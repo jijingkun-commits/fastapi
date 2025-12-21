@@ -1,0 +1,9 @@
+INFO     | 2025-12-20 22:30:03 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-20 22:30:07 | httptools_impl.py:468 | send() | 127.0.0.1:62498 - "GET /?ide_webview_request_time=1766241007174 HTTP/1.1" 404
+INFO     | 2025-12-20 22:30:07 | httptools_impl.py:468 | send() | 127.0.0.1:62498 - "GET /%40vite/client HTTP/1.1" 404
+INFO     | 2025-12-20 22:30:30 | httptools_impl.py:468 | send() | 127.0.0.1:62501 - "GET /?ide_webview_request_time=1766241030496 HTTP/1.1" 404
+INFO     | 2025-12-20 22:30:30 | httptools_impl.py:468 | send() | 127.0.0.1:62501 - "GET /%40vite/client HTTP/1.1" 404
+INFO     | 2025-12-20 22:30:51 | httptools_impl.py:468 | send() | 127.0.0.1:55988 - "OPTIONS /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-20 22:30:51 | httptools_impl.py:468 | send() | 127.0.0.1:55988 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-20 22:30:54 | httptools_impl.py:468 | send() | 127.0.0.1:55988 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-20 22:30:58 | httptools_impl.py:468 | send() | 127.0.0.1:55988 - "POST /api/v1/login HTTP/1.1" 500

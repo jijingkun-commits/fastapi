@@ -4,12 +4,12 @@ FROM python:3.11-slim
 # 工作目录
 WORKDIR /app
 
-# 复制依赖并安装
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-# 复制项目代码
+# 复制项目配置与代码并安装依赖
+COPY pyproject.toml /app/pyproject.toml
 COPY app /app/app
+RUN pip install --no-cache-dir .
+
+# （代码已复制于上方）
 
 # 默认环境变量（可被外部覆盖）
 ENV PYTHONUNBUFFERED=1

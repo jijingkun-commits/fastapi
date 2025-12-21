@@ -1,0 +1,163 @@
+INFO     | 2025-12-21 00:02:15 | httptools_impl.py:468 | send() | 127.0.0.1:57472 - "OPTIONS /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 00:02:15 | httptools_impl.py:468 | send() | 127.0.0.1:57472 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-21 00:45:26 | httptools_impl.py:468 | send() | 127.0.0.1:53154 - "OPTIONS /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 00:45:26 | httptools_impl.py:468 | send() | 127.0.0.1:53154 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-21 00:46:12 | httptools_impl.py:468 | send() | 127.0.0.1:58838 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-21 00:46:13 | httptools_impl.py:468 | send() | 127.0.0.1:58838 - "POST /api/v1/login HTTP/1.1" 500
+INFO     | 2025-12-21 00:46:44 | httptools_impl.py:468 | send() | 127.0.0.1:56685 - "POST /api/v1/login HTTP/1.1" 500
+ERROR    | 2025-12-21 00:48:40 | health.py:25 | health_db() | db health failed: (pymysql.err.OperationalError) (1045, "Access denied for user 'root'@'172.20.0.1' (using password: YES)")
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+INFO     | 2025-12-21 00:48:40 | httptools_impl.py:468 | send() | 127.0.0.1:55063 - "GET /api/v1/health/db HTTP/1.1" 200
+INFO     | 2025-12-21 00:49:11 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 00:49:16 | server.py:262 | shutdown() | Shutting down
+INFO     | 2025-12-21 00:49:16 | on.py:67 | shutdown() | Waiting for application shutdown.
+INFO     | 2025-12-21 00:49:16 | on.py:76 | shutdown() | Application shutdown complete.
+INFO     | 2025-12-21 00:49:16 | server.py:92 | _serve() | Finished server process [26204]
+INFO     | 2025-12-21 00:53:04 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | SELECT DATABASE()
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | SELECT @@sql_mode
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | SELECT @@lower_case_table_names
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 00:54:27 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 00:54:27 | base.py:1846 | _execute_context() | [generated in 0.00042s] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 00:54:27 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 00:54:27 | httptools_impl.py:468 | send() | 127.0.0.1:59840 - "POST /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 01:04:35 | httptools_impl.py:468 | send() | 127.0.0.1:52806 - "OPTIONS /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 01:04:35 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 01:04:35 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 01:04:35 | base.py:1846 | _execute_context() | [cached since 608.2s ago] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 01:04:35 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 01:04:35 | httptools_impl.py:468 | send() | 127.0.0.1:52806 - "POST /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 01:41:35 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 01:41:52 | server.py:262 | shutdown() | Shutting down
+INFO     | 2025-12-21 01:41:52 | on.py:67 | shutdown() | Waiting for application shutdown.
+INFO     | 2025-12-21 01:41:52 | on.py:76 | shutdown() | Application shutdown complete.
+INFO     | 2025-12-21 01:41:52 | server.py:92 | _serve() | Finished server process [50884]
+INFO     | 2025-12-21 01:45:07 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 01:45:26 | httptools_impl.py:468 | send() | 127.0.0.1:64376 - "GET /api/v1/health HTTP/1.1" 200
+INFO     | 2025-12-21 01:54:52 | httptools_impl.py:468 | send() | 127.0.0.1:55756 - "POST /api/v1/login HTTP/1.1" 400
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | SELECT DATABASE()
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | SELECT @@sql_mode
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | SELECT @@lower_case_table_names
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 01:55:04 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 01:55:04 | base.py:1846 | _execute_context() | [generated in 0.00048s] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 01:55:04 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 01:55:04 | httptools_impl.py:468 | send() | 127.0.0.1:54833 - "POST /api/v1/login HTTP/1.1" 401
+INFO     | 2025-12-21 13:51:08 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 13:51:17 | httptools_impl.py:468 | send() | 127.0.0.1:62259 - "GET /?ide_webview_request_time=1766296277359 HTTP/1.1" 404
+INFO     | 2025-12-21 13:51:17 | httptools_impl.py:468 | send() | 127.0.0.1:62259 - "GET /%40vite/client HTTP/1.1" 404
+INFO     | 2025-12-21 13:55:07 | httptools_impl.py:468 | send() | 127.0.0.1:49695 - "OPTIONS /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:07 | httptools_impl.py:468 | send() | 127.0.0.1:49695 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:17 | httptools_impl.py:468 | send() | 127.0.0.1:49696 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:23 | httptools_impl.py:468 | send() | 127.0.0.1:61934 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:43 | httptools_impl.py:468 | send() | 127.0.0.1:61937 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:44 | httptools_impl.py:468 | send() | 127.0.0.1:61937 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:55:56 | httptools_impl.py:468 | send() | 127.0.0.1:62028 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:04 | httptools_impl.py:468 | send() | 127.0.0.1:62029 - "OPTIONS /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | SELECT DATABASE()
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | SELECT @@sql_mode
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | SELECT @@lower_case_table_names
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | [raw sql] {}
+INFO     | 2025-12-21 13:56:04 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 13:56:04 | base.py:1846 | _execute_context() | [generated in 0.00037s] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 13:56:04 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 13:56:04 | httptools_impl.py:468 | send() | 127.0.0.1:62029 - "POST /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:11 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 13:56:11 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 13:56:11 | base.py:1846 | _execute_context() | [cached since 7.138s ago] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 13:56:11 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 13:56:11 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/login HTTP/1.1" 401
+INFO     | 2025-12-21 13:56:15 | base.py:2701 | _connection_begin_impl() | BEGIN (implicit)
+INFO     | 2025-12-21 13:56:15 | base.py:1846 | _execute_context() | SELECT t_user.id AS t_user_id, t_user.`userName` AS `t_user_userName`, t_user.password AS t_user_password, t_user.mobile AS t_user_mobile, t_user.`createTime` AS `t_user_createTime`, t_user.`updateTime` AS `t_user_updateTime` 
+FROM t_user 
+WHERE t_user.`userName` = %(userName_1)s 
+ LIMIT %(param_1)s
+INFO     | 2025-12-21 13:56:15 | base.py:1846 | _execute_context() | [cached since 10.99s ago] {'userName_1': 'admin', 'param_1': 1}
+INFO     | 2025-12-21 13:56:15 | base.py:2704 | _connection_rollback_impl() | ROLLBACK
+INFO     | 2025-12-21 13:56:15 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/login HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:17 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:21 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:22 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:23 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:56:24 | httptools_impl.py:468 | send() | 127.0.0.1:63058 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 13:58:36 | httptools_impl.py:468 | send() | 127.0.0.1:59969 - "POST /api/v1/llm/stream HTTP/1.1" 422
+INFO     | 2025-12-21 14:01:08 | server.py:262 | shutdown() | Shutting down
+INFO     | 2025-12-21 14:01:08 | on.py:67 | shutdown() | Waiting for application shutdown.
+INFO     | 2025-12-21 14:01:08 | on.py:76 | shutdown() | Application shutdown complete.
+INFO     | 2025-12-21 14:01:08 | server.py:92 | _serve() | Finished server process [38992]
+INFO     | 2025-12-21 14:01:08 | on.py:62 | startup() | Application startup complete.
+ERROR    | 2025-12-21 14:01:08 | on.py:134 | send() | Traceback (most recent call last):
+  File "C:\Users\jijingkun\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jijingkun\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 686, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\jijingkun\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\jijingkun\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\jijingkun\work\fastapi\venv\Lib\site-packages\starlette\routing.py", line 700, in lifespan
+    await receive()
+  File "C:\Users\jijingkun\work\fastapi\venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jijingkun\AppData\Local\Programs\Python\Python312\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+INFO     | 2025-12-21 14:01:09 | on.py:62 | startup() | Application startup complete.
+INFO     | 2025-12-21 14:08:12 | httptools_impl.py:468 | send() | 127.0.0.1:53803 - "GET /?ide_webview_request_time=1766296277359 HTTP/1.1" 404
+INFO     | 2025-12-21 14:08:12 | httptools_impl.py:468 | send() | 127.0.0.1:53803 - "GET /%40vite/client HTTP/1.1" 404
+INFO     | 2025-12-21 14:08:40 | httptools_impl.py:468 | send() | 127.0.0.1:57306 - "OPTIONS /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 14:08:40 | httptools_impl.py:468 | send() | 127.0.0.1:57306 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:24:27 | httptools_impl.py:468 | send() | 127.0.0.1:56457 - "OPTIONS /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:24:27 | httptools_impl.py:468 | send() | 127.0.0.1:56457 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:24:38 | httptools_impl.py:468 | send() | 127.0.0.1:56458 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:24:40 | httptools_impl.py:468 | send() | 127.0.0.1:56458 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:24:46 | httptools_impl.py:468 | send() | 127.0.0.1:56471 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:34:52 | httptools_impl.py:468 | send() | 127.0.0.1:61965 - "OPTIONS /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:34:52 | httptools_impl.py:468 | send() | 127.0.0.1:61965 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:34:56 | httptools_impl.py:468 | send() | 127.0.0.1:61965 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:35:11 | httptools_impl.py:468 | send() | 127.0.0.1:62425 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:36:26 | httptools_impl.py:468 | send() | 127.0.0.1:53250 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:36:35 | httptools_impl.py:468 | send() | 127.0.0.1:57109 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:38:07 | httptools_impl.py:468 | send() | 127.0.0.1:62027 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:38:10 | httptools_impl.py:468 | send() | 127.0.0.1:62027 - "POST /api/v1/llm/stream HTTP/1.1" 200
+INFO     | 2025-12-21 16:38:14 | httptools_impl.py:468 | send() | 127.0.0.1:62027 - "POST /api/v1/llm/stream HTTP/1.1" 200

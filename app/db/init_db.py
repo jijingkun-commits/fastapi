@@ -16,7 +16,7 @@ def init_db(seed_admin: bool = True) -> None:
             if not admin:
                 user = User(
                     userName="admin",
-                    password=hash_password("secret"),
+                    password=hash_password("asdf1234"),
                     mobile="13800000000",
                 )
                 db.add(user)
