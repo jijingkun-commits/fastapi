@@ -23,3 +23,24 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
+
+
+# 可选的 OAuth2 认证（不强制要求 token）
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/login", auto_error=False)
+
+
+def get_current_user_optional(
+    token: str = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db)
+):
+    """可选的用户认证，未提供 token 时返回 None。"""
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        uid = int(payload.get("uid"))
+        user = get_by_id(db, uid)
+        return user
+    except Exception:
+        return None
+

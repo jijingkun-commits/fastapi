@@ -46,3 +46,26 @@ def health_pool():
             "status": status,
         },
     }
+
+
+@router.get("/health/minio")
+def health_minio():
+    """验证 MinIO 连接是否可用。"""
+    try:
+        from app.services.asset_service import get_asset_service
+        svc = get_asset_service()
+        result = svc.check_connection()
+        return {
+            "status": "ok" if result["healthy"] else "error",
+            "minio": result
+        }
+    except Exception as e:
+        logging.getLogger("app.health").error(f"minio health check failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "minio": {
+                "healthy": False,
+                "error": str(e)
+            }
+        }
+

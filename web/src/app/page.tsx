@@ -1,24 +1,33 @@
+/**
+ * 主页面
+ *
+ * 使用 dynamic import 并禁用 SSR 来解决 useSearchParams 问题
+ */
 "use client";
 
-import Link from "next/link";
-import { Toaster } from "@/components/ui/sonner";
-import { Button } from "@/components/ui/button";
+import dynamic from "next/dynamic";
 
-export default function Page() {
-  return (
-    <div className="min-h-screen w-full bg-background p-6">
-      <Toaster richColors closeButton />
-      <div className="mx-auto max-w-4xl flex flex-col items-center gap-8 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight">主页</h1>
-        <p className="text-muted-foreground">请选择功能页面</p>
-        <div className="flex items-center gap-4">
-          <Link href="/auth">
-            <Button size="lg" variant="brand">登录与接口</Button>
-          </Link>
-          <Link href="/chat">
-            <Button size="lg" variant="outline">LangGraph 聊天</Button>
-          </Link>
+// 动态导入并禁用 SSR，避免服务端渲染时的 useSearchParams 问题
+const ChatContainer = dynamic(
+  () => import("@/components/chat/ChatContainer").then(mod => mod.ChatContainer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-screen items-center justify-center bg-gray-50/50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
+          <span className="text-sm text-gray-500">加载中...</span>
         </div>
+      </div>
+    ),
+  }
+);
+
+export default function Home() {
+  return (
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50/50">
+      <div className="flex-1 overflow-hidden relative">
+        <ChatContainer />
       </div>
     </div>
   );

@@ -1,9 +1,9 @@
 "use client";
 
-import { ArtifactProvider } from "@/components/thread/artifact";
+import { ArtifactProvider } from "@/components/chat/artifact";
 import { ThreadProvider } from "@/providers/Thread";
 import { StreamProvider } from "@/providers/Stream";
-import { Thread } from "@/components/thread";
+import { Thread } from "@/components/chat";
 
 export function ChatContainer() {
   return (

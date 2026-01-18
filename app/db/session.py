@@ -1,4 +1,6 @@
 """数据库会话与引擎管理（中文注释）。"""
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -28,7 +30,33 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
-    """FastAPI 依赖：提供数据库会话，并在请求结束后释放。"""
+    """FastAPI 依赖注入：提供数据库会话。
+    
+    用法：
+        @app.get("/")
+        def endpoint(db: Session = Depends(get_db)):
+            ...
+    
+    注意：此函数是生成器，专为 FastAPI Depends 设计。
+    如需在非 FastAPI 场景使用，请用 get_db_context()。
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_db_context():
+    """上下文管理器：用于非 FastAPI 场景获取数据库会话。
+    
+    用法：
+        with get_db_context() as db:
+            chat_repo.save_message(db, ...)
+    
+    适用场景：LangGraph 节点、Celery 任务、后台线程等。
+    """
     db = SessionLocal()
     try:
         yield db

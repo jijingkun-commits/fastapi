@@ -1,6 +1,6 @@
 """用户相关的Pydantic模型（中文注释）。"""
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LoginRequest(BaseModel):
@@ -18,9 +18,8 @@ class Token(BaseModel):
 
 class UserOut(BaseModel):
     """用户对外展示模型。"""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
-    userName: Optional[str] = None
+    username: Optional[str] = None
     mobile: Optional[str] = None
-
-    class Config:
-        from_attributes = True

@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import ENV, CORS_ALLOW_ORIGINS
-from app.middlewares.correlation import CorrelationIdMiddleware
+from app.core.middlewares.correlation import CorrelationIdMiddleware
 
 
 def setup_middlewares(app: FastAPI) -> None:

@@ -1,3 +1,4 @@
+"""健康检查接口测试（中文注释）。"""
 from fastapi.testclient import TestClient
 
 from app.main import app

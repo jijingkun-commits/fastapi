@@ -1,15 +1,149 @@
 version: "3.9"
+
 services:
-  web:
-    build: .
-    ports:
-      - "8000:8000"
+  # ============================================================
+  # 基础设施服务 (默认启动)
+  # ============================================================
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:10-alpine
+    container_name: fastapi-postgres
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-chat_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./install/sql/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+      - shared # 共享网络，供 RAGFlow 访问
+
+  # MinIO 对象存储
+  minio:
+    image: minio/minio:latest
+    container_name: fastapi-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=12345678
+    ports:
+      - "${MINIO_API_PORT:-19000}:9000"
+      - "${MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "mc", "ready", "local" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+      - shared # 共享网络，供 RAGFlow 访问
+
+  # MinIO 初始化（创建 Bucket、设置生命周期规则）
+  minio-init:
+    image: python:3.11-slim
+    container_name: fastapi-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=12345678
+      - MINIO_ASSETS_EXPIRE_DAYS=${MINIO_ASSETS_EXPIRE_DAYS:-30}
+    volumes:
+      - ./install/scripts/init_minio_buckets.py:/app/init_minio_buckets.py:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install -q minio && python init_minio_buckets.py"
+    restart: "no"
+    networks:
+      - backend
+
+  # ============================================================
+  # 应用服务 (profile: app)
+  # 启动命令: docker compose --profile app up -d
+  # ============================================================
+
+  # FastAPI 后端
+  app:
+    profiles:
+      - app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi-app
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/chat_db
+      - PG_CHECKPOINTER_URI=postgresql://postgres:postgres@postgres:5432/chat_db
       - JWT_SECRET=${JWT_SECRET}
-      - JWT_ALGORITHM=${JWT_ALGORITHM}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
-      - INIT_DB_ON_STARTUP=${INIT_DB_ON_STARTUP}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      - INIT_DB_ON_STARTUP=${INIT_DB_ON_STARTUP:-false}
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-qwen}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # MinIO 配置
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-QfIx8FgdpgKtmbFMbKVb}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-DsitWZJT3pecrg020Y2NKCETVpsIc3h2PrKTqONA}
+      # RAGFlow 配置（通过共享网络访问）
+      - RAGFLOW_API_URL=http://ragflow-server:80/api/v1
+      - RAGFLOW_API_KEY=${RAGFLOW_API_KEY}
+      - RAGFLOW_DATASET_ID=${RAGFLOW_DATASET_ID}
     volumes:
       - ./app:/app/app:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - backend
+      - shared # 共享网络，访问 RAGFlow
+
+  # Next.js 前端
+  web:
+    profiles:
+      - app
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: fastapi-web
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - app
+    environment:
+      - NEXT_PUBLIC_API_URL=http://app:8000
+    restart: unless-stopped
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  minio_data:
+
+
+networks:
+  backend:
+    driver: bridge
+  # 共享网络，供 RAGFlow 访问 PostgreSQL 和 MinIO
+  shared:
+    name: bojx-shared
+    driver: bridge

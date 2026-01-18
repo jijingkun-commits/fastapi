@@ -2,16 +2,12 @@
 
 import { Toaster } from "@/components/ui/sonner";
 import { LoginCard } from "@/components/auth/LoginCard";
-import { SseCard } from "@/components/llm/SseCard";
 
 export default function AuthPage() {
   return (
-    <div className="min-h-screen w-full bg-background p-6">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-6">
       <Toaster richColors closeButton />
-      <div className="mx-auto w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <LoginCard />
-        <SseCard />
-      </div>
+      <LoginCard />
     </div>
   );
 }

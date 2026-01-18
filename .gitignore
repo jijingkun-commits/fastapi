@@ -1,0 +1,68 @@
+# 统一的 .gitignore（Python FastAPI 后端 + Next.js 前端）
+
+#参照类代码
+demo/
+
+# 操作系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 通用日志与构建输出
+*.log
+logs/
+dist/
+build/
+coverage/
+.coverage
+coverage.xml
+htmlcov/
+test-results/
+web/test-results/
+web/playwright-report/
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+dev.db
+
+# 敏感信息
+.env
+.env.*
+!.env.example
+web/.auth/
+
+# Python（FastAPI 后端）
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+*.egg
+.cache/
+.mypy_cache/
+.pytest_cache/
+.tox/
+.ruff_cache/
+.venv/
+venv/
+uvicorn.out
+
+# Node/Next.js（前端 web/）
+web/node_modules/
+web/.next/
+web/.vercel/
+web/.turbo/
+pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+
+# 其他（按需扩展）
+*.swp
+*.swo
+*.tmp
+*.bak

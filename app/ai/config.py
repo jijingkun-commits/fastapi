@@ -1,0 +1,62 @@
+"""AI 模块配置：从 core.config 统一导入（中文注释）。
+
+为保持向后兼容，该模块从 core.config 重新导出所有 AI 相关配置。
+新代码请直接从 app.core.config 导入相关配置。
+"""
+from app.core.config import (
+    MODEL_PROVIDER,
+    MODEL_TYPE,
+    MODEL_NAME,
+    MODEL_API_KEY,
+    MODEL_BASE_URL,
+    MODEL_TEMPERATURE,
+    MESSAGE_MAX_TOKENS,
+    STREAMING,
+    REQUEST_TIMEOUT,
+    MAX_RETRIES,
+    REASONING_EFFORT,
+
+    TAVILY_API_KEY,
+    PUBLIC_DIR,
+    SQL_REQUIRE_APPROVAL,
+    ENABLE_THINKING,
+    THINKING_BUDGET,
+    MCP_CHART_SERVER_URL,
+    MCP_CHART_ENABLED,
+    MINIO_ENDPOINT,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_SECURE,
+    MINIO_BUCKET_ASSETS,
+    API_PUBLIC_URL,
+)
+
+# 重新导出所有配置（向后兼容）
+__all__ = [
+    "MODEL_PROVIDER",
+    "MODEL_TYPE",
+    "MODEL_NAME",
+    "MODEL_API_KEY",
+    "MODEL_BASE_URL",
+    "MODEL_TEMPERATURE",
+    "MESSAGE_MAX_TOKENS",
+    "STREAMING",
+    "REQUEST_TIMEOUT",
+    "MAX_RETRIES",
+    "REASONING_EFFORT",
+
+    "TAVILY_API_KEY",
+    "PUBLIC_DIR",
+    "SQL_REQUIRE_APPROVAL",
+    "ENABLE_THINKING",
+    "THINKING_BUDGET",
+    "MCP_CHART_SERVER_URL",
+    "MCP_CHART_ENABLED",
+    "MINIO_ENDPOINT",
+    "MINIO_ACCESS_KEY",
+    "MINIO_SECRET_KEY",
+    "MINIO_SECURE",
+    "MINIO_BUCKET_ASSETS",
+    "API_PUBLIC_URL",
+]
+

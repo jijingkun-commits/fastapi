@@ -1,9 +1,5 @@
 # Project Rules for Trae
-
-- Use FastAPI `lifespan` for startup/shutdown; avoid `@app.on_event`.
-- Prefer absolute imports: `from app...` across the project.
-- Register new endpoints via `app/api/v1/router.py`.
-- Run tests: `python -m pytest -q`.
-- Start dev server: `uvicorn app.main:app --reload --port 8000`.
-- Use `.env` and `python-dotenv` for configuration.
-- Use Pydantic v2 style (`ConfigDict`) for model config.
+1、你禁止修改任何代码，只提供发现在问题，给出修改思路。
+2、不用启动服务，我的服务永远自己来启动。
+3、你只做测试。
+4、前端入口url：http://localhost:3000/ 用户名为：jjk

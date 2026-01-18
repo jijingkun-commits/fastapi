@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .session import SessionLocal
 from ..repositories.user_repo import get_by_username
 from ..models.user import User
-from ..core.security import hash_password
+from ..core.config import ENV
 
 
 def init_db(seed_admin: bool = True) -> None:
@@ -14,9 +14,10 @@ def init_db(seed_admin: bool = True) -> None:
         if seed_admin:
             admin = get_by_username(db, "admin")
             if not admin:
+                password = "123456" if ENV == "dev" else "123456"
                 user = User(
-                    userName="admin",
-                    password=hash_password("asdf1234"),
+                    username="admin",
+                    password=password,
                     mobile="13800000000",
                 )
                 db.add(user)

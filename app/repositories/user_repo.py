@@ -2,7 +2,7 @@
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from ..models.user import User
+from app.models.user import User
 
 
 def get_by_id(db: Session, user_id: int) -> Optional[User]:
@@ -12,7 +12,7 @@ def get_by_id(db: Session, user_id: int) -> Optional[User]:
 
 def get_by_username(db: Session, username: str) -> Optional[User]:
     """根据用户名查询用户。"""
-    return db.query(User).filter(User.userName == username).first()
+    return db.query(User).filter(User.username == username).first()
 
 
 def get_by_mobile(db: Session, mobile: str) -> Optional[User]:

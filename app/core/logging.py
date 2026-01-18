@@ -106,4 +106,42 @@ def setup_logging() -> None:
         lg.setLevel(level)
         lg.propagate = False
 
+    # 第三方依赖库日志等级配置：屏蔽过多的 DEBUG/INFO 日志
+    noisy_loggers = [
+        # SQLAlchemy 相关
+        "sqlalchemy",
+        "sqlalchemy.engine",
+        "sqlalchemy.engine.Engine",
+        "sqlalchemy.pool",
+        "sqlalchemy.dialects",
+        "sqlalchemy.orm",
+        # LangChain 相关（不含 LangGraph）
+        "langchain",
+        "langchain_core",
+        "langchain_openai",
+        "langsmith",
+        # HTTP 客户端相关
+        "httpx",
+        "httpcore",
+        "urllib3",
+        # 其他常见噪音源
+        "openai",
+        "asyncio",
+        "watchfiles",
+    ]
+    for name in noisy_loggers:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    # LangGraph 及其依赖库的日志等级设置为 INFO（保留重要信息，屏蔽 DEBUG）
+    langgraph_loggers = [
+        "langgraph",
+        "langgraph.checkpoint",
+        "langgraph.checkpoint.sqlite",
+        "langgraph.checkpoint.sqlite.aio",
+        # aiosqlite 是 langgraph checkpoint 的底层依赖，core.py 中的 _connection_worker_thread 日志来自这里
+        "aiosqlite",
+    ]
+    for name in langgraph_loggers:
+        logging.getLogger(name).setLevel(logging.INFO)
+
     _CONFIGURED = True
