@@ -48,37 +48,39 @@ export function LoginCard() {
         <CardTitle className="text-2xl font-bold">登录到系统</CardTitle>
         <CardDescription>开发环境：只需输入账号即可登录</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="identifier">账号</Label>
-          <Input
-            id="identifier"
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="用户名或11位手机号"
-            autoFocus
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">密码 <span className="text-muted-foreground text-xs">(开发环境可选)</span></Label>
-          <PasswordInput
-            id="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="开发环境下可留空"
-          />
-        </div>
-      </CardContent>
-      <CardFooter>
-        <Button
-          variant="brand"
-          className="w-full"
-          onClick={onLogin}
-          disabled={loading}
-        >
-          {loading ? "登录中…" : "登录"}
-        </Button>
-      </CardFooter>
+      <form onSubmit={(e) => { e.preventDefault(); onLogin(); }}>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="identifier">账号</Label>
+            <Input
+              id="identifier"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="用户名或11位手机号"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">密码 <span className="text-muted-foreground text-xs">(开发环境可选)</span></Label>
+            <PasswordInput
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="开发环境下可留空"
+            />
+          </div>
+        </CardContent>
+        <CardFooter>
+          <Button
+            type="submit"
+            variant="brand"
+            className="w-full"
+            disabled={loading}
+          >
+            {loading ? "登录中…" : "登录"}
+          </Button>
+        </CardFooter>
+      </form>
     </Card>
   );
 }

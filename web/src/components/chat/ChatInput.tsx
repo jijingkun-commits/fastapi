@@ -31,6 +31,7 @@ import { ContentBlock } from "@langchain/core/messages";
 import { ThinkingCapability, isThinkingToggleable } from "@/lib/model-config";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/StreamContext";
+import { useQueryState } from "nuqs";
 
 /** 快捷提示词配置 */
 export const QUICK_PROMPTS = [
@@ -40,8 +41,9 @@ export const QUICK_PROMPTS = [
     { label: "知识库", value: "查询知识库，用户已注销无法使用该功能的问题要怎么解决？" },
     { label: "待办查询", value: "待办查询" },
     { label: "新渠道有哪些功能", value: "查询知识库，新渠道有哪些功能" },
-    { label: "代码审查", value: "请对以下代码进行代码审查，指出潜在问题和改进建议：" },
-    { label: "总结摘要", value: "请总结以下内容的要点：" },
+    { label: "待办", value: "明天我要去上海" },
+    { label: "待办1", value: "早上9点，和张三一起，去陆家嘴开会" },
+    { label: "待办2", value: "好的" },
 ];
 
 export interface ChatInputProps {
@@ -118,6 +120,7 @@ export function ChatInput({
 
     const [mounted, setMounted] = useState(false);
     const [selectedTodo, setSelectedTodo] = useState<{ id: number, title: string } | null>(null);
+    const [threadId] = useQueryState("threadId");
 
     useEffect(() => {
         setMounted(true);
@@ -127,10 +130,18 @@ export function ChatInput({
             const stored = sessionStorage.getItem('selectedTodo');
             if (stored) {
                 try {
-                    setSelectedTodo(JSON.parse(stored));
+                    const parsed = JSON.parse(stored);
+                    // 验证是否属于当前对话
+                    if (parsed.threadId === threadId) {
+                        setSelectedTodo(parsed);
+                    } else {
+                        setSelectedTodo(null);
+                    }
                 } catch (e) {
                     console.error('Failed to parse selected todo', e);
                 }
+            } else {
+                setSelectedTodo(null);
             }
         };
 
@@ -148,7 +159,7 @@ export function ChatInput({
             window.removeEventListener('todoSelected', handleTodoSelected);
             window.removeEventListener('todoDeselected', handleTodoDeselected);
         };
-    }, []);
+    }, [threadId]);
 
     return (
         <div ref={dropRef} className="relative z-10 w-full max-w-4xl mx-auto">
@@ -160,6 +171,17 @@ export function ChatInput({
                         <span className="font-semibold">{selectedTodo.title}</span>
                         <span className="text-gray-400">|</span>
                         <span className="text-indigo-600">ID {selectedTodo.id}</span>
+                        <button
+                            type="button"
+                            className="ml-1 text-indigo-400 hover:text-indigo-600 transition-colors"
+                            onClick={() => {
+                                sessionStorage.removeItem('selectedTodo');
+                                setSelectedTodo(null);
+                                window.dispatchEvent(new Event('todoDeselected'));
+                            }}
+                        >
+                            ✕
+                        </button>
                     </div>
                 </div>
             )}
@@ -201,6 +223,7 @@ export function ChatInput({
                         placeholder={selectedTodo ? `讨论待办: ${selectedTodo.title}...` : "Type your message..."}
                         className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
                         style={{ fieldSizing: 'content' } as any}
+                        data-testid="chat-input"
                     />
 
                     {/* 底部操作栏 */}

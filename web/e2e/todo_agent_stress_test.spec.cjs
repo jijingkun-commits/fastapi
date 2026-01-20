@@ -20,9 +20,61 @@ const { test, expect } = require('@playwright/test');
 const BASE_URL = 'http://localhost:3000';
 const LONG_TIMEOUT = 60000; // 60秒超时，适合复杂对话
 
+// 辅助函数: 确保已登录
+async function ensureLoggedIn(page) {
+    // 监听浏览器日志和错误
+    page.on('console', msg => console.log(`BROWSER LOG: ${msg.text()}`));
+    page.on('pageerror', exception => console.log(`BROWSER ERROR: ${exception}`));
+
+    console.log('🔄 Navigating to /chat...');
+    await page.goto(`${BASE_URL}/chat`);
+
+    const chatInput = page.locator('[data-testid="chat-input"]');
+    const loginInput = page.locator('input#identifier');
+
+    try {
+        await Promise.race([
+            chatInput.waitFor({ state: 'visible', timeout: 60000 }),
+            loginInput.waitFor({ state: 'visible', timeout: 60000 })
+        ]);
+    } catch (e) {
+        console.log('⚠️ Timeout waiting for initial state (chat or login)');
+    }
+
+    if (await loginInput.isVisible()) {
+        console.log('🔐 Login form detected, logging in...');
+        await loginInput.fill('jjk');
+        await page.getByRole('button', { name: '登录' }).click();
+
+        console.log('⏳ Waiting for chat input after login...');
+        await chatInput.waitFor({ state: 'visible', timeout: 60000 });
+        console.log('✅ Login successful, chat input visible');
+    } else if (await chatInput.isVisible()) {
+        console.log('✅ Already logged in, chat input visible');
+    } else {
+        console.log('❌ Failed to resolve state: neither chat input nor login form visible');
+        console.log(`Current URL: ${page.url()}`);
+    }
+
+    await page.waitForLoadState('networkidle');
+}
+
+// 辅助函数: 发送消息并等待回复
 // 辅助函数: 发送消息并等待回复
 async function sendMessage(page, message, waitTime = 3000) {
-    const input = page.locator('[data-testid="chat-input"], textarea[placeholder*="输入"]');
+    const selector = '[data-testid="chat-input"]';
+    try {
+        await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
+    } catch (e) {
+        console.log(`❌ Timeout waiting for chat input. Current URL: ${page.url()}`);
+        console.log(`Page Title: ${await page.title()}`);
+        // Log part of body to see if we are on login page
+        const body = await page.textContent('body');
+        console.log(`Body preview: ${body?.substring(0, 500)}`);
+        throw e;
+    }
+
+    const input = page.locator(selector);
     await input.fill(message);
     await input.press('Enter');
 
@@ -54,11 +106,7 @@ function logRound(round, description, passed) {
 test.describe('待办 Agent 复杂多轮对话压力测试', () => {
 
     test.beforeEach(async ({ page }) => {
-        // 确保登录状态
-        await page.goto(`${BASE_URL}/chat`);
-        await page.waitForLoadState('networkidle');
-        // 可选: 清空历史对话
-        // await page.locator('[data-testid="clear-chat"]').click();
+        await ensureLoggedIn(page);
     });
 
     test('完整 10 轮压力测试场景', async ({ page }) => {
@@ -231,8 +279,7 @@ AI 中台倒是不那么急，但领导下周可能要听汇报。
 test.describe('单独功能验证测试', () => {
 
     test.beforeEach(async ({ page }) => {
-        await page.goto(`${BASE_URL}/chat`);
-        await page.waitForLoadState('networkidle');
+        await ensureLoggedIn(page);
     });
 
     test('能力1: 多轮信息收集与状态保持', async ({ page }) => {
@@ -390,8 +437,7 @@ test.describe('单独功能验证测试', () => {
 test.describe('边界场景测试', () => {
 
     test.beforeEach(async ({ page }) => {
-        await page.goto(`${BASE_URL}/chat`);
-        await page.waitForLoadState('networkidle');
+        await ensureLoggedIn(page);
     });
 
     test('边界1: 超长任务描述', async ({ page }) => {
