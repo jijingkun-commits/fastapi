@@ -14,3 +14,15 @@ colorlog==6.9.0
 psycopg[binary]==3.1.13
 asyncpg==0.29.0
 alembic==1.13.1
+
+# AI & Agents
+pydantic>=2.9.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-openai>=0.2.0
+langgraph>=0.2.20
+langgraph-checkpoint-postgres>=2.0.0
+tenacity>=8.5.0
+tiktoken>=0.7.0
+openai>=1.40.0
