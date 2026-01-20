@@ -19,6 +19,13 @@ from app.models.chat_asset import ChatAsset
 # If there are other models, they should be imported here.
 
 def init_tables():
+    print("Dropping existing tables (if any)...")
+    try:
+        Base.metadata.drop_all(bind=engine)
+        print("✅ Old tables dropped.")
+    except Exception as e:
+        print(f"⚠️  Warning dropping tables: {e}")
+    
     print("Creating all tables from SQLAlchemy models...")
     try:
         Base.metadata.create_all(bind=engine)
