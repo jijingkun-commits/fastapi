@@ -3,35 +3,14 @@
 专注于数据库查询、Python 数据处理和可视化图表生成。
 """
 import logging
-from langchain.agents import create_agent
+from langgraph.prebuilt import create_react_agent
 
 from app.ai.llm_util import get_llm
+from app.ai.prompts.agent_prompts import DATA_AGENT_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# 问数 Agent 系统提示词
-DATA_AGENT_PROMPT = """你是一位专业的数据分析师，擅长：
-- SQL 数据库查询和数据提取
-- Python 数据处理与分析
-- 数据可视化和图表生成
-
-## 你的核心能力
-1. **SQL 查询**: 使用 `sql_inter` 工具执行 SQL 语句查询数据
-2. **数据提取**: 使用 `extract_data` 工具将查询结果保存为 DataFrame
-3. **Python 分析**: 使用 `python_inter` 工具执行数据分析代码
-4. **图表生成**: 使用 `fig_inter` 工具生成可视化图表
-
-## 工作流程
-1. 理解用户的数据需求
-2. 编写并执行 SQL 查询获取数据
-3. 如需要，使用 Python 进行进一步处理
-4. 根据需求生成图表或统计报告
-
-## 注意事项
-- 先解释你的分析计划，再执行操作
-- 确保 SQL 语法正确，先验证再执行复杂查询
-- 图表中的文字使用英文以避免乱码
-"""
+# DATA_AGENT_PROMPT 已迁移到 app/ai/prompts/agent_prompts.py
 
 
 def create_data_agent(model=None, enable_thinking: bool = False, model_id: str = None):
@@ -53,10 +32,26 @@ def create_data_agent(model=None, enable_thinking: bool = False, model_id: str =
     
     tools = [sql_inter, extract_data, python_inter, fig_inter]
     
-    agent = create_agent(
-        model=model,
-        tools=tools,
-        system_prompt=DATA_AGENT_PROMPT,
+    # 加载共享工具（图片分析、文件读取）
+    try:
+        from app.ai.tools.vision_tool import analyze_image, is_vision_configured
+        if is_vision_configured():
+            tools.append(analyze_image)
+            logger.debug("data_agent: 已加载 analyze_image 工具")
+    except Exception as e:
+        logger.warning("data_agent: Vision 工具加载失败: %s", e)
+    
+    try:
+        from app.ai.tools.file_tools import read_uploaded_file
+        tools.append(read_uploaded_file)
+        logger.debug("data_agent: 已加载 read_uploaded_file 工具")
+    except Exception as e:
+        logger.warning("data_agent: 文件读取工具加载失败: %s", e)
+    
+    agent = create_react_agent(
+        model,
+        tools,
+        prompt=DATA_AGENT_PROMPT,
         name="data_agent",
     )
     

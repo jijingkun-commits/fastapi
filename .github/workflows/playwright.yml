@@ -23,6 +23,7 @@ jobs:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD || '12345678' }}
       MINIO_ENDPOINT: http://localhost:9000
+      MINIO_API_PORT: 9000
       MINIO_ACCESS_KEY: admin
       MINIO_SECRET_KEY: ${{ secrets.MINIO_ROOT_PASSWORD || '12345678' }}
       
@@ -66,13 +67,18 @@ jobs:
 
     - name: Start Backend
       run: |
-        # Init DB tables (if needed by script or relying on alembic/auto-create)
-        # Note: uvicorn is started in background
+        # Init DB tables using python script
+        model_provider=qwen python scripts/init_tables_ci.py
+        # Start uvicorn
         nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
         
     - name: Wait for Backend
       run: |
         timeout 30s bash -c 'until curl -s http://localhost:8000/health > /dev/null; do sleep 1; done' || (cat backend.log && exit 1)
+
+    - name: Run Backend Integration Tests
+      run: |
+        python test_todo_api.py
 
     # 3. Frontend Setup (Next.js)
     - name: Set up Node.js
@@ -89,6 +95,7 @@ jobs:
     - name: Start Frontend
       working-directory: ./web
       run: |
+        # Wait for backend to be fully ready before starting frontend build/dev
         npm run dev -- -p 3000 > frontend.log 2>&1 &
         
     - name: Wait for Frontend
@@ -105,7 +112,7 @@ jobs:
       run: npx playwright test e2e/todo_agent_stress_test.spec.cjs --project=chromium --workers 2
 
     - name: Upload Artifacts
-      if: failure()
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: playwright-report

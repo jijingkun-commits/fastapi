@@ -26,6 +26,7 @@ export interface Todo {
     status: TodoStatus
     priority: TodoPriority
     progress: number
+    progress_notes?: string  // 进展备注
     category?: string
     tags?: string[]
     due_date?: string

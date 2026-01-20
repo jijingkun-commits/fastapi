@@ -10,9 +10,10 @@ from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
 
-from app.ai.workflow.todo_graph import TodoAgentState
+from app.ai.state import TodoAgentState
 from app.db.session import get_db_context
 from app.repositories.todo_repository import TodoRepository
+from app.ai.utils.state_helpers import get_user_id_optional
 
 logger = logging.getLogger(__name__)
 
@@ -171,22 +172,9 @@ def summarize_node(state: TodoAgentState) -> TodoAgentState:
 
 # ==================== 辅助函数 ====================
 
-def _get_user_id_from_state(state: TodoAgentState) -> Optional[int]:
-    """从状态中获取用户 ID。"""
-    # 尝试从 pending_operation 获取
-    pending_op = state.get("pending_operation")
-    if pending_op and pending_op.get("user_id"):
-        return pending_op.get("user_id")
-    
-    # 尝试从 messages 的 metadata 获取 (如果有的话)
-    messages = state.get("messages", [])
-    for msg in messages:
-        if hasattr(msg, "additional_kwargs"):
-            user_id = msg.additional_kwargs.get("user_id")
-            if user_id:
-                return user_id
-    
-    return None
+# _get_user_id_from_state 已迁移到 app.ai.utils.state_helpers
+# 为保持向后兼容，创建别名
+_get_user_id_from_state = get_user_id_optional
 
 
 def _todo_to_dict(todo) -> Dict:

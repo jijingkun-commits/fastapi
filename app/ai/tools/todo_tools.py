@@ -38,19 +38,19 @@ class ListTodosInput(BaseModel):
 
 class TodoIdInput(BaseModel):
     """待办 ID 输入参数。"""
-    todo_id: int = Field(description="待办事项的 ID")
+    todo_id: Optional[int] = Field(default=None, description="待办事项的 ID（可选，未指定时使用当前讨论的待办）")
 
 
 class UpdateProgressInput(BaseModel):
     """更新进度输入参数。"""
-    todo_id: int = Field(description="待办事项的 ID")
+    todo_id: Optional[int] = Field(default=None, description="待办事项的 ID（可选，未指定时使用当前讨论的待办）")
     progress: int = Field(description="进度百分比 (0-100)")
     progress_notes: Optional[str] = Field(default=None, description="进展说明")
 
 
 class UpdateTodoInput(BaseModel):
     """更新待办输入参数。"""
-    todo_id: int = Field(description="待办事项的 ID")
+    todo_id: Optional[int] = Field(default=None, description="待办事项的 ID（可选，未指定时使用当前讨论的待办）")
     title: Optional[str] = Field(default=None, description="新标题")
     description: Optional[str] = Field(default=None, description="新描述")
     priority: Optional[int] = Field(default=None, description="新优先级")
@@ -68,10 +68,23 @@ def _get_user_id(config: RunnableConfig) -> Optional[int]:
     return None
 
 
+def _get_current_todo_id(config: RunnableConfig) -> Optional[int]:
+    """从 config 中提取当前讨论的待办 ID。"""
+    if config and "configurable" in config:
+        return config["configurable"].get("current_todo_id")
+    return None
+
+
 def _parse_datetime(date_str: str) -> Optional[datetime]:
     """解析日期时间字符串。"""
     if not date_str:
         return None
+        
+    # 🆕 尝试解析 ISO 格式 (e.g. 2026-01-19T09:00:00)
+    try:
+        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+    except ValueError:
+        pass
     
     # 支持多种格式
     formats = [
@@ -266,18 +279,26 @@ def list_todos(
 
 @tool(args_schema=UpdateProgressInput)
 def update_progress(
-    todo_id: int,
-    progress: int,
+    todo_id: int = None,
+    progress: int = 0,
     progress_notes: str = None,
     config: RunnableConfig = None
 ) -> str:
     """更新待办事项的进度。
     
     更新任务的完成进度（0-100），可以添加进展说明。进度达到 100% 时自动标记为完成。
+    如果未指定 todo_id，将自动使用当前讨论的待办 ID。
     """
     user_id = _get_user_id(config)
     if not user_id:
         return "❌ 无法获取用户信息，请确保已登录"
+    
+    # 如果未指定 todo_id，尝试从上下文获取
+    if todo_id is None:
+        todo_id = _get_current_todo_id(config)
+        if todo_id is None:
+            return "❌ 请指定待办 ID，或先选中一个待办事项"
+        logger.info("使用上下文中的待办 ID: %d", todo_id)
     
     if progress < 0 or progress > 100:
         return "❌ 进度必须在 0-100 之间"
@@ -287,7 +308,6 @@ def update_progress(
         from app.repositories.todo_repository import todo_repo
         
         with get_db_context() as db:
-            # 先获取待办信息
             todo = todo_repo.get_by_id(db, todo_id, user_id)
             if not todo:
                 return f"❌ 未找到 ID 为 {todo_id} 的待办事项"
@@ -297,7 +317,6 @@ def update_progress(
             )
             
             if success:
-                # 刷新获取最新状态
                 db.refresh(todo)
                 
                 progress_bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
@@ -318,7 +337,7 @@ def update_progress(
 
 @tool(args_schema=UpdateTodoInput)
 def update_todo(
-    todo_id: int,
+    todo_id: int = None,
     title: str = None,
     description: str = None,
     priority: int = None,
@@ -330,10 +349,18 @@ def update_todo(
     """更新待办事项的信息。
     
     可以更新标题、描述、优先级、截止日期、分类等信息。
+    如果未指定 todo_id，将自动使用当前讨论的待办 ID。
     """
     user_id = _get_user_id(config)
     if not user_id:
         return "❌ 无法获取用户信息，请确保已登录"
+    
+    # 如果未指定 todo_id，尝试从上下文获取
+    if todo_id is None:
+        todo_id = _get_current_todo_id(config)
+        if todo_id is None:
+            return "❌ 请指定待办 ID，或先选中一个待办事项"
+        logger.info("使用上下文中的待办 ID: %d", todo_id)
     
     try:
         from app.db.session import get_db_context
@@ -386,21 +413,28 @@ def update_todo(
 
 
 @tool(args_schema=TodoIdInput)
-def complete_todo(todo_id: int, config: RunnableConfig = None) -> str:
+def complete_todo(todo_id: int = None, config: RunnableConfig = None) -> str:
     """标记待办事项为已完成。
     
     将指定 ID 的待办任务标记为完成状态，自动记录完成时间。
+    如果未指定 todo_id，将自动使用当前讨论的待办 ID。
     """
     user_id = _get_user_id(config)
     if not user_id:
         return "❌ 无法获取用户信息，请确保已登录"
+    
+    # 如果未指定 todo_id，尝试从上下文获取
+    if todo_id is None:
+        todo_id = _get_current_todo_id(config)
+        if todo_id is None:
+            return "❌ 请指定待办 ID，或先选中一个待办事项"
+        logger.info("使用上下文中的待办 ID: %d", todo_id)
     
     try:
         from app.db.session import get_db_context
         from app.repositories.todo_repository import todo_repo
         
         with get_db_context() as db:
-            # 先获取待办信息用于展示
             todo = todo_repo.get_by_id(db, todo_id, user_id)
             if not todo:
                 return f"❌ 未找到 ID 为 {todo_id} 的待办事项"
@@ -420,21 +454,28 @@ def complete_todo(todo_id: int, config: RunnableConfig = None) -> str:
 
 
 @tool(args_schema=TodoIdInput)
-def delete_todo(todo_id: int, config: RunnableConfig = None) -> str:
+def delete_todo(todo_id: int = None, config: RunnableConfig = None) -> str:
     """删除待办事项。
     
     删除指定 ID 的待办任务。此操作会记录到历史日志中。
+    如果未指定 todo_id，将自动使用当前讨论的待办 ID。
     """
     user_id = _get_user_id(config)
     if not user_id:
         return "❌ 无法获取用户信息，请确保已登录"
+    
+    # 如果未指定 todo_id，尝试从上下文获取
+    if todo_id is None:
+        todo_id = _get_current_todo_id(config)
+        if todo_id is None:
+            return "❌ 请指定待办 ID，或先选中一个待办事项"
+        logger.info("使用上下文中的待办 ID: %d", todo_id)
     
     try:
         from app.db.session import get_db_context
         from app.repositories.todo_repository import todo_repo
         
         with get_db_context() as db:
-            # 先获取待办信息用于展示
             todo = todo_repo.get_by_id(db, todo_id, user_id)
             if not todo:
                 return f"❌ 未找到 ID 为 {todo_id} 的待办事项"

@@ -9,35 +9,38 @@
 ```
 app/ai/
 ├── workflow/
-│   └── multi_agent_graph.py   # 多智能体 Supervisor 图
+│   ├── multi_agent_graph.py   # 多智能体 Supervisor 图
+│   └── todo_graph.py          # 待办专用 StateGraph (2026-01 重构)
 ├── agents/
 │   ├── data_agent.py          # 数据分析专家
 │   ├── knowledge_agent.py     # 知识库专家
-│   ├── todo_agent.py          # 待办事项专家
-│   ├── todo_graph.py          # 待办专用 StateGraph
-│   ├── todo_enhanced_nodes.py # 增强节点（确认流程）
+│   ├── todo_agent.py          # 待办事项专家 (Prompt 定义)
+│   ├── todo_enhanced_nodes.py # 增强节点（澄清/冲突检测/任务拆解）
 │   └── summarize_node.py      # 摘要节点
 ├── tools/
 │   ├── todo_tools.py          # 待办工具集
+│   ├── batch_todo_tools.py    # 批量待办工具
 │   ├── chatTools.py           # MCP 数据库工具
 │   ├── file_tools.py          # 文件读取工具
 │   ├── vision_tool.py         # 图片分析工具
 │   └── ragflow_tool.py        # 知识库检索工具
-├── prompts/                   # 🆕 渐进披露 Prompt 管理
+├── prompts/                   # 渐进披露 Prompt 管理
 │   ├── agent_prompts.py       # 核心 Prompt
 │   ├── prompt_loader.py       # 参考文档加载器
 │   └── references/            # 详细参考文档
 │       ├── sql_guide.md
 │       ├── chart_guide.md
 │       └── knowledge_guide.md
-├── mcp/                       # Model Context Protocol
 ├── utils/                      # 工具函数
+│   ├── __init__.py
+│   ├── state_helpers.py        # 状态辅助函数 (user_id/todo_id 统一获取)
 │   └── image_fixer.py          # 图片链接修复逻辑
+├── mcp/                       # Model Context Protocol
 ├── events.py                  # SSE 事件协议
-├── guardrails.py              # 🆕 护栏系统（输入/输出验证）
-├── intent_classifier.py       # 🆕 意图识别器
-├── parameter_extractor.py     # 🆕 参数提取器（借鉴 Flock）
-├── llm_judge.py               # 🆕 LLM as Judge 输出评估
+├── guardrails.py              # 护栏系统（输入/输出验证）
+├── intent_classifier.py       # 意图识别器
+├── parameter_extractor.py     # 参数提取器（借鉴 Flock）
+├── llm_judge.py               # LLM as Judge 输出评估
 ├── llm_util.py                # LLM 实例管理
 ├── message_utils.py           # 消息处理工具
 └── middleware.py              # AI 中间件
@@ -105,7 +108,77 @@ def _create_task_handoff_tool(agent_name: str, description: str):
 
 ---
 
-## 🛠️ Tools 详解
+## 📋 Todo Graph 架构 (2026-01 重构)
+
+**文件**: `app/ai/workflow/todo_graph.py`
+
+### 节点流程
+
+```mermaid
+graph TD
+    A[analyze_intent] --> B{route_next}
+    B -->|clarify| C[clarify_node]
+    B -->|decompose| D[task_decomposition_node]
+    B -->|conflict| E[conflict_detection_node]
+    B -->|resolve| R[resolve_entity]
+    B -->|execute| H[execute_operation]
+    B -->|summarize| I[summarize_node]
+    
+    C --> END
+    D --> E
+    E --> R
+    R --> B2{route_after_resolve}
+    B2 -->|clarify| C
+    B2 -->|confirm| F[ask_confirmation]
+    B2 -->|execute| H
+    F --> G[wait_for_confirmation]
+    G --> H
+    H --> END
+    I --> END
+```
+
+### 核心改动 (2026-01)
+
+| 原设计 | 新设计 | 改进点 |
+|--------|--------|--------|
+| `request_confirmation` 单节点 | `ask_confirmation` + `wait_for_confirmation` | 分离消息发送与中断等待 |
+| 正则解析 LLM 输出 | Pydantic `IntentResult` 模型 | 结构化验证 |
+| 分散的 `user_id` 获取 | 统一 `state_helpers.py` | 集中管理 |
+| 执行阶段模糊匹配 ID | **新增 `resolve_entity` 节点** | 在确认前解析 ID，避免歧义 |
+| 文本确认消息 | **结构化 ConfirmationCard** | 前端渲染 Diff 视图 |
+
+### resolve_entity 节点
+
+**文件**: `app/ai/agents/resolve_node.py`
+
+专门在确认前解析模糊的待办标识为具体 `todo_id`：
+
+| 匹配结果 | 处理 |
+|---------|------|
+| 0 个匹配 | 路由到 `clarify`，提示找不到 |
+| 1 个匹配 | 写入 `todo_id` 到 `pending_operation`，路由到 `confirm` |
+| 多个匹配 | 路由到 `clarify`，列出选项供选择 |
+
+### 状态辅助函数
+
+**文件**: `app/ai/utils/state_helpers.py`
+
+```python
+from app.ai.utils.state_helpers import get_user_id, get_user_id_optional, get_current_todo_id
+
+# 获取 user_id（抛异常版）
+user_id = get_user_id(state, config)
+
+# 获取 user_id（返回 None 版）
+user_id = get_user_id_optional(state, config)
+
+# 获取当前讨论的 todo_id
+todo_id = get_current_todo_id(state, config)
+```
+
+---
+
+## �🛠️ Tools 详解
 
 ### Todo Tools
 

@@ -18,7 +18,8 @@ import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import ConfirmationCard from "@/components/todo/ConfirmationCard";
-import TodoListCard, { TodoItem } from "@/components/todo/TodoListCard";
+import TodoListCard from "@/components/todo/TodoListCard";
+import { Todo } from "@/types/todo";
 
 /**
  * 解析 Anthropic 流式工具调用
@@ -98,7 +99,7 @@ export function AssistantMessage({
   const responseData = additionalKwargs?.data as Record<string, any> | undefined;
 
   // 获取 todos 数据
-  const todoData = responseData?.todos as TodoItem[] | undefined;
+  const todoData = responseData?.todos as Todo[] | undefined;
 
   // 确认操作处理
   const handleConfirm = async (data?: Record<string, any>) => {
@@ -170,8 +171,13 @@ export function AssistantMessage({
             readonly={false}
             onSelectionChange={(todoId, todo) => {
               if (typeof window !== 'undefined') {
+                const currentThreadId = new URL(window.location.href).searchParams.get('threadId');
                 if (todoId && todo) {
-                  sessionStorage.setItem('selectedTodo', JSON.stringify({ id: todoId, title: todo.title }));
+                  sessionStorage.setItem('selectedTodo', JSON.stringify({
+                    id: todoId,
+                    title: todo.title,
+                    threadId: currentThreadId
+                  }));
                   window.dispatchEvent(new Event('todoSelected'));
                 } else {
                   sessionStorage.removeItem('selectedTodo');

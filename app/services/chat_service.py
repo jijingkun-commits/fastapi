@@ -53,6 +53,7 @@ class ChatService:
         model_id: Optional[str] = None,
         use_multi_agent: bool = False,
         attachments: Optional[list] = None,  # List[Attachment] objects
+        current_todo_id: Optional[int] = None,
     ) -> AsyncGenerator[bytes, None]:
         """流式处理用户输入，返回 SSE 格式的事件流。
         
@@ -130,15 +131,16 @@ class ChatService:
                        len(attachments), len(image_attachments), len(other_attachments))
             
         input_messages = [HumanMessage(content=final_prompt)]
-        config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+        config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id}}
         
-        # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id）
+        # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）
         input_state = {
             "messages": input_messages,
             "user_id": user_id,
             "thread_id": thread_id,
             "enable_thinking": enable_thinking,
             "model_id": model_id,
+            "current_todo_id": current_todo_id,
         }
         
         # 用于收集完整回复
@@ -335,6 +337,7 @@ async def sse_stream(
     model_id: Optional[str] = None,
     use_multi_agent: bool = False,
     attachments: Optional[list] = None,
+    current_todo_id: Optional[int] = None,
 ) -> AsyncGenerator[bytes, None]:
     """SSE 流式输出入口函数。
     
@@ -350,6 +353,7 @@ async def sse_stream(
         model_id: 模型标识
         use_multi_agent: 是否使用多智能体模式
         attachments: 附件列表
+        current_todo_id: 当前讨论的待办 ID
         
     Yields:
         SSE 格式的事件数据
@@ -358,7 +362,7 @@ async def sse_stream(
     
     async for chunk in svc.stream(
         prompt, thread_id, user_id, delay_ms, 
-        enable_thinking, model_id, use_multi_agent, attachments
+        enable_thinking, model_id, use_multi_agent, attachments, current_todo_id
     ):
         yield chunk
 

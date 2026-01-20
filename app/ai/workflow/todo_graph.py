@@ -23,9 +23,29 @@ from app.db.session import get_db_context  # 数据库上下文管理器
 from app.repositories.todo_repository import TodoRepository  # 待办仓库
 from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
 
-# 🆕 导入自定义事件工具
+# 导入自定义事件工具
 from langgraph.config import get_stream_writer
-from app.ai.events import emit_result, emit_token, emit_status, emit_error
+from app.ai.events import emit_clarification, emit_token, emit_status, emit_error
+
+# 导入统一的状态辅助函数
+from app.ai.utils.state_helpers import get_user_id, get_user_id_optional
+
+# 导入实体解析节点
+from app.ai.agents.resolve_node import resolve_entity, route_after_resolve
+
+# 导入意图分析辅助函数
+from app.ai.workflow.todo_intent_helpers import (
+    filter_messages_for_todo,
+    query_existing_todos,
+    parse_time_info,
+    detect_urgent_task,
+    process_clarify_intent,
+    process_confirm_intent,
+    process_batch_create_intent,
+    process_summarize_intent,
+    process_constraint_intent,
+    determine_confirmation_need
+)
 
 # 创建仓库实例
 todo_repo = TodoRepository()
@@ -304,66 +324,60 @@ ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
 #     return False
 
 
-# ==================== 辅助函数 ====================
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 
-def _recover_todo_from_messages(messages: list) -> Optional[Dict]:
-    """从消息历史中恢复待办上下文。
-    
-    解析 AI 之前给出的待办信息（标题、时间、地点等）。
-    
-    Returns:
-        提取的待办信息字典，如果无法恢复则返回 None
-    """
-    import re
-    
-    for msg in reversed(messages):
-        if not hasattr(msg, 'type') or msg.type != 'ai':
-            continue
-        
-        content = str(getattr(msg, 'content', ''))
-        if not content or '待办信息' not in content:
-            continue
-        
-        # 解析待办信息
-        recovered = {}
-        
-        # 标题
-        title_match = re.search(r'标题[：:]\s*(.+?)(?:\n|$)', content)
-        if title_match:
-            recovered['title'] = title_match.group(1).strip()
-        
-        # 时间
-        time_match = re.search(r'时间[：:]\s*(.+?)(?:\n|$)', content)
-        if time_match:
-            recovered['time'] = time_match.group(1).strip()
-        
-        # 地点
-        location_match = re.search(r'地点[：:]\s*(.+?)(?:\n|$)', content)
-        if location_match:
-            recovered['location'] = location_match.group(1).strip()
-        
-        # 优先级
-        priority_match = re.search(r'优先级[：:]\s*(.+?)(?:\n|$)', content)
-        if priority_match:
-            priority_text = priority_match.group(1).strip()
-            if '高' in priority_text:
-                recovered['priority'] = 1
-            elif '低' in priority_text:
-                recovered['priority'] = 3
-            else:
-                recovered['priority'] = 2
-        
-        if recovered.get('title'):
-            logger.info(f"从消息历史解析待办: {recovered}")
-            return recovered
-    
-    return None
+# ==================== Pydantic 响应模型 (P1-4) ====================
+
+class IntentResult(BaseModel):
+    """LLM 意图分析结果模型"""
+    intent: str = Field(description="用户意图: create, update, delete, query, confirm, clarify 等")
+    extracted_info: Dict = Field(default={}, description="提取的实体信息: title, time, due_date, priority 等")
+    missing_info: List[str] = Field(default=[], description="缺失的关键信息")
+    is_complex: bool = Field(default=False, description="是否为复杂任务")
+    conflict_risk: str = Field(default="none", description="冲突风险: high, medium, none")
+    context_hints: Dict = Field(default={}, description="上下文线索")
+    projects: List[str] = Field(default=[], description="涉及的项目列表")
+    time_constraints: Dict = Field(default={}, description="时间约束")
 
 
 # ==================== 节点函数 ====================
 
-def analyze_intent(state: TodoAgentState) -> TodoAgentState:
-    """分析用户意图节点。
+def _get_user_id_from_state(state: TodoAgentState) -> Optional[int]:
+    """从 State 中获取用户 ID (统一入口)"""
+    return get_user_id_optional(state, config=None)
+
+
+def _get_user_todo_context(user_id: int) -> str:
+    """获取用户现有待办上下文字符串"""
+    if not user_id:
+        return ""
+        
+    try:
+        with get_db_context() as db:
+            existing_todos = todo_repo.list_by_user(db, user_id, status="pending")
+            if not existing_todos:
+                return ""
+                
+            # 构建简洁的任务列表上下文
+            todo_list = []
+            for t in existing_todos[:10]:  # 最多 10 条
+                due_str = t.due_date.strftime("%m月%d日") if t.due_date else "无截止"
+                priority_map = {1: "高", 2: "中", 3: "低"}
+                priority_str = priority_map.get(t.priority, "中")
+                todo_list.append(f"- {t.title} (截止:{due_str}, 优先级:{priority_str})")
+            
+            context = f"\n\n## 用户现有待办 ({len(existing_todos)}项)\n" + "\n".join(todo_list)
+            logger.info(f"加载用户现有待办: {len(existing_todos)} 项")
+            return context
+    except Exception as e:
+        logger.warning(f"查询历史任务失败: {e}")
+        return ""
+
+def analyze_intent(state: TodoAgentState) -> Dict:
+    """分析用户意图节点（重构版）。
+    
+    使用辅助函数拆分逻辑，返回增量更新字典而非直接修改 state。
     
     职责：
     1. 调用 LLM 分析最后一条用户消息
@@ -372,302 +386,132 @@ def analyze_intent(state: TodoAgentState) -> TodoAgentState:
     """
     logger.info("=== analyze_intent 节点 ===")
     
-    messages = state["messages"]
+    # 收集需要更新的字段
+    updates: Dict = {}
     
-    # 获取最近的历史消息 (最多5条)
-    recent_messages = messages[-5:] if messages else []
+    messages = state.get("messages", [])
     
-    # 构建分析用的消息列表
-    # 1. System Prompt
-    analysis_messages = [SystemMessage(content=ANALYZE_PROMPT)]
+    # Step 1: 消息过滤与 Handoff 上下文构建
+    pending_handoff = state.get("pending_handoff")
+    filtered_messages, handoff_context = filter_messages_for_todo(messages, pending_handoff)
+    recent_messages = filtered_messages[-5:] if filtered_messages else []
     
-    # 2. 历史消息 (直接附加, 保持对话流)
-    # 注意: 我们需要确保 SystemMessage 在最前
+    logger.info(f"分析用户消息 (Original: {len(messages)}, Filtered: {len(filtered_messages)}, Use: {len(recent_messages)})")
+    
+    # Step 2: 历史任务查询 (通过 Helper)
+    user_id = _get_user_id_from_state(state)
+    existing_todos_context = ""
+    if user_id:
+        existing_todos_context = query_existing_todos(user_id)
+    
+    # 清理上一轮的临时状态
+    if state.get("pending_clarifications"):
+        updates["pending_clarifications"] = []
+    if state.get("detected_conflicts"):
+        updates["detected_conflicts"] = []
+    
+    # Step 3: 调用 LLM 分析
+    llm = get_llm(enable_streaming=False)
+    
+    # 构建 Parser
+    parser = JsonOutputParser(pydantic_object=IntentResult)
+    format_instructions = parser.get_format_instructions()
+    
+    # 构建 Prompt
+    system_prompt = f"{ANALYZE_PROMPT}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
+    
+    analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
     
-    logger.info(f"分析用户消息 (上下文: {len(recent_messages)} 条)")
-    
-    # 🆕 P2: 历史任务查询 - 获取用户现有待办列表
-    existing_todos_context = ""
     try:
-        user_id = _get_user_id_from_state(state)
-        if user_id:
-            with get_db_context() as db:
-                existing_todos = todo_repo.list_by_user(db, user_id, status="pending")
-                if existing_todos:
-                    # 构建简洁的任务列表上下文
-                    todo_list = []
-                    for t in existing_todos[:10]:  # 最多 10 条
-                        due_str = t.due_date.strftime("%m月%d日") if t.due_date else "无截止"
-                        priority_map = {1: "高", 2: "中", 3: "低"}
-                        priority_str = priority_map.get(t.priority, "中")
-                        todo_list.append(f"- {t.title} (截止:{due_str}, 优先级:{priority_str})")
-                    
-                    existing_todos_context = f"\n\n## 用户现有待办 ({len(existing_todos)}项)\n" + "\n".join(todo_list)
-                    logger.info(f"加载用户现有待办: {len(existing_todos)} 项")
-    except Exception as e:
-        logger.warning(f"查询历史任务失败: {e}")
-
-    
-    # 🧹 清理上一轮的临时状态
-    if state.get("pending_clarifications"):
-        state["pending_clarifications"] = []
-    if state.get("detected_conflicts"):
-        state["detected_conflicts"] = []
-    
-    # 调用 LLM 分析（禁用流式输出，避免内部 JSON 被发送到前端）
-    llm = get_llm(enable_streaming=False)
-    try:
-        # 🆕 P2: 将历史任务上下文注入到系统提示中
-        enhanced_prompt = ANALYZE_PROMPT
-        if existing_todos_context:
-            enhanced_prompt += existing_todos_context
-            enhanced_prompt += "\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。"
-        
-        # 重建分析消息，使用增强提示
-        analysis_messages = [SystemMessage(content=enhanced_prompt)]
-        analysis_messages.extend(recent_messages)
-        
         response = llm.invoke(analysis_messages, config={"tags": ["internal_thought"]})
-        # DeepSeek Reasoner返回的内容在content中
         result_text = response.content
-        logger.info(f"LLM 分析结果: {result_text}")
+        logger.info(f"LLM 分析结果长度: {len(result_text)}")
         
-        # 解析 JSON
-        analysis = json.loads(result_text)
+        try:
+            analysis_dict = parser.parse(result_text)
+        except Exception as e:
+            logger.warning(f"解析 JSON 失败，重试清理: {e}")
+            # 简单的 markdown json 清理
+            clean_text = result_text.replace("```json", "").replace("```", "").strip()
+            start = clean_text.find("{")
+            end = clean_text.rfind("}")
+            if start != -1 and end != -1:
+                clean_text = clean_text[start:end+1]
+            analysis_dict = json.loads(clean_text)
         
-        # 🆕 Phase 1A: NLP 时间解析增强
-        from app.services.time_parser import NaturalTimeParser
-        time_parser = NaturalTimeParser()
-        
+        analysis = analysis_dict
+
         intent = analysis.get("intent", "chat")
         extracted_info = analysis.get("extracted_info", {})
         
-        # 尝试提取并解析时间字段
-        # 通常 LLM 会提取出如 "周三下午" 这样的原生文本放在 time 或 due_date 中
-        raw_time = extracted_info.get("time") or extracted_info.get("due_date")
-        if raw_time and isinstance(raw_time, str):
-            parsed_time, meta = time_parser.parse(raw_time)
-            if parsed_time:
-                # 更新为 ISO 格式的标准时间
-                extracted_info["due_date"] = parsed_time.isoformat()
-                # 保留原始时间描述，用于澄清或确认
-                extracted_info["original_time"] = meta.get("original_text")
-                logger.info(f"时间解析: '{raw_time}' -> {extracted_info['due_date']}")
-                
-                # 特殊处理：如果是模糊时间，可能需要用户进一步澄清？
-                # 目前 NaturalTimeParser 已经做了尽力推断，先信任它
-                
-            # 提取约束 (如 "周一不可用")
-            constraints = meta.get("constraints")
-            if constraints:
-                # 合并到 time_constraints
-                current_constraints = state.get("time_constraints") or {}
-                # 注意：这里需要深度合并
-                if "blocked_weekdays" in constraints:
-                    current_blocked = set(current_constraints.get("blocked_weekdays", []))
-                    current_blocked.update(constraints["blocked_weekdays"])
-                    current_constraints["blocked_weekdays"] = list(current_blocked)
-                
-                state["time_constraints"] = current_constraints
-                logger.info(f"解析到时间约束: {constraints}")
-
-        # 🆕 Phase 3: 紧急任务检测与优先级提升
-        # 检测紧急关键词
-        last_user_msg = ""
-        for msg in reversed(messages):
-            if hasattr(msg, 'content') and isinstance(msg.content, str):
-                last_user_msg = msg.content
-                break
+        # Step 4: 时间解析
+        extracted_info, time_constraints = parse_time_info(
+            extracted_info, 
+            state.get("time_constraints")
+        )
+        if time_constraints:
+            updates["time_constraints"] = time_constraints
         
-        urgent_keywords = ["刚刚", "紧急", "立刻", "马上", "领导说", "老板说", "赶紧"]
-        is_urgent = any(kw in last_user_msg for kw in urgent_keywords)
+        # Step 5: 紧急任务检测
+        extracted_info = detect_urgent_task(messages, intent, extracted_info, user_id)
         
-        if is_urgent and intent == "create":
-            # 自动提升优先级
-            extracted_info["priority"] = 1
-            extracted_info["is_urgent"] = True
-            logger.info("检测到紧急任务，自动提升为高优先级")
-            
-            # 检查同一天是否有其他任务可能受影响
-            due_date = extracted_info.get("due_date")
-            if due_date:
-                try:
-                    from app.db.session import get_db_context
-                    from app.repositories.todo_repository import todo_repo
-                    from datetime import datetime
-                    
-                    # 解析新任务的日期
-                    if isinstance(due_date, str):
-                        new_due = datetime.fromisoformat(due_date.replace('Z', '+00:00'))
-                    else:
-                        new_due = due_date
-                    
-                    # 获取用户信息
-                    user_id = None
-                    if hasattr(state, 'get'):
-                        pending_op = state.get("pending_operation")
-                        if pending_op:
-                            user_id = pending_op.get("user_id")
-                    
-                    # 仅在能获取用户ID时查询
-                    if user_id:
-                        with get_db_context() as db:
-                            existing_todos = todo_repo.list_by_user(db, user_id, status="todo")
-                            
-                            affected_tasks = []
-                            for todo in existing_todos:
-                                if todo.due_date and todo.due_date.date() == new_due.date():
-                                    if todo.priority >= 2:  # 中低优先级
-                                        affected_tasks.append(todo.title)
-                            
-                            if affected_tasks:
-                                # 记录受影响的任务
-                                extracted_info["affected_tasks"] = affected_tasks
-                                logger.info(f"紧急任务可能影响: {affected_tasks}")
-                except Exception as e:
-                    logger.warning(f"检查受影响任务失败: {e}")
-
-        is_complex = analysis.get("is_complex", False)
-        conflict_risk = analysis.get("conflict_risk", "none")
-        quick_mode = state.get("quick_mode", False)
+        # Step 6: 意图分支处理
         
-        # 🆕 处理clarify意图 - 区分两种场景
+        # 6.1 clarify 意图
         if intent == "clarify":
-            # 检查是否有部分待办信息
-            has_partial_todo = (
-                extracted_info.get("title") or 
-                extracted_info.get("time") or 
-                extracted_info.get("description")
-            )
-            
-            if has_partial_todo:
-                # 场景A: 有部分待办信息但需要补充 (如"明天开会")
-                # 设置 pending_operation 以便后续确认
-                state["pending_operation"] = {
-                    "action": "create",
-                    "data": extracted_info,
-                    "needs_clarification": True  # 🆕 标记需要澄清
-                }
-                state["pending_clarifications"] = analysis.get("missing_info", [])
-                state["conversation_context"] = analysis.get("context_hints", {})
-                logger.info(f"部分待办信息,需要澄清: {extracted_info.get('title')}")
-            else:
-                # 场景B: 纯澄清,无待办信息 (如"帮我理一理")
-                state["pending_clarifications"] = analysis.get("missing_info", [])
-                state["conversation_context"] = analysis.get("context_hints", {})
-                
-                # 🆕 P3: 多项目队列填充
-                projects = analysis.get("projects", [])
-                if projects and len(projects) > 1:
-                    state["project_queue"] = projects
-                    state["current_project_index"] = 0
-                    state["active_projects"] = projects
-                    logger.info(f"识别到多项目: {projects}")
-                else:
-                    logger.info("纯澄清模式,无待办信息")
-            
-            return state
+            result = process_clarify_intent(analysis, extracted_info)
+            updates.update(result.to_dict())
+            return updates
         
-        # 🆕 处理 confirm 意图 - 用户确认创建待办
+        # 6.2 confirm 意图
         if intent == "confirm":
-            # 检查是否有待确认的操作
-            pending_op = state.get("pending_operation")
-            if pending_op and pending_op.get("needs_clarification"):
-                # 用户确认了，移除 needs_clarification 标记
-                # 这样下次 route_next 会路由到 confirm 节点触发 interrupt
-                pending_op["needs_clarification"] = False
-                state["pending_operation"] = pending_op
-                logger.info(f"用户确认创建: {pending_op['data'].get('title')}")
-            else:
-                # 没有待确认的操作，尝试从 extracted_info 或消息历史重建 pending_operation
-                if extracted_info and (extracted_info.get("title") or extracted_info.get("time")):
-                    logger.info(f"从 extracted_info 重建 pending_operation: {extracted_info}")
-                    state["pending_operation"] = {
-                        "action": "create",
-                        "data": extracted_info,
-                        "needs_clarification": False,
-                    }
-                else:
-                    # 尝试从消息历史中恢复待办上下文
-                    recovered_data = _recover_todo_from_messages(messages)
-                    if recovered_data:
-                        # 合并用户补充的信息（如果有）
-                        if extracted_info:
-                            for key, value in extracted_info.items():
-                                if value:
-                                    recovered_data[key] = value
-                        logger.info(f"从消息历史恢复待办上下文: {recovered_data}")
-                        state["pending_operation"] = {
-                            "action": "create",
-                            "data": recovered_data,
-                            "needs_clarification": True,  # 让用户确认
-                        }
-                    else:
-                        logger.warning("收到 confirm 意图但无法恢复待办上下文")
-                        state["pending_operation"] = None
-            return state
+            result = process_confirm_intent(state.get("pending_operation"), extracted_info)
+            updates.update(result.to_dict())
+            return updates
         
-        # 🆕 处理用户补充信息的场景
-        # 如果用户在确认阶段补充了更多信息，合并到已有的待办数据中
+        # 6.3 用户补充信息场景
         pending_op = state.get("pending_operation")
         if pending_op and pending_op.get("needs_clarification") and extracted_info:
-            # 用户补充了信息，合并数据
             existing_data = pending_op.get("data", {})
             for key, value in extracted_info.items():
-                if value:  # 只更新非空值
+                if value:
                     existing_data[key] = value
             pending_op["data"] = existing_data
-            state["pending_operation"] = pending_op
-            logger.info(f"用户补充信息: {extracted_info}")
-            # 继续走确认流程（保持 needs_clarification = True）
-            return state
+            updates["pending_operation"] = pending_op
+            return updates
         
-        # 🆕 处理 batch_create 意图
+        # 6.4 batch_create 意图
         if intent == "batch_create":
-            todos = extracted_info.get("todos", [])
-            if todos:
-                state["draft_todos"] = todos
-                state["pending_operation"] = {
-                    "action": "batch_create",
-                    "data": {"count": len(todos), "todos": todos}
-                }
-                logger.info(f"批量创建: {len(todos)} 个待办")
-            return state
-
-        # 🆕 处理 summarize 意图 - 汇总输出
+            result = process_batch_create_intent(extracted_info)
+            updates.update(result.to_dict())
+            return updates
+        
+        # 6.5 summarize 意图
         if intent == "summarize":
-            state["pending_operation"] = {
-                "action": "summarize",
-                "data": {},
-                "skip_confirmation": True  # 汇总不需要确认
-            }
-            logger.info("识别到汇总请求")
-            return state
-
-        # 🆕 处理 constraint 意图 或 顺带的 constraints
-        time_constraints = analysis.get("time_constraints")
+            result = process_summarize_intent()
+            updates.update(result.to_dict())
+            return updates
+        
+        # 6.6 constraint 意图
         if intent == "constraint":
-             ext_constraints = extracted_info.get("constraints", {})
-             if ext_constraints:
-                 current_constraints = state.get("time_constraints") or {}
-                 current_constraints.update(ext_constraints)
-                 state["time_constraints"] = current_constraints
-                 logger.info(f"更新时间约束: {ext_constraints}")
-                 # 约束通常伴随着对之前计划的影响，可能需要重新检测冲突
-                 # 我们暂时视为一次 update 操作来触发检测，或者直接返回让后续节点处理
-                 return state
-
-        # 提取顺带的约束(mix-in)
-        if time_constraints:
-             current_constraints = state.get("time_constraints") or {}
-             current_constraints.update(time_constraints)
-             state["time_constraints"] = current_constraints
-
-        # 标记复杂任务和冲突风险
+            result = process_constraint_intent(extracted_info, state.get("time_constraints"))
+            updates.update(result.to_dict())
+            return updates
+        
+        # 6.7 处理顺带的约束
+        analysis_time_constraints = analysis.get("time_constraints")
+        if analysis_time_constraints:
+            current_constraints = state.get("time_constraints") or {}
+            current_constraints.update(analysis_time_constraints)
+            updates["time_constraints"] = current_constraints
+        
+        # Step 7: 复杂任务和冲突风险标记
+        is_complex = analysis.get("is_complex", False)
+        conflict_risk = analysis.get("conflict_risk", "none")
+        
         if is_complex:
-            # 添加到draft_todos等待拆解
-            draft_todos = state.get("draft_todos", [])
+            draft_todos = list(state.get("draft_todos") or [])
             draft_todos.append({
                 "title": extracted_info.get("title"),
                 "is_complex": True,
@@ -675,68 +519,49 @@ def analyze_intent(state: TodoAgentState) -> TodoAgentState:
                 "dependencies": analysis.get("dependencies", []),
                 **extracted_info
             })
-            state["draft_todos"] = draft_todos
+            updates["draft_todos"] = draft_todos
         
         if conflict_risk != "none":
-            state["detected_conflicts"] = analysis.get("conflicts", [])
+            updates["detected_conflicts"] = analysis.get("conflicts", [])
         
-        # 智能确认策略
-        if quick_mode:
-            needs_confirmation = False
-            logger.info("快速模式:跳过确认")
-        elif intent == "create":
-            needs_confirmation = True
-            logger.info("创建操作:需要确认")
-        elif intent in ["delete", "update", "batch_complete", "merge"]: # merge 也需要确认
-            needs_confirmation = True
-        elif intent in ["query", "complete"]:
-            needs_confirmation = False
+        # Step 8: 确定是否需要确认
+        quick_mode = state.get("quick_mode", False)
+        needs_confirmation, needs_clarification = determine_confirmation_need(intent, quick_mode)
         
         if needs_confirmation:
-            # 设置待确认操作
-            # 对于创建操作，先经过 clarify 节点展示信息并询问用户
-            # 用户确认后才进入人工审核（interrupt）
-            state["pending_operation"] = {
+            updates["pending_operation"] = {
                 "action": intent,
                 "data": extracted_info,
-                "needs_clarification": intent == "create"  # 创建操作需要先确认
+                "needs_clarification": needs_clarification
             }
-            state["extracted_info"] = extracted_info
-            logger.info(f"需要确认: {intent}, 需要先澄清: {intent == 'create'}")
+            updates["extracted_info"] = extracted_info
+            logger.info(f"需要确认: {intent}, 需要先澄清: {needs_clarification}")
         else:
-            # 直接执行（也需要设置 pending_operation，供 execute 节点使用）
-            state["pending_operation"] = {
+            updates["pending_operation"] = {
                 "action": intent,
                 "data": extracted_info,
-                "skip_confirmation": True  # 标记跳过确认
+                "skip_confirmation": True
             }
-            state["extracted_info"] = extracted_info
+            updates["extracted_info"] = extracted_info
             logger.info(f"直接执行: {intent}")
-
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON 解析失败: {e}")
-        # 降级处理：如果无法解析，假设是闲聊
-        state["pending_operation"] = None
+            
+    except Exception as e:
+        logger.error(f"意图分析严重错误: {e}")
+        updates["pending_operation"] = None
     
-    return state
-
-
-def request_confirmation(state: TodoAgentState) -> TodoAgentState:
+    return updates
+def ask_confirmation(state: TodoAgentState) -> Dict:
     """请求用户确认节点。
     
-    职责：
-    1. 生成友好的确认消息
-    2. 展示提取的信息
-    3. 引导用户补充或确认
+    发送包含 Confirmation Card 的消息给用户。
+    实际的等待中断在 wait_for_confirmation 节点处理。
     """
-    logger.info("=== request_confirmation 节点 ===")
+    logger.info("=== ask_confirmation 节点 ===")
     
     operation = state.get("pending_operation")
-    
     if not operation:
         logger.warning("无待确认操作")
-        return state
+        return {}
     
     action = operation.get("action")
     # 优先使用 operation["data"]，而非 extracted_info
@@ -779,12 +604,18 @@ def request_confirmation(state: TodoAgentState) -> TodoAgentState:
         confirm_msg = f"即将批量完成 {count} 个待办，确认吗？"
     
     elif action == "delete":
-        title = data.get("title", "待办")
-        confirm_msg = f"确认删除 **{title}** 吗？"
+        # 优先使用 resolve 节点解析后的信息
+        todo_id = data.get("todo_id")
+        title = data.get("resolved_title") or data.get("title") or "待办"
+        id_hint = f" (ID: {todo_id})" if todo_id else ""
+        confirm_msg = f"确认删除 **{title}**{id_hint} 吗？"
     
     elif action == "update":
-        title = data.get("title", "待办")
-        confirm_msg = f"确认更新 **{title}** 吗？"
+        # 优先使用 resolve 节点解析后的信息
+        todo_id = data.get("todo_id")
+        title = data.get("resolved_title") or data.get("title") or "待办"
+        id_hint = f" (ID: {todo_id})" if todo_id else ""
+        confirm_msg = f"确认更新 **{title}**{id_hint} 吗？"
 
     elif action == "merge":
         target_tasks = data.get("target_tasks", [])
@@ -869,29 +700,107 @@ def request_confirmation(state: TodoAgentState) -> TodoAgentState:
         ]
     }
     
-    logger.info(f"请求用户确认 (interrupt): {action}, message_preview={confirm_msg[:50]}...")
+    logger.info(f"请求用户确认: {action}, message_preview={confirm_msg[:50]}...")
     
-    # 触发中断，发送数据给前端
-    # resume_value 将包含用户的决策 (decision)
-    decision = interrupt(confirmation_data)
+    # 构造结构化 operation 对象用于前端渲染 ConfirmationCard
+    operation_data = {
+        "action": action, # 统一使用 action 字段
+        "data": data,
+        "summary": friendly_summary
+    }
+    
+    # 对于更新操作，尝试构造 diff 数据
+    if action == "update":
+        todo_id = data.get("todo_id")
+        resolved_title = data.get("resolved_title")
+        
+        # 填充 target_task
+        if todo_id:
+            operation_data["target_task"] = {
+                "id": todo_id,
+                "title": resolved_title or title
+            }
+        
+        # 填充 diff
+        # 注意：这里简化处理，实际 diff 需要从数据库获取原始值进行对比
+        # 但在 route_next 或 resolve 阶段我们可能已经有了原始数据
+        # 如果 state 中没有原始待办，这里只能显示新值
+        diff = {}
+        for key, value in data.items():
+            if key in ["title", "priority", "due_date", "description", "category"] and value:
+                # 假设旧值未知，前端会显示 "-> 新值"
+                diff[key] = {"old": None, "new": value}
+        operation_data["diff"] = diff
+        
+    elif action == "delete":
+         todo_id = data.get("todo_id")
+         if todo_id:
+            operation_data["target_task"] = {
+                "id": todo_id,
+                "title": data.get("resolved_title") or data.get("title")
+            }
+
+    # 返回 AIMessage
+    msg = AIMessage(
+        content=confirm_msg,
+        additional_kwargs={
+            "requires_confirmation": True,
+            "operation": operation_data
+        }
+    )
+    
+    return {
+        "messages": [msg],
+        "pending_operation": operation, # 保持 pending_operation 状态
+        "user_confirmed": None # 重置确认状态
+    }
+
+
+def wait_for_confirmation(state: TodoAgentState) -> Dict:
+    """等待用户确认节点。
+    
+    接受前端 resume 的数据并更新状态。
+    """
+    logger.info("=== wait_for_confirmation 节点 ===")
+    
+    # 触发中断，等待用户回复
+    # 前端 resume 时传递的数据将作为 interrupt 的返回值
+    decision = interrupt(None)
     
     logger.info(f"收到用户决策 (resume): {decision}")
     
+    if not decision:
+        return {"user_confirmed": False}
+    
     # 根据决策更新状态
-    if decision.get("type") == "accept":
+    # 兼容两种格式：
+    # 1. 完整数据: {"confirmed": True, ...}
+    # 2. 也是完整数据，前端直接把 ConfirmationCard 的表单传回来
+    
+    # 检查是否包含 confirmed 字段 (前端 ai.tsx 默认传 {confirmed: true})
+    is_confirmed = decision.get("confirmed", False)
+    
+    if is_confirmed or decision.get("type") == "accept":
         # 如果用户修改了参数 (例如修改了时间)
+        # 前端可能直接混在 decision 顶层，也可能在 args 里
+        update_data = {}
+        for k, v in decision.items():
+            if k not in ["confirmed", "type", "_display_message"]:
+                update_data[k] = v
+                
         if "args" in decision:
-            logger.info(f"用户更新了参数: {decision['args']}")
-            if state["pending_operation"]:
-                 state["pending_operation"]["data"].update(decision["args"])
+            update_data.update(decision["args"])
+            
+        if update_data and state["pending_operation"]:
+             logger.info(f"用户更新了参数: {update_data}")
+             state["pending_operation"]["data"].update(update_data)
         
         return {"user_confirmed": True}
         
-    elif decision.get("type") == "reject":
+    elif decision.get("type") == "reject" or not is_confirmed:
         logger.info("用户拒绝了操作")
         return {"user_confirmed": False}
         
-    # 默认情况
     return {"user_confirmed": False}
 
 
@@ -971,12 +880,14 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
             result = _execute_delete(data, state)
         elif action == "batch_complete":
             result = _execute_batch_complete(data, state)
+        elif action == "batch_create":
+            result = _execute_batch_create(data, state)
         elif action == "query":
             result = _execute_query(data, state)
         elif action == "merge":
             result = _execute_merge(data, state)
         else:
-            result = f"⚠️ 暂不支持操作: {action}"
+            result = ToolResultBuilder.error(f"暂不支持操作: {action}")
         
         # 统一转换 ToolResult 为 AIMessage
         if result["success"]:
@@ -1017,47 +928,9 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
 
 # ==================== 工具调用辅助函数 ====================
 
-def _get_user_id_from_state(state: TodoAgentState, config: RunnableConfig = None) -> int:
-    """从 state 或 RunnableConfig 中获取 user_id。
-    
-    优先级：
-    1. state.get("user_id") - 主要来源（由 graph 调用方传递）
-    2. RunnableConfig.configurable["user_id"]
-    3. pending_operation["user_id"]
-    
-    Args:
-        state: TodoAgentState
-        config: RunnableConfig（可选）
-        
-    Returns:
-        int: 用户 ID
-        
-    Raises:
-        ValueError: 如果无法获取 user_id
-    """
-    # 优先从 state 直接读取（MultiAgentState 有 user_id 字段）
-    user_id = state.get("user_id")
-    if user_id is not None:
-        return int(user_id)
-    
-    # 尝试从 RunnableConfig 获取
-    if config and hasattr(config, "configurable"):
-        user_id = config.get("configurable", {}).get("user_id")
-        if user_id is not None:
-            return int(user_id)
-    
-    # 尝试从 pending_operation 中获取
-    pending_op = state.get("pending_operation")
-    if pending_op and "user_id" in pending_op:
-        return int(pending_op["user_id"])
-    
-    # 无法获取时抛出异常，而非返回默认值
-    error_msg = (
-        "无法获取 user_id：请确保在调用 graph 时传递 user_id 参数，"
-        "例如 graph.ainvoke({'messages': [...], 'user_id': 1})"
-    )
-    logger.error(error_msg)
-    raise ValueError(error_msg)
+# _get_user_id_from_state 已迁移到 app.ai.utils.state_helpers
+# 为保持向后兼容，创建别名
+_get_user_id_from_state = get_user_id
 
 
 def _execute_query(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1143,20 +1016,82 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
         return ToolResultBuilder.error("创建待办失败", str(e))
 
 
+def _execute_batch_create(data: Dict, state: TodoAgentState) -> ToolResult:
+    """执行批量创建操作。
+    
+    用于处理用户在一条消息中提到多个待办的场景，如：
+    "明天开会，后天出差"
+    """
+    from app.ai.tools.todo_tools import add_todo
+    
+    user_id = _get_user_id_from_state(state)
+    config = RunnableConfig(configurable={"user_id": user_id})
+    
+    todos = data.get("todos", [])
+    if not todos:
+        return ToolResultBuilder.error("没有待创建的待办项")
+    
+    created = []
+    failed = []
+    
+    for todo_data in todos:
+        try:
+            due_date = todo_data.get("time") or todo_data.get("due_date")
+            result_str = add_todo.invoke({
+                "title": todo_data.get("title", "新待办"),
+                "description": todo_data.get("description", ""),
+                "priority": _parse_priority(todo_data.get("priority")),
+                "due_date": due_date,
+                "category": todo_data.get("category"),
+                "tags": todo_data.get("tags"),
+                "reminder_enabled": todo_data.get("reminder_enabled", False),
+                "config": config
+            })
+            created.append(todo_data.get("title", "新待办"))
+            logger.info(f"批量创建: 成功创建 '{todo_data.get('title')}'")
+        except Exception as e:
+            failed.append(todo_data.get("title", "未知"))
+            logger.exception(f"批量创建失败: {todo_data.get('title')}, 错误: {e}")
+    
+    # 汇总结果
+    if created and not failed:
+        return ToolResultBuilder.success(
+            f"成功创建 {len(created)} 个待办：{', '.join(created)}"
+        )
+    elif created and failed:
+        return ToolResultBuilder.success(
+            f"部分成功：创建了 {len(created)} 个，失败 {len(failed)} 个\n"
+            f"成功：{', '.join(created)}\n"
+            f"失败：{', '.join(failed)}"
+        )
+    else:
+        return ToolResultBuilder.error(f"批量创建失败：{', '.join(failed)}")
+
+
 def _execute_update(data: Dict, state: TodoAgentState) -> ToolResult:
-    """执行更新操作。"""
+    """执行更新操作。
+    
+    注意：必须提供 todo_id。ID 解析应在 resolve_entity 阶段完成。
+    如果缺失 todo_id，将返回系统错误。
+    """
     from app.ai.tools.todo_tools import update_todo
     
     user_id = _get_user_id_from_state(state)
     config = RunnableConfig(configurable={"user_id": user_id})
     
+    todo_id = data.get("todo_id")
+    
+    # 如果没有 todo_id，直接报错 (ID 解析应在 resolve 阶段完成)
+    if not todo_id:
+        return ToolResultBuilder.error("系统错误：缺失待办 ID (请先尝试解析该任务)")
+    
     try:
         result_str = update_todo.invoke({
-            "todo_id": data.get("todo_id"),
-            "title": data.get("title"),
+            "todo_id": todo_id,
+            "title": data.get("new_title"),  # 注意：更新时使用 new_title
             "description": data.get("description"),
             "priority": _parse_priority(data.get("priority")),
-            "due_date": data.get("due_date"),
+            "due_date": data.get("due_date") or data.get("time"),
             "category": data.get("category"),
             "status": data.get("status"),
             "config": config
@@ -1166,6 +1101,9 @@ def _execute_update(data: Dict, state: TodoAgentState) -> ToolResult:
     except Exception as e:
         logger.exception(f"更新待办失败: {e}")
         return ToolResultBuilder.error("更新待办失败", str(e))
+
+
+
 
 
 def _execute_complete(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1193,6 +1131,9 @@ def _execute_delete(data: Dict, state: TodoAgentState) -> ToolResult:
     
     user_id = _get_user_id_from_state(state)
     config = RunnableConfig(configurable={"user_id": user_id})
+    
+    if not data.get("todo_id"):
+        return ToolResultBuilder.error("系统错误：缺失待办 ID (请先尝试解析该任务)")
     
     try:
         result_str = delete_todo.invoke({
@@ -1307,7 +1248,7 @@ def _parse_priority(priority_str: Optional[str]) -> int:
 
 # ==================== 路由函数 ====================
 
-def route_next(state: TodoAgentState) -> Literal["clarify", "decompose", "conflict", "confirm", "execute", "summarize", "end"]:
+def route_next(state: TodoAgentState) -> Literal["clarify", "decompose", "conflict", "resolve", "execute", "summarize", "end"]:
     """路由到下一个节点 - 增强版。
     
     流程优先级:
@@ -1316,7 +1257,7 @@ def route_next(state: TodoAgentState) -> Literal["clarify", "decompose", "confli
     2. 纯澄清 (无待办) → clarify
     3. 有复杂任务 → decompose
     4. 有待办需要冲突检测 → conflict
-    5. 有待办需要确认 → confirm
+    5. 有待办需要实体解析 → resolve（新增）
     6. 有待办跳过确认（如查询） → execute
     7. 默认执行 → execute
     """
@@ -1353,11 +1294,12 @@ def route_next(state: TodoAgentState) -> Literal["clarify", "decompose", "confli
         logger.info("路由到: conflict (冲突检测)")
         return "conflict"
     
+    # 5. 有待办需要实体解析或确认 → resolve（新流程）
     if state.get("pending_operation"):
-        logger.info("路由到: confirm")
-        return "confirm"
+        logger.info("路由到: resolve (实体解析)")
+        return "resolve"
     
-    # 5. 默认执行
+    # 6. 默认执行
     logger.info("路由到: execute")
     return "execute"
 
@@ -1393,7 +1335,9 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
     workflow.add_node("clarify", clarify_node)
     workflow.add_node("decompose", task_decomposition_node)
     workflow.add_node("conflict", conflict_detection_node)
-    workflow.add_node("confirm", request_confirmation)
+    workflow.add_node("resolve", resolve_entity)              # 新增：实体解析节点
+    workflow.add_node("confirm", ask_confirmation)           # 发送确认消息
+    workflow.add_node("wait_confirm", wait_for_confirmation) # 等待用户决策
     workflow.add_node("execute", execute_operation)
     workflow.add_node("summarize", summarize_node)  # 汇总节点
     
@@ -1402,7 +1346,7 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
     
     # === 设置边 ===
     
-    # analyze → 条件路由 (clarify/decompose/conflict/confirm/execute)
+    # analyze → 条件路由 (clarify/decompose/conflict/resolve/execute)
     workflow.add_conditional_edges(
         "analyze",
         route_next,
@@ -1410,7 +1354,7 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
             "clarify": "clarify",
             "decompose": "decompose",
             "conflict": "conflict",
-            "confirm": "confirm",
+            "resolve": "resolve",  # 新增：实体解析路由
             "execute": "execute",
             "summarize": "summarize"  # 汇总路由
         }
@@ -1425,18 +1369,33 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
     # summarize → END (汇总后结束)
     workflow.add_edge("summarize", END)
     
-    # conflict → confirm/execute
+    # conflict → resolve (改为先解析再确认)
     workflow.add_conditional_edges(
         "conflict",
-        lambda state: "confirm" if state.get("pending_operation") else "execute",
+        lambda state: "resolve" if state.get("pending_operation") else "execute",
         {
+            "resolve": "resolve",
+            "execute": "execute"
+        }
+    )
+    
+    # resolve → 条件路由 (clarify/confirm/execute)
+    workflow.add_conditional_edges(
+        "resolve",
+        route_after_resolve,
+        {
+            "clarify": "clarify",
             "confirm": "confirm",
             "execute": "execute"
         }
     )
     
-    # confirm → execute (确认后执行)
-    workflow.add_edge("confirm", "execute")
+    # confirm → wait_confirm (发送消息后等待)
+    workflow.add_edge("confirm", "wait_confirm")
+    
+    # wait_confirm → execute (收到决策后执行)
+    #注意：如果用户拒绝，execute_node 会处理 user_confirmed=False 的情况并取消
+    workflow.add_edge("wait_confirm", "execute")
     
     # execute → END
     workflow.add_edge("execute", END)
@@ -1446,14 +1405,10 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
     if checkpointer is None:
         checkpointer = MemorySaver()
         
-    # 注意：移除了 interrupt_before，因为：
-    # 1. 查询操作（list_todos）是只读的，不需要中断
-    # 2. 在多智能体架构中，中断会导致子图挂起而无法返回结果
-    # 3. 确认逻辑应该在对话流中通过 clarify_node 自然完成
+    # 注意：使用 wait_for_confirmation 内部的 interrupt() 实现暂停
     graph = workflow.compile(
         checkpointer=checkpointer
-        # 注意：不再使用 interrupt_before，而是使用 confirm 节点内的 interrupt() 函数
     )
     
-    logger.info("✅ 待办Agent Graph (多轮对话增强版) 创建成功")
+    logger.info("待办Agent Graph (多轮对话增强版) 创建成功")
     return graph

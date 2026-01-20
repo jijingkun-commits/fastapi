@@ -21,5 +21,6 @@ class ChatRequest(BaseModel):
     model_id: Optional[str] = None  # 可选模型标识
     use_multi_agent: bool = False  # 是否使用多智能体模式（Supervisor 路由）
     attachments: Optional[List[Attachment]] = None  # 用户上传的附件列表
+    current_todo_id: Optional[int] = None  # 当前正在讨论的待办 ID
 
 

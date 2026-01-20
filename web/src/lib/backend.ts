@@ -207,11 +207,12 @@ export async function streamLLM(
   callbacks: StreamCallbacks | ((token: string) => void),
   options?: {
     modelId?: string;
-    aiConfigId?: string; // 尚未用于 API，预留
+    aiConfigId?: string;
     threadId?: string;
     enableThinking?: boolean;
     useMultiAgent?: boolean;
     attachments?: Attachment[];
+    currentTodoId?: number;
   },
 ) {
   const cb =
@@ -228,6 +229,7 @@ export async function streamLLM(
       enable_thinking: options?.enableThinking,
       use_multi_agent: options?.useMultiAgent,
       attachments: options?.attachments,
+      current_todo_id: options?.currentTodoId,
     }),
   });
 
@@ -335,12 +337,13 @@ export async function streamLLM(
 export function startLLMStream(
   prompt: string,
   callbacks: StreamCallbacks | ((token: string) => void),
-  maxTokens: number = 50, // This parameter is not used in streamLLM options
+  maxTokens: number = 50,
   threadId?: string,
   enableThinking: boolean = false,
   modelId?: string,
   useMultiAgent: boolean = false,
   attachments?: Attachment[],
+  currentTodoId?: number,
 ) {
   const ctrl = new AbortController();
   const promise = streamLLM(prompt, callbacks, {
@@ -348,14 +351,9 @@ export function startLLMStream(
     threadId,
     enableThinking,
     useMultiAgent,
-    attachments
-  }); // Pass signal via fetch options if apiFetch supported it (it should)
-
-  // Note: apiFetch implementation currently doesn't accept AbortSignal directly
-  // We'd need to modify apiFetch to support signal if we want true cancellation.
-  // For now, stopping reading the stream (which streamLLM does when we implement it fully) is enough.
-  // Actually, streamLLM above uses `reader`, so if we want to abort, we need to cancel the reader.
-  // But streamLLM is async helper, it returns promise.
+    attachments,
+    currentTodoId,
+  });
 
   return {
     stop: () => ctrl.abort(),

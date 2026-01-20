@@ -5,13 +5,14 @@
 - conflict_detection_node: 冲突检测  
 - task_decomposition_node: 任务拆解
 """
+import json
 import logging
 from typing import Dict, List, Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
 
 from app.ai.llm_util import get_llm
-from app.ai.workflow.todo_graph import TodoAgentState
+from app.ai.state import TodoAgentState
 
 # 🆕 导入自定义事件工具
 from langgraph.config import get_stream_writer
@@ -508,8 +509,6 @@ def task_decomposition_node(state: TodoAgentState) -> TodoAgentState:
 
 
 # ==================== 辅助函数 ====================
-
-import json
 
 def assess_clarity(message: str) -> float:
     """评估消息清晰度 (0-1)。"""

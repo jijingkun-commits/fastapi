@@ -101,6 +101,7 @@ async def chat_stream(
         payload.model_id,
         payload.use_multi_agent,
         payload.attachments,
+        payload.current_todo_id,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 

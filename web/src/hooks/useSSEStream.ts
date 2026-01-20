@@ -203,6 +203,20 @@ export function useSSEStream(): StreamContextValue {
             setIsLoading(true);
             isStreamingRef.current = true;
 
+            // 读取当前选中的待办 ID
+            let currentTodoId: number | undefined;
+            if (typeof window !== 'undefined') {
+                try {
+                    const stored = sessionStorage.getItem('selectedTodo');
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        currentTodoId = parsed.id;
+                    }
+                } catch (e) {
+                    console.error('解析 selectedTodo 失败:', e);
+                }
+            }
+
             const { stop: stopFn, promise } = startLLMStream(
                 prompt,
                 {
@@ -301,6 +315,7 @@ export function useSSEStream(): StreamContextValue {
                 selectedModel,
                 useMultiAgent,
                 update?.attachments,
+                currentTodoId,
             );
 
             stopRef.current = stopFn;

@@ -17,6 +17,8 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ImageViewer } from "@/components/ui/image-viewer";
+import { CloseButton } from "@/components/ui/close-button";
 
 import "katex/dist/katex.min.css";
 
@@ -222,15 +224,19 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) 
         onClick={() => setLightboxOpen(true)}
       />
 
-      {/* 点击放大弹窗 */}
+      {/* 点击放大弹窗 - 使用新的 ImageViewer 组件 */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-black/90 border-none">
+        <DialogContent
+          className="max-w-[95vw] max-h-[95vh] p-0 bg-transparent border-none"
+          showClose={false}
+        >
           <DialogTitle className="sr-only">{imageName}</DialogTitle>
-          <div className="flex items-center justify-center">
-            <img
-              src={src}
-              alt={imageName}
-              className="max-w-full max-h-[85vh] object-contain rounded-lg"
+          <div className="relative w-full h-[95vh]">
+            <ImageViewer src={src} alt={imageName} />
+            <CloseButton
+              onClick={() => setLightboxOpen(false)}
+              className="absolute top-4 right-4 z-50"
+              size="lg"
             />
           </div>
         </DialogContent>

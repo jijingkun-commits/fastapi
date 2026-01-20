@@ -38,6 +38,7 @@ from app.api.v1.endpoints.upload_api import router as upload_router
 api_router.include_router(upload_router)
 # 待办看板路由：需要登录
 from app.api.v1.endpoints.todo_api import router as todo_router
-api_router.include_router(todo_router, prefix="/todos", tags=["Todos"], dependencies=[Depends(get_current_user)])
+api_router.include_router(todo_router, prefix="/todo", tags=["Todo"], dependencies=[Depends(get_current_user)])
+
 
 

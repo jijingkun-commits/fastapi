@@ -19,10 +19,10 @@ async def lifespan(app: FastAPI):
         from app.core.settings import Settings
         Settings() # 实例化即校验，失败会抛出 ValidationError
         import logging
-        logging.info("配置校验通过 ✅")
+        logging.info("配置校验通过")
     except Exception as e:
         import logging
-        logging.critical(f"配置校验失败 ❌: {e}")
+        logging.critical(f"配置校验失败: {e}")
         raise e
     
     # MySQL 数据库初始化（已切换为 PostgreSQL，逻辑不变）

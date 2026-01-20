@@ -1,14 +1,6 @@
-/**
- * 待办事项列表卡片 (v2)
- * 
- * 变更记录:
- * - 移除分类 (Category) 和 标签 (Tags) 编辑入口
- * - 新增 开始时间 (Start Time) 编辑
- * - 新增 进展情况 (Progress) 编辑与展示 (进度条 + 备注)
- */
-'use client'
+"use client"
 
-import React, { useState, KeyboardEvent } from 'react'
+import React, { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,43 +21,37 @@ import {
     ChevronUp,
     Edit2,
     Save,
-    X,
     Clock,
     Flag,
-    Activity
+    Activity,
+    Loader2,
+    Repeat,
+    Tag
 } from 'lucide-react'
+import { format, isToday, isTomorrow, isThisYear } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
 import { updateTodoAPI, completeTodoAPI, deleteTodoAPI } from '@/lib/todo-api'
 import { toast } from 'sonner'
+import { Progress } from "@/components/ui/progress"
+
+import { Todo } from '@/types/todo'
 
 // ==================== Types ====================
-
-export interface TodoItem {
-    id: number
-    title: string
-    status: string
-    description?: string
-    priority: number
-    due_date?: string
-    start_time?: string
-    progress?: number        // 0-100
-    progress_notes?: string  // 进展情况/备注
-    category?: string        // 保留字段但不展示编辑
-    tags?: string[]          // 保留字段但不展示编辑
-}
+// 使用统一类型，不再重复定义 TodoItem
 
 interface TodoListCardProps {
-    todos: TodoItem[]
-    onAction: (command: string) => void
-    readonly?: boolean  // 是否为只读模式(历史记录)
-    onSelectionChange?: (todoId: number | null, todo?: TodoItem) => void  // 选中回调
-    onRefresh?: () => void  // 刷新回调
+    todos: Todo[]
+    onAction?: (command: string) => void  // 恢复可选属性
+    readonly?: boolean
+    onSelectionChange?: (todoId: number | null, todo?: Todo) => void  // 恢复可选属性
+    onRefresh?: () => void
 }
 
 // ==================== Component ====================
 
 export default function TodoListCard({
-    todos = [],
+    todos,
     onAction,
     readonly = false,
     onSelectionChange,
@@ -74,8 +60,40 @@ export default function TodoListCard({
     const [selectedItem, setSelectedItem] = useState<number | null>(null)  // 单选
     const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
     const [editingId, setEditingId] = useState<number | null>(null)
-    const [editForm, setEditForm] = useState<Partial<TodoItem>>({})
+    const [editForm, setEditForm] = useState<Partial<Todo>>({})
     const [isUpdating, setIsUpdating] = useState(false)
+
+    // 日期格式化辅助函数
+    const formatFriendlyDate = (dateStr?: string) => {
+        if (!dateStr) return ''
+        try {
+            const date = new Date(dateStr)
+            if (isToday(date)) {
+                return format(date, "'今天' HH:mm", { locale: zhCN })
+            }
+            if (isTomorrow(date)) {
+                return format(date, "'明天' HH:mm", { locale: zhCN })
+            }
+            if (isThisYear(date)) {
+                return format(date, "MM月dd日 HH:mm", { locale: zhCN })
+            }
+            return format(date, "yyyy-MM-dd HH:mm", { locale: zhCN })
+        } catch (e) {
+            return dateStr
+        }
+    }
+
+    // datetime-local 格式转换 (YYYY-MM-DDThh:mm)
+    const toDatetimeLocal = (isoStr?: string) => {
+        if (!isoStr) return ''
+        try {
+            // 如果只有日期没有时间 (YYYY-MM-DD)，补上时间
+            if (isoStr.length === 10) return `${isoStr}T09:00`
+            return new Date(isoStr).toISOString().slice(0, 16)
+        } catch (e) {
+            return ''
+        }
+    }
 
     // 单选切换
     const handleSelect = (id: number) => {
@@ -97,22 +115,48 @@ export default function TodoListCard({
         setExpandedItems(newExpanded)
     }
 
-    // 开始编辑
-    const startEdit = (todo: TodoItem) => {
+    // 开始编辑（同时展开）
+    const startEdit = (todo: Todo) => {
         setEditingId(todo.id)
         setEditForm({ ...todo })
+        // 自动展开该项
+        setExpandedItems(prev => new Set(prev).add(todo.id))
     }
 
-    // 保存编辑 (直接API调用)
+    // 保存编辑 (Diff 更新)
     const handleSave = async () => {
         if (!editingId) return
 
         const original = todos.find(t => t.id === editingId)
         if (!original) return
 
+        // 计算差异
+        const changes: Partial<Todo> = {}
+        let hasChanges = false
+
+        // 比较关键字段
+        const fieldsToCheck: (keyof Todo)[] = [
+            'title', 'description', 'priority', 'due_date',
+            'start_time', 'progress', 'progress_notes', 'category'
+        ]
+
+        fieldsToCheck.forEach(key => {
+            if (editForm[key] !== original[key]) {
+                // @ts-ignore - 动态赋值类型检查较松
+                changes[key] = editForm[key]
+                hasChanges = true
+            }
+        })
+
+        if (!hasChanges) {
+            toast.info('没有检测到修改')
+            setEditingId(null)
+            return
+        }
+
         setIsUpdating(true)
         try {
-            await updateTodoAPI(editingId, editForm)
+            await updateTodoAPI(editingId, changes)
             toast.success('更新成功')
             setEditingId(null)
             onRefresh?.()  // 通知父组件刷新
@@ -175,9 +219,9 @@ export default function TodoListCard({
 
     if (todos.length === 0) {
         return (
-            <Card className="bg-gray-50/50 border-dashed shadow-none">
-                <CardContent className="p-8 text-center text-gray-500 text-sm flex flex-col items-center gap-2">
-                    <CheckCircle className="w-8 h-8 text-gray-300" />
+            <Card className="bg-muted/10 border-dashed shadow-none">
+                <CardContent className="p-8 text-center text-muted-foreground text-sm flex flex-col items-center gap-2">
+                    <CheckCircle className="w-8 h-8 text-muted-foreground/30" />
                     没有找到相关待办事项
                 </CardContent>
             </Card>
@@ -185,41 +229,29 @@ export default function TodoListCard({
     }
 
     return (
-        <Card className="w-full max-w-2xl border-indigo-100/50 bg-white/90 backdrop-blur-sm shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
+        <Card className="w-full max-w-2xl bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md py-0 gap-0">
             <CardContent className="p-0">
-                {/* Header */}
-                <div className="flex items-center justify-between p-3 border-b border-indigo-50/50 bg-indigo-50/20">
+                {/* Header - 简洁版 */}
+                <div className="flex items-center justify-between p-3 border-b bg-muted/20">
                     <div className="flex items-center gap-3">
-                        <span className="font-semibold text-sm text-indigo-950 flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-indigo-500" />
+                        <span className="font-semibold text-sm flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-primary" />
                             待办清单 ({todos.length})
                         </span>
                         {selectedItem !== null && (
-                            <Badge variant="secondary" className="text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-100 border-none">
+                            <Badge variant="secondary" className="text-xs bg-primary/10 text-primary hover:bg-primary/20 border-none font-normal">
                                 已选中 ID {selectedItem}
                             </Badge>
                         )}
                     </div>
-                    <div className="flex gap-1.5 transition-all">
-                        {!readonly && selectedItem !== null && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs text-gray-500 hover:text-gray-700"
-                                onClick={() => handleSelect(selectedItem)}
-                            >
-                                取消选择
-                            </Button>
-                        )}
-                        {readonly && (
-                            <span className="text-xs text-gray-400">历史记录</span>
-                        )}
-                    </div>
+                    {readonly && (
+                        <span className="text-xs text-muted-foreground">历史记录</span>
+                    )}
                 </div>
 
-                {/* List */}
-                <div className="divide-y divide-gray-50">
-                    {todos.map((todo) => {
+                {/* List - 紧凑化布局 */}
+                <div className="divide-y">
+                    {todos.map((todo, index) => {
                         const isSelected = selectedItem === todo.id
                         const isExpanded = expandedItems.has(todo.id)
                         const isEditing = editingId === todo.id
@@ -227,79 +259,147 @@ export default function TodoListCard({
 
                         return (
                             <div
-                                key={todo.id}
+                                key={`${todo.id}-${index}`}
                                 className={cn(
-                                    "transition-all duration-200 group cursor-pointer",
-                                    isSelected && "bg-indigo-50/60 border-l-4 border-indigo-500",
-                                    !isSelected && "hover:bg-gray-50/50",
-                                    isExpanded && "bg-gray-50/30"
+                                    "transition-all duration-200 group cursor-pointer border-l-4 border-transparent",
+                                    isSelected && "bg-muted/30 border-primary",
+                                    !isSelected && "hover:bg-muted/30",
+                                    isExpanded && "bg-muted/20"
                                 )}
                                 onClick={() => !readonly && !isEditing && handleSelect(todo.id)}
                             >
-                                {/* Item Row */}
-                                <div className="flex items-start gap-3 p-3.5">
+                                {/* Item Row - 紧凑布局 */}
+                                <div className="flex items-center gap-3 p-3">
+                                    <div className="flex-1 min-w-0">
+                                        {/* 第一行：标题 + 优先级 + 截止时间 + 右侧按钮 */}
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                {/* 标题（限制字符） */}
+                                                <span className={cn(
+                                                    "font-medium text-sm transition-colors flex-shrink-0",
+                                                    isCompleted ? "text-muted-foreground line-through decoration-border" : "text-foreground"
+                                                )}>
+                                                    {todo.title.length > 10 ? `${todo.title.slice(0, 10)}...` : todo.title}
+                                                </span>
 
-                                    <div className="flex-1 min-w-0 space-y-1.5">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div
-                                                className="cursor-pointer flex-1 min-w-0"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className={cn(
-                                                        "font-medium text-sm truncate transition-colors",
-                                                        isCompleted ? "text-gray-400 line-through decoration-gray-300" : "text-gray-900 group-hover:text-indigo-900"
-                                                    )}>
-                                                        {todo.title}
-                                                    </span>
-                                                    {todo.priority === 1 && !isCompleted && (
-                                                        <span className="flex h-1.5 w-1.5 rounded-full bg-red-500 ring-2 ring-red-100" />
-                                                    )}
-                                                </div>
-
-                                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                                    <Badge
-                                                        variant="outline"
-                                                        className={cn("text-[10px] h-5 px-1.5 font-normal", priorityColors[todo.priority])}
+                                                {/* 重复任务图标 */}
+                                                {todo.is_recurring && (
+                                                    <span
+                                                        className="flex items-center text-blue-500"
+                                                        title={`${todo.recurrence_pattern === 'daily' ? '每日' : todo.recurrence_pattern === 'weekly' ? '每周' : '每月'}重复`}
                                                     >
-                                                        {priorityNames[todo.priority]}
-                                                    </Badge>
+                                                        <Repeat className="w-3 h-3" />
+                                                    </span>
+                                                )}
 
-                                                    {todo.start_time && (
-                                                        <span className="flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md border bg-indigo-50 text-indigo-600 border-indigo-100">
-                                                            <Calendar className="w-3 h-3" />
-                                                            {todo.start_time} (开始)
-                                                        </span>
-                                                    )}
+                                                {/* 优先级标签 */}
+                                                <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-medium border flex-shrink-0", priorityColors[todo.priority])}>
+                                                    {priorityNames[todo.priority]}
+                                                </span>
 
-                                                    {todo.due_date && (
-                                                        <span className={cn(
-                                                            "flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md border",
-                                                            new Date(todo.due_date) < new Date() && !isCompleted
-                                                                ? "bg-red-50 text-red-600 border-red-100"
-                                                                : "bg-gray-50 text-gray-500 border-gray-200"
-                                                        )}>
-                                                            <Clock className="w-3 h-3" />
-                                                            {todo.due_date} (截止)
-                                                        </span>
-                                                    )}
-
-                                                    {todo.progress !== undefined && todo.progress > 0 && !isCompleted && (
-                                                        <span className="text-[10px] text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 flex items-center gap-1">
-                                                            <Activity className="w-3 h-3" />
-                                                            {todo.progress}%
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                {/* 截止时间 */}
+                                                {todo.due_date && (
+                                                    <span className={cn(
+                                                        "flex items-center gap-1 text-xs flex-shrink-0",
+                                                        new Date(todo.due_date) < new Date() && !isCompleted ? "text-destructive font-medium" : "text-muted-foreground"
+                                                    )}>
+                                                        <Clock className="w-3 h-3" />
+                                                        {formatFriendlyDate(todo.due_date)}
+                                                    </span>
+                                                )}
                                             </div>
 
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 -mr-1"
-                                                onClick={() => toggleExpand(todo.id)}
-                                            >
-                                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                            </Button>
+                                            {/* 右侧按钮区 */}
+                                            <div className="flex items-center gap-1 flex-shrink-0">
+                                                {/* 选中时显示编辑和完成按钮 */}
+                                                {!readonly && isSelected && (
+                                                    <>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-6 text-xs font-normal px-2"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                startEdit(todo);
+                                                            }}
+                                                        >
+                                                            <Edit2 className="w-3 h-3 mr-1" />
+                                                            编辑
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            className={cn(
+                                                                "h-6 text-xs font-medium px-2 border",
+                                                                isCompleted
+                                                                    ? "text-muted-foreground hover:bg-muted"
+                                                                    : "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100"
+                                                            )}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (isCompleted) {
+                                                                    handleQuickReopen(todo.id);
+                                                                } else {
+                                                                    handleQuickComplete(todo.id);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                                            {isCompleted ? '重开' : '完成'}
+                                                        </Button>
+                                                    </>
+                                                )}
+                                                {/* 展开按钮 */}
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        toggleExpand(todo.id)
+                                                    }}
+                                                >
+                                                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {/* 第二行：进度条 + 分类标签 + 描述 */}
+                                        <div className="mt-1 space-y-1">
+                                            {/* 进度条（仅在有进度且未完成时显示） */}
+                                            {todo.progress > 0 && todo.progress < 100 && (
+                                                <div className="flex items-center gap-2">
+                                                    <Progress value={todo.progress} className="h-1.5 flex-1" />
+                                                    <span className="text-[10px] text-muted-foreground w-8">{todo.progress}%</span>
+                                                </div>
+                                            )}
+
+                                            {/* 分类和标签 */}
+                                            {(todo.category || (todo.tags && todo.tags.length > 0)) && (
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    {todo.category && (
+                                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">
+                                                            <Tag className="w-2.5 h-2.5" />
+                                                            {todo.category}
+                                                        </span>
+                                                    )}
+                                                    {todo.tags?.slice(0, 2).map((tag, i) => (
+                                                        <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary">
+                                                            {tag}
+                                                        </span>
+                                                    ))}
+                                                    {todo.tags && todo.tags.length > 2 && (
+                                                        <span className="text-[10px] text-muted-foreground">+{todo.tags.length - 2}</span>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* 描述（仅在有内容时显示） */}
+                                            {todo.description && (
+                                                <p className="text-xs text-muted-foreground truncate">
+                                                    {todo.description}
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -307,17 +407,15 @@ export default function TodoListCard({
                                 {/* Expanded Details - Edit Mode */}
                                 {isExpanded && isEditing && (
                                     <div className="px-3 pb-3 pt-0 animate-in slide-in-from-top-2 duration-200">
-                                        <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-lg space-y-4 relative overflow-hidden">
-                                            {/* Decorative background */}
-                                            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full blur-3xl -z-10 opacity-50 pointer-events-none" />
+                                        <div className="bg-card p-4 rounded-xl border shadow-sm space-y-4">
 
                                             {/* 标题 */}
                                             <div className="space-y-1.5">
-                                                <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">标题 <span className="text-red-500">*</span></label>
+                                                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">标题 <span className="text-destructive">*</span></label>
                                                 <Input
                                                     value={editForm.title}
                                                     onChange={e => setEditForm({ ...editForm, title: e.target.value })}
-                                                    className="h-9 text-sm font-medium border-gray-200 focus-visible:ring-indigo-500/20 focus-visible:border-indigo-500"
+                                                    className="h-9 text-sm font-medium"
                                                 />
                                             </div>
 
@@ -325,14 +423,14 @@ export default function TodoListCard({
                                             <div className="grid grid-cols-2 gap-4">
                                                 {/* 优先级 */}
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                                                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                                                         <Flag className="w-3 h-3" /> 优先级
                                                     </label>
                                                     <Select
                                                         value={String(editForm.priority)}
-                                                        onValueChange={(val) => setEditForm({ ...editForm, priority: Number(val) })}
+                                                        onValueChange={(val) => setEditForm({ ...editForm, priority: Number(val) as any })}  // 使用 any 规避类型检查，或者导入 TodoPriority 做断言
                                                     >
-                                                        <SelectTrigger className="h-9 text-xs border-gray-200 focus:ring-indigo-500/20">
+                                                        <SelectTrigger className="h-9 text-xs">
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -345,7 +443,7 @@ export default function TodoListCard({
 
                                                 {/* 进度 (%) */}
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                                                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                                                         <Activity className="w-3 h-3" /> 进度 (%)
                                                     </label>
                                                     <div className="flex items-center gap-2">
@@ -355,78 +453,83 @@ export default function TodoListCard({
                                                             max={100}
                                                             value={editForm.progress !== undefined ? editForm.progress : 0}
                                                             onChange={e => setEditForm({ ...editForm, progress: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
-                                                            className="h-9 text-xs border-gray-200 focus:ring-indigo-500/20"
+                                                            className="h-9 text-xs"
                                                         />
                                                     </div>
                                                 </div>
 
                                                 {/* 开始时间 */}
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                                                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                                                         <Calendar className="w-3 h-3" /> 开始时间
                                                     </label>
                                                     <Input
-                                                        value={editForm.start_time || ''}
+                                                        type="datetime-local"
+                                                        value={toDatetimeLocal(editForm.start_time)}
                                                         onChange={e => setEditForm({ ...editForm, start_time: e.target.value })}
-                                                        placeholder="如: 今天下午2点"
-                                                        className="h-9 text-sm border-gray-200 focus-visible:ring-indigo-500/20"
+                                                        className="h-9 text-sm"
                                                     />
                                                 </div>
 
                                                 {/* 截止时间 */}
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                                                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                                                         <Clock className="w-3 h-3" /> 截止时间
                                                     </label>
                                                     <Input
-                                                        value={editForm.due_date || ''}
+                                                        type="datetime-local"
+                                                        value={toDatetimeLocal(editForm.due_date)}
                                                         onChange={e => setEditForm({ ...editForm, due_date: e.target.value })}
-                                                        placeholder="如: 明天上午9点"
-                                                        className="h-9 text-sm border-gray-200 focus-visible:ring-indigo-500/20"
+                                                        className="h-9 text-sm"
                                                     />
                                                 </div>
                                             </div>
 
                                             {/* 进展情况 (New) */}
                                             <div className="space-y-1.5">
-                                                <label className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+                                                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                                                     <Edit2 className="w-3 h-3" /> 进展情况
                                                 </label>
                                                 <Textarea
                                                     value={editForm.progress_notes || ''}
                                                     onChange={e => setEditForm({ ...editForm, progress_notes: e.target.value })}
-                                                    className="min-h-[60px] text-sm resize-none border-gray-200 focus-visible:ring-indigo-500/20"
+                                                    className="min-h-[60px] text-sm resize-none"
                                                     placeholder="记录最新进展..."
                                                 />
                                             </div>
 
                                             {/* 详细描述 */}
                                             <div className="space-y-1.5">
-                                                <label className="text-xs font-medium text-gray-500">详细描述</label>
+                                                <label className="text-xs font-medium text-muted-foreground">详细描述</label>
                                                 <Textarea
                                                     value={editForm.description || ''}
                                                     onChange={e => setEditForm({ ...editForm, description: e.target.value })}
-                                                    className="min-h-[80px] text-sm resize-none border-gray-200 focus-visible:ring-indigo-500/20"
+                                                    className="min-h-[80px] text-sm resize-none"
                                                     placeholder="添加更多备注信息..."
                                                 />
                                             </div>
 
-                                            <div className="flex justify-end gap-3 pt-2 border-t border-gray-50">
+                                            <div className="flex justify-end gap-3 pt-2 border-t">
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    className="h-8 text-gray-500 hover:text-gray-700"
+                                                    className="h-8 text-muted-foreground"
                                                     onClick={() => setEditingId(null)}
                                                 >
                                                     取消
                                                 </Button>
                                                 <Button
                                                     size="sm"
-                                                    className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm px-4"
+                                                    className="h-8 px-4"
                                                     onClick={handleSave}
+                                                    disabled={isUpdating}
                                                 >
-                                                    <Save className="w-3.5 h-3.5 mr-1.5" />
-                                                    保存更改
+                                                    {isUpdating ? (
+                                                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                                    ) : (
+                                                        <Save className="w-3.5 h-3.5 mr-1.5" />
+                                                    )}
+                                                    {isUpdating ? '保存中...' : '保存更改'}
                                                 </Button>
                                             </div>
                                         </div>
@@ -436,94 +539,28 @@ export default function TodoListCard({
                                 {/* Expanded Details - View Mode */}
                                 {isExpanded && !isEditing && (
                                     <div className="px-3 pb-3 pt-0 animate-in slide-in-from-top-1 duration-200">
-                                        <div className="space-y-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100/50">
-                                            {/* 进展情况展示 (New Section) */}
-                                            {(todo.progress_notes || (todo.progress !== undefined && todo.progress > 0)) && (
-                                                <div className="bg-white p-3 rounded-lg border border-indigo-50 space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-1.5 text-xs font-medium text-indigo-900">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                                                            最新进展
-                                                        </div>
-                                                        {todo.progress !== undefined && (
-                                                            <div className="text-[10px] text-gray-400">
-                                                                进度: {todo.progress}%
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    {/* 进度条 */}
-                                                    {todo.progress !== undefined && todo.progress > 0 && (
-                                                        <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                                                                style={{ width: `${todo.progress}%` }}
-                                                            />
-                                                        </div>
-                                                    )}
-
-                                                    {todo.progress_notes && (
-                                                        <p className="text-xs text-secondary-foreground leading-relaxed whitespace-pre-wrap pl-3 border-l-2 border-indigo-200 mt-1">
-                                                            {todo.progress_notes}
-                                                        </p>
-                                                    )}
-                                                </div>
+                                        <div className="space-y-3 bg-muted/30 p-4 rounded-xl border border-border/50">
+                                            {/* 进展备注 */}
+                                            {todo.progress_notes && (
+                                                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                                                    {todo.progress_notes}
+                                                </p>
                                             )}
 
+                                            {/* 详细描述 */}
                                             {todo.description && (
                                                 <div className="space-y-1">
-                                                    <div className="text-xs font-medium text-gray-500">描述</div>
-                                                    <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">
+                                                    <div className="text-xs font-medium text-muted-foreground">描述</div>
+                                                    <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
                                                         {todo.description}
                                                     </p>
                                                 </div>
                                             )}
 
-                                            <div className="flex items-center justify-between pt-3 border-t border-gray-200/50 mt-2">
-                                                <div className="text-xs text-gray-400 flex flex-col gap-0.5">
-                                                    <span>ID: #{todo.id}</span>
-                                                    {todo.category && <span>分类: {todo.category}</span>}
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    {!readonly && (
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="h-7 text-xs bg-white border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all font-normal"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                startEdit(todo)
-                                                            }}
-                                                        >
-                                                            <Edit2 className="w-3 h-3 mr-1.5" />
-                                                            编辑
-                                                        </Button>
-                                                    )}
-                                                    {!readonly && (
-                                                        <Button
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            className={cn(
-                                                                "h-7 text-xs transition-all font-medium border shadow-sm",
-                                                                isCompleted
-                                                                    ? "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-                                                                    : "bg-emerald-50 border-emerald-100 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 hover:border-emerald-200"
-                                                            )}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                if (isCompleted) {
-                                                                    handleQuickReopen(todo.id);
-                                                                } else {
-                                                                    handleQuickComplete(todo.id);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <CheckCircle className="w-3 h-3 mr-1.5" />
-                                                            {isCompleted ? '重新打开' : '标记完成'}
-                                                        </Button>
-                                                    )}
-                                                </div>
-                                            </div>
+                                            {/* 如果没有任何内容则显示提示 */}
+                                            {!todo.progress_notes && !todo.description && (
+                                                <p className="text-xs text-muted-foreground text-center py-2">暂无详情</p>
+                                            )}
                                         </div>
                                     </div>
                                 )}

@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, trim_messages
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
@@ -29,172 +29,17 @@ from app.db.postgres_checkpoint import get_checkpointer
 # 🆕 导入自定义事件工具
 from langgraph.config import get_stream_writer
 from app.ai.events import emit_status
+from app.ai.protocol import HandoffResult
+from app.ai.prompts.agent_prompts import SUPERVISOR_PROMPT
+from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 
 logger = logging.getLogger(__name__)
 
 
-# Agent 类型常量定义
-class AgentType:
-    """专家 Agent 类型枚举。"""
-    DATA = "data_expert"
-    TODO = "todo_expert"
+# AgentType, AGENT_DESCRIPTIONS, MultiAgentState 已迁移到 app/ai/state.py
 
 
-# Agent 描述映射（仅保留需要多步骤推理的专家）
-AGENT_DESCRIPTIONS = {
-    AgentType.DATA: """将复杂的多步骤数据分析任务分配给数据专家。
-
-**委派给 data_expert 的场景**（需要多个工具配合）：
-- 读取 Excel/CSV 文件并进行多维度分析
-- 数据清洗 + 统计分析 + 可视化
-- 需要 Python 代码进行复杂计算
-
-**不需要委派的简单任务**（你可以直接处理）：
-- 简单 SQL 查询 → 直接用 sql_inter
-- 简单绘图 → 直接用 fig_inter
-- 知识库搜索 → 直接用 knowledge_search
-""",
-    AgentType.TODO: """将待办事项管理任务分配给待办助手。
-
-**适用场景**:
-- 查询/列出待办: "列出我的待办"、"查看工作类待办"
-- 创建待办: "帮我记录一个待办"、"明天10点开会"
-- 更新/完成/删除: "完成待办1"、"删除第3个任务"
-
-**重要**: 待办管理需要确认流程，必须委派给 todo_expert。
-""",
-}
-
-
-class MultiAgentState(TypedDict):
-    """多智能体状态定义。
-    
-    Attributes:
-        messages: 对话消息列表
-        user_id: 用户 ID
-        thread_id: 对话线程 ID
-        enable_thinking: 是否启用深度思考模式
-        model_id: 模型标识
-        attachment_analysis: 附件分析结果（由 preprocess 节点填充）
-        evaluation: 专家工作评估结果（由 evaluate 节点填充）
-        iteration_count: 当前迭代次数（防止无限循环）
-        _graph_type: Graph 类型标记（用于 resume 时检测）
-        pending_handoff: 待处理的委派指令（由 handoff 工具设置）
-    """
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    user_id: Optional[int]
-    thread_id: Optional[str]
-    enable_thinking: Optional[bool]
-    model_id: Optional[str]
-    attachment_analysis: Optional[str]
-    evaluation: Optional[str]
-    iteration_count: Optional[int]
-    thinking_content: Optional[str]
-    # 显式标记 Graph 类型，用于 resume 时检测
-    _graph_type: Optional[Literal["multi_agent"]]
-    # Phase 2: 意图识别字段（借鉴 Flock Intent Recognition）
-    detected_intent: Optional[str]
-    intent_route: Optional[str]
-    # 待处理的委派指令（由 handoff 工具返回值解析）
-    pending_handoff: Optional[dict]
-
-
-# Supervisor 系统提示词（决策树版 - 借鉴 OpenAI Swarm + Anthropic Skills）
-SUPERVISOR_PROMPT = """你是一个智能助手 Supervisor，负责理解用户意图并执行或委派任务。
-
-## 决策树
-
-根据用户请求，按以下流程判断：
-
-```
-用户请求
-    │
-    ├─ 简单问候/闲聊？（你好/谢谢/再见）
-    │       └─ 是 → 直接回复，不调用任何工具
-    │
-    ├─ 需要联网实时信息？（天气/新闻/股价/汇率）
-    │       └─ 是 → 调用 tavily_search
-    │
-    ├─ 涉及知识库内容？（公司规定/产品文档/技术资料）
-    │       └─ 是 → 调用 knowledge_search
-    │
-    ├─ 需要数据库查询？（查询表/统计数据）
-    │       └─ 是 → 调用 sql_inter
-    │
-    ├─ 需要绘制图表？（折线图/柱状图/饼图/散点图/几何图形）
-    │       └─ 是 → 调用 fig_inter
-    │
-    ├─ 需要分析图片？（识别图片内容）
-    │       └─ 是 → 调用 analyze_image
-    │
-    ├─ 需要读取上传文件？（查看文件内容）
-    │       └─ 是 → 调用 read_uploaded_file
-    │
-    ├─ 复杂数据分析？（文件处理 + 数据清洗 + 统计 + 可视化）
-    │       └─ 是 → 委派给 data_expert（调用 assign_to_data_expert）
-    │
-    ├─ 待办事项管理？（创建/查询/更新/完成/删除待办）
-    │       └─ 是 → 委派给 todo_expert（调用 assign_to_todo_expert）
-    │
-    └─ 待办确认/补充？（用户简短回复可能是对待办操作的确认）
-            │
-            └─ 如果上一条 AI 消息包含待办相关内容（如"待办"、"确认"、"创建"等）
-                    └─ 是 → 委派给 todo_expert
-```
-
-## 重要：待办确认/补充信息识别
-
-当用户发送简短回复或补充信息时，需要检查对话历史：
-- 如果上一条 AI 消息涉及待办事项（包含"待办"、"📝"、"确认"、"标题"、"时间"等关键词），则委派给 todo_expert
-- **关键**：在 task_description 中必须包含**完整的对话上下文**，包括：
-  1. 用户最初的待办请求（如"我明天要去上海"）
-  2. AI 之前提取的待办信息（如标题、时间、地点等）
-  3. 用户当前的补充/确认内容（如"早上9点，黄河路1001号"）
-  
-例如，当用户说"早上9点，黄河路1001号"来补充待办信息时，task_description 应该包含：
-```
-用户最初想创建待办：去上海
-- 标题：去上海
-- 时间：明天
-用户现在补充信息：时间是早上9点，地点是黄河路1001号
-请帮用户更新待办信息。
-```
-
-## 工具速查
-
-| 工具 | 用途 | 典型请求 |
-|------|------|----------|
-| tavily_search | 联网搜索 | "上海天气"、"今日新闻" |
-| knowledge_search | 知识库检索 | "公司差旅规定"、"产品手册" |
-| sql_inter | SQL 查询 | "查询用户表"、"订单统计" |
-| fig_inter | 绘制图表 | "画一个饼图"、"画一个圆" |
-| analyze_image | 图片分析 | "这张图是什么" |
-| read_uploaded_file | 读取文件 | "读取这个文件" |
-| assign_to_data_expert | 委派数据分析 | "分析Excel销售趋势" |
-| assign_to_todo_expert | 委派待办管理 | "帮我记录一个待办" |
-
-## 执行原则
-
-1. **单工具优先**：能用一个工具解决的，直接调用，不委派，优先使用知识库工具（例如用户只发了一张图片而不带任何文字内容时，那么优先使用 analyze_image 工具，然后提取问题查找知识库）
-2. **静默执行**：直接调用工具，不要先输出"让我来..."之类的文字
-3. **委派时机**：仅当需要多步骤推理或用户确认流程时，才委派给专家
-4. **图片占位符**：knowledge_search 返回的 `[IMG-N]` 占位符**必须原样保留**在回答中
-
-### 图片占位符示例
-knowledge_search 返回：
-```
-【0】账户管理功能... 相关图片: [IMG-0]
-【1】转账功能... 相关图片: [IMG-1]
-```
-
-你的回答应该包含占位符：
-```
-账户管理支持电子回单... [IMG-0]
-转账功能支持批量操作... [IMG-1]
-```
-
-系统会自动将 `[IMG-N]` 替换为实际图片，你只需保留占位符即可。
-"""
+# SUPERVISOR_PROMPT 已迁移到 app/ai/prompts/agent_prompts.py
 
 
 def _get_common_tools():
@@ -323,15 +168,12 @@ def _create_task_handoff_tool(agent_name: str, description: str):
         task_description: Annotated[str, "详细描述下一个专家需要完成的任务，包含所有相关上下文和指令"],
     ) -> str:
         """将任务委派给指定的专家 Agent。返回 JSON 格式的委派指令。"""
-        import json
-        
-        handoff_instruction = {
-            "action": "handoff",
-            "target_agent": agent_name,
-            "task_description": task_description,
-        }
-        
-        return f"<!--HANDOFF:{json.dumps(handoff_instruction, ensure_ascii=False)}-->"
+        # [Phase 2] 标准化输出：使用 HandoffResult 模型生成纯 JSON
+        result = HandoffResult(
+            target_agent=agent_name,
+            task_description=task_description
+        )
+        return result.model_dump_json(ensure_ascii=False)
     
     return handoff_tool
 
@@ -444,7 +286,7 @@ async def create_multi_agent_graph(
     """创建多智能体 Supervisor 图（手动构建）。
     
     架构：
-        START -> preprocess -> supervisor -> [data_expert | knowledge_expert | todo_expert]
+        START -> preprocess -> supervisor -> [data_expert  | todo_expert]
                                       |
                                       +-> Postprocess -> END
                                       
@@ -477,19 +319,12 @@ async def create_multi_agent_graph(
         name="supervisor",
     )
     
-    # 4. 创建 data_expert（仅用于多步骤分析）
-    data_agent = create_react_agent(
-        llm,
-        _get_data_expert_tools(),
-        name="data_expert",
-        prompt="""你是数据分析专家。
-
-你的工具：
-- extract_data: 从文件中提取数据
-- python_inter: 执行 Python 代码进行复杂分析
-
-收到任务后，请根据提供的任务描述和上下文进行分析。执行完成后，总结你的工作。
-""",
+    # 4. 创建 data_expert（使用独立的 DataAgent 模块）
+    from app.ai.agents.data_agent import create_data_agent
+    data_agent = create_data_agent(
+        model=llm,
+        enable_thinking=enable_thinking,
+        model_id=model_id
     )
     
     # 5. 创建 todo_expert（使用 TodoGraph）
@@ -516,16 +351,40 @@ async def create_multi_agent_graph(
             # kb_images 映射：在收到 ToolMessage 时动态填充
             kb_images = {}
             
-            # 记录初始消息数量，用于在 values 模式中只发送新增消息
+            # 记录初始消息数量
             input_message_count = len(state.get("messages", []))
             
+            # protocol parser
+            from app.ai.protocol import AgentOutputParser
+            
             try:
-                # 🆕 使用 astream + stream_mode="messages" 获取 LLM 流式输出
-                # 已发送的 tool_call ID 集合，用于去重
+                # 使用 astream + stream_mode="messages" 获取 LLM 流式输出
+                # Context Pruning: 限制传递给 Agent 的消息数量
+                # 策略: 保留最后 15 条消息，确保以 Human 开始（适配 Chat Model）
+                original_messages = state.get("messages", [])
+                pruned_messages = trim_messages(
+                    original_messages,
+                    max_tokens=15,
+                    token_counter=len,
+                    strategy="last",
+                    start_on="human",
+                    include_system=True,
+                    allow_partial=False,
+                )
+                
+                # 创建临时 state 用于 invoke (不修改原始 state)
+                # 注意：这里需要浅拷贝其他字段，以免 Agent 依赖
+                pruned_state = state.copy()
+                pruned_state["messages"] = pruned_messages
+                
+                logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {len(pruned_messages)} msgs")
+
                 sent_tool_call_ids = set()
+                # 跟踪已发送的文本消息 ID，防止 values 模式重复发送
+                emitted_message_ids = set()
                 
                 async for mode, chunk in agent.astream(
-                    state, 
+                    pruned_state, 
                     config, 
                     stream_mode=["messages", "values"]
                 ):
@@ -536,46 +395,22 @@ async def create_multi_agent_graph(
                             msg_type = type(msg).__name__
                             logger.debug(f"[{name}] messages 模式收到: {msg_type}")
                             
+                            # 记录流式消息 ID
+                            if hasattr(msg, 'id') and msg.id:
+                                emitted_message_ids.add(msg.id)
+                            
                             # 检测 ToolMessage（工具执行完成）并发送 tool_end 事件
                             if isinstance(msg, ToolMessage):
                                 tool_name = getattr(msg, "name", "unknown")
                                 tool_content = str(getattr(msg, "content", ""))
-                                tool_output = tool_content[:200]  # 截断输出用于日志
+                                tool_output = tool_content[:200]
                                 emit_tool_end(writer, tool_name, tool_output, node=name)
                                 
-                                import re
-                                import json
-                                
-                                # 检测 HANDOFF 标记（委派指令）
-                                # 只在 supervisor 节点执行提前返回，让外层条件边路由到专家
-                                handoff_match = re.search(r'<!--HANDOFF:(\{.*?\})-->', tool_content)
-                                if handoff_match:
-                                    try:
-                                        handoff_data = json.loads(handoff_match.group(1))
-                                        target_agent = handoff_data.get("target_agent")
-                                        logger.info(f"[{name}] 检测到 handoff 指令: target={target_agent}")
-                                        
-                                        # 只在 supervisor 节点提前返回，其他节点继续处理
-                                        if name == "supervisor":
-                                            state_update = final_state or {}
-                                            state_update["pending_handoff"] = handoff_data
-                                            return state_update
-                                        # 非 supervisor 节点：跳过 HANDOFF 内容，继续处理
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"[{name}] handoff JSON 解析失败")
-                                
-                                # 从 ToolMessage 中提取 kb_images 映射
-                                logger.info(f"[{name}] 收到 ToolMessage: name={tool_name}, 长度={len(tool_content)}")
-                                kb_images_match = re.search(r'<!--KB_IMAGES:(\{.*?\})-->', tool_content)
-                                if kb_images_match:
-                                    try:
-                                        new_images = json.loads(kb_images_match.group(1))
-                                        kb_images.update(new_images)
-                                        logger.info(f"[{name}] 从 ToolMessage 提取到 kb_images: {len(new_images)} 个")
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"[{name}] kb_images JSON 解析失败")
-                                else:
-                                    logger.info(f"[{name}] ToolMessage 中无 KB_IMAGES 标记")
+                                # 2. 检测 KB_IMAGES (Handoff 移至 values 模式处理以保证状态完整)
+                                new_images = AgentOutputParser.parse_kb_images(tool_content)
+                                if new_images:
+                                    kb_images.update(new_images)
+                                    logger.info(f"[{name}] 从 ToolMessage 提取到 kb_images: {len(new_images)} 个")
                                 
                                 continue
                             
@@ -586,48 +421,36 @@ async def create_multi_agent_graph(
                             # 提取并发送文本内容
                             content = getattr(msg, "content", "")
                             if content and isinstance(content, str):
-                                # 过滤内部输出：跳过 JSON 格式的意图分析结果
-                                stripped = content.strip()
-                                
-                                # 检测纯 JSON
-                                if stripped.startswith("{") and stripped.endswith("}"):
-                                    try:
-                                        import json
-                                        json.loads(stripped)
-                                        # 是有效 JSON，跳过（内部分析输出）
-                                        logger.debug(f"[{name}] 跳过 JSON 格式的内部输出")
-                                        continue
-                                    except json.JSONDecodeError:
-                                        pass  # 不是有效 JSON，继续处理
-                                
-                                # 检测 markdown 代码块中的 JSON (```json ... ```)
-                                if stripped.startswith("```json") and stripped.endswith("```"):
-                                    logger.debug(f"[{name}] 跳过 markdown JSON 代码块")
+                                # 使用协议解析器判断是否过滤
+                                if AgentOutputParser.should_filter_content(content):
+                                    logger.debug(f"[{name}] 跳过内部协议内容")
                                     continue
                                 
-                                # 检测包含 intent 关键字的 JSON 结构（意图分析输出）
-                                if '"intent"' in stripped and ('"query"' in stripped or '"create"' in stripped or '"clarify"' in stripped):
-                                    logger.debug(f"[{name}] 跳过意图分析 JSON")
-                                    continue
-                                
-                                # 过滤 HANDOFF 标记
-                                if "<!--HANDOFF:" in content:
-                                    logger.debug(f"[{name}] 跳过 HANDOFF 标记")
-                                    continue
-                                
-                                # 替换占位符为实际图片 Markdown
-                                if kb_images:
-                                    for idx_str, url in kb_images.items():
-                                        placeholder = f"[IMG-{idx_str}]"
-                                        if placeholder in content:
-                                            markdown_img = f"![参考图片]({url})"
-                                            content = content.replace(placeholder, markdown_img)
-                                
+                                # 发送 token
                                 collected_content.append(content)
                                 emit_token(writer, content, node=name)
-                            
+                                
+                            # 提取 tool_calls 并发送 tool_start 事件
                             # 注意：messages 模式下 tool_calls.args 为空
                             # 工具调用事件在 values 模式下发送（有完整参数）
+                            if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
+                                for tc_chunk in msg.tool_call_chunks:
+                                    if tc_chunk:
+                                        tc_index = tc_chunk.get("index") # tool_call_chunks index
+                                        tool_name = tc_chunk.get("name")
+                                        tool_args = tc_chunk.get("args")
+                                        
+                                        # 在这里我们主要关注 tool_name 的出现来触发 tool_start
+                                        # LangChain 的 tool_call_chunks 有点碎，通常第一个 chunk 包含 name
+                                        if tool_name:
+                                            # 注意：由于 chunk 不含 ID，这里很难精确去重。
+                                            # 我们主要依靠近似判断，或者在 ToolMessage 返回时发送 end
+                                            # 更好的做法是在 values 模式处理 tool_start，或者这里只发一次
+                                            pass
+                                            
+                                        # 暂时不在 messages 模式发 tool_start，太碎了，改为 values 模式发
+                                        # 或者只发 thinking
+                                        pass
                             
                             # 提取并发送思考内容
                             additional = getattr(msg, "additional_kwargs", {})
@@ -640,48 +463,46 @@ async def create_multi_agent_graph(
                                 emit_thinking(writer, reasoning, node=name)
                     
                     elif mode == "values":
-                        # values 模式包含完整的 state，从这里获取 tool_calls 参数
+                        # 处理整个状态更新
                         final_state = chunk
-                        
-                        # 从 ToolMessage 中提取 kb_images 和 HANDOFF 标记
                         messages = chunk.get("messages", [])
-                        for msg in messages:
-                            if isinstance(msg, ToolMessage):
-                                import re
-                                import json
-                                tool_content = str(getattr(msg, "content", ""))
+                        
+                        # 检查 kb_images
+                        if messages and isinstance(messages[-1], ToolMessage):
+                            last_tool_msg = messages[-1]
+                            tool_content = str(getattr(last_tool_msg, "content", ""))
+                            
+                            # A. 检测 Handoff (确保 ToolMessage 已在状态中)
+                            handoff_data = AgentOutputParser.parse_handoff(tool_content)
+                            if handoff_data and name == "supervisor":
+                                target_agent = handoff_data.get("target_agent")
+                                logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
                                 
-                                # 检测 HANDOFF 标记（委派指令）
-                                handoff_match = re.search(r'<!--HANDOFF:(\{.*?\})-->', tool_content)
-                                if handoff_match:
-                                    try:
-                                        handoff_data = json.loads(handoff_match.group(1))
-                                        target_agent = handoff_data.get("target_agent")
-                                        logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
-                                        
-                                        # 更新 final_state 中的 pending_handoff
-                                        final_state["pending_handoff"] = handoff_data
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"[{name}] handoff JSON 解析失败")
+                                # 构造增量更新：只包含新增消息和 handoff 标记
+                                delta_messages = messages[input_message_count:]
                                 
-                                # 检测 kb_images 标记
-                                kb_images_match = re.search(r'<!--KB_IMAGES:(\{.*?\})-->', tool_content)
-                                if kb_images_match:
-                                    try:
-                                        new_images = json.loads(kb_images_match.group(1))
-                                        kb_images.update(new_images)
-                                        logger.info(f"[{name}] 从 values 模式提取 kb_images: {len(new_images)} 个")
-                                        # 发送 kb_images 事件到前端，让前端进行替换
-                                        from app.ai.events import emit_kb_images
-                                        emit_kb_images(writer, kb_images, node=name)
-                                    except json.JSONDecodeError:
-                                        pass
+                                # 🆕 Phase 3: 确保此时不丢失其他状态 (如 user_id, thread_id 等)
+                                # 虽然 Supervisor 主要是路由，但保持稳健性
+                                other_keys = {k: v for k, v in final_state.items() if k != "messages"}
+                                
+                                ret = other_keys.copy()
+                                ret["messages"] = delta_messages
+                                ret["pending_handoff"] = handoff_data
+                                return ret
+
+                            # B. 检测 KB_IMAGES
+                            new_images = AgentOutputParser.parse_kb_images(tool_content)
+                            if new_images:
+                                kb_images.update(new_images)
+                                logger.info(f"[{name}] 从 values 模式提取 kb_images: {len(new_images)} 个")
+                                from app.ai.events import emit_kb_images
+                                emit_kb_images(writer, kb_images, node=name)
                         
                         # 只检查新增的 AI 消息（索引 >= input_message_count），避免发送历史消息
                         new_messages = messages[input_message_count:] if len(messages) > input_message_count else []
                         for new_msg in new_messages:
                             if isinstance(new_msg, AIMessage):
-                                # 发送 tool_calls 事件
+                                # 1. 处理 Tool Calls (tool_start)
                                 if hasattr(new_msg, 'tool_calls') and new_msg.tool_calls:
                                     for tc in new_msg.tool_calls:
                                         tc_id = tc.get("id")
@@ -691,46 +512,41 @@ async def create_multi_agent_graph(
                                         # 去重：只发送未发送过的 tool_call
                                         if tc_id and tc_id not in sent_tool_call_ids and tool_name:
                                             sent_tool_call_ids.add(tc_id)
-                                            logger.debug(
-                                                "发送 tool_start 事件 (from values): name='%s', args=%s",
-                                                tool_name, tool_args
-                                            )
+                                            logger.debug(f"发送 tool_start 事件: {tool_name}")
                                             emit_tool_start(writer, tool_name, tool_args, node=name)
                                 else:
-                                    # 非 tool_call 的 AIMessage（如 summarize 节点生成的最终输出）
-                                    # 只对 todo_expert 发送，避免 supervisor 的消息被重复发送
-                                    if name == "todo_expert":
-                                        msg_id = getattr(new_msg, 'id', None)
-                                        msg_content = getattr(new_msg, 'content', '')
-                                        
-                                        if msg_id and msg_content and isinstance(msg_content, str):
-                                            if msg_id not in sent_tool_call_ids:  # 通过 id 去重
-                                                sent_tool_call_ids.add(msg_id)
-                                                
-                                                # 检查内容是否已发送（避免内容重复）
-                                                if msg_content in collected_content:
-                                                    logger.debug(f"[{name}] 跳过已发送的内容")
-                                                    continue
-                                                
-                                                # 过滤内部输出（JSON/HANDOFF）
-                                                stripped = msg_content.strip()
-                                                should_skip = False
-                                                
-                                                if stripped.startswith("{") and stripped.endswith("}"):
-                                                    should_skip = True
-                                                if stripped.startswith("```json"):
-                                                    should_skip = True
-                                                if '"intent"' in stripped:
-                                                    should_skip = True
-                                                if "<!--HANDOFF:" in stripped:
-                                                    should_skip = True
-                                                
-                                                if not should_skip:
-                                                    logger.info(f"[{name}] values 模式发送非流式 AIMessage: {msg_content[:50]}...")
-                                                    collected_content.append(msg_content)
-                                                    emit_token(writer, msg_content, node=name)
+                                    # 2. 处理非流式文本消息 (补发漏掉的消息)
+                                    msg_content = getattr(new_msg, 'content', '')
+                                    msg_id = getattr(new_msg, 'id', None)
+                                    
+                                    # 过滤逻辑
+                                    if AgentOutputParser.should_filter_content(msg_content):
+                                        continue
+
+                                    # 去重逻辑
+                                    # A. 如果 ID 已处理过，跳过
+                                    if msg_id and msg_id in emitted_message_ids:
+                                        continue
+                                    
+                                    # B. 如果内容完全匹配已收集的内容，跳过（防止无 ID 时的重复）
+                                    full_collected = "".join(collected_content)
+                                    if msg_content and msg_content in full_collected:
+                                        # 只有当内容较长时才认为是重复，避免短词误判
+                                        if len(msg_content) > 10:
+                                            continue
+                                        # 或者如果它是 collected 的后缀？
+                                        # 简单起见，如果完全包含且 ID 缺失，假设已发
+                                        continue
+                                    
+                                    # 发送补漏消息
+                                    if msg_content:
+                                        logger.info(f"[{name}] values 模式补发消息: {msg_content[:30]}...")
+                                        emit_token(writer, msg_content, node=name)
+                                        collected_content.append(msg_content)
+                                        if msg_id:
+                                            emitted_message_ids.add(msg_id)
                 
-                # 🔍 调试日志：打印 LLM 输出统计
+                # 调试日志：打印 LLM 输出统计
                 full_output = "".join(collected_content)
                 import re
                 output_image_count = len(re.findall(r'!\[[^\]]*\]\([^)]+\)', full_output))
@@ -739,6 +555,7 @@ async def create_multi_agent_graph(
                 logger.debug(f"[{name}] LLM 输出统计:")
                 logger.debug(f"  总长度: {len(full_output)} 字符")
                 logger.debug(f"  包含图片: {output_image_count} 张")
+                
                 logger.debug(f"  输出预览（前 500 字符）:")
                 logger.debug(f"  {full_output[:500]}")
                 logger.debug("="*60)
@@ -748,9 +565,11 @@ async def create_multi_agent_graph(
             except GraphInterrupt:
                 raise
             except Exception as e:
-                logger.exception(f"{name} 节点执行异常: %s", e)
-                error_msg = f"抱歉，{name} 在处理任务时遇到内部错误: {str(e)}"
+                logger.error(f"[{name}]流式输出异常: {e}", exc_info=True)
+                # 发生异常时，至少返回状态，避免前端挂起
+                error_msg = f"\n[System Error: {str(e)}]"
                 emit_token(writer, error_msg, node=name)
+                # 返回错误消息以结束当前节点执行
                 return {"messages": [AIMessage(content=error_msg)]}
         
         return streaming_wrapper
@@ -966,7 +785,12 @@ async def create_multi_agent_graph(
             elif target_agent == AgentType.TODO:
                 return "todo_expert"
             else:
-                logger.warning(f"未知的 target_agent: {target_agent}")
+                # 无效的 target_agent，可能是 LLM 幻觉或协议错误
+                valid_agents = [AgentType.DATA, AgentType.TODO]
+                logger.error(
+                    f"无效的 target_agent: {target_agent}，有效值为 {valid_agents}，"
+                    f"将跳过 handoff 直接结束"
+                )
                 return "postprocess"
         
         # 检查是否有其他工具调用

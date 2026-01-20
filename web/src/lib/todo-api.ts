@@ -4,7 +4,8 @@
  * 提供直接调用后端 REST API 的函数,绕过 AI 自然语言处理
  */
 
-import { TodoItem } from '@/components/todo/TodoListCard';
+import { Todo } from '@/types/todo';
+import { apiFetch } from '@/lib/backend';
 
 const API_BASE = '/api/v1/todo';
 
@@ -13,14 +14,13 @@ const API_BASE = '/api/v1/todo';
  */
 export async function updateTodoAPI(
     todoId: number,
-    updates: Partial<TodoItem>
+    updates: Partial<Todo>
 ): Promise<void> {
-    const response = await fetch(`${API_BASE}/${todoId}`, {
+    const response = await apiFetch(`${API_BASE}/${todoId}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
             title: updates.title,
             description: updates.description,
@@ -44,9 +44,8 @@ export async function updateTodoAPI(
  * 完成待办事项
  */
 export async function completeTodoAPI(todoId: number): Promise<void> {
-    const response = await fetch(`${API_BASE}/${todoId}/complete`, {
+    const response = await apiFetch(`${API_BASE}/${todoId}/complete`, {
         method: 'POST',
-        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -59,9 +58,8 @@ export async function completeTodoAPI(todoId: number): Promise<void> {
  * 删除待办事项
  */
 export async function deleteTodoAPI(todoId: number): Promise<void> {
-    const response = await fetch(`${API_BASE}/${todoId}`, {
+    const response = await apiFetch(`${API_BASE}/${todoId}`, {
         method: 'DELETE',
-        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -73,10 +71,9 @@ export async function deleteTodoAPI(todoId: number): Promise<void> {
 /**
  * 刷新待办列表 (通过自然语言)
  */
-export async function refreshTodoList(): Promise<TodoItem[]> {
-    const response = await fetch(`${API_BASE}`, {
+export async function refreshTodoList(): Promise<Todo[]> {
+    const response = await apiFetch(`${API_BASE}`, {
         method: 'GET',
-        credentials: 'include',
     });
 
     if (!response.ok) {
