@@ -66,3 +66,4 @@ yarn-error.log*
 *.swo
 *.tmp
 *.bak
+ragflow/
