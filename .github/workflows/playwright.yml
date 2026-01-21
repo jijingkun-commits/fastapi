@@ -109,7 +109,7 @@ jobs:
 
     - name: Run Playwright Tests
       working-directory: ./web
-      run: npx playwright test e2e/todo_agent_stress_test.spec.cjs --project=chromium --workers 2
+      run: npx playwright test e2e/todo_agent_stress_test.spec.cjs --project=chromium --workers 1
 
     - name: Upload Artifacts
       if: always()
