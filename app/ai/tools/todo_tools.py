@@ -22,6 +22,7 @@ class AddTodoInput(BaseModel):
     priority: int = Field(default=2, description="优先级：1=高, 2=中, 3=低")
     start_time: Optional[str] = Field(default=None, description="开始时间，格式：YYYY-MM-DD HH:MM")
     due_date: Optional[str] = Field(default=None, description="截止日期，格式：YYYY-MM-DD HH:MM")
+    location: Optional[str] = Field(default=None, description="地点")  # 🆕 新增
     category: Optional[str] = Field(default=None, description="分类：工作/生活/学习等")
     tags: Optional[List[str]] = Field(default=None, description="标签列表")
     reminder_enabled: bool = Field(default=False, description="是否启用提醒")
@@ -116,6 +117,7 @@ def add_todo(
     priority: int = 2, 
     start_time: str = None,
     due_date: str = None,
+    location: str = None, # 🆕 新增
     category: str = None,
     tags: List[str] = None,
     reminder_enabled: bool = False,
@@ -138,12 +140,20 @@ def add_todo(
         parsed_start_time = _parse_datetime(start_time) if start_time else None
         parsed_due_date = _parse_datetime(due_date) if due_date else None
         
+        # 🆕 将地点拼接到描述中
+        final_description = description
+        if location:
+            if final_description:
+                final_description = f"📍 地点：{location}\n{final_description}"
+            else:
+                final_description = f"📍 地点：{location}"
+        
         with get_db_context() as db:
             todo = todo_repo.create(
                 db=db,
                 user_id=user_id,
                 title=title,
-                description=description,
+                description=final_description, # 使用拼接后的描述
                 priority=priority,
                 start_time=parsed_start_time,
                 due_date=parsed_due_date,

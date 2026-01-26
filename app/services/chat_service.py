@@ -473,30 +473,7 @@ async def sse_resume_stream(
         if snapshot and snapshot.tasks:
             for task in snapshot.tasks:
                 if task.interrupts:
-                    # 在 resume 的 interrupt 场景保存 AI 回复
-                    # 注意：resume 场景中用户的原始消息已经保存过了
-                    # 这里只需要保存新的 AI 回复
-                    try:
-                        from app.db.session import get_db_context
-                        from app.repositories import chat_repo
-                        
-                        ai_content = "".join(full_answer)
-                        
-                        if ai_content:
-                            with get_db_context() as db:
-                                chat_repo.save_message(
-                                    db,
-                                    user_id=user_id,
-                                    thread_id=thread_id,
-                                    role="ai",
-                                    content_type="markdown",
-                                    content=ai_content,
-                                )
-                            logger.info("Resume interrupt AI 回复已保存: thread_id=%s, ai=%d字", 
-                                       thread_id, len(ai_content))
-                    except Exception as save_error:
-                        logger.error("Resume interrupt 保存消息失败: %s", save_error, exc_info=True)
-                    
+                    # 有新的 interrupt，发送给前端，不保存消息（等流程结束时统一保存）
                     for interrupt in task.interrupts:
                         logger.info("检测到新的 interrupt: %s", interrupt.value)
                         yield format_sse("interrupt", {
@@ -506,8 +483,39 @@ async def sse_resume_stream(
                         })
                     return
 
-        # 流结束（对话已在 postprocess 节点自动保存到 MySQL）
+        # 流结束
         logger.info("恢复流程完成: thread_id=%s, answer_len=%d", thread_id, len("".join(full_answer)))
+        
+        # 保存 AI 回复到数据库
+        try:
+            from app.db.session import get_db_context
+            from app.repositories import chat_repo
+            
+            # 优先使用流式收集的内容
+            ai_content = "".join(full_answer)
+            
+            # 如果流式内容为空，尝试从 snapshot 获取最后一条 AI 消息
+            if not ai_content and snapshot and "messages" in snapshot.values:
+                messages = snapshot.values["messages"]
+                if messages:
+                    last_msg = messages[-1]
+                    if last_msg.type == "ai":
+                        ai_content = getattr(last_msg, "content", "")
+            
+            if ai_content:
+                with get_db_context() as db:
+                    chat_repo.save_message(
+                        db,
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        role="ai",
+                        content_type="markdown",
+                        content=ai_content,
+                    )
+                logger.info("Resume 完成 AI 回复已保存: thread_id=%s, ai=%d字", 
+                           thread_id, len(ai_content))
+        except Exception as save_error:
+            logger.error("Resume 保存消息失败: %s", save_error, exc_info=True)
         
         done_payload = {"thread_id": thread_id}
         
@@ -520,8 +528,9 @@ async def sse_resume_stream(
                     content = getattr(last_msg, "content", "")
                     additional = getattr(last_msg, "additional_kwargs", {})
                     
-                    # 如果没有流式输出过，补充发送 token
-                    if content and not full_answer:
+                    # 避免重复发送：只有当内容不同于已流式输出的内容时才补发
+                    streamed_content = "".join(full_answer)
+                    if content and content != streamed_content and not full_answer:
                          yield format_sse("token", {"content": content or ""})
                          done_payload["final_content"] = content
                     

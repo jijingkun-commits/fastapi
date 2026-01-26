@@ -246,6 +246,30 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             logger.info("护栏: 输入已脱敏处理")
             content = sanitized_content
     
+    # ========== 3. 系统上下文注入 ==========
+    # 为所有 Agent 提供当前时间等系统级信息
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
+    updates["system_context"] = f"当前时间: {current_time}"
+    
+    # ========== 4. Skills RAG 检索 ==========
+    # 根据用户消息检索相关技能，为后续 Agent 提供专业知识上下文
+    try:
+        from app.services.skill_service import SkillService
+        from app.services.llm_config_service import LLMConfigService
+        
+        # 只有在 embedding 模型配置好时才执行检索
+        if LLMConfigService.is_type_configured("embedding") and content:
+            skills = SkillService.search_skills(content, top_k=2, threshold=0.4)
+            if skills:
+                skill_context = SkillService.format_skills_as_context(skills)
+                updates["skill_context"] = skill_context
+                logger.info("预处理节点: 检索到 %d 个相关技能: %s", 
+                           len(skills), [s.skill_id for s in skills])
+                emit_status(writer, message=f"已加载 {len(skills)} 个相关技能", node="preprocess")
+    except Exception as e:
+        logger.warning("预处理节点: 技能检索失败 - %s", e)
+    
     # 检测是否包含图片 URL（Markdown 格式）
     image_urls = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', content)
     
@@ -377,11 +401,41 @@ async def create_multi_agent_graph(
                 pruned_state = state.copy()
                 pruned_state["messages"] = pruned_messages
                 
+                # 注入系统上下文和技能上下文
+                from langchain_core.messages import SystemMessage
+                context_messages = []
+                
+                # 1. 系统上下文（当前时间等）
+                if state.get("system_context"):
+                    context_messages.append(SystemMessage(content=state["system_context"]))
+                
+                # 2. 技能上下文（Skills RAG 检索到的相关技能）
+                if state.get("skill_context"):
+                    context_messages.append(SystemMessage(content=state["skill_context"]))
+                
+                # 将上下文消息插入到裁剪后的消息列表开头（在原有 SystemMessage 之后）
+                if context_messages:
+                    # 找到第一个非 SystemMessage 的位置
+                    insert_pos = 0
+                    for i, msg in enumerate(pruned_messages):
+                        if not isinstance(msg, SystemMessage):
+                            insert_pos = i
+                            break
+                    else:
+                        insert_pos = len(pruned_messages)
+                    
+                    pruned_state["messages"] = (
+                        pruned_messages[:insert_pos] + 
+                        context_messages + 
+                        pruned_messages[insert_pos:]
+                    )
+                
                 logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {len(pruned_messages)} msgs")
 
                 sent_tool_call_ids = set()
                 # 跟踪已发送的文本消息 ID，防止 values 模式重复发送
                 emitted_message_ids = set()
+
                 
                 async for mode, chunk in agent.astream(
                     pruned_state, 
@@ -393,7 +447,6 @@ async def create_multi_agent_graph(
                         if isinstance(chunk, tuple) and len(chunk) == 2:
                             msg, metadata = chunk
                             msg_type = type(msg).__name__
-                            logger.debug(f"[{name}] messages 模式收到: {msg_type}")
                             
                             # 记录流式消息 ID
                             if hasattr(msg, 'id') and msg.id:
@@ -481,8 +534,7 @@ async def create_multi_agent_graph(
                                 # 构造增量更新：只包含新增消息和 handoff 标记
                                 delta_messages = messages[input_message_count:]
                                 
-                                # 🆕 Phase 3: 确保此时不丢失其他状态 (如 user_id, thread_id 等)
-                                # 虽然 Supervisor 主要是路由，但保持稳健性
+                                # 确保此时不丢失其他状态 (如 user_id, thread_id 等)
                                 other_keys = {k: v for k, v in final_state.items() if k != "messages"}
                                 
                                 ret = other_keys.copy()
@@ -773,24 +825,41 @@ async def create_multi_agent_graph(
         1. 如果有 pending_handoff → 路由到对应专家 (data_expert / todo_expert)
         2. 如果有其他 tool_calls → 路由到 evaluate
         3. 否则 → 路由到 postprocess
+        
+        增强：添加 Handoff 校验，记录无效目标并重新路由回 Supervisor
         """
+        from app.ai.exceptions import HandoffValidationError
+        
         # 优先检查 pending_handoff（由 handoff 工具设置）
         pending_handoff = state.get("pending_handoff")
         if pending_handoff:
             target_agent = pending_handoff.get("target_agent")
-            logger.info(f"Supervisor 检测到 pending_handoff，路由到 {target_agent}")
+            logger.info(f"Supervisor 检测到 pending_handoff，目标: {target_agent}")
             
-            if target_agent == AgentType.DATA:
-                return "data_expert"
-            elif target_agent == AgentType.TODO:
-                return "todo_expert"
+            # 有效的 Agent 列表
+            VALID_AGENTS = {AgentType.DATA, AgentType.TODO}
+            
+            if target_agent in VALID_AGENTS:
+                # 有效的 Handoff
+                if target_agent == AgentType.DATA:
+                    return "data_expert"
+                elif target_agent == AgentType.TODO:
+                    return "todo_expert"
             else:
-                # 无效的 target_agent，可能是 LLM 幻觉或协议错误
-                valid_agents = [AgentType.DATA, AgentType.TODO]
-                logger.error(
-                    f"无效的 target_agent: {target_agent}，有效值为 {valid_agents}，"
-                    f"将跳过 handoff 直接结束"
+                # 无效的 target_agent - 记录错误并处理
+                error = HandoffValidationError(
+                    f"无效的 Handoff 目标 Agent: {target_agent}，"
+                    f"有效值为 {list(VALID_AGENTS)}",
+                    invalid_target=target_agent
                 )
+                logger.error(str(error))
+                
+                # 清理无效的 pending_handoff，避免后续节点再次处理
+                state["pending_handoff"] = None
+                
+                # 策略：直接结束（也可以选择重新路由回 Supervisor 让 LLM 重试）
+                # 这里选择直接结束，避免无限循环
+                logger.warning("清除无效 Handoff，直接进入 postprocess")
                 return "postprocess"
         
         # 检查是否有其他工具调用

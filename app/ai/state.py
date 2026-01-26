@@ -91,6 +91,12 @@ class MultiAgentState(BaseAgentState, total=False):
     
     # 委派控制
     pending_handoff: Dict         # 待处理的委派指令（由 handoff 工具返回值解析）
+    
+    # Skills RAG
+    skill_context: str            # 检索到的相关技能上下文（由 preprocess 节点填充）
+    
+    # 系统上下文
+    system_context: str           # 系统级上下文信息（当前时间、用户信息等）
 
 
 class TodoAgentState(BaseAgentState, total=False):
@@ -110,3 +116,40 @@ class TodoAgentState(BaseAgentState, total=False):
     
     # 提取信息(保留用于向后兼容)
     extracted_info: Dict
+
+
+class DataAgentState(BaseAgentState, total=False):
+    """问数 Agent 状态定义。
+    
+    继承 BaseAgentState，扩展以下字段：
+    - 查询上下文（query_context, time_range, filters）
+    - SQL 生成（generated_sql, sql_source, sql_approved）
+    - 指标匹配（matched_metric, metric_params）
+    - 可视化（viz_type, viz_data）
+    """
+    # 查询上下文
+    query_context: Dict                # 当前查询的完整上下文
+    retrieved_schema: List[Dict]       # 检索到的相关表结构
+    time_range: str                    # 时间范围（如 "本月", "过去7天"）
+    filters: List[str]                 # 筛选条件列表
+    dimensions: List[str]              # 聚合维度列表
+    
+    # 指标匹配
+    matched_metric: str                # 匹配到的指标名称（如 "total_gmv"）
+    metric_params: Dict                # 指标参数（维度、筛选等）
+    
+    # SQL 生成
+    generated_sql: str                 # 生成的 SQL 语句
+    sql_source: Literal["metric", "vanna", "template"]  # SQL 来源
+    sql_result: Any                    # SQL 执行结果
+    pending_sql: str                   # 待审核的 SQL（需用户确认时）
+    sql_approved: bool                 # SQL 是否已批准
+    
+    # 可视化
+    viz_type: str                      # 图表类型（pie, bar, line 等）
+    viz_data: Dict                     # 图表数据
+    
+    # 意图分类
+    data_intent: Literal["metric_query", "free_query", "visualization", "clarification"]
+    clarification_needed: str          # 需要用户澄清的内容
+

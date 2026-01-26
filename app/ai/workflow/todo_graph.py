@@ -25,7 +25,7 @@ from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
 
 # 导入自定义事件工具
 from langgraph.config import get_stream_writer
-from app.ai.events import emit_clarification, emit_token, emit_status, emit_error
+from app.ai.events import emit_clarification, emit_token, emit_status, emit_error, emit_result
 
 # 导入统一的状态辅助函数
 from app.ai.utils.state_helpers import get_user_id, get_user_id_optional
@@ -269,15 +269,17 @@ ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
 ```
 
 ## 判断规则 ⚠️
-1. 输入模糊/缺信息 → **clarify (最优先)**
-2. 检测到业务关键词 → **clarify** (触发隐含需求推理)
-3. "周一不可用/必须等" → **constraint** (提取约束)
-4. "列出/查看" → query
-5. "合并/结合" → merge
-6. "刚刚/紧急" → priority_adjust
-7. "对了/还有" → context_switch
-8. "清单/列表/汇总/按优先级" → **summarize** (汇总输出)
-9. 明确动作+时间 → create
+1. 用户表达快速创建意图 → **create** + `quick_mode: true`
+   关键词: "不要问那么多"、"直接创建"、"快速创建"、"先创建"、"别问了"
+2. 输入模糊/缺信息 → **clarify (最优先)**
+3. 检测到业务关键词 → **clarify** (触发隐含需求推理)
+4. "周一不可用/必须等" → **constraint** (提取约束)
+5. "列出/查看" → query
+6. "合并/结合" → merge
+7. "刚刚/紧急" → priority_adjust
+8. "对了/还有" → context_switch
+9. "清单/列表/汇总/按优先级" → **summarize** (汇总输出)
+10. 明确动作+时间 → create
 
 ## 输出格式
 必须返回JSON:
@@ -288,7 +290,8 @@ ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
   "extracted_info": {},
   "is_complex": false,
   "conflict_risk": "none",
-  "time_constraints": {} 
+  "time_constraints": {},
+  "quick_mode": false
 }
 ```
 
@@ -393,10 +396,12 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     
     # Step 1: 消息过滤与 Handoff 上下文构建
     pending_handoff = state.get("pending_handoff")
-    filtered_messages, handoff_context = filter_messages_for_todo(messages, pending_handoff)
+    filtered_messages, handoff_context, pre_extracted_info = filter_messages_for_todo(messages, pending_handoff)
     recent_messages = filtered_messages[-5:] if filtered_messages else []
     
     logger.info(f"分析用户消息 (Original: {len(messages)}, Filtered: {len(filtered_messages)}, Use: {len(recent_messages)})")
+    if pre_extracted_info:
+        logger.info(f"Handoff 预提取信息: {pre_extracted_info}")
     
     # Step 2: 历史任务查询 (通过 Helper)
     user_id = _get_user_id_from_state(state)
@@ -444,6 +449,14 @@ def analyze_intent(state: TodoAgentState) -> Dict:
 
         intent = analysis.get("intent", "chat")
         extracted_info = analysis.get("extracted_info", {})
+        
+        # 🆕 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
+        if pre_extracted_info:
+            for key, value in pre_extracted_info.items():
+                if value and not extracted_info.get(key):
+                    extracted_info[key] = value
+                    logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+        
         
         # Step 4: 时间解析
         extracted_info, time_constraints = parse_time_info(
@@ -524,9 +537,14 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         if conflict_risk != "none":
             updates["detected_conflicts"] = analysis.get("conflicts", [])
         
-        # Step 8: 确定是否需要确认
-        quick_mode = state.get("quick_mode", False)
-        needs_confirmation, needs_clarification = determine_confirmation_need(intent, quick_mode)
+        # Step 8: 读取 quick_mode 并确定是否需要确认
+        # quick_mode 可能来自 LLM 分析或 state
+        quick_mode = analysis.get("quick_mode", False) or state.get("quick_mode", False)
+        if quick_mode:
+            updates["quick_mode"] = True
+            logger.info("检测到快速创建模式")
+        
+        needs_confirmation, needs_clarification = determine_confirmation_need(intent, quick_mode, extracted_info)
         
         if needs_confirmation:
             updates["pending_operation"] = {
@@ -583,20 +601,23 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
         if title == "新待办" and description:
             title = description[:50]  # 使用描述的前50个字符作为标题
         
+        location = data.get("location") or ""
+        
         confirm_msg = f"""好的，我帮你记录这个待办 📝
 
 **{title}**
 - 📅 时间：{time_str if time_str else '未设置'}
+{f'- 📍 地点：{location}' if location else ''}
 - ⭐ 优先级：{priority}
 - 🏷️ 分类：{category if category else '未分类'}
-{f'- 📄 描述：{description}' if description else ''}
+{f'- 📄 待办内容：{description}' if description else ''}
 
 要补充一些信息吗？比如：
 1. 具体时间（几点）
 2. 详细描述
 3. 是否需要提醒
 
-直接说"确认"即可创建，或告诉我补充内容～
+直接说"确认"即可创建，或"拒绝"告诉我补充内容～
 """
     
     elif action == "batch_complete":
@@ -744,14 +765,13 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
     msg = AIMessage(
         content=confirm_msg,
         additional_kwargs={
-            "requires_confirmation": True,
             "operation": operation_data
         }
     )
     
     return {
         "messages": [msg],
-        "pending_operation": operation, # 保持 pending_operation 状态
+        "pending_operation": operation_data, # 更新包含 summary 的完整信息
         "user_confirmed": None # 重置确认状态
     }
 
@@ -765,12 +785,38 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
     
     # 触发中断，等待用户回复
     # 前端 resume 时传递的数据将作为 interrupt 的返回值
-    decision = interrupt(None)
+    
+    # 构造前端 CompactApproval 需要的数据格式
+    pending_op = state.get("pending_operation") or {}
+    
+    # 确保有 summary，避免前端显示空
+    if not pending_op.get("summary") and pending_op.get("data"):
+         # 尝试从 data 生成简单的 summary
+         data = pending_op["data"]
+         summary_lines = ["**待确认操作**"]
+         if data.get("title"): summary_lines.append(f"📝 标题: {data['title']}")
+         if data.get("due_date"): summary_lines.append(f"⏰ 时间: {data['due_date']}")
+         pending_op["summary"] = "\n".join(summary_lines)
+    
+    interrupt_value = {
+        "action_requests": [{
+            "name": pending_op.get("action", "unknown"),
+            "args": {
+                **pending_op.get("data", {}),
+                "_display_message": pending_op.get("summary", "")
+            }
+        }]
+    }
+    
+    decision = interrupt(interrupt_value)
     
     logger.info(f"收到用户决策 (resume): {decision}")
     
+    # 如果 decision 为空（非预期情况，可能是上下文切换导致），保持等待状态或静默退出
+    # 不要返回 False，否则会触发 execute_operation 的“已取消”消息
     if not decision:
-        return {"user_confirmed": False}
+        logger.warning("wait_for_confirmation 收到空决策，可能是非 Resume 调用")
+        return {"user_confirmed": None}
     
     # 根据决策更新状态
     # 兼容两种格式：
@@ -780,7 +826,7 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
     # 检查是否包含 confirmed 字段 (前端 ai.tsx 默认传 {confirmed: true})
     is_confirmed = decision.get("confirmed", False)
     
-    if is_confirmed or decision.get("type") == "accept":
+    if is_confirmed or decision.get("type") in ("accept", "edit"):
         # 如果用户修改了参数 (例如修改了时间)
         # 前端可能直接混在 decision 顶层，也可能在 args 里
         update_data = {}
@@ -791,7 +837,7 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
         if "args" in decision:
             update_data.update(decision["args"])
             
-        if update_data and state["pending_operation"]:
+        if update_data and state.get("pending_operation"):
              logger.info(f"用户更新了参数: {update_data}")
              state["pending_operation"]["data"].update(update_data)
         
@@ -822,9 +868,9 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
     operation = state.get("pending_operation")
     extracted_info = state.get("extracted_info", {})
     
-    # 如果用户取消
+    # 如果用户取消：静默处理，不追加任何消息
     if user_confirmed is False:
-        state["messages"].append(AIMessage(content="好的，已取消操作 👌"))
+        logger.info("用户拒绝操作，静默退出")
         return state
     
     # 如果没有操作（如查询）
@@ -1007,8 +1053,8 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
             "category": data.get("category"),
             "tags": data.get("tags"),
             "reminder_enabled": data.get("reminder_enabled", False),
-            "config": config
-        })
+            "location": data.get("location")  # 传入 location (需确保 add_todo 支持)
+        }, config=config)
         
         return ToolResultBuilder.success(result_str)
     except Exception as e:

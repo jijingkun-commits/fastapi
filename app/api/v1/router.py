@@ -33,12 +33,15 @@ api_router.include_router(llm_router, prefix="/llm", tags=["LLM"], dependencies=
 # 系统配置路由
 from app.api.v1.endpoints.config_api import router as config_router
 api_router.include_router(config_router, prefix="/config", tags=["Config"], dependencies=[Depends(get_current_user)])
-# 上传路由：支持可选登录（匿名用户也可上传临时文件）
+# 上传路由：必须登录
 from app.api.v1.endpoints.upload_api import router as upload_router
-api_router.include_router(upload_router)
+api_router.include_router(upload_router, dependencies=[Depends(get_current_user)])
 # 待办看板路由：需要登录
 from app.api.v1.endpoints.todo_api import router as todo_router
 api_router.include_router(todo_router, prefix="/todo", tags=["Todo"], dependencies=[Depends(get_current_user)])
+# 问数管理路由：需要登录
+from app.api.v1.endpoints.data_admin_api import router as data_admin_router
+api_router.include_router(data_admin_router, dependencies=[Depends(get_current_user)])
 
 
 

@@ -107,6 +107,8 @@ export function ChatInput({
     } = stream as any; // Cast to any because some props might be added by SSE/custom provider
 
     const thinkingCapability = (stream as any).thinkingCapability;
+    const interrupt = (stream as any).interrupt;
+    const hasInterrupt = !!interrupt;
 
     // 快捷提示词选择
     const handleQuickPromptSelect = (value: string) => {
@@ -163,8 +165,8 @@ export function ChatInput({
 
     return (
         <div ref={dropRef} className="relative z-10 w-full max-w-4xl mx-auto">
-            {/* 选中待办提示 */}
-            {selectedTodo && (
+            {/* 选中待办提示 - 仅在非审核状态下显示 */}
+            {!hasInterrupt && selectedTodo && (
                 <div className="mb-2">
                     <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs rounded-lg border border-indigo-200">
                         <span className="font-medium">🎯 当前讨论:</span>
@@ -186,174 +188,178 @@ export function ChatInput({
                 </div>
             )}
 
-            {/* 人工审核组件 */}
-            <div className="mb-4">
-                <CompactApproval />
-            </div>
+            {/* 内容区域：审核卡片 或 输入表单 */}
+            <div className="w-full">
+                {hasInterrupt ? (
+                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <CompactApproval />
+                    </div>
+                ) : (
+                    <form onSubmit={onSubmit} className="w-full">
+                        {/* 主输入容器 - ChatGPT 风格 */}
+                        <div className="relative bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow transition-shadow">
+                            {/* 文件预览 - 在输入框内部顶部 */}
+                            {contentBlocks.length > 0 && (
+                                <div className="px-4 pt-3 pb-2">
+                                    <ContentBlocksPreview blocks={contentBlocks} onRemove={onRemoveBlock} />
+                                </div>
+                            )}
 
-            <form onSubmit={onSubmit} className="w-full">
-                {/* 主输入容器 - ChatGPT 风格 */}
-                <div className="relative bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow transition-shadow">
-                    {/* 文件预览 - 在输入框内部顶部 */}
-                    {contentBlocks.length > 0 && (
-                        <div className="px-4 pt-3 pb-2">
-                            <ContentBlocksPreview blocks={contentBlocks} onRemove={onRemoveBlock} />
-                        </div>
-                    )}
-
-                    {/* 文本输入框 */}
-                    <textarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onPaste={onPaste}
-                        onKeyDown={(e) => {
-                            if (
-                                e.key === "Enter" &&
-                                !e.shiftKey &&
-                                !e.metaKey &&
-                                !e.nativeEvent.isComposing
-                            ) {
-                                e.preventDefault();
-                                const el = e.target as HTMLElement | undefined;
-                                const form = el?.closest("form");
-                                form?.requestSubmit();
-                            }
-                        }}
-                        placeholder={selectedTodo ? `讨论待办: ${selectedTodo.title}...` : "Type your message..."}
-                        className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
-                        style={{ fieldSizing: 'content' } as any}
-                        data-testid="chat-input"
-                    />
-
-                    {/* 底部操作栏 */}
-                    <div className="flex items-center justify-between px-3 pb-3 pt-0">
-                        {/* 左侧：+ 按钮和隐藏的开关 */}
-                        <div className="flex items-center gap-2">
-                            {/* 圆形 + 按钮 */}
-                            <Label
-                                htmlFor="file-input"
-                                className="flex cursor-pointer items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors group"
-                            >
-                                <Plus className="w-5 h-5 text-gray-600 group-hover:text-gray-900" />
-                            </Label>
-                            <input
-                                id="file-input"
-                                type="file"
-                                onChange={onFileUpload}
-                                multiple
-                                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.xlsx,.xls,.csv,.txt,.md,.docx"
-                                className="hidden"
+                            {/* 文本输入框 */}
+                            <textarea
+                                ref={textareaRef}
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onPaste={onPaste}
+                                onKeyDown={(e) => {
+                                    if (
+                                        e.key === "Enter" &&
+                                        !e.shiftKey &&
+                                        !e.metaKey &&
+                                        !e.nativeEvent.isComposing
+                                    ) {
+                                        e.preventDefault();
+                                        const el = e.target as HTMLElement | undefined;
+                                        const form = el?.closest("form");
+                                        form?.requestSubmit();
+                                    }
+                                }}
+                                placeholder={selectedTodo ? `讨论待办: ${selectedTodo.title}...` : "Type your message..."}
+                                className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
+                                style={{ fieldSizing: 'content' } as any}
+                                data-testid="chat-input"
                             />
 
-                            {/* 开关控件 - 折叠到下拉菜单或隐藏 */}
-                            <div className="hidden lg:flex items-center gap-2">
-                                <Select onValueChange={handleQuickPromptSelect}>
-                                    <SelectTrigger className="w-[120px] h-7 text-xs bg-transparent border-gray-200 text-gray-600">
-                                        <SelectValue placeholder="快捷指令" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {QUICK_PROMPTS.map((prompt) => (
-                                            <SelectItem key={prompt.label} value={prompt.value}>
-                                                {prompt.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        {/* 右侧：开关 + 麦克风和发送按钮 */}
-                        <div className="flex items-center gap-2">
-                            {/* 开关控件组 - 更紧凑 */}
-                            <div className="hidden md:flex items-center gap-2 mr-1">
-                                {/* 深度思考开关 */}
-                                <div className="flex items-center space-x-1">
-                                    <Switch
-                                        id="enable-thinking"
-                                        checked={enableThinking}
-                                        disabled={!isThinkingToggleable(thinkingCapability)}
-                                        onCheckedChange={(checked) => {
-                                            if (thinkingCapability === "always") {
-                                                toast.info("该模型始终启用深度思考，无法关闭");
-                                                return;
-                                            }
-                                            if (thinkingCapability === "never") {
-                                                toast.info("该模型不支持深度思考");
-                                                return;
-                                            }
-                                            setEnableThinking(checked);
-                                        }}
-                                        className="scale-75"
-                                    />
+                            {/* 底部操作栏 */}
+                            <div className="flex items-center justify-between px-3 pb-3 pt-0">
+                                {/* 左侧：+ 按钮和隐藏的开关 */}
+                                <div className="flex items-center gap-2">
+                                    {/* 圆形 + 按钮 */}
                                     <Label
-                                        htmlFor="enable-thinking"
-                                        className={cn(
-                                            "text-[11px] whitespace-nowrap cursor-pointer",
-                                            isThinkingToggleable(thinkingCapability)
-                                                ? "text-gray-600"
-                                                : "text-gray-400"
-                                        )}
+                                        htmlFor="file-input"
+                                        className="flex cursor-pointer items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors group"
                                     >
-                                        思考
+                                        <Plus className="w-5 h-5 text-gray-600 group-hover:text-gray-900" />
                                     </Label>
+                                    <input
+                                        id="file-input"
+                                        type="file"
+                                        onChange={onFileUpload}
+                                        multiple
+                                        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.xlsx,.xls,.csv,.txt,.md,.docx"
+                                        className="hidden"
+                                    />
+
+                                    {/* 开关控件 - 折叠到下拉菜单或隐藏 */}
+                                    <div className="hidden lg:flex items-center gap-2">
+                                        <Select onValueChange={handleQuickPromptSelect}>
+                                            <SelectTrigger className="w-[120px] h-7 text-xs bg-transparent border-gray-200 text-gray-600">
+                                                <SelectValue placeholder="快捷指令" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {QUICK_PROMPTS.map((prompt) => (
+                                                    <SelectItem key={prompt.label} value={prompt.value}>
+                                                        {prompt.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
 
-                                {/* 多智能体模式开关 */}
-                                <div className="flex items-center space-x-1">
-                                    <Switch
-                                        id="use-multi-agent"
-                                        checked={useMultiAgent}
-                                        onCheckedChange={setUseMultiAgent}
-                                        className="scale-75"
-                                    />
-                                    <Label
-                                        htmlFor="use-multi-agent"
-                                        className="text-[11px] text-gray-600 whitespace-nowrap cursor-pointer"
+                                {/* 右侧：开关 + 麦克风和发送按钮 */}
+                                <div className="flex items-center gap-2">
+                                    {/* 开关控件组 - 更紧凑 */}
+                                    <div className="hidden md:flex items-center gap-2 mr-1">
+                                        {/* 深度思考开关 */}
+                                        <div className="flex items-center space-x-1">
+                                            <Switch
+                                                id="enable-thinking"
+                                                checked={enableThinking}
+                                                disabled={!isThinkingToggleable(thinkingCapability)}
+                                                onCheckedChange={(checked) => {
+                                                    if (thinkingCapability === "always") {
+                                                        toast.info("该模型始终启用深度思考，无法关闭");
+                                                        return;
+                                                    }
+                                                    if (thinkingCapability === "never") {
+                                                        toast.info("该模型不支持深度思考");
+                                                        return;
+                                                    }
+                                                    setEnableThinking(checked);
+                                                }}
+                                                className="scale-75"
+                                            />
+                                            <Label
+                                                htmlFor="enable-thinking"
+                                                className={cn(
+                                                    "text-[11px] whitespace-nowrap cursor-pointer",
+                                                    isThinkingToggleable(thinkingCapability)
+                                                        ? "text-gray-600"
+                                                        : "text-gray-400"
+                                                )}
+                                            >
+                                                思考
+                                            </Label>
+                                        </div>
+
+                                        {/* 多智能体模式开关 */}
+                                        <div className="flex items-center space-x-1">
+                                            <Switch
+                                                id="use-multi-agent"
+                                                checked={useMultiAgent}
+                                                onCheckedChange={setUseMultiAgent}
+                                                className="scale-75"
+                                            />
+                                            <Label
+                                                htmlFor="use-multi-agent"
+                                                className="text-[11px] text-gray-600 whitespace-nowrap cursor-pointer"
+                                            >
+                                                多Agent
+                                            </Label>
+                                        </div>
+                                    </div>
+
+                                    {/* 麦克风按钮 */}
+                                    <button
+                                        type="button"
+                                        className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors group"
+                                        onClick={() => toast.info("语音输入功能开发中")}
                                     >
-                                        多Agent
-                                    </Label>
+                                        <Mic className="w-4 h-4 text-gray-600 group-hover:text-gray-900" />
+                                    </button>
+
+                                    {/* 发送按钮 */}
+                                    {isLoading ? (
+                                        <Button
+                                            key="stop"
+                                            onClick={onStop}
+                                            size="icon"
+                                            className="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800"
+                                        >
+                                            <LoaderCircle className="h-4 w-4 animate-spin text-white" />
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="submit"
+                                            size="icon"
+                                            className="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                            disabled={isLoading || !canSubmit}
+                                        >
+                                            <ArrowUp className="h-4 w-4 text-white" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
-
-                            {/* 麦克风按钮 */}
-                            <button
-                                type="button"
-                                className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors group"
-                                onClick={() => toast.info("语音输入功能开发中")}
-                            >
-                                <Mic className="w-4 h-4 text-gray-600 group-hover:text-gray-900" />
-                            </button>
-
-                            {/* 发送按钮 */}
-                            {isLoading ? (
-                                <Button
-                                    key="stop"
-                                    onClick={onStop}
-                                    size="icon"
-                                    className="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800"
-                                >
-                                    <LoaderCircle className="h-4 w-4 animate-spin text-white" />
-                                </Button>
-                            ) : (
-                                <Button
-                                    type="submit"
-                                    size="icon"
-                                    className="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    disabled={isLoading || !canSubmit}
-                                >
-                                    <ArrowUp className="h-4 w-4 text-white" />
-                                </Button>
-                            )}
                         </div>
-                    </div>
-                </div>
+                    </form>
+                )}
+            </div>
 
-                {/* 底部免责声明 - ChatGPT 风格 */}
-                <p className="text-center text-xs text-gray-500 mt-2 px-4">
-                    AI 可能会出错。请核实重要信息。
-                </p>
-            </form>
+            {/* 底部免责声明 - 始终显示 */}
+            <p className="text-center text-xs text-gray-500 mt-2 px-4 transition-all duration-300">
+                AI 可能会出错。请谨慎甄别，要是出错了它可不负责哦~
+            </p>
         </div>
     );
 }

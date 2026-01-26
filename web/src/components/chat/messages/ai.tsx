@@ -157,14 +157,8 @@ export function AssistantMessage({
   return (
     <div className="group mr-auto flex w-full items-start gap-2" data-testid="ai-message">
       <div className="flex w-full flex-col gap-2">
-        {/* 优先渲染确认卡片 */}
-        {requiresConfirmation && operation ? (
-          <ConfirmationCard
-            operation={operation as any}
-            onConfirm={handleConfirm}
-            onCancel={handleCancel}
-          />
-        ) : dataType === "todo_list" && todoData && todoData.length > 0 ? (
+        {/* 移除旧版确认卡片，统一使用底部的 Human-in-the-loop 组件 */}
+        {dataType === "todo_list" && todoData && todoData.length > 0 ? (
           <TodoListCard
             todos={todoData}
             onAction={handleAction}
@@ -206,25 +200,28 @@ export function AssistantMessage({
               </>
             )}
 
-            <div
-              className={cn(
-                "mr-auto flex items-center gap-2 transition-opacity",
-                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-              )}
-            >
-              <BranchSwitcher
-                branch={meta?.branch}
-                branchOptions={meta?.branchOptions}
-                onSelect={(branch) => thread.setBranch(branch)}
-                isLoading={isLoading}
-              />
-              <CommandBar
-                content={contentString}
-                isLoading={isLoading}
-                isAiMessage={true}
-                handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-              />
-            </div>
+            {/* 仅当消息包含实际文本内容时显示操作栏（过滤纯工具调用的中间步骤） */}
+            {contentString.trim().length > 0 && (
+              <div
+                className={cn(
+                  "mr-auto flex items-center gap-2 transition-opacity",
+                  "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+                )}
+              >
+                <BranchSwitcher
+                  branch={meta?.branch}
+                  branchOptions={meta?.branchOptions}
+                  onSelect={(branch) => thread.setBranch(branch)}
+                  isLoading={isLoading}
+                />
+                <CommandBar
+                  content={contentString}
+                  isLoading={isLoading}
+                  isAiMessage={true}
+                  handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

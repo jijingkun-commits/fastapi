@@ -5,9 +5,9 @@ services:
   # 基础设施服务 (默认启动)
   # ============================================================
 
-  # PostgreSQL 数据库
+  # PostgreSQL 数据库 (需 11+ 以支持 pgvector，否则需要使用其他数据库以支持向量化)
   postgres:
-    image: postgres:10-alpine
+    image: pgvector/pgvector:pg16
     container_name: fastapi-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}

@@ -11,6 +11,7 @@ from app.core.config import (
     DB_POOL_RECYCLE,
     DB_POOL_TIMEOUT,
     DB_ECHO,
+    ANALYTICS_DATABASE_URL,
 )
 
 
@@ -27,6 +28,22 @@ engine = create_engine(
 
 # 创建会话工厂（禁用自动提交与自动刷新）
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+# ==========================================
+# 分析库连接 (Analytics DB)
+# ==========================================
+analytics_engine = create_engine(
+    ANALYTICS_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_timeout=DB_POOL_TIMEOUT,
+    echo=DB_ECHO,
+)
+
+# 分析库会话工厂
+AnalyticsSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=analytics_engine)
 
 
 def get_db():
@@ -58,6 +75,25 @@ def get_db_context():
     适用场景：LangGraph 节点、Celery 任务、后台线程等。
     """
     db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_analytics_db():
+    """FastAPI 依赖注入：提供分析库会话 (Read-Only)。"""
+    db = AnalyticsSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_analytics_db_context():
+    """上下文管理器：获取分析库会话。"""
+    db = AnalyticsSessionLocal()
     try:
         yield db
     finally:

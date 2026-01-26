@@ -1,0 +1,120 @@
+"""
+语义层：Semantic Model 定义文件
+
+基于 WrenAI MDL 的设计理念，定义数据模型、关系、指标和维度。
+此文件作为初始模板，实际生产中建议将指标存储到数据库 (t_metrics)。
+"""
+
+version: "1.0"
+
+# ==========================================
+# 1. 数据模型定义 (Models)
+# ==========================================
+models:
+  - name: orders
+    table_name: t_orders
+    description: "订单主表"
+    columns:
+      - name: id
+        type: integer
+        is_primary_key: true
+      - name: user_id
+        type: integer
+        description: "下单用户ID"
+      - name: amount
+        type: decimal
+        description: "订单金额"
+      - name: status
+        type: string
+        description: "订单状态 (pending, paid, shipped, completed, cancelled)"
+      - name: created_at
+        type: timestamp
+        description: "下单时间"
+
+  - name: users
+    table_name: t_user
+    description: "用户表"
+    columns:
+      - name: id
+        type: integer
+        is_primary_key: true
+      - name: userName
+        type: string
+        description: "用户名"
+      - name: mobile
+        type: string
+        description: "手机号"
+
+# ==========================================
+# 2. 关系定义 (Relationships)
+# ==========================================
+relationships:
+  - name: order_user
+    from_model: orders
+    to_model: users
+    join_type: left
+    condition: "orders.user_id = users.id"
+    description: "订单与用户的关联关系"
+
+# ==========================================
+# 3. 指标定义 (Metrics)
+# ==========================================
+# 注意：这些指标应同步到 t_metrics 表中以支持向量检索
+metrics:
+  - name: order_count
+    description: "订单数量（排除已取消）"
+    type: count
+    model: orders
+    filter: "status != 'cancelled'"
+    synonyms: ["订单数", "成单量", "订单总数"]
+    
+  - name: total_gmv
+    description: "成交总额 (GMV) - 已支付及以后状态的订单"
+    type: sum
+    model: orders
+    field: amount
+    filter: "status IN ('paid', 'shipped', 'completed')"
+    synonyms: ["销售额", "GMV", "总收入", "成交额"]
+
+  - name: avg_order_value
+    description: "客单价 (AOV) - 平均订单金额"
+    type: derived
+    formula: "total_gmv / order_count"
+    synonyms: ["客单价", "平均订单金额", "AOV"]
+
+  - name: new_user_count
+    description: "新增用户数"
+    type: count
+    model: users
+    filter: "DATE(createTime) = CURRENT_DATE"
+    synonyms: ["新用户", "今日新增", "注册用户数"]
+
+# ==========================================
+# 4. 维度定义 (Dimensions)
+# ==========================================
+dimensions:
+  - name: order_date
+    description: "下单日期"
+    model: orders
+    field: created_at
+    transformation: "DATE(created_at)"
+    
+  - name: order_month
+    description: "下单月份"
+    model: orders
+    field: created_at
+    transformation: "DATE_TRUNC('month', created_at)"
+
+# ==========================================
+# 使用示例
+# ==========================================
+# 自然语言: "本月成交额是多少？"
+# -> 匹配指标: total_gmv
+# -> 维度: order_month
+# -> 生成 SQL:
+#    SELECT DATE_TRUNC('month', created_at) AS month, 
+#           SUM(amount) AS total_gmv
+#    FROM t_orders
+#    WHERE status IN ('paid', 'shipped', 'completed')
+#      AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
+#    GROUP BY 1

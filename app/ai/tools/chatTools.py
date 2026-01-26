@@ -45,19 +45,39 @@ from app.db.session import engine
 
 # 定义结构化参数模型
 class SQLQuerySchema(BaseModel):
-    sql_query: str = Field(description="用于从 MySQL 提取数据的 SQL 查询语句。")
+    sql_query: str = Field(description="用于从 PostgreSQL 提取数据的 SQL 查询语句。")
 
 # 封装为 LangGraph 工具
 @tool(args_schema=SQLQuerySchema)
 def sql_inter(sql_query: str) -> str:
     """
     当用户需要进行数据库查询工作时，请调用该函数。
-    该函数用于在指定MySQL服务器上运行一段SQL代码，完成数据查询相关工作，
-    并且当前函数是使用SQLAlchemy连接MySQL数据库。
+    该函数用于在指定PostgreSQL服务器上运行一段SQL代码，完成数据查询相关工作，
+    并且当前函数是使用SQLAlchemy连接PostgreSQL数据库。
     本函数只负责运行SQL代码并进行数据查询，若要进行数据提取，则使用另一个extract_data函数。
-    :param sql_query: 字符串形式的SQL查询语句，用于执行对MySQL中数据库中各张表进行查询，并获得各表中的各类相关信息
-    :return：sql_query在MySQL中的运行结果。   
+    
+    支持：
+    - 模板 SQL：使用 {{metric_name}} 语法引用预定义指标
+    - 数据访问控制：自动检查表权限
+    
+    :param sql_query: 字符串形式的SQL查询语句
+    :return：sql_query在PostgreSQL中的运行结果。
     """
+    # 模板 SQL 处理
+    if "{{" in sql_query and "}}" in sql_query:
+        sql_query = _expand_template_sql(sql_query)
+    
+    # 数据访问控制检查
+    try:
+        from app.ai.semantic.data_access_control import get_access_control
+        dac = get_access_control()
+        is_valid, error_msg = dac.validate_sql(sql_query)
+        if not is_valid:
+            logger.warning(f"SQL 访问被拒绝: {error_msg}")
+            return json.dumps({"error": error_msg, "access_denied": True}, ensure_ascii=False)
+    except ImportError:
+        pass  # 忽略导入错误
+    
     # 检查是否需要人工审核
     if ai_config.SQL_REQUIRE_APPROVAL:
         logger.info("SQL 查询需要人工审核，等待用户确认...")
@@ -102,9 +122,35 @@ def sql_inter(sql_query: str) -> str:
         logger.error("SQL 查询执行失败: %s", e)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
+
+def _expand_template_sql(sql_query: str) -> str:
+    """展开模板 SQL 中的指标引用。
+    
+    支持语法：{{metric_name}} 会被替换为指标的 SQL 片段
+    """
+    import re
+    
+    # 查找所有 {{...}} 模式
+    pattern = r'\{\{(\w+)\}\}'
+    
+    def replace_metric(match):
+        metric_name = match.group(1)
+        # 从 data_intent_helpers 获取指标信息
+        try:
+            from app.ai.workflow.data_intent_helpers import get_metric_info
+            metric = get_metric_info(metric_name)
+            if metric and metric.get("formula"):
+                return metric["formula"]
+        except Exception:
+            pass
+        # 返回原始如果找不到
+        return match.group(0)
+    
+    return re.sub(pattern, replace_metric, sql_query)
+
 # 定义结构化参数
 class ExtractQuerySchema(BaseModel):
-    sql_query: str = Field(description="用于从 MySQL 提取数据的 SQL 查询语句。")
+    sql_query: str = Field(description="用于从 PostgreSQL 提取数据的 SQL 查询语句。")
     df_name: str = Field(description="指定用于保存结果的 pandas 变量名称（字符串形式）。")
 
 from typing import Dict, Any
@@ -136,11 +182,11 @@ def cleanup_thread_dataframes(thread_id: str) -> bool:
 @tool(args_schema=ExtractQuerySchema)
 def extract_data(sql_query: str, df_name: str, config: RunnableConfig) -> str:
     """
-    用于在MySQL数据库中提取一张表到当前Python环境中，注意，本函数只负责数据表的提取，
-    并不负责数据查询，若需要在MySQL中进行数据查询，请使用sql_inter函数。
+    用于在PostgreSQL数据库中提取一张表到当前Python环境中，注意，本函数只负责数据表的提取，
+    并不负责数据查询，若需要在PostgreSQL中进行数据查询，请使用sql_inter函数。
     同时需要注意，编写外部函数的参数消息时，必须是满足json格式的字符串，
-    :param sql_query: 字符串形式的SQL查询语句，用于提取MySQL中的某张表。
-    :param df_name: 将MySQL数据库中提取的表格进行本地保存时的变量名，以字符串形式表示。
+    :param sql_query: 字符串形式的SQL查询语句，用于提取PostgreSQL中的某张表。
+    :param df_name: 将PostgreSQL数据库中提取的表格进行本地保存时的变量名，以字符串形式表示。
     :return：表格读取和保存结果
     """
     if pd is None:

@@ -1,6 +1,6 @@
 """用户模型，对应表 t_user（中文注释）。
 
-数据库字段已统一为小写格式（username, createtime, updatetime）。
+数据库字段已统一为小写格式（username, create_time, update_time）。
 """
 from typing import Optional
 from datetime import datetime
@@ -19,9 +19,9 @@ class User(Base):
     )
     password: Mapped[Optional[str]] = mapped_column(String(300), comment="密码")
     mobile: Mapped[Optional[str]] = mapped_column(String(100), comment="手机号")
-    createtime: Mapped[Optional[datetime]] = mapped_column(
+    create_time: Mapped[Optional[datetime]] = mapped_column(
         DateTime, comment="创建时间"
     )
-    updatetime: Mapped[Optional[datetime]] = mapped_column(
+    update_time: Mapped[Optional[datetime]] = mapped_column(
         DateTime, comment="修改时间"
     )

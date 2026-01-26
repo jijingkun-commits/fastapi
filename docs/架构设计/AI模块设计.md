@@ -23,7 +23,12 @@ app/ai/
 │   ├── chatTools.py           # MCP 数据库工具
 │   ├── file_tools.py          # 文件读取工具
 │   ├── vision_tool.py         # 图片分析工具
-│   └── ragflow_tool.py        # 知识库检索工具
+│   ├── ragflow_tool.py        # 知识库检索工具
+│   └── embedding_util.py      # [New] 嵌入向量生成工具
+├── data/
+│   └── skills/                # [New] 技能知识库
+│       ├── todo-intent/       # 待办意图识别
+│       └── ...
 ├── prompts/                   # 渐进披露 Prompt 管理
 │   ├── agent_prompts.py       # 核心 Prompt
 │   ├── prompt_loader.py       # 参考文档加载器
@@ -44,11 +49,38 @@ app/ai/
 ├── llm_util.py                # LLM 实例管理
 ├── message_utils.py           # 消息处理工具
 └── middleware.py              # AI 中间件
+├── models/
+│   └── agent_skill.py         # [New] 技能数据库模型
+├── services/
+│   └── skill_service.py       # [New] 技能检索服务
+└── scripts/
+    └── import_skills.py       # [New] 技能导入脚本
 ```
 
 ---
 
 ## 🔄 MultiAgentGraph 架构
+
+### Skills RAG 与系统上下文增强 (2026-01)
+
+在进入 Supervisor 之前，预处理节点会：
+1. **注入系统上下文**：为所有 Agent 提供当前时间等系统信息
+2. **检索相关技能**：根据用户消息动态检索业务技能
+
+```mermaid
+graph LR
+    UserMsg -->Preprocess[预处理节点]
+    
+    subgraph Preprocess
+        direction TB
+        Guard[护栏验证] --> Time[注入系统上下文]
+        Time --> Embed[生成向量]
+        Embed --> Search[PostgreSQL 检索]
+        Search --> Context[注入 skill_context]
+    end
+    
+    Context --> Supervisor
+```
 
 ### 状态定义
 
@@ -69,6 +101,10 @@ class MultiAgentState(TypedDict):
     # 🆕 意图识别字段（借鉴 Flock Intent Recognition）
     detected_intent: Optional[str]            # 识别到的意图类型
     intent_route: Optional[str]               # 意图路由目标
+    pending_handoff: Optional[Dict]           # 待处理的委派指令
+    # 🆕 Skills RAG 与系统上下文
+    skill_context: Optional[str]              # 检索到的相关技能上下文
+    system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
 ```
 
 ### 核心节点（简化架构）

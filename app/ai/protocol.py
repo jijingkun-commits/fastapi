@@ -73,21 +73,26 @@ class AgentOutputParser:
         stripped = content.strip()
         
         # 1. 纯 JSON (通常是内部意图分析结果)
+        # 必须是严格的 JSON 对象格式，且不包含额外的解释文本
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                json.loads(stripped)
+                # 尝试解析
+                data = json.loads(stripped)
+                # 进一步校验：是否包含内部字段（如 intent, action 等）
+                if isinstance(data, dict) and any(k in data for k in ["intent", "action", "role", "node"]):
+                    return True
+                # 如果只是普通 JSON 数据但不是内部协议，可能不应该过滤？
+                #但在当前架构中，LLM 只有在 tool_use 或 内部思考时才输出 JSON
+                # 给用户的内容通常是 Markdown
                 return True
             except json.JSONDecodeError:
                 pass
                 
-        # 2. Markdown JSON 代码块
-        if stripped.startswith("```json"):
+        # 2. Markdown JSON 代码块 - 仅当整个内容就是一个代码块时才过滤
+        if stripped.startswith("```json") and stripped.endswith("```"):
             return True
             
-        # 3. 包含特定内部关键词
-        # 注意：这里保留了一些业务特定的关键词，后续应逐步移除
-        if '"intent"' in stripped:
-            return True
+        # 3. 包含特定内部关键词 (更严格的校验)
         if "<!--HANDOFF:" in stripped:
             return True
             

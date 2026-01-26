@@ -34,4 +34,9 @@ requests>=2.31.0
 python-multipart>=0.0.9
 aiofiles>=23.2.0
 regex>=2024.5.15
+pgvector>=0.2.0
+
+
+# Data Agent / Text-to-SQL
+vanna>=0.3.0
 

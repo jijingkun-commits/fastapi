@@ -25,6 +25,12 @@ DATABASE_URL: str = os.getenv(
     "postgresql+psycopg://postgres:postgres@localhost:5432/chat_db",
 )
 
+# 问数 Agent 专用分析库（只读连接）
+ANALYTICS_DATABASE_URL: str = os.getenv(
+    "ANALYTICS_DATABASE_URL",
+    DATABASE_URL, # 默认回退到主库，但在生产环境应隔离
+)
+
 # 数据库连接池参数
 DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
@@ -80,6 +86,9 @@ REASONING_EFFORT = os.getenv("REASONING_EFFORT", "medium")
 
 # 意图分类器模型配置（使用轻量级快速模型）
 INTENT_CLASSIFIER_MODEL = os.getenv("INTENT_CLASSIFIER_MODEL", "glm-4.5-air")
+
+# 智谱 API Key (用于 Embedding 向量化)
+ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 
 
 # 搜索

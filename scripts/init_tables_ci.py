@@ -2,6 +2,7 @@ import sys
 import os
 from pathlib import Path
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 # Add project root to path
 # config.py -> core -> app -> fastapi
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.models.todo import Todo, TodoHistory, TodoReminderQueue
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
+from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
 # If there are other models, they should be imported here.
 
 def init_tables():
@@ -26,6 +28,14 @@ def init_tables():
     except Exception as e:
         print(f"⚠️  Warning dropping tables: {e}")
     
+    print("Creating extensions...")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        print("✅ Extension 'vector' created (if not exists).")
+    except Exception as e:
+        print(f"⚠️  Warning creating extension: {e}")
+
     print("Creating all tables from SQLAlchemy models...")
     try:
         Base.metadata.create_all(bind=engine)
@@ -46,8 +56,8 @@ def seed_users():
                 username="admin",
                 password="12345678", # Match docker-compose env or simple default
                 mobile="13800000000",
-                createtime=None, # Allow default
-                updatetime=None
+                create_time=None, # Allow default
+                update_time=None
             )
             db.add(admin_user)
         
@@ -59,8 +69,8 @@ def seed_users():
                 username="jjk",
                 password="", # Empty password as used in test_todo_api.py
                 mobile="13900000000",
-                createtime=None,
-                updatetime=None
+                create_time=None,
+                update_time=None
             )
             db.add(jjk_user)
         

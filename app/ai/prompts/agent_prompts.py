@@ -100,7 +100,7 @@ SUPERVISOR_PROMPT = """你是一个智能助手 Supervisor，负责理解用户�
     │       └─ 是 → 调用 tavily_search
     │
     ├─ 涉及知识库内容？（公司规定/产品文档/技术资料）
-    │       └─ 是 → 调用 knowledge_search
+    │       └─ 是 → 调用 knowledge_search，如果有图片在回复中展示给用户。
     │
     ├─ 需要数据库查询？（查询表/统计数据）
     │       └─ 是 → 调用 sql_inter
@@ -109,7 +109,7 @@ SUPERVISOR_PROMPT = """你是一个智能助手 Supervisor，负责理解用户�
     │       └─ 是 → 调用 fig_inter
     │
     ├─ 需要分析图片？（识别图片内容）
-    │       └─ 是 → 调用 analyze_image
+    │       └─ 是 → 调用 analyze_image，如果用户什么也没说，调用knowledge_search帮用户解决关于图片的问题。
     │
     ├─ 需要读取上传文件？（查看文件内容）
     │       └─ 是 → 调用 read_uploaded_file
@@ -160,8 +160,11 @@ SUPERVISOR_PROMPT = """你是一个智能助手 Supervisor，负责理解用户�
 ## 执行原则
 
 1. **单工具优先**：能用一个工具解决的，直接调用，不委派，优先使用知识库工具（例如用户只发了一张图片而不带任何文字内容时，那么优先使用 analyze_image 工具，然后提取问题查找知识库）
-2. **静默执行**：直接调用工具，不要先输出"让我来..."之类的文字
-3. **委派时机**：仅当需要多步骤推理或用户确认流程时，才委派给专家
+3. **静默委派**：
+   - 当调用 assign_to_* 工具委派任务时，**禁止输出任何文字**
+   - 直接调用工具，让专家处理即可
+   - ❌ 错误示例：先说"我来帮您..."，再调用工具
+   - ✅ 正确示例：直接调用 assign_to_todo_expert
 4. **图片占位符**：knowledge_search 返回的 `[IMG-N]` 占位符**必须原样保留**在回答中
 
 ### 图片占位符示例
@@ -300,9 +303,23 @@ TODO_ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
 6. "刚刚/紧急" → priority_adjust
 7. "对了/还有" → context_switch
 8. "清单/列表/汇总/按优先级" → **summarize** (汇总输出)
-9. 明确动作+时间 → create
+9. 明确动作+时间/地点 → create
 
-请严格基于 Schema 输出结构化数据。
+请严格基于以下 Schema 输出结构化数据：
+```json
+{
+  "intent": "create",
+  "extracted_info": {
+    "title": "去陆家嘴开会",
+    "time": "早上9点",
+    "location": "陆家嘴",
+    "participants": ["张三"],
+    "priority": 2,
+    "category": "工作"
+  },
+  "needs_clarification": false
+}
+```
 """
 
 
