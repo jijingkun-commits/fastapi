@@ -209,7 +209,7 @@ class VannaPGVector(VannaBase):
     def get_related_documentation(self, question: str, **kwargs) -> List[str]:
         """
         检索相关指标定义 (基于语义相似度)。
-        查询 t_dmp_ind_info。
+        查询 t_metric_definition 表。
         """
         embedding = self.generate_embedding(question)
         if not embedding:
@@ -217,10 +217,11 @@ class VannaPGVector(VannaBase):
             
         embedding_str = str(embedding)
         
-        # 检索最相关的 5 个指标
+        # 检索最相关的 5 个指标（统一使用 t_metric_definition）
         sql = text("""
-            SELECT metric_code, metric_name, description, formula 
-            FROM t_dmp_ind_info 
+            SELECT metric_id, metric_name, description, sql_template 
+            FROM t_metric_definition 
+            WHERE is_active = TRUE AND embedding IS NOT NULL
             ORDER BY embedding <=> :embedding 
             LIMIT 5
         """)
@@ -232,10 +233,10 @@ class VannaPGVector(VannaBase):
         for row in result:
             # 格式化文档块供 LLM 参考
             doc = (
-                f"指标代码: {row.metric_code}\n"
+                f"指标代码: {row.metric_id}\n"
                 f"指标名称: {row.metric_name}\n"
-                f"定义说明: {row.description}\n"
-                f"计算逻辑: {row.formula}"
+                f"定义说明: {row.description or ''}\n"
+                f"SQL模板: {row.sql_template or ''}"
             )
             docs.append(doc)
             

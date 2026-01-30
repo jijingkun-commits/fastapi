@@ -473,7 +473,12 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
           return <ThinkingBlock key={index} content={part.content} />;
         }
         // 修复 Markdown 表格格式（AI 可能返回缺少换行的表格）
-        const fixedContent = fixMarkdownTable(part.content);
+        // 同时移除开头的空白换行（防止后端消息格式问题导致显示异常）
+        const fixedContent = fixMarkdownTable(part.content).trimStart();
+        // 如果 trim 后为空，跳过渲染
+        if (!fixedContent) {
+          return null;
+        }
         return (
           <ReactMarkdown
             key={index}

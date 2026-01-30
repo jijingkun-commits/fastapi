@@ -3,6 +3,7 @@
 提供对话消息的 CRUD 操作。
 基于单表 t_chat_message 设计，title 存储在第一条 human 消息中。
 """
+import hashlib
 import json
 import logging
 from typing import Optional, List, Any
@@ -16,6 +17,14 @@ from app.repositories import chat_assets_repository
 
 
 logger = logging.getLogger(__name__)
+
+
+def _content_hash(content: str) -> str:
+    """计算内容的短 hash，用于日志对比和去重。"""
+    if not content:
+        return "empty"
+    normalized = content.strip()
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
 def save_message(
@@ -347,6 +356,28 @@ def save_conversation_from_messages(
     # 提取内容
     human_content = getattr(last_human, "content", "") if last_human else ""
     ai_content = str(getattr(last_ai, "content", "")) if last_ai else ""
+    replaced_count = 0  # 用于跟踪图片占位符替换数量
+    
+    # ============================================================
+    # Thinking 内容处理
+    # ============================================================
+    # 
+    # 【背景】DeepSeek/Qwen 的思考内容存储在 additional_kwargs 的
+    #         reasoning_content 或 thinking_content 字段
+    # 【处理】如果 ai_content 中没有 <think> 标签但有 thinking 内容，
+    #         将其包装后添加到内容开头，确保历史加载时前端能正确解析
+    # ============================================================
+    if last_ai:
+        additional_kwargs = getattr(last_ai, "additional_kwargs", {}) or {}
+        thinking = (
+            additional_kwargs.get("reasoning_content") or 
+            additional_kwargs.get("thinking_content") or 
+            ""
+        )
+        if thinking and "<think>" not in ai_content:
+            # 将 thinking 内容包装在 <think> 标签内，添加到内容开头
+            ai_content = f"<think>\n{thinking}\n</think>\n\n{ai_content}"
+            logger.info("已将 thinking 内容包装到 AI 回复中: %d 字符", len(thinking))
     
     # ============================================================
     # 图片占位符替换
@@ -406,20 +437,30 @@ def save_conversation_from_messages(
     
     # 3. 保存 human 消息（带去重检查，防止 interrupt 和 postprocess 重复保存）
     if human_content:
-        # 检查是否已存在相同内容的 human 消息
-        existing_human = (
+        human_content_str = str(human_content)
+        human_hash = _content_hash(human_content_str)
+        
+        # 检查最近的 human 消息是否有相同 hash（使用归一化内容比较）
+        recent_humans = (
             db.query(ChatMessage)
             .filter(
                 ChatMessage.thread_id == thread_id,
                 ChatMessage.role == "human",
-                ChatMessage.content == str(human_content),
             )
-            .first()
+            .order_by(ChatMessage.create_time.desc())
+            .limit(3)  # 只检查最近3条
+            .all()
         )
         
+        existing_human = None
+        for msg in recent_humans:
+            if _content_hash(msg.content or "") == human_hash:
+                existing_human = msg
+                break
+        
         if existing_human:
-            logger.info("跳过重复 human 消息: thread_id=%s, content=%s...", 
-                       thread_id, str(human_content)[:30])
+            logger.info("跳过重复 human 消息 (hash匹配): thread_id=%s, hash=%s, content=%s...", 
+                       thread_id, human_hash, human_content_str[:30])
         else:
             title = human_content[:50] if len(human_content) > 50 else human_content
             save_message(
@@ -433,25 +474,40 @@ def save_conversation_from_messages(
             )
     
     # 4. 保存 ai 消息（只保存最后一条，带去重检查）
+    extra_data = None  # 在外部定义，确保日志可访问
     if last_ai:  # 使用 last_ai 对象判断，确保能获取 metadata
-        # 检查是否已存在相同内容的 AI 消息（防止 interrupt/resume 与 postprocess 重复保存）
-        existing_ai = (
+        # 提取 metadata (additional_kwargs)
+        extra_data = getattr(last_ai, "additional_kwargs", None)
+        ai_hash = _content_hash(ai_content)
+        
+        # 检查最近的 AI 消息是否有相同 hash（使用归一化内容比较）
+        recent_ais = (
             db.query(ChatMessage)
             .filter(
                 ChatMessage.thread_id == thread_id,
                 ChatMessage.role == "ai",
-                ChatMessage.content == ai_content,
             )
-            .first()
+            .order_by(ChatMessage.create_time.desc())
+            .limit(3)  # 只检查最近3条
+            .all()
         )
         
+        existing_ai = None
+        for msg in recent_ais:
+            if _content_hash(msg.content or "") == ai_hash:
+                existing_ai = msg
+                break
+        
         if existing_ai:
-            logger.info("跳过重复 AI 消息: thread_id=%s, content=%s...", 
-                       thread_id, ai_content[:30] if ai_content else "")
+            logger.info("跳过重复 AI 消息 (hash匹配): thread_id=%s, hash=%s, content=%s...", 
+                       thread_id, ai_hash, ai_content[:30] if ai_content else "")
+            # 如果已存在但 extra_data 不同，更新 extra_data（确保结构化数据不丢失）
+            if extra_data and (not existing_ai.extra_data or existing_ai.extra_data != extra_data):
+                existing_ai.extra_data = extra_data
+                db.commit()
+                logger.info("更新已存在消息的 extra_data: msg_id=%d, keys=%s", 
+                           existing_ai.id, list(extra_data.keys()))
         else:
-            # 提取 metadata (additional_kwargs)
-            extra_data = getattr(last_ai, "additional_kwargs", None)
-            
             save_message(
                 db,
                 user_id=user_id,
@@ -462,8 +518,13 @@ def save_conversation_from_messages(
                 extra_data=extra_data,  # 保存 metadata
             )
     
-    logger.info("对话已保存: thread_id=%s, human=%d字, ai=%d字", 
-               thread_id, len(str(human_content)), len(str(ai_content)))
+    # 详细同步追踪日志
+    saved_extra_keys = list(extra_data.keys()) if extra_data else []
+    logger.info(
+        "[SYNC-TRACE] 数据库保存完成: thread_id=%s, ai_len=%d, ai_hash=%s, extra_data_keys=%s, kb_images_replaced=%d",
+        thread_id, len(str(ai_content)), _content_hash(str(ai_content)),
+        saved_extra_keys, replaced_count
+    )
 
 
 def save_feedback(

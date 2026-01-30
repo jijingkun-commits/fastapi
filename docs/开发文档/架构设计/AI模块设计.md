@@ -1231,7 +1231,7 @@ LANGFUSE_HOST=https://cloud.langfuse.com  # 可选
 ├─────────────────────────────────────────────────────────────┤
 │  generate_embedding()      → 使用项目统一 embedding 工具    │
 │  get_related_ddl()         → t_meta_tables + t_meta_columns │
-│  get_related_documentation()→ t_dmp_ind_info (指标定义)     │
+│  get_related_documentation()→ t_metric_definition (指标定义)│
 │  get_related_question_sql() → t_data_query_log (训练数据)   │
 │  submit_prompt()           → LLM 生成 SQL                   │
 └─────────────────────────────────────────────────────────────┘
@@ -1242,7 +1242,7 @@ LANGFUSE_HOST=https://cloud.langfuse.com  # 可选
 | 方法 | 数据源 | 用途 |
 |------|--------|------|
 | `get_related_ddl()` | `t_meta_tables` + `t_meta_columns` | 检索相关表结构（DDL），构建完整 CREATE TABLE |
-| `get_related_documentation()` | `t_dmp_ind_info` | 检索相关指标定义，提供业务语义 |
+| `get_related_documentation()` | `t_metric_definition` | 检索相关指标定义，提供业务语义 |
 | `get_related_question_sql()` | `t_data_query_log` (trained=true) | 检索相似历史问答，Few-shot 示例 |
 
 **DDL 检索流程**：
@@ -1265,7 +1265,7 @@ sequenceDiagram
     DDL-->>Q: 返回 DDL 列表
 ```
 
-#### 指标体系 (`t_dmp_ind_info`)
+#### 指标体系 (`t_metric_definition`)
 
 指标体系是问数 Agent 的核心知识库，存储业务指标的语义定义和 SQL 模板。
 

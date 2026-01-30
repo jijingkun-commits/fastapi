@@ -619,7 +619,8 @@ async def create_multi_agent_graph(
             except Exception as e:
                 logger.error(f"[{name}]流式输出异常: {e}", exc_info=True)
                 # 发生异常时，至少返回状态，避免前端挂起
-                error_msg = f"\n[System Error: {str(e)}]"
+                # 注意：不要在开头加换行，否则保存到数据库后加载回来会显示空行
+                error_msg = f"[System Error: {str(e)}]"
                 emit_token(writer, error_msg, node=name)
                 # 返回错误消息以结束当前节点执行
                 return {"messages": [AIMessage(content=error_msg)]}

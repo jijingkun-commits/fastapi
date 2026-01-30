@@ -6,6 +6,7 @@
 - 双写逻辑：LangGraph 自动写 SQLite Checkpoint，业务数据写 MySQL
 """
 import asyncio
+import hashlib
 import json
 import logging
 from typing import AsyncGenerator, Optional
@@ -18,6 +19,14 @@ from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 
 
 logger = logging.getLogger(__name__)
+
+
+def _content_hash(content: str) -> str:
+    """计算内容的短 hash，用于日志对比。"""
+    if not content:
+        return "empty"
+    normalized = content.strip()
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
 # 注意：对话保存逻辑已移至 chat_graph.py 的 postprocess 节点
@@ -147,6 +156,8 @@ class ChatService:
         full_answer = []
         tool_data = []
         thinking_content = None
+        # 用于收集流式过程中的结构化数据（result 事件）
+        collected_additional_kwargs = {}
         
         logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s, multi_agent=%s", 
                     thread_id, len(prompt), enable_thinking, model_id or "默认", use_multi_agent)
@@ -189,6 +200,11 @@ class ChatService:
                         # 如果有 message 字段，也收集到 full_answer
                         if event_data.get("message"):
                             full_answer.append(event_data["message"])
+                        # 收集结构化数据用于 done 事件的 additional_kwargs
+                        if event_data.get("data_type"):
+                            collected_additional_kwargs["data_type"] = event_data["data_type"]
+                            collected_additional_kwargs["data"] = event_data.get("data")
+                            logger.debug("收集结构化数据: data_type=%s", event_data["data_type"])
                         yield self._format_sse("result", event_data)
                     
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
@@ -214,41 +230,16 @@ class ChatService:
                         # 在 interrupt 时保存已生成的消息
                         # 注意：snapshot.values.messages 不包含 Supervisor 的流式回复
                         # 因此我们直接使用 full_answer（流式收集的内容）和原始 prompt
-                        try:
-                            from app.db.session import get_db_context
-                            from app.repositories import chat_repo
-                            
-                            ai_content = "".join(full_answer)
-                            
-                            with get_db_context() as db:
-                                # 保存 human 消息
-                                title = prompt[:50] if len(prompt) > 50 else prompt
-                                chat_repo.save_message(
-                                    db,
-                                    user_id=user_id,
-                                    thread_id=thread_id,
-                                    role="human",
-                                    content_type="text",
-                                    content=prompt,
-                                    title=title,
-                                )
-                                
-                                # 保存 AI 消息（如果有内容）- 标记为中间消息
-                                if ai_content:
-                                    chat_repo.save_message(
-                                        db,
-                                        user_id=user_id,
-                                        thread_id=thread_id,
-                                        role="ai",
-                                        content_type="markdown",
-                                        content=ai_content,
-                                        extra_data={"is_intermediate": True},  # 标记为中间消息，前端可过滤
-                                    )
-                            
-                            logger.info("Interrupt 场景消息已保存: thread_id=%s, human=%d字, ai=%d字", 
-                                       thread_id, len(prompt), len(ai_content))
-                        except Exception as save_error:
-                            logger.error("Interrupt 场景保存消息失败: %s", save_error, exc_info=True)
+                        ai_content = "".join(full_answer)
+                        if ai_content:
+                            self._save_conversation_fallback(
+                                thread_id=thread_id,
+                                user_id=user_id,
+                                prompt=prompt,
+                                ai_content=ai_content,
+                                is_intermediate=True,
+                                scenario="Interrupt",
+                            )
                         
                         for interrupt in task.interrupts:
                             logger.info("检测到 interrupt: %s", interrupt.value)
@@ -266,6 +257,11 @@ class ChatService:
             # 例如: TodoAgent 的 query/execute 操作直接返回 AIMessage，没有触发 on_chat_model_stream
             
             done_payload = {"thread_id": thread_id}
+            
+            # 1. 优先使用流式过程中收集的结构化数据（最可靠）
+            if collected_additional_kwargs:
+                done_payload["additional_kwargs"] = collected_additional_kwargs
+                logger.debug("使用流式收集的 additional_kwargs: %s", list(collected_additional_kwargs.keys()))
             
             if snapshot and "messages" in snapshot.values:
                 messages = snapshot.values["messages"]
@@ -288,11 +284,16 @@ class ChatService:
                             else:
                                 logger.warning("跳过原始JSON输出: %s", content[:100])
                         
-                        # 优先使用最后一条 AI 消息的 additional_kwargs
-                        if last_msg.additional_kwargs:
-                             done_payload["additional_kwargs"] = last_msg.additional_kwargs
+                        # 2. 如果流式未收集到，尝试从最后一条 AI 消息获取
+                        if "additional_kwargs" not in done_payload and last_msg.additional_kwargs:
+                            # 过滤掉不需要传给前端的字段
+                            filtered = {k: v for k, v in last_msg.additional_kwargs.items() 
+                                       if v is not None and k not in ("reasoning_content",)}
+                            if filtered:
+                                done_payload["additional_kwargs"] = filtered
+                                logger.debug("使用 last_msg.additional_kwargs: %s", list(filtered.keys()))
 
-                    # 如果没有找到 additional_kwargs，回溯寻找 (兼容旧逻辑)
+                    # 3. 最后回溯寻找 (兼容旧逻辑)
                     if "additional_kwargs" not in done_payload:
                         for msg in reversed(messages):
                              if isinstance(msg, AIMessage) and hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
@@ -300,16 +301,32 @@ class ChatService:
                                               if v is not None and k not in ("reasoning_content", )}
                                   if additional:
                                       done_payload["additional_kwargs"] = additional
+                                      logger.debug("通过回溯找到 additional_kwargs: %s", list(additional.keys()))
                                       break
 
             # 流结束（对话由 postprocess 节点保存到数据库）
-            logger.info("流式处理完成: thread_id=%s, answer_len=%d", thread_id, len("".join(full_answer)))
+            streamed_content = "".join(full_answer)
+            additional_keys = list(done_payload.get("additional_kwargs", {}).keys()) if done_payload.get("additional_kwargs") else []
+            logger.info(
+                "[SYNC-TRACE] 流式输出完成: thread_id=%s, content_len=%d, content_hash=%s, additional_kwargs_keys=%s, thinking=%s",
+                thread_id, len(streamed_content), _content_hash(streamed_content), 
+                additional_keys, bool(thinking_content)
+            )
             
             yield self._format_sse("done", done_payload)
             
         except Exception as e:
-
             error_msg = str(e)
+            
+            # 保存错误消息到数据库（确保对话历史不丢失）
+            ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
+            self._save_conversation_fallback(
+                thread_id=thread_id,
+                user_id=user_id,
+                prompt=prompt,
+                ai_content=ai_content,
+                scenario="Exception",
+            )
             
             # 检查是否为内容审核错误
             if "inappropriate content" in error_msg.lower() or "内容违规" in error_msg:
@@ -327,6 +344,65 @@ class ChatService:
         payload = json.dumps(data, ensure_ascii=False)
         return f"event: {event_type}\ndata: {payload}\n\n".encode()
 
+    def _save_conversation_fallback(
+        self,
+        thread_id: str,
+        user_id: Optional[int],
+        prompt: Optional[str],
+        ai_content: str,
+        *,
+        is_intermediate: bool = False,
+        scenario: str = "fallback",
+    ) -> None:
+        """统一的备用消息保存方法，用于异常/中断场景。
+        
+        Args:
+            thread_id: 对话线程 ID
+            user_id: 用户 ID
+            prompt: 用户输入（None 表示不保存 human 消息，如 resume 场景）
+            ai_content: AI 回复内容
+            is_intermediate: 是否为中间消息（如 interrupt 场景）
+            scenario: 场景标识，用于日志
+        """
+        from app.db.session import get_db_context
+        from app.repositories import chat_repo
+        
+        try:
+            with get_db_context() as db:
+                # 保存 human 消息（如果提供）
+                if prompt is not None:
+                    title = prompt[:50] if len(prompt) > 50 else prompt
+                    chat_repo.save_message(
+                        db,
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        role="human",
+                        content_type="text",
+                        content=prompt,
+                        title=title,
+                    )
+                
+                # 保存 AI 消息
+                extra_data = {"is_intermediate": True} if is_intermediate else None
+                chat_repo.save_message(
+                    db,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    role="ai",
+                    content_type="markdown",
+                    content=ai_content,
+                    extra_data=extra_data,
+                )
+            
+            logger.info(
+                "%s 场景消息已保存: thread_id=%s, human=%s, ai=%d字",
+                scenario,
+                thread_id,
+                f"{len(prompt)}字" if prompt else "无",
+                len(ai_content),
+            )
+        except Exception as save_error:
+            logger.error("%s 场景保存消息失败: %s", scenario, save_error, exc_info=True)
 
 
 async def sse_stream(
@@ -395,6 +471,8 @@ async def sse_resume_stream(
     
     # 用于收集完整回复
     full_answer = []
+    # 用于收集流式过程中的结构化数据
+    collected_additional_kwargs = {}
     
     svc = ChatService()
     format_sse = svc._format_sse
@@ -456,6 +534,10 @@ async def sse_resume_stream(
                 elif event_type == "result":
                     if event_data.get("message"):
                         full_answer.append(event_data["message"])
+                    # 收集结构化数据用于 done 事件
+                    if event_data.get("data_type"):
+                        collected_additional_kwargs["data_type"] = event_data["data_type"]
+                        collected_additional_kwargs["data"] = event_data.get("data")
                     yield format_sse("result", event_data)
                 
                 elif event_type in ("status", "clarification", "confirmation"):
@@ -492,6 +574,10 @@ async def sse_resume_stream(
         
         done_payload = {"thread_id": thread_id}
         
+        # 1. 优先使用流式过程中收集的结构化数据
+        if collected_additional_kwargs:
+            done_payload["additional_kwargs"] = collected_additional_kwargs
+        
         # 检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
         if snapshot and "messages" in snapshot.values:
             messages = snapshot.values["messages"]
@@ -507,11 +593,28 @@ async def sse_resume_stream(
                          yield format_sse("token", {"content": content or ""})
                          done_payload["final_content"] = content
                     
-                    if additional:
-                        done_payload["additional_kwargs"] = additional
+                    # 2. 如果流式未收集到，从 snapshot 获取
+                    if "additional_kwargs" not in done_payload and additional:
+                        filtered = {k: v for k, v in additional.items() 
+                                   if v is not None and k not in ("reasoning_content",)}
+                        if filtered:
+                            done_payload["additional_kwargs"] = filtered
 
         yield format_sse("done", done_payload)
         
     except Exception as e:
+        error_msg = str(e)
         logger.exception("恢复流程错误: %s", e)
-        yield format_sse("error", {"message": str(e)})
+        
+        # 保存错误消息到数据库（确保对话历史不丢失）
+        # 注意：resume 场景不需要保存 human 消息，只保存 AI 错误响应
+        ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
+        svc._save_conversation_fallback(
+            thread_id=thread_id,
+            user_id=user_id,
+            prompt=None,
+            ai_content=ai_content,
+            scenario="ResumeException",
+        )
+        
+        yield format_sse("error", {"message": error_msg})

@@ -82,7 +82,7 @@ class MetricService:
     def _match_metric_by_vector(self, question: str, similarity_threshold: float = 0.6) -> Optional[MetricDefinition]:
         """使用向量相似度搜索匹配指标。
         
-        查询 t_dmp_ind_info 表的 embedding 列进行语义匹配。
+        查询 t_metric_definition 表的 embedding 列进行语义匹配。
         
         Args:
             question: 用户问题
@@ -103,23 +103,23 @@ class MetricService:
             embedding_str = str(question_embedding)
             
             with self.chat_engine.connect() as conn:
-                # 向量相似度搜索
+                # 向量相似度搜索（统一使用 t_metric_definition）
                 # 使用余弦距离，结果越小越相似
                 # 1 - distance = similarity
                 result = conn.execute(text("""
                     SELECT 
-                        metric_code as metric_id,
+                        metric_id,
                         metric_name,
-                        tags as aliases,
+                        aliases,
                         description,
-                        formula as sql_template,
+                        sql_template,
                         category,
                         unit,
                         1 - (embedding <=> :embedding) as similarity
-                    FROM t_dmp_ind_info
-                    WHERE embedding IS NOT NULL
-                      AND formula IS NOT NULL
-                      AND formula != ''
+                    FROM t_metric_definition
+                    WHERE is_active = TRUE
+                      AND embedding IS NOT NULL
+                      AND sql_template IS NOT NULL
                     ORDER BY embedding <=> :embedding
                     LIMIT 3
                 """), {"embedding": embedding_str})
@@ -137,8 +137,6 @@ class MetricService:
                 logger.info(f"向量搜索最佳匹配: {best_row.metric_name}, 相似度: {similarity:.3f}")
                 
                 if similarity >= similarity_threshold:
-                    # 构建 MetricDefinition
-                    # 注意：t_dmp_ind_info 的列结构与 t_metric_definition 不同
                     metric = MetricDefinition((
                         best_row.metric_id,
                         best_row.metric_name,
@@ -162,6 +160,8 @@ class MetricService:
     def _match_metric_by_keyword(self, question_lower: str) -> Optional[MetricDefinition]:
         """使用关键词匹配指标（降级方案）。
         
+        查询 t_metric_definition 表进行名称和别名匹配。
+        
         Args:
             question_lower: 小写的用户问题
             
@@ -170,24 +170,13 @@ class MetricService:
         """
         try:
             with self.chat_engine.connect() as conn:
-                # 首先尝试 t_metric_definition 表（如果存在）
-                try:
-                    result = conn.execute(text("""
-                        SELECT metric_id, metric_name, aliases, description, 
-                               sql_template, category, unit
-                        FROM t_metric_definition
-                        WHERE is_active = TRUE AND sql_template IS NOT NULL
-                    """))
-                    metrics = result.fetchall()
-                except Exception:
-                    # t_metric_definition 不存在，使用 t_dmp_ind_info
-                    result = conn.execute(text("""
-                        SELECT metric_code, metric_name, tags, description, 
-                               formula, category, unit
-                        FROM t_dmp_ind_info
-                        WHERE formula IS NOT NULL AND formula != ''
-                    """))
-                    metrics = result.fetchall()
+                result = conn.execute(text("""
+                    SELECT metric_id, metric_name, aliases, description, 
+                           sql_template, category, unit
+                    FROM t_metric_definition
+                    WHERE is_active = TRUE AND sql_template IS NOT NULL
+                """))
+                metrics = result.fetchall()
                 
                 # 关键词匹配
                 for row in metrics:
@@ -198,7 +187,7 @@ class MetricService:
                         logger.info(f"匹配到指标(名称): {metric.metric_name}")
                         return metric
                     
-                    # 检查别名/标签
+                    # 检查别名
                     if metric.aliases:
                         for alias in metric.aliases.split(','):
                             alias = alias.strip()

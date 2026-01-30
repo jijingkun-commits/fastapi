@@ -19,7 +19,7 @@ from app.db.session import engine
 
 
 # 源文件路径
-SOURCE_FILE = project_root / "docs/内部参考/数据资料/dmp_show_ind_info_20260123.txt"
+SOURCE_FILE = project_root / "data/dmp_show_ind_info_20260123.txt"
 
 # 字段分隔符 (ASCII 27, ESC)
 DELIMITER = "\x1b"
@@ -89,18 +89,21 @@ def import_metrics():
         print("无有效数据，退出")
         return
     
-    # 插入数据库
+    # 插入数据库 (使用 UPSERT 保留已有的 sql_template)
     with engine.connect() as conn:
-        # 清空旧数据
-        conn.execute(text("TRUNCATE TABLE t_metric_definition"))
-        print("已清空旧数据")
-        
-        # 批量插入
+        # 使用 ON CONFLICT 进行 UPSERT，保留已有的 sql_template
         insert_sql = text("""
             INSERT INTO t_metric_definition 
             (metric_id, metric_name, description, category, unit, frequency, aliases, sql_template)
             VALUES 
             (:metric_id, :metric_name, :description, :category, :unit, :frequency, :aliases, :sql_template)
+            ON CONFLICT (metric_id) DO UPDATE SET
+                metric_name = EXCLUDED.metric_name,
+                description = EXCLUDED.description,
+                category = COALESCE(EXCLUDED.category, t_metric_definition.category),
+                unit = COALESCE(EXCLUDED.unit, t_metric_definition.unit),
+                frequency = EXCLUDED.frequency,
+                updated_at = NOW()
         """)
         
         batch_size = 500

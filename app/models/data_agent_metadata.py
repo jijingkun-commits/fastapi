@@ -78,21 +78,27 @@ class DataQueryLog(Base):
     question_embedding = Column(Vector(2048), comment="问题向量（智谱 embedding-3）")
     created_at = Column(TIMESTAMP, server_default=func.now())
 
+
 class Metric(Base):
-    """指标定义表"""
-    __tablename__ = "t_metrics"
+    """指标定义（兼容层，映射到 t_metric_definition）"""
+    __tablename__ = "t_metric_definition"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False, comment="指标名称")
-    description = Column(Text, comment="描述")
-    metric_type = Column(String(20), comment="count, sum, avg, derived")
-    model_name = Column(String(100), comment="关联的数据模型")
-    field_name = Column(String(100), comment="计算字段")
-    formula = Column(Text, comment="计算公式（派生指标）")
-    filter_condition = Column(Text, comment="WHERE 条件")
-    synonyms = Column(ARRAY(String), comment="同义词数组")
-    embedding = Column(Vector(2048), comment="指标描述向量（智谱 embedding-3）")
-    
-    created_by = Column(Integer, comment="创建人ID")
+    name = Column(String(100), nullable=False, unique=True, comment="指标名称")
+    description = Column(Text, comment="指标描述")
+    metric_type = Column(String(50), comment="指标类型：sum/avg/count/formula")
+    model_name = Column(String(100), comment="关联模型/表名")
+    field_name = Column(String(100), comment="关联字段名")
+    formula = Column(Text, comment="计算公式（SQL片段）")
+    filter_condition = Column(Text, comment="过滤条件")
+    synonyms = Column(ARRAY(String), comment="同义词列表")
+    embedding = Column(Vector(2048), comment="向量嵌入")
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+# === 废弃表说明 ===
+# t_metrics 表已废弃，统一使用 t_metric_definition
+# t_dmp_ind_info 表已废弃，不再使用 DIDP 原始格式
+# 
+# 指标定义表现在只有一个：t_metric_definition
+# 详见 docs/开发文档/架构设计/数据库设计.md

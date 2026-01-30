@@ -27,6 +27,8 @@ from app.ai.prompts.data_prompts import (
 )
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.utils.state_helpers import get_user_id
+from app.ai.utils.schema_router import route_schema
+from app.core.config import ANALYTICS_DEFAULT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -187,9 +189,10 @@ def schema_retrieve(state: DataAgentState) -> Dict:
     """检索相关表结构（Vanna RAG）。
     
     职责：
-    1. 使用 Vanna 检索相关 DDL
-    2. 检索相关指标文档
-    3. 检索类似历史问题
+    1. 使用 schema 路由确定目标 schema
+    2. 使用 Vanna 检索相关 DDL（限定 schema 范围）
+    3. 检索相关指标文档
+    4. 检索类似历史问题
     """
     logger.info("=== schema_retrieve 节点 ===")
     
@@ -202,8 +205,12 @@ def schema_retrieve(state: DataAgentState) -> Dict:
     try:
         vanna = get_vanna()
         
-        # 检索相关 DDL
-        ddl_list = vanna.get_related_ddl(question)
+        # 使用 schema 路由确定目标 schema
+        target_schema = route_schema(question)
+        logger.info(f"Schema 路由结果: {target_schema}")
+        
+        # 检索相关 DDL（传递 schema 参数，缩小检索范围）
+        ddl_list = vanna.get_related_ddl(question, schema=target_schema)
         
         # 检索相关文档/指标
         docs = vanna.get_related_documentation(question)
@@ -221,7 +228,11 @@ def schema_retrieve(state: DataAgentState) -> Dict:
         
         logger.info(f"检索到 {len(retrieved_schema)} 条相关信息")
         
-        return {"retrieved_schema": retrieved_schema}
+        # 返回检索结果和目标 schema，供后续节点使用
+        return {
+            "retrieved_schema": retrieved_schema,
+            "target_schema": target_schema
+        }
         
     except Exception as e:
         logger.exception(f"Schema 检索失败: {e}")
@@ -287,18 +298,28 @@ def sql_generate(state: DataAgentState) -> Dict:
     if not similar_context:
         similar_context = "（未检索到相关历史查询）"
     
-    logger.info(f"RAG 上下文: DDL={len(ddl_context)}字符, Doc={len(doc_context)}字符, Similar={len(similar_context_parts)}条")
+    # 获取目标 Schema（由 schema_retrieve 节点确定）
+    target_schema = state.get("target_schema", ANALYTICS_DEFAULT_SCHEMA)
+    logger.info(f"RAG 上下文: DDL={len(ddl_context)}字符, Doc={len(doc_context)}字符, Similar={len(similar_context_parts)}条, Schema={target_schema}")
     
     try:
         vanna = get_vanna()
         
-        # 构建完整的 prompt（显式注入 RAG 检索结果）
+        # 构建 Schema 约束提示
+        schema_constraint = f"""
+**重要约束**：
+- 生成的 SQL 必须使用 schema 前缀 `{target_schema}`
+- 表名格式示例：`{target_schema}.table_name`
+- 如果检索到的 DDL 中已包含 schema 前缀，请直接使用该前缀
+"""
+        
+        # 构建完整的 prompt（显式注入 RAG 检索结果 + Schema 约束）
         full_prompt = SQL_GENERATION_PROMPT.format(
             ddl=ddl_context,
             documentation=doc_context,
             similar_queries=similar_context,
             question=question
-        )
+        ) + schema_constraint
         
         # 构建消息列表
         messages = [

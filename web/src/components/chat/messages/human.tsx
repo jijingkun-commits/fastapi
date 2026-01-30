@@ -80,6 +80,7 @@ export function HumanMessage({
         "group ml-auto flex items-center gap-2",
         isEditing && "w-full max-w-xl",
       )}
+      data-testid="human-message"
     >
       <div className={cn("flex flex-col gap-2", isEditing && "w-full")}>
         {isEditing ? (

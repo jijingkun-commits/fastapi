@@ -194,10 +194,16 @@ data: {json_payload}
   type: "done",
   data: {
     thread_id: string,
-    qa_record_id?: number  // 问答记录 ID
+    qa_record_id?: number,           // 问答记录 ID
+    additional_kwargs?: {            // 结构化数据（用于卡片渲染）
+      data_type?: string,            // 数据类型：todo_list / image 等
+      data?: any                     // 结构化数据
+    }
   }
 }
 ```
+
+> **注意**: `additional_kwargs` 字段用于传递需要在历史加载时恢复的结构化数据（如 TodoList 卡片）。前端需要在 `onDone` 回调中将其更新到消息的 `additional_kwargs` 属性。
 
 ### `error` - 错误
 

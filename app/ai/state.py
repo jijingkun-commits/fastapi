@@ -131,6 +131,7 @@ class DataAgentState(BaseAgentState, total=False):
     # 查询上下文
     query_context: Dict                # 当前查询的完整上下文
     retrieved_schema: List[Dict]       # 检索到的相关表结构
+    target_schema: str                 # 目标 Schema（由 schema 路由确定）
     time_range: str                    # 时间范围（如 "本月", "过去7天"）
     filters: List[str]                 # 筛选条件列表
     dimensions: List[str]              # 聚合维度列表

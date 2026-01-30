@@ -1,0 +1,123 @@
+# 脚本目录说明
+
+本目录包含项目维护和数据初始化相关的脚本。
+
+## 目录结构
+
+```
+scripts/                    # 运维和数据脚本
+├── README.md              # 本文件
+│
+├── # === 数据初始化（部署时使用）===
+├── init_llm_config.py     # 初始化 LLM 模型配置
+├── init_metric_definition.py  # 初始化指标定义（基础 4 个）
+├── init_skill_config.py   # 初始化技能配置
+├── init_tables_ci.py      # CI 环境表初始化
+├── init_business_tables.py    # 业务表初始化
+├── init_feedback_table.py     # 反馈表初始化
+├── init_metrics_table.py  # [废弃] 创建 t_dmp_ind_info 表
+│
+├── # === 数据导入 ===
+├── import_skills.py       # ★ 导入 AI 技能到向量库
+├── import_metrics_from_didp.py  # 从 DIDP 导入指标
+├── import_deposit_data.py # 导入存款测试数据
+├── import_dim_data.py     # 导入维度数据
+├── import_dim_tables.py   # 导入维度表结构
+│
+├── # === 元数据同步 ===
+├── schema_sync.py         # ★ 同步表元数据到向量库
+├── expand_metrics.py      # ★ 扩展指标定义（19 个）
+├── create_dim_tables.py   # 创建维度表
+├── create_meta_tables.py  # 创建元数据表
+│
+├── # === 数据维护 ===
+├── cleanup_chat_db.py     # 清理聊天历史
+├── migrate_vector_dim.py  # 迁移向量维度
+├── force_import_skills.py # 强制重新导入技能
+├── archive_restore_skills.py  # 归档/恢复技能
+├── merge_skills_from_cursorrules.py  # 合并 Cursor 规则技能
+│
+├── # === 验证和检查 ===
+├── check_counts.py        # 检查各表记录数
+├── verify_data_db.py      # 验证数据库状态
+├── validate_metric_coverage.py  # 验证指标覆盖率
+├── inspect_data_files.py  # 检查数据文件
+│
+├── # === 工具脚本 ===
+├── extract_metric_sql.py  # 提取指标 SQL
+├── setup_data.py          # 数据初始化入口
+└── sync-repos.sh          # 仓库同步脚本
+
+install/                   # 部署安装相关
+├── scripts/
+│   ├── init_postgres.sql/ # ★ 数据库迁移 SQL（按序号执行）
+│   │   ├── 006_add_vision_models.sql
+│   │   ├── 007_upgrade_todo_tables.sql
+│   │   ├── ...
+│   │   └── 016_expand_metrics.sql
+│   ├── init_llm_config.py     # LLM 配置初始化
+│   ├── init_minio_buckets.py  # MinIO Bucket 初始化
+│   └── init_system_config.py  # 系统配置初始化
+└── sql/                   # 基础 SQL 脚本
+    ├── init_postgres.sql  # ★ 核心表结构
+    ├── 003_llm_config.sql # LLM 配置表
+    ├── 004_create_todo_table.sql  # 待办表
+    └── create_chat_assets_table.sql  # 附件表
+```
+
+## 常用脚本
+
+### 部署初始化
+
+```bash
+# 推荐使用一键部署脚本
+./deploy.sh dev init
+
+# 或手动执行关键脚本
+python scripts/init_llm_config.py
+python scripts/init_metric_definition.py
+python scripts/expand_metrics.py
+python scripts/import_skills.py
+python scripts/schema_sync.py
+```
+
+### 日常维护
+
+```bash
+# 同步表元数据（新增表后执行）
+python scripts/schema_sync.py
+
+# 更新 AI 技能（修改 SKILL.md 后执行）
+python scripts/import_skills.py
+
+# 检查数据状态
+python scripts/check_counts.py
+python scripts/validate_metric_coverage.py
+```
+
+### 数据清理
+
+```bash
+# 清理聊天历史（保留 30 天）
+python scripts/cleanup_chat_db.py --days 30
+
+# 强制重新导入技能
+python scripts/force_import_skills.py
+```
+
+## 脚本分类
+
+| 分类 | 说明 | 执行频率 |
+|------|------|----------|
+| **初始化** | 部署时执行一次 | 部署时 |
+| **导入** | 数据变更后执行 | 按需 |
+| **同步** | 元数据变更后执行 | 按需 |
+| **维护** | 定期清理 | 定期 |
+| **验证** | 排查问题时使用 | 按需 |
+
+## 注意事项
+
+1. **执行顺序**：初始化脚本有依赖关系，建议使用 `./deploy.sh init`
+2. **环境变量**：所有脚本依赖 `.env` 配置，确保配置正确
+3. **幂等性**：大部分脚本支持重复执行，使用 `ON CONFLICT DO UPDATE`
+4. **废弃脚本**：`init_metrics_table.py` 已废弃，勿使用

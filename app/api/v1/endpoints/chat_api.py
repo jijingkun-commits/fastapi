@@ -5,6 +5,7 @@
 - 对话历史查询和管理
 - 恢复被中断的流程（人工审核）
 """
+import hashlib
 import logging
 from typing import Optional, List, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -24,6 +25,14 @@ from app.models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("api.chat")
+
+
+def _content_hash(content: str) -> str:
+    """计算内容的短 hash，用于日志对比。"""
+    if not content:
+        return "empty"
+    normalized = content.strip()
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
 # ==================== Schemas ====================
@@ -168,6 +177,15 @@ def get_thread_messages(
              # 旧数据兼容：如果仍有 minio://，保留原样或日志警告，不再尝试转换
              # 因为 message_processor 已被移除
              pass
+        
+        # 同步追踪日志（仅对 AI 消息记录）
+        if m.role == "ai":
+            extra_keys = list(m.extra_data.keys()) if m.extra_data else []
+            logger.info(
+                "[SYNC-TRACE] 历史加载: thread_id=%s, msg_id=%d, ai_len=%d, ai_hash=%s, extra_data_keys=%s",
+                thread_id, m.id, len(content) if content else 0, 
+                _content_hash(content) if content else "empty", extra_keys
+            )
         
         result.append(MessageOut(
             id=m.id,

@@ -248,6 +248,7 @@ export async function streamLLM(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let doneCalled = false;
 
   try {
     while (true) {
@@ -311,7 +312,10 @@ export async function streamLLM(
             // 知识库图片映射事件
             onKbImages?.(data.images);
           } else if (type === "done") {
-            onDone?.(data.thread_id, data.additional_kwargs);
+            if (!doneCalled) {
+              doneCalled = true;
+              onDone?.(data.thread_id, data.additional_kwargs);
+            }
           } else if (type === "error") {
             onError?.(data.message);
           }
@@ -328,11 +332,11 @@ export async function streamLLM(
     }
   } finally {
     // 确保在正常结束或异常时调用 onDone，避免状态卡死
-    // 注意：如果在循环内已经调用过 onDone，这里可能会重复调用，但在 React 中这通常是可以接受的（只会触发一次状态更新），
-    // 或者可以增加一个 flag 标记。简化起见，这里总是调用，业务层需做幂等处理。
-    // 为了更安全，可以只在错误或 Abort 时调用，或者完全依赖 done 事件。
-    // 但 SSE 有时会中断，所以 finally 兜底是必要的。
-    onDone?.(options?.threadId);
+    // 使用 doneCalled 标记防止重复调用
+    if (!doneCalled) {
+      doneCalled = true;
+      onDone?.(options?.threadId);
+    }
   }
 }
 
