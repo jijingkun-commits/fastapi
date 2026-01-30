@@ -219,7 +219,9 @@ export function AssistantMessage({
                   isLoading={isLoading}
                   isAiMessage={true}
                   handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                  messageId={message?.id}
                 />
+
               </div>
             )}
           </>

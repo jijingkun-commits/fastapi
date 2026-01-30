@@ -22,7 +22,7 @@ class AddTodoInput(BaseModel):
     priority: int = Field(default=2, description="优先级：1=高, 2=中, 3=低")
     start_time: Optional[str] = Field(default=None, description="开始时间，格式：YYYY-MM-DD HH:MM")
     due_date: Optional[str] = Field(default=None, description="截止日期，格式：YYYY-MM-DD HH:MM")
-    location: Optional[str] = Field(default=None, description="地点")  # 🆕 新增
+    location: Optional[str] = Field(default=None, description="地点")
     category: Optional[str] = Field(default=None, description="分类：工作/生活/学习等")
     tags: Optional[List[str]] = Field(default=None, description="标签列表")
     reminder_enabled: bool = Field(default=False, description="是否启用提醒")
@@ -81,7 +81,7 @@ def _parse_datetime(date_str: str) -> Optional[datetime]:
     if not date_str:
         return None
         
-    # 🆕 尝试解析 ISO 格式 (e.g. 2026-01-19T09:00:00)
+    # 尝试解析 ISO 格式 (e.g. 2026-01-19T09:00:00)
     try:
         return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
     except ValueError:
@@ -117,7 +117,7 @@ def add_todo(
     priority: int = 2, 
     start_time: str = None,
     due_date: str = None,
-    location: str = None, # 🆕 新增
+    location: str = None,
     category: str = None,
     tags: List[str] = None,
     reminder_enabled: bool = False,
@@ -140,7 +140,7 @@ def add_todo(
         parsed_start_time = _parse_datetime(start_time) if start_time else None
         parsed_due_date = _parse_datetime(due_date) if due_date else None
         
-        # 🆕 将地点拼接到描述中
+        # 将地点拼接到描述中
         final_description = description
         if location:
             if final_description:

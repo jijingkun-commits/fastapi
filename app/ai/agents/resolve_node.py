@@ -17,7 +17,7 @@ from app.ai.state import TodoAgentState
 logger = logging.getLogger(__name__)
 
 
-def resolve_entity(state: TodoAgentState) -> TodoAgentState:
+def resolve_entity(state: TodoAgentState) -> Dict:
     """实体解析节点 - 在确认前将模糊标识解析为具体 ID。
     
     处理逻辑：
@@ -28,41 +28,46 @@ def resolve_entity(state: TodoAgentState) -> TodoAgentState:
        - 匹配 0 个：设置 needs_clarification，提示找不到。
        - 匹配 1 个：将 todo_id 写入 pending_operation。
        - 匹配多个：设置 needs_clarification，列出选项供选择。
+       
+    Returns:
+        Dict: 增量更新字典（LangGraph 最佳实践）
     """
     logger.info("=== resolve_entity 节点 ===")
     
     pending_op = state.get("pending_operation")
     
-    # 无操作，直接放行
+    # 无操作，直接放行（返回空更新）
     if not pending_op:
         logger.info("无待处理操作，跳过实体解析")
-        return state
+        return {}
     
+    # 深拷贝以避免修改原始 state
+    pending_op = dict(pending_op)
     action = pending_op.get("action", "")
-    data = pending_op.get("data", {})
+    data = dict(pending_op.get("data", {}))
     
     # 不需要解析的操作类型
     skip_actions = ["create", "batch_create", "query", "summarize", "clarify", "constraint"]
     if action in skip_actions:
         logger.info(f"操作 '{action}' 无需实体解析，跳过")
-        return state
+        return {}
     
     # 已有 todo_id，无需解析
     if data.get("todo_id"):
         logger.info(f"已有 todo_id={data.get('todo_id')}，跳过解析")
-        return state
+        return {}
     
     # 需要解析的操作：update, delete, complete, merge
     needs_resolution_actions = ["update", "delete", "complete", "merge"]
     if action not in needs_resolution_actions:
         logger.info(f"操作 '{action}' 不在需解析列表中，跳过")
-        return state
+        return {}
     
     # 获取用户 ID
     user_id = get_user_id_optional(state, config=None)
     if not user_id:
         logger.warning("无法获取 user_id，跳过实体解析")
-        return state
+        return {}
     
     # 提取搜索关键词
     keyword = data.get("target_title") or data.get("title") or data.get("keyword")
@@ -71,9 +76,10 @@ def resolve_entity(state: TodoAgentState) -> TodoAgentState:
         # 无关键词，无法搜索
         logger.info("无搜索关键词，设置需澄清")
         pending_op["needs_clarification"] = True
-        state["pending_operation"] = pending_op
-        state["pending_clarifications"] = ["请告诉我要操作哪个待办事项的名称或 ID"]
-        return state
+        return {
+            "pending_operation": pending_op,
+            "pending_clarifications": ["请告诉我要操作哪个待办事项的名称或 ID"]
+        }
     
     # 执行模糊搜索
     matches = _find_matching_todos(user_id, keyword)
@@ -82,26 +88,26 @@ def resolve_entity(state: TodoAgentState) -> TodoAgentState:
         # 匹配 0 个：提示找不到
         logger.info(f"未找到匹配 '{keyword}' 的待办")
         pending_op["needs_clarification"] = True
-        state["pending_operation"] = pending_op
-        state["pending_clarifications"] = [f"找不到包含 '{keyword}' 的待办事项，请确认名称或直接告诉我待办 ID"]
-        state["messages"].append(AIMessage(
-            content=f"❌ 找不到包含「{keyword}」的待办事项。\n\n请检查名称是否正确，或者直接告诉我待办的 ID。"
-        ))
-        return state
+        return {
+            "pending_operation": pending_op,
+            "pending_clarifications": [f"找不到包含 '{keyword}' 的待办事项，请确认名称或直接告诉我待办 ID"],
+            "messages": [AIMessage(
+                content=f"❌ 找不到包含「{keyword}」的待办事项。\n\n请检查名称是否正确，或者直接告诉我待办的 ID。"
+            )]
+        }
     
     elif len(matches) == 1:
         # 匹配 1 个：成功解析
         matched_todo = matches[0]
         logger.info(f"成功解析: '{keyword}' -> #{matched_todo['id']} {matched_todo['title']}")
         
-        # 将解析结果写入 pending_operation
+        # 将解析结果写入 pending_operation（使用副本）
         data["todo_id"] = matched_todo["id"]
         data["resolved_title"] = matched_todo["title"]
         pending_op["data"] = data
         pending_op["needs_clarification"] = False
-        state["pending_operation"] = pending_op
         
-        return state
+        return {"pending_operation": pending_op}
     
     else:
         # 匹配多个：列出选项供选择
@@ -114,14 +120,14 @@ def resolve_entity(state: TodoAgentState) -> TodoAgentState:
         
         pending_op["needs_clarification"] = True
         pending_op["disambiguation_options"] = matches[:5]
-        state["pending_operation"] = pending_op
-        state["pending_clarifications"] = ["请选择具体是哪一个待办"]
         
-        state["messages"].append(AIMessage(
-            content=f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个：\n\n{options_text}\n\n请说「第 X 个」或「ID 为 XX 的」。"
-        ))
-        
-        return state
+        return {
+            "pending_operation": pending_op,
+            "pending_clarifications": ["请选择具体是哪一个待办"],
+            "messages": [AIMessage(
+                content=f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个：\n\n{options_text}\n\n请说「第 X 个」或「ID 为 XX 的」。"
+            )]
+        }
 
 
 def _find_matching_todos(user_id: int, keyword: str, limit: int = 5) -> List[Dict]:
@@ -161,6 +167,11 @@ def route_after_resolve(state: TodoAgentState) -> str:
     pending_op = state.get("pending_operation")
     
     if not pending_op:
+        return "execute"
+    
+    # 用户已通过规则化确认，直接执行
+    if state.get("user_confirmed"):
+        logger.info("用户已确认 (user_confirmed=True)，路由到 execute")
         return "execute"
     
     # 需要澄清

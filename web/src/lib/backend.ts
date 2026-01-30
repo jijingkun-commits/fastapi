@@ -213,6 +213,7 @@ export async function streamLLM(
     useMultiAgent?: boolean;
     attachments?: Attachment[];
     currentTodoId?: number;
+    signal?: AbortSignal;
   },
 ) {
   const cb =
@@ -231,6 +232,7 @@ export async function streamLLM(
       attachments: options?.attachments,
       current_todo_id: options?.currentTodoId,
     }),
+    signal: options?.signal,
   });
 
   if (!response.ok) {
@@ -353,6 +355,7 @@ export function startLLMStream(
     useMultiAgent,
     attachments,
     currentTodoId,
+    signal: ctrl.signal,
   });
 
   return {
@@ -513,3 +516,24 @@ export async function deleteThread(threadId: string, userId?: number): Promise<v
   const r = await apiFetch(url, { method: "DELETE" });
   if (!r.ok) throw new Error("删除对话失败");
 }
+
+/**
+ * 提交消息反馈
+ */
+export async function submitFeedback(
+  messageId: number | string,
+  score: number, // 1: Like, -1: Dislike, 0: Cancel
+  reason?: string
+): Promise<void> {
+  const r = await apiFetch(`/api/v1/chat/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message_id: messageId,
+      score,
+      reason,
+    }),
+  });
+  if (!r.ok) throw new Error("提交反馈失败");
+}
+

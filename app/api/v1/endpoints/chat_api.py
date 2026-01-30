@@ -13,10 +13,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+
 from app.services.chat_service import sse_stream, sse_resume_stream
-from app.schemas.chat import ChatRequest
+from app.schemas.chat import ChatRequest, FeedbackRequest
 from app.repositories import chat_repo
 from app.api.deps import get_current_user
+
 from app.models.user import User
 
 
@@ -40,7 +42,7 @@ class MessageOut(BaseModel):
     content_type: str  # text / markdown / mixed / multimodal
     content: Any  # 字符串或 ContentBlock 数组
     metadata: Optional[dict] = None
-    additional_kwargs: Optional[dict] = None  # 🆕 新增字段，用于前端组件渲染
+    additional_kwargs: Optional[dict] = None  # 用于前端组件渲染
     title: Optional[str] = None
     created_at: Optional[str] = None
 
@@ -174,7 +176,7 @@ def get_thread_messages(
             content_type=m.content_type,
             content=content,
             metadata=m.extra_data,
-            additional_kwargs=m.extra_data,  # 🆕 映射 extra_data 到 additional_kwargs
+            additional_kwargs=m.extra_data,  # 映射 extra_data 到 additional_kwargs
             title=m.title,
             created_at=m.create_time.isoformat() if m.create_time else None,
         ))
@@ -218,3 +220,25 @@ def update_thread_title(
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
     return {"message": "标题已更新", "thread_id": thread_id, "title": request.title}
+
+
+@router.post("/feedback")
+def submit_feedback(
+    payload: FeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """提交消息反馈（点赞/点踩）。"""
+    try:
+        feedback = chat_repo.save_feedback(
+            db,
+            user_id=current_user.id,
+            message_id=payload.message_id,
+            score=payload.score,
+            reason=payload.reason,
+        )
+        return {"message": "反馈已提交", "data": feedback}
+    except Exception as e:
+        logger.error("提交反馈失败: %s", e)
+        raise HTTPException(status_code=500, detail="提交反馈失败")
+

@@ -54,6 +54,25 @@ class AgentOutputParser:
                 pass
                 
         return None
+    
+    @staticmethod
+    def parse_handoff_typed(content: str) -> Optional["HandoffResult"]:
+        """类型安全的 Handoff 解析（返回 Pydantic 模型）。
+        
+        相比 parse_handoff，此方法提供：
+        1. 返回类型为 HandoffResult，IDE 可直接提示字段
+        2. Pydantic 验证确保数据结构正确
+        3. 失败时返回 None 而不是抛异常
+        """
+        data = AgentOutputParser.parse_handoff(content)
+        if data is None:
+            return None
+        
+        try:
+            return HandoffResult(**data)
+        except Exception as e:
+            logger.warning(f"HandoffResult 验证失败: {e}")
+            return None
 
     @staticmethod
     def parse_kb_images(content: str) -> Optional[Dict[str, str]]:

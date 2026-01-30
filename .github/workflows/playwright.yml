@@ -81,6 +81,10 @@ jobs:
         pip install pytest-asyncio
         python -m pytest app/tests/test_todo_db_integration.py -v --tb=short
 
+    - name: Run Skill Retrieval Smoke Test
+      run: |
+        python -m pytest app/tests/test_skill_retrieval_smoke.py -v --tb=short
+
     # 3. Frontend Setup (Next.js)
     - name: Set up Node.js
       uses: actions/setup-node@v4

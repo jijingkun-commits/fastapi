@@ -15,6 +15,9 @@ from app.core.config import (
     REQUEST_TIMEOUT,
     MAX_RETRIES,
     REASONING_EFFORT,
+    MODEL_CORE_NAME,
+    MODEL_REVIEW_NAME,
+    MODEL_DEBUG_NAME,
 
     TAVILY_API_KEY,
     PUBLIC_DIR,
@@ -44,6 +47,9 @@ __all__ = [
     "REQUEST_TIMEOUT",
     "MAX_RETRIES",
     "REASONING_EFFORT",
+    "MODEL_CORE_NAME",
+    "MODEL_REVIEW_NAME",
+    "MODEL_DEBUG_NAME",
 
     "TAVILY_API_KEY",
     "PUBLIC_DIR",

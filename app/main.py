@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from pathlib import Path
+
 
 from app.core.logging import setup_logging
 from app.core.middleware import setup_middlewares
@@ -50,7 +52,16 @@ async def lifespan(app: FastAPI):
         from app.db.session import SessionLocal
         with SessionLocal() as db:
             LLMConfigService.load_from_db(db)
+            LLMConfigService.load_from_db(db)
             SystemConfigService.load_from_db(db)
+            
+            # 启动时自动同步技能文件到数据库
+            from app.services.skill_service import SkillService
+            from app.core.config import PROJECT_ROOT
+            import os
+            skills_dir = os.path.join(PROJECT_ROOT, "app/ai/skills")
+            count = SkillService.sync_changed_skills(Path(skills_dir))
+            logging.info(f"技能同步完成，更新了 {count} 个技能")
     except Exception as e:
         import logging
         logging.exception("配置服务初始化失败，将使用环境变量降级")
@@ -75,7 +86,7 @@ app.add_exception_handler(Exception, global_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
-# 🆕 挂载静态文件目录 (用于显示生成的图片)
+# 挂载静态文件目录 (用于显示生成的图片)
 from fastapi.staticfiles import StaticFiles
 from app.core.config import PUBLIC_DIR
 import os

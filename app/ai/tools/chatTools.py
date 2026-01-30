@@ -41,7 +41,7 @@ if ai_config.TAVILY_API_KEY:
 
 from sqlalchemy import text
 from langgraph.types import interrupt
-from app.db.session import engine
+from app.db.session import analytics_engine  # 使用业务数据库连接
 
 # 定义结构化参数模型
 class SQLQuerySchema(BaseModel):
@@ -109,9 +109,9 @@ def sql_inter(sql_query: str) -> str:
         else:
             logger.info("用户批准了 SQL 查询")
     
-    # 执行 SQL 查询
+    # 执行 SQL 查询（在业务数据库 data_db 上执行）
     try:
-        with engine.connect() as conn:
+        with analytics_engine.connect() as conn:
             result = conn.execute(text(sql_query))
             # 获取列名
             columns = result.keys()
@@ -198,8 +198,8 @@ def extract_data(sql_query: str, df_name: str, config: RunnableConfig) -> str:
         return "错误: 无法获取对话 ID，无法保存数据"
 
     try:
-        # 使用已导入的 engine 直接读取
-        df = pd.read_sql(sql_query, engine)
+        # 使用业务数据库连接读取数据
+        df = pd.read_sql(sql_query, analytics_engine)
         
         # 初始化该 thread 的存储空间
         if thread_id not in extracted_dataframes:
@@ -392,7 +392,7 @@ def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
                 # 统一使用相对路径，前端通过 Next.js rewrites 代理到后端
                 proxy_url = asset_service.get_proxy_url(object_key)
                 
-                # 🆕 实时流式发送图片事件，让前端立即显示（不依赖 LLM 输出 Markdown）
+                # 实时流式发送图片事件，让前端立即显示（不依赖 LLM 输出 Markdown）
                 try:
                     from langgraph.config import get_stream_writer
                     from app.ai.events import emit_result

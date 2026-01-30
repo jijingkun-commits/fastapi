@@ -191,7 +191,7 @@ class ChatService:
                             full_answer.append(event_data["message"])
                         yield self._format_sse("result", event_data)
                     
-                    elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end"):
+                    elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
                         yield self._format_sse(event_type, event_data)
                     
                     else:
@@ -233,7 +233,7 @@ class ChatService:
                                     title=title,
                                 )
                                 
-                                # 保存 AI 消息（如果有内容）
+                                # 保存 AI 消息（如果有内容）- 标记为中间消息
                                 if ai_content:
                                     chat_repo.save_message(
                                         db,
@@ -242,6 +242,7 @@ class ChatService:
                                         role="ai",
                                         content_type="markdown",
                                         content=ai_content,
+                                        extra_data={"is_intermediate": True},  # 标记为中间消息，前端可过滤
                                     )
                             
                             logger.info("Interrupt 场景消息已保存: thread_id=%s, human=%d字, ai=%d字", 
@@ -486,36 +487,8 @@ async def sse_resume_stream(
         # 流结束
         logger.info("恢复流程完成: thread_id=%s, answer_len=%d", thread_id, len("".join(full_answer)))
         
-        # 保存 AI 回复到数据库
-        try:
-            from app.db.session import get_db_context
-            from app.repositories import chat_repo
-            
-            # 优先使用流式收集的内容
-            ai_content = "".join(full_answer)
-            
-            # 如果流式内容为空，尝试从 snapshot 获取最后一条 AI 消息
-            if not ai_content and snapshot and "messages" in snapshot.values:
-                messages = snapshot.values["messages"]
-                if messages:
-                    last_msg = messages[-1]
-                    if last_msg.type == "ai":
-                        ai_content = getattr(last_msg, "content", "")
-            
-            if ai_content:
-                with get_db_context() as db:
-                    chat_repo.save_message(
-                        db,
-                        user_id=user_id,
-                        thread_id=thread_id,
-                        role="ai",
-                        content_type="markdown",
-                        content=ai_content,
-                    )
-                logger.info("Resume 完成 AI 回复已保存: thread_id=%s, ai=%d字", 
-                           thread_id, len(ai_content))
-        except Exception as save_error:
-            logger.error("Resume 保存消息失败: %s", save_error, exc_info=True)
+        # 注意：AI 消息保存已由 _postprocess 节点统一处理，此处不再重复保存
+        # 这避免了 resume 和 postprocess 同时保存导致的重复记录问题
         
         done_payload = {"thread_id": thread_id}
         

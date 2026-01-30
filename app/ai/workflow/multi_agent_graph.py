@@ -26,7 +26,7 @@ from langgraph.graph import StateGraph, START, END
 from app.ai.llm_util import get_llm
 from app.db.postgres_checkpoint import get_checkpointer
 
-# 🆕 导入自定义事件工具
+# 自定义事件工具
 from langgraph.config import get_stream_writer
 from app.ai.events import emit_status
 from app.ai.protocol import HandoffResult
@@ -191,10 +191,10 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     if not messages:
         return {}
     
-    # 🆕 获取 StreamWriter 用于发送自定义事件
+    # 获取 StreamWriter 用于发送自定义事件
     writer = get_stream_writer()
     
-    # 🆕 显式标记 Graph 类型，用于 resume 时检测
+    # 显式标记 Graph 类型，用于 resume 时检测
     updates = {"_graph_type": "multi_agent"}
     
     # ========== 1. 消息验证与修复 ==========
@@ -264,9 +264,9 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             if skills:
                 skill_context = SkillService.format_skills_as_context(skills)
                 updates["skill_context"] = skill_context
-                logger.info("预处理节点: 检索到 %d 个相关技能: %s", 
-                           len(skills), [s.skill_id for s in skills])
-                emit_status(writer, message=f"已加载 {len(skills)} 个相关技能", node="preprocess")
+                skill_names = [s.skill_id for s in skills]
+                logger.info("预处理节点: 检索到 %d 个相关技能: %s", len(skills), skill_names)
+                emit_status(writer, message=f"已加载 {len(skills)} 个相关技能: {skill_names}", node="preprocess")
     except Exception as e:
         logger.warning("预处理节点: 技能检索失败 - %s", e)
     
@@ -276,7 +276,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     if image_urls:
         logger.info("预处理节点: 检测到 %d 张图片，开始分析...", len(image_urls))
         
-        # 🆕 发送分析状态给前端
+        # 发送分析状态给前端
         emit_status(writer, message=f"正在分析 {len(image_urls)} 张图片...", node="preprocess")
         
         try:
@@ -287,7 +287,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                 logger.info("预处理节点: 图片分析完成 - %s", str(analysis_result)[:100])
                 updates["attachment_analysis"] = f"[图片分析结果] {analysis_result}"
                 
-                # 🆕 发送完成状态
+                # 发送完成状态
                 emit_status(writer, message="图片分析完成", node="preprocess")
         except Exception as e:
             logger.warning("预处理节点: 图片分析失败 - %s", e)
@@ -727,7 +727,7 @@ async def create_multi_agent_graph(
         # 否则可能需要继续处理（由 Supervisor 重新评估）
         logger.info("评估节点: 任务可能需要继续，返回 Supervisor")
         
-        # 🆕 发送协调状态给前端
+        # 发送协调状态给前端
         writer = get_stream_writer()
         emit_status(writer, message="专家工作需要继续，正在协调其他专家...", node="evaluate")
         
@@ -778,7 +778,7 @@ async def create_multi_agent_graph(
         model_id = state.get("model_id")
         result = await classify_intent(content, model_id)
         
-        # 🆕 发送意图识别状态
+        # 发送意图识别状态
         writer = get_stream_writer()
         emit_status(writer, message=f"意图识别: {result.intent}", node="intent_classify")
         
@@ -805,15 +805,13 @@ async def create_multi_agent_graph(
         logger.info("意图路由: 到 supervisor (intent=%s)", intent)
         return "supervisor"
     
-    # 🔧 修复问题5：移除 intent_classify 节点，简化架构
-    # Supervisor 已经有 Prompt 指导路由，无需额外的意图分类
+    # 架构规则：不使用独立的 intent_classify 节点，由 Supervisor 统一处理意图路由
     
     # 添加边
     workflow.add_edge(START, "preprocess")
     workflow.add_edge("preprocess", "supervisor")
     
     # 专家执行完 -> 评估节点
-    # 🔧 关键修复：添加专家到评估节点的边
     workflow.add_edge("data_expert", "evaluate")
     workflow.add_edge("todo_expert", "evaluate")
     

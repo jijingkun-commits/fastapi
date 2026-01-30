@@ -397,22 +397,23 @@ export function Thread() {
 
                   {messages
                     .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                    .map((message, index) =>
-                      message.type === "human" ? (
+                    .map((message, index, filteredMessages) => {
+                      const isLast = index === filteredMessages.length - 1;
+                      return message.type === "human" ? (
                         <HumanMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
-                          isLoading={isLoading}
+                          isLoading={isLoading && isLast}
                         />
                       ) : (
                         <AssistantMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
-                          isLoading={isLoading}
+                          isLoading={isLoading && isLast}
                           handleRegenerate={handleRegenerate}
                         />
-                      ),
-                    )}
+                      );
+                    })}
                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
                     We need to render it outside of the messages list, since there are no messages to render */}
                   {hasNoAIOrToolMessages && !!stream.interrupt && (

@@ -1,0 +1,20 @@
+# 核心精选技能 (Core Skills)
+# Backend
+python-patterns
+api-patterns
+database-design
+software-architecture
+
+# Frontend
+react-best-practices
+frontend-dev-guidelines
+ui-ux-pro-max
+tailwind-patterns
+
+# Agent
+langgraph
+ai-agents-architect
+
+# Quality
+testing-patterns
+clean-code

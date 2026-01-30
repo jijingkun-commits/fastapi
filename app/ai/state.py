@@ -126,6 +126,7 @@ class DataAgentState(BaseAgentState, total=False):
     - SQL 生成（generated_sql, sql_source, sql_approved）
     - 指标匹配（matched_metric, metric_params）
     - 可视化（viz_type, viz_data）
+    - 错误恢复（iterations, last_error, sql_history）
     """
     # 查询上下文
     query_context: Dict                # 当前查询的完整上下文
@@ -140,7 +141,7 @@ class DataAgentState(BaseAgentState, total=False):
     
     # SQL 生成
     generated_sql: str                 # 生成的 SQL 语句
-    sql_source: Literal["metric", "vanna", "template"]  # SQL 来源
+    sql_source: Literal["metric", "vanna", "template", "vanna_rag"]  # SQL 来源
     sql_result: Any                    # SQL 执行结果
     pending_sql: str                   # 待审核的 SQL（需用户确认时）
     sql_approved: bool                 # SQL 是否已批准
@@ -152,4 +153,9 @@ class DataAgentState(BaseAgentState, total=False):
     # 意图分类
     data_intent: Literal["metric_query", "free_query", "visualization", "clarification"]
     clarification_needed: str          # 需要用户澄清的内容
+    
+    # 错误恢复（自愈机制）
+    iterations: int                    # 当前迭代次数（用于限制重试）
+    last_error: str                    # 最后一次执行错误信息
+    sql_history: List[Dict]            # SQL 生成历史 [{"sql": str, "error": str}]
 

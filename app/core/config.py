@@ -17,6 +17,8 @@ dotenv_path = _BASE / f".env.{_ENV}"
 load_dotenv(dotenv_path, override=True)
 
 ENV: str = _ENV
+PROJECT_ROOT: Path = _BASE
+
 
 
 # 数据库连接串（示例：mysql+pymysql://user:pass@host:port/schema）
@@ -30,6 +32,22 @@ ANALYTICS_DATABASE_URL: str = os.getenv(
     "ANALYTICS_DATABASE_URL",
     DATABASE_URL, # 默认回退到主库，但在生产环境应隔离
 )
+
+# 问数允许的 Schema 白名单（逗号分隔）
+_analytics_schemas_str = os.getenv("ANALYTICS_SCHEMAS", "fdmdata,sdmdata,public")
+ANALYTICS_SCHEMAS: list = [s.strip().lower() for s in _analytics_schemas_str.split(",") if s.strip()]
+
+# 默认 Schema（无法识别时使用）
+ANALYTICS_DEFAULT_SCHEMA: str = os.getenv("ANALYTICS_DEFAULT_SCHEMA", "fdmdata")
+
+# Schema 别名映射（用户友好名称 -> 实际 schema）
+# 格式：alias1:schema1,alias2:schema2
+_schema_aliases_str = os.getenv("SCHEMA_ALIASES", "存款:fdmdata,贷款:fdmdata,维度:sdmdata,日期:sdmdata")
+SCHEMA_ALIASES: dict = {}
+for pair in _schema_aliases_str.split(","):
+    if ":" in pair:
+        alias, schema = pair.split(":", 1)
+        SCHEMA_ALIASES[alias.strip()] = schema.strip().lower()
 
 # 数据库连接池参数
 DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
@@ -78,6 +96,11 @@ MODEL_BASE_URL = os.getenv("MODEL_BASE_URL", "https://dashscope.aliyuncs.com/com
 MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.7"))
 MESSAGE_MAX_TOKENS = int(os.getenv("MESSAGE_MAX_TOKENS", "4096"))
 
+# Agent Specific Models
+MODEL_CORE_NAME = os.getenv("MODEL_CORE_NAME", MODEL_NAME)
+MODEL_REVIEW_NAME = os.getenv("MODEL_REVIEW_NAME", MODEL_NAME)
+MODEL_DEBUG_NAME = os.getenv("MODEL_DEBUG_NAME", MODEL_NAME)
+
 # AI 参数
 STREAMING = os.getenv("STREAMING", "true").lower() == "true"
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
@@ -93,6 +116,9 @@ ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 
 # 搜索
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
+# 技能检索
+SKILL_SIMILARITY_THRESHOLD: float = float(os.getenv("SKILL_SIMILARITY_THRESHOLD", "0.5"))
 
 # 静态资源
 PUBLIC_DIR = os.getenv("PUBLIC_DIR", "public")

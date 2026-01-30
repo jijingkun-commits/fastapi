@@ -29,13 +29,123 @@ EventType = Literal[
     "confirmation",    # 确认请求（需要用户确认的操作）
     "clarification",   # 澄清问题（需要用户补充信息）
     "interrupt",       # 中断等待（Human-in-the-loop）
+    "handoff",         # 智能体切换
     "done",            # 流结束
     "error",           # 错误
 ]
 
 
+# ==================== AgentEvent 统一事件模型 ====================
+
+from enum import Enum
+from pydantic import BaseModel, Field
+
+
+class AgentEventType(str, Enum):
+    """Agent 事件类型枚举（用于 astream_events 模式）。"""
+    TOKEN = "token"
+    THINKING = "thinking"
+    TOOL_START = "tool_start"
+    TOOL_END = "tool_end"
+    STATUS = "status"
+    RESULT = "result"
+    CONFIRMATION = "confirmation"
+    CLARIFICATION = "clarification"
+    HANDOFF = "handoff"
+    KB_IMAGES = "kb_images"
+    INTERRUPT = "interrupt"
+    DONE = "done"
+    ERROR = "error"
+
+
+class AgentEvent(BaseModel):
+    """统一的 Agent 事件模型。
+    
+    所有 SSE 输出都使用此格式，前端只需解析 JSON 并根据 type 处理。
+    """
+    type: AgentEventType
+    content: Any = None
+    node: str = ""
+    metadata: dict = Field(default_factory=dict)
+    
+    def to_sse(self) -> str:
+        """转换为 SSE 格式字符串。"""
+        return f"data: {self.model_dump_json(exclude_none=True)}\n\n"
+    
+    def to_stream_dict(self) -> dict:
+        """转换为 chat_service.py 兼容的 stream 格式。
+        
+        输出格式: {"type": "token", "data": {"content": "..."}, "node": "..."}
+        """
+        # content 已经是正确的数据结构，直接放入 data 字段
+        if isinstance(self.content, dict):
+            data = self.content
+        elif self.content is not None:
+            data = {"content": self.content}
+        else:
+            data = {}
+        
+        return {
+            "type": self.type.value,
+            "data": data,
+            "node": self.node
+        }
+    
+    @classmethod
+    def token(cls, content: str, node: str = "") -> "AgentEvent":
+        """创建 token 事件。"""
+        return cls(type=AgentEventType.TOKEN, content=content, node=node)
+    
+    @classmethod
+    def thinking(cls, content: str, node: str = "") -> "AgentEvent":
+        """创建 thinking 事件。"""
+        return cls(type=AgentEventType.THINKING, content=content, node=node)
+    
+    @classmethod
+    def tool_start(cls, name: str, args: dict = None, node: str = "") -> "AgentEvent":
+        """创建 tool_start 事件。"""
+        return cls(
+            type=AgentEventType.TOOL_START, 
+            content={"name": name, "input": args or {}}, 
+            node=node
+        )
+    
+    @classmethod
+    def tool_end(cls, name: str, output: str = "", node: str = "") -> "AgentEvent":
+        """创建 tool_end 事件。"""
+        return cls(
+            type=AgentEventType.TOOL_END, 
+            content={"name": name, "output": output}, 
+            node=node
+        )
+    
+    @classmethod
+    def status(cls, message: str, node: str = "") -> "AgentEvent":
+        """创建 status 事件。"""
+        return cls(type=AgentEventType.STATUS, content={"message": message}, node=node)
+    
+    @classmethod
+    def handoff(cls, target_agent: str, task_description: str, node: str = "") -> "AgentEvent":
+        """创建 handoff 事件。"""
+        return cls(
+            type=AgentEventType.HANDOFF,
+            content={"target_agent": target_agent, "task_description": task_description},
+            node=node
+        )
+    
+    @classmethod
+    def error(cls, message: str, node: str = "") -> "AgentEvent":
+        """创建 error 事件。"""
+        return cls(type=AgentEventType.ERROR, content={"message": message}, node=node)
+    
+    @classmethod
+    def done(cls, thread_id: str = "", node: str = "") -> "AgentEvent":
+        """创建 done 事件。"""
+        return cls(type=AgentEventType.DONE, content={"thread_id": thread_id}, node=node)
+
+
 class StreamEvent(TypedDict):
-    """流式事件结构。"""
+    """流式事件结构（向后兼容）。"""
     type: EventType
     data: Any
     node: Optional[str]  # 来源节点名称（可选，用于调试）

@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db_context
 from app.models.agent_skill import AgentSkill
 from app.ai.utils.embedding_util import get_embedding
+from app.core.config import SKILL_SIMILARITY_THRESHOLD
+from app.services.system_config_service import SystemConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +129,13 @@ class SkillService:
         return True
     
     @classmethod
-    def import_all_skills(cls, skills_dir: Path, force: bool = False) -> int:
+    def import_all_skills(cls, skills_dir: Path, force: bool = False, whitelist: List[str] = None) -> int:
         """从目录导入所有技能。
         
         Args:
             skills_dir: 技能目录路径
             force: 是否强制更新所有
+            whitelist: 白名单列表（仅导入列表中的 skill_id），为空则导入所有
             
         Returns:
             导入的技能数量
@@ -143,6 +146,15 @@ class SkillService:
         
         count = 0
         skill_files = list(skills_dir.glob("*/SKILL.md"))
+        
+        # 过滤白名单
+        if whitelist:
+            skill_files = [
+                f for f in skill_files 
+                if f.parent.name in whitelist
+            ]
+            logger.info(f"应用白名单过滤: {whitelist}")
+        
         logger.info(f"发现 {len(skill_files)} 个技能文件")
         
         with get_db_context() as db:
@@ -169,8 +181,11 @@ class SkillService:
         cls, 
         query: str, 
         top_k: int = 2,
-        threshold: float = 0.5
+        threshold: float = None
     ) -> List[AgentSkill]:
+        # 优先使用传入参数 -> 其次 DB 动态配置 -> 最后 env/默认值
+        if threshold is None:
+            threshold = SystemConfigService.get_float("skill_similarity_threshold", SKILL_SIMILARITY_THRESHOLD)
         """向量检索相关技能。
         
         Args:
@@ -191,10 +206,10 @@ class SkillService:
             sql = text("""
                 SELECT 
                     id, skill_id, name, description, content,
-                    1 - (embedding <=> :query_vec) as similarity
+                    1 - (embedding <=> CAST(:query_vec AS vector)) as similarity
                 FROM t_agent_skills
                 WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> :query_vec
+                ORDER BY embedding <=> CAST(:query_vec AS vector)
                 LIMIT :limit
             """)
             

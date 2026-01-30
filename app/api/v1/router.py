@@ -42,6 +42,18 @@ api_router.include_router(todo_router, prefix="/todo", tags=["Todo"], dependenci
 # 问数管理路由：需要登录
 from app.api.v1.endpoints.data_admin_api import router as data_admin_router
 api_router.include_router(data_admin_router, dependencies=[Depends(get_current_user)])
+# 数据访问控制管理路由：需要登录
+from app.api.v1.endpoints.access_admin_api import router as access_admin_router
+api_router.include_router(access_admin_router, dependencies=[Depends(get_current_user)])
+# LLM 配置管理路由：需要登录
+from app.api.v1.endpoints.llm_admin_api import router as llm_admin_router
+api_router.include_router(llm_admin_router, dependencies=[Depends(get_current_user)])
+# 技能管理路由：需要登录
+from app.api.v1.endpoints.skill_admin_api import router as skill_admin_router
+api_router.include_router(skill_admin_router, dependencies=[Depends(get_current_user)])
+# 系统配置管理路由：需要登录
+from app.api.v1.endpoints.system_admin_api import router as system_admin_router
+api_router.include_router(system_admin_router, dependencies=[Depends(get_current_user)])
 
 
 

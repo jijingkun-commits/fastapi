@@ -33,6 +33,12 @@ TABLE_BLACKLIST: Set[str] = {
     "t_messages",
 }
 
+# 系统 schema 白名单（允许访问这些 schema 下的所有表）
+SYSTEM_SCHEMA_WHITELIST: Set[str] = {
+    "information_schema",
+    "pg_catalog",
+}
+
 
 class DataAccessControl:
     """数据访问控制类。
@@ -53,30 +59,58 @@ class DataAccessControl:
         self._whitelist = self._load_whitelist()
     
     def _load_whitelist(self) -> Set[str]:
-        """从数据库加载表白名单。"""
-        # 生产环境应从 t_meta_tables 加载
-        # 这里使用默认值
+        """从数据库加载表白名单。
+        
+        优先从 t_system_config 读取，如果没有则使用默认值。
+        """
+        try:
+            from app.models.system_config import SystemConfig
+            
+            with get_db_context() as db:
+                config = db.query(SystemConfig).filter(
+                    SystemConfig.config_key == "data_access.table_whitelist"
+                ).first()
+                
+                if config and config.config_value:
+                    tables = [t.strip() for t in config.config_value.split(",") if t.strip()]
+                    if tables:
+                        logger.debug(f"从数据库加载表白名单: {tables}")
+                        return set(tables)
+        except Exception as e:
+            logger.warning(f"加载表白名单失败，使用默认值: {e}")
+        
         return DEFAULT_TABLE_WHITELIST.copy()
     
     def check_table_access(self, table_name: str) -> bool:
         """检查表访问权限。
         
         Args:
-            table_name: 表名
+            table_name: 表名（可包含 schema 前缀，如 information_schema.tables）
             
         Returns:
             是否允许访问
         """
         table_lower = table_name.lower()
         
+        # 检查是否为系统 schema 的表（如 information_schema.tables）
+        if '.' in table_lower:
+            schema = table_lower.split('.')[0]
+            if schema in {s.lower() for s in SYSTEM_SCHEMA_WHITELIST}:
+                logger.debug(f"系统表访问允许: {table_name}")
+                return True
+            # 提取纯表名用于后续检查
+            pure_table = table_lower.split('.')[-1]
+        else:
+            pure_table = table_lower
+        
         # 黑名单优先
-        if table_lower in {t.lower() for t in TABLE_BLACKLIST}:
+        if pure_table in {t.lower() for t in TABLE_BLACKLIST}:
             logger.warning(f"表访问被拒绝（黑名单）: {table_name}")
             return False
         
         # 检查白名单（如果启用）
         if self._whitelist:
-            if table_lower not in {t.lower() for t in self._whitelist}:
+            if pure_table not in {t.lower() for t in self._whitelist}:
                 logger.warning(f"表访问被拒绝（不在白名单）: {table_name}")
                 return False
         
@@ -85,32 +119,19 @@ class DataAccessControl:
     def extract_tables_from_sql(self, sql: str) -> List[str]:
         """从 SQL 语句中提取表名。
         
-        简单实现，使用正则匹配。
-        生产环境应使用 SQL 解析器（如 sqlglot）。
+        使用 sqlglot 进行 AST 解析，比正则更准确可靠。
+        保留完整表名（包含 schema 前缀），以便 check_table_access 进行系统表检查。
         
         Args:
             sql: SQL 语句
             
         Returns:
-            表名列表
+            表名列表（可能包含 schema 前缀，如 information_schema.tables）
         """
-        import re
+        from app.ai.utils.sql_parser import extract_tables_from_sql as parse_tables
         
-        sql_upper = sql.upper()
-        tables = []
-        
-        # 匹配 FROM / JOIN 后的表名
-        patterns = [
-            r'FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-            r'JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-            r'INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-            r'UPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, sql, re.IGNORECASE)
-            tables.extend(matches)
-        
+        # 使用统一的 SQL 解析工具，保留完整表名（包含 schema）
+        tables = parse_tables(sql)
         return list(set(tables))
     
     def validate_sql(self, sql: str) -> tuple[bool, Optional[str]]:
@@ -220,4 +241,4 @@ def get_access_control(user_id: Optional[int] = None) -> DataAccessControl:
 
 
 # 导出
-__all__ = ["DataAccessControl", "get_access_control", "DEFAULT_TABLE_WHITELIST", "TABLE_BLACKLIST"]
+__all__ = ["DataAccessControl", "get_access_control", "DEFAULT_TABLE_WHITELIST", "TABLE_BLACKLIST", "SYSTEM_SCHEMA_WHITELIST"]

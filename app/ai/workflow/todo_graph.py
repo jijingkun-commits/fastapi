@@ -5,6 +5,11 @@
 - 任务拆解
 - 冲突检测
 - 优先级动态调整
+
+设计原则 (LangGraph Best Practices):
+1. 所有节点函数返回 Dict 而非直接修改 state
+2. 使用配置类管理硬编码值
+3. 使用 interrupt() + Command 模式处理人机交互
 """
 import logging
 import json
@@ -22,6 +27,14 @@ from app.ai.llm_util import get_llm
 from app.db.session import get_db_context  # 数据库上下文管理器
 from app.repositories.todo_repository import TodoRepository  # 待办仓库
 from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
+from app.ai.config.todo_config import get_todo_config, get_todo_dependencies  # 配置类和依赖注入
+from app.ai.exceptions import (
+    LLMParseError,
+    LLMInvocationError,
+    DatabaseError,
+    EntityNotFoundError,
+    MissingRequiredFieldError,
+)
 
 # 导入自定义事件工具
 from langgraph.config import get_stream_writer
@@ -41,14 +54,17 @@ from app.ai.workflow.todo_intent_helpers import (
     detect_urgent_task,
     process_clarify_intent,
     process_confirm_intent,
-    process_batch_create_intent,
-    process_summarize_intent,
-    process_constraint_intent,
-    determine_confirmation_need
+    determine_confirmation_need,
+    check_rule_based_intent,
+    extract_heuristic_title,
+    get_progressive_strategy,
 )
 
 # 创建仓库实例
 todo_repo = TodoRepository()
+
+# 获取配置实例
+todo_config = get_todo_config()
 
 
 logger = logging.getLogger(__name__)
@@ -57,34 +73,27 @@ logger = logging.getLogger(__name__)
 # ==================== 状态定义 ====================
 
 class TodoAgentState(TypedDict):
-    """待办 Agent 状态 - 多轮对话增强版。"""
-    # === 基础字段 ===
+    """待办 Agent 状态 - 简化版。"""
     messages: Annotated[List[BaseMessage], add_messages]
-    user_id: Optional[int]  # 🔧 新增：用户 ID（与 MultiAgentState 一致）
-    thread_id: Optional[str]  # 🔧 新增：对话线程 ID
-    pending_operation: Optional[Dict]  # 待确认的操作
-    user_confirmed: Optional[bool]     # 用户确认状态
-    quick_mode: Optional[bool]         # 快速模式(跳过确认)
+    user_id: Optional[int]
+    thread_id: Optional[str]
+    pending_operation: Optional[Dict]
+    user_confirmed: Optional[bool]
+    quick_mode: Optional[bool]
     
-    # === 🆕 对话管理 ===
-    conversation_context: Optional[Dict]  # 当前讨论的上下文
-    active_projects: Optional[List[str]]  # 正在讨论的项目列表
-    current_focus: Optional[str]          # 当前焦点任务
+    # 对话管理
+    conversation_context: Optional[Dict]
+    current_focus: Optional[str]
     
-    # === 🆕 任务池 ===
-    draft_todos: Optional[List[Dict]]           # 草稿待办(未确认)
-    pending_clarifications: Optional[List[str]] # 待澄清的问题
+    # 冲突检测
+    detected_conflicts: Optional[List[Dict]]
+    time_constraints: Optional[Dict]
     
-    # === 🆕 冲突与约束 ===
-    detected_conflicts: Optional[List[Dict]]  # 检测到的冲突
-    time_constraints: Optional[Dict]          # 时间约束(会议、不可用时段)
-    
-    # === 🆕 提取信息(保留用于向后兼容) ===
+    # 提取信息
     extracted_info: Optional[Dict]
     
-    # === 🆕 P3: 项目队列(逐项目追问) ===
-    project_queue: Optional[List[str]]       # 待处理项目队列
-    current_project_index: Optional[int]     # 当前处理的项目索引
+    # 澄清追问
+    pending_clarifications: Optional[List[str]]
 
 
 # 注意：OperationResult 已废弃，统一使用 ToolResult (从 app.core.types 导入)
@@ -92,211 +101,9 @@ class TodoAgentState(TypedDict):
 
 # ==================== 系统提示词 ====================
 
-ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
-
-## 任务
-分析用户消息,判断意图并提取信息。支持多轮对话和复杂场景。
-
-## 意图分类 (11种)
-
-### 1. clarify (需要澄清) - **新增优先级**
-**触发条件**:
-- 模糊/高层级: "帮我理一理", "太多了", "有几个项目"
-- 缺少关键信息: 无具体任务、时间、范围
-- 隐含需求: "领导要听汇报" (需准备材料但未明确)
-
-**输出**:
-```json
-{
-  "intent": "clarify",
-  "needs_clarification": true,
-  "missing_info": ["具体任务", "时间范围"],
-  "context_hints": {"mentioned": ["项目", "汇报"]},
-  "projects": ["预售资金系统", "AI中台"]
-}
-```
-**注意**: 如果用户提到了多个项目名称，必须在 `projects` 数组中列出。
-
-
-### 2. query (查询)
-**关键词**: 列出、查看、显示、有哪些
-**示例**: "列出上海的待办" → query, keyword="上海"
-
-### 3. create (创建)
-**关键词**: 创建、添加、记录、明天、下周
-**复杂任务标记**:
-```json
-{
-  "intent": "create",
-  "is_complex": true,
-  "subtask_hints": ["系统架构", "信创适配"],
-  "dependencies": ["等待商务方案"]
-}
-```
-
-### 4. update (更新)
-**关键词**: 修改、改成、延后、推迟
-**冲突标记**:
-```json
-{
-  "intent": "update",
-  "conflict_risk": "high",
-  "conflicts": ["延期但有催办"]
-}
-```
-
-### 5. complete (完成)
-**关键词**: 完成、做完了
-
-### 6. delete (删除)
-**关键词**: 删除、取消
-
-### 7. batch_create (批量创建) - **新增**
-**触发条件**: 一次性提到多个待办
-**示例**: 
-- "明天去上海,后天去北京"
-- "这周要开会、写报告、做测试"
-
-**输出**:
-```json
-{
-  "intent": "batch_create",
-  "extracted_info": {
-    "todos": [
-      {"title": "去上海", "time": "明天", "location": "上海"},
-      {"title": "去北京", "time": "后天", "location": "北京"}
-    ]
-  }
-}
-```
-**注意**: extracted_info 支持以下字段:
-- title: 待办标题
-- time/due_date: 截止时间
-- location: 地点/位置
-- priority: 优先级 (1=高, 2=中, 3=低)
-- description: 详细描述
-- category: 分类
-
-### 8. batch_complete (批量完成)
-**关键词**: 批量、全部完成
-
-### 9. merge (合并) - **新增**
-**关键词**: 合并、结合、一起做
-**示例**: "路线图跟说明能不能合并?"
-**输出**:
-```json
-{
-  "intent": "merge",
-  "extracted_info": {
-    "target_tasks": ["路线图", "说明"],
-    "merge_strategy": "combine_description"
-  }
-}
-```
-
-### 10. priority_adjust (优先级调整) - **新增**
-**触发**: 插入紧急任务、"刚刚领导说"
-**示例**: "刚收到消息,明天急需..."
-
-### 11. context_switch (上下文切换) - **新增**
-**触发**: "对了"、"还有"、从一个项目切换到另一个
-**示例**: "对了,人力系统那个..."
-
-### 12. confirm (用户确认) - **重要**
-**触发条件**: 当系统之前展示了待办信息并询问确认时，用户回复确认
-**关键词**: 好的、确认、可以、没问题、就这样、创建吧、对
-
-### 13. chat (闲聊)
-非待办相关
-
-### 14. constraint (约束声明) - **新增**
-**触发**: 提到不可用时间、外部依赖、强制死线
-**示例**: 
-- "周一我全天开会"
-- "必须等商务部给方案"
-**输出**:
-```json
-{
-  "intent": "constraint",
-  "extracted_info": {
-    "constraints": {
-        "monday_unavailable": true,
-        "external_dependency": "商务部方案"
-    }
-  }
-}
-```
-
-### 15. summarize (汇总请求) - **新增**
-**触发**: 用户请求查看待办清单或汇总
-**关键词**: 清单、列表、按优先级、汇总、给我看看、总结一下
-**示例**: 
-- "按优先级给我待办清单"
-- "可以，给我看看"
-- "汇总一下"
-**输出**:
-```json
-{
-  "intent": "summarize"
-}
-```
-
-## 🧠 隐含需求推理 (Phase 4)
-当用户提到以下业务关键词时,主动追问相关准备工作:
-
-| 关键词 | 隐含需求 | 建议追问 |
-|--------|----------|---------|
-| 汇报/汇报会 | PPT、数据、会议材料 | "需要准备PPT或会议材料吗?" |
-| 投标/招标 | 技术方案、报价、资质文件 | "是否需要准备技术方案或报价?" |
-| 评审/审核 | 文档、测试报告、演示 | "需要准备评审文档吗?" |
-| 培训/讲课 | 课件、演示环境 | "需要准备培训材料吗?" |
-| 发布/上线 | 测试、文档、回滚方案 | "发布前需要哪些准备工作?" |
-
-**识别逻辑**:
-1. 检测用户消息中的业务关键词
-2. 如果发现关键词,在 `missing_info` 中添加相关建议
-3. 在 `context_hints` 中标记检测到的业务场景
-
-**示例**:
-用户: "领导下周要听项目汇报"
-```json
-{
-  "intent": "clarify",
-  "needs_clarification": true,
-  "missing_info": ["汇报时间", "需要准备PPT或会议材料吗?"],
-  "context_hints": {"business_type": "汇报", "implied_tasks": ["准备PPT", "整理数据"]}
-}
-```
-
-## 判断规则 ⚠️
-1. 用户表达快速创建意图 → **create** + `quick_mode: true`
-   关键词: "不要问那么多"、"直接创建"、"快速创建"、"先创建"、"别问了"
-2. 输入模糊/缺信息 → **clarify (最优先)**
-3. 检测到业务关键词 → **clarify** (触发隐含需求推理)
-4. "周一不可用/必须等" → **constraint** (提取约束)
-5. "列出/查看" → query
-6. "合并/结合" → merge
-7. "刚刚/紧急" → priority_adjust
-8. "对了/还有" → context_switch
-9. "清单/列表/汇总/按优先级" → **summarize** (汇总输出)
-10. 明确动作+时间 → create
-
-## 输出格式
-必须返回JSON:
-```json
-{
-  "intent": "clarify",
-  "needs_confirmation": false,
-  "extracted_info": {},
-  "is_complex": false,
-  "conflict_risk": "none",
-  "time_constraints": {},
-  "quick_mode": false
-}
-```
-
-只返回JSON,不要其他内容。
-"""
+from app.ai.prompts.todo_prompts import (
+    TODO_INTENT_ANALYZE_PROMPT,
+)
 
 
 # ==================== 辅助函数 ====================
@@ -351,23 +158,34 @@ def _get_user_id_from_state(state: TodoAgentState) -> Optional[int]:
     return get_user_id_optional(state, config=None)
 
 
-def _get_user_todo_context(user_id: int) -> str:
-    """获取用户现有待办上下文字符串"""
+def _get_user_todo_context(user_id: int, config: dict = None) -> str:
+    """获取用户现有待办上下文字符串。
+    
+    Args:
+        user_id: 用户 ID
+        config: LangGraph 运行配置（用于依赖注入）
+    """
     if not user_id:
         return ""
+    
+    # 使用依赖注入
+    deps = get_todo_dependencies(config)
         
     try:
-        with get_db_context() as db:
-            existing_todos = todo_repo.list_by_user(db, user_id, status="pending")
+        with deps.get_db_context() as db:
+            repo = deps.get_repository()
+            existing_todos = repo.list_by_user(db, user_id, status="pending")
             if not existing_todos:
                 return ""
                 
             # 构建简洁的任务列表上下文
+            limit = todo_config.context_todos_limit
+            # 数字到中文优先级映射
+            priority_num_to_cn = {1: "高", 2: "中", 3: "低"}
             todo_list = []
-            for t in existing_todos[:10]:  # 最多 10 条
+            for t in existing_todos[:limit]:
                 due_str = t.due_date.strftime("%m月%d日") if t.due_date else "无截止"
-                priority_map = {1: "高", 2: "中", 3: "低"}
-                priority_str = priority_map.get(t.priority, "中")
+                priority_str = priority_num_to_cn.get(t.priority, "中")
                 todo_list.append(f"- {t.title} (截止:{due_str}, 优先级:{priority_str})")
             
             context = f"\n\n## 用户现有待办 ({len(existing_todos)}项)\n" + "\n".join(todo_list)
@@ -376,6 +194,292 @@ def _get_user_todo_context(user_id: int) -> str:
     except Exception as e:
         logger.warning(f"查询历史任务失败: {e}")
         return ""
+
+
+def _check_duplicate_todos(user_id: int, new_title: str, threshold: float = None, config: dict = None) -> List[Dict]:
+    """检查是否存在相似的待办任务（重复检测）。
+    
+    Args:
+        user_id: 用户 ID
+        new_title: 新任务标题
+        threshold: 相似度阈值 (0-1)，默认使用配置值
+        config: LangGraph 运行配置（用于依赖注入）
+        
+    Returns:
+        相似任务列表 [{"id": int, "title": str, "similarity": float}, ...]
+    """
+    if threshold is None:
+        threshold = todo_config.duplicate_threshold
+        
+    if not user_id or not new_title:
+        logger.warning(f"重复检测跳过: user_id={user_id}, new_title={new_title}")
+        return []
+
+    logger.info(f"Start _check_duplicate_todos: user_id={user_id}, title={new_title}")
+    
+    # 使用依赖注入获取仓库和数据库上下文
+    deps = get_todo_dependencies(config)
+    
+    try:
+        with deps.get_db_context() as db:
+            # 获取用户未完成的待办 (使用配置的 limit)
+            repo = deps.get_repository()
+            existing_todos = repo.list_by_user(db, user_id, status="pending", limit=todo_config.max_todos_per_query)
+            logger.info(f"重复检测: 获取到 {len(existing_todos)} 个现有待办 (Limit=200)")
+            
+            if not existing_todos:
+                return []
+            
+            duplicates = []
+            new_title_lower = new_title.lower().strip()
+            
+            for todo in existing_todos:
+                existing_title = todo.title.lower().strip() if todo.title else ""
+                
+                # 计算相似度（简单的关键词匹配方法）
+                similarity = _calculate_title_similarity(new_title_lower, existing_title)
+                
+                if similarity >= threshold:
+                    logger.info(f"发现相似: '{existing_title}' score={similarity}")
+                    duplicates.append({
+                        "id": todo.id,
+                        "title": todo.title,
+                        "similarity": round(similarity, 2),
+                        "status": todo.status,
+                        "due_date": todo.due_date.strftime("%m-%d") if todo.due_date else None
+                    })
+            
+            # 按相似度降序排列
+            duplicates.sort(key=lambda x: x["similarity"], reverse=True)
+            
+            if duplicates:
+                logger.info(f"检测到 {len(duplicates)} 个相似任务: {[d['title'] for d in duplicates[:3]]}")
+            
+            return duplicates[:todo_config.duplicate_max_results]
+    except Exception as e:
+        logger.warning(f"重复检测失败: {e}")
+        return []
+
+
+def _calculate_title_similarity(new_title: str, existing_title: str) -> float:
+    """计算两个标题的相似度（基于关键词重叠）。
+    
+    使用 Jaccard 相似度计算。
+    """
+    if not new_title or not existing_title:
+        return 0.0
+    
+    # 完全匹配
+    if new_title == existing_title:
+        return 1.0
+    
+    # 包含关系
+    if new_title in existing_title or existing_title in new_title:
+        return 0.9
+    
+    # Jaccard 相似度（基于字符 n-gram）
+    def get_ngrams(text: str, n: int = 2) -> set:
+        return set(text[i:i+n] for i in range(len(text) - n + 1))
+    
+    ngrams_new = get_ngrams(new_title)
+    ngrams_existing = get_ngrams(existing_title)
+    
+    if not ngrams_new or not ngrams_existing:
+        return 0.0
+    
+    intersection = len(ngrams_new & ngrams_existing)
+    union = len(ngrams_new | ngrams_existing)
+    
+    return intersection / union if union > 0 else 0.0
+
+
+# ==================== LLM 调用辅助函数 ====================
+
+def _invoke_llm_for_intent(
+    recent_messages: List[BaseMessage],
+    system_prompt: str,
+    heuristic_title: Optional[str] = None,
+    pre_extracted_info: Optional[Dict] = None
+) -> Dict:
+    """调用 LLM 分析用户意图并解析响应。
+    
+    职责：
+    1. 调用 LLM 分析消息
+    2. 解析 JSON 响应
+    3. 应用启发式标题修正
+    4. 合并预提取信息
+    
+    Args:
+        recent_messages: 最近的消息列表
+        system_prompt: 系统提示词（应已包含 format_instructions）
+        heuristic_title: 启发式提取的标题（可选）
+        pre_extracted_info: Handoff 预提取的信息（可选）
+        
+    Returns:
+        Dict: 包含 intent 和 extracted_info 的分析结果
+        
+    Note:
+        此函数可用于替代 analyze_intent 中的 LLM 调用部分。
+        未来重构时可以这样使用：
+        
+        >>> analysis = _invoke_llm_for_intent(recent_messages, system_prompt, ...)
+        >>> intent = analysis["intent"]
+        >>> extracted_info = analysis["extracted_info"]
+    """
+    llm = get_llm(enable_streaming=False)
+    parser = JsonOutputParser(pydantic_object=IntentResult)
+    
+    analysis_messages = [SystemMessage(content=system_prompt)]
+    analysis_messages.extend(recent_messages)
+    
+    response = llm.invoke(analysis_messages, config={"tags": ["internal_thought"]})
+    result_text = response.content
+    logger.info(f"LLM 分析结果长度: {len(result_text)}")
+    
+    # 解析 JSON 响应
+    try:
+        analysis_dict = parser.parse(result_text)
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON 解析失败，尝试清理: {e}")
+        # 简单的 markdown json 清理
+        clean_text = result_text.replace("```json", "").replace("```", "").strip()
+        start = clean_text.find("{")
+        end = clean_text.rfind("}")
+        if start != -1 and end != -1:
+            clean_text = clean_text[start:end+1]
+            try:
+                analysis_dict = json.loads(clean_text)
+            except json.JSONDecodeError:
+                logger.warning("JSON 清理后仍无法解析，使用默认意图")
+                analysis_dict = {"intent": "clarify", "extracted_info": {}}
+        else:
+            analysis_dict = {"intent": "clarify", "extracted_info": {}}
+    except Exception as e:
+        logger.warning(f"解析意外错误: {e}，使用默认意图")
+        analysis_dict = {"intent": "clarify", "extracted_info": {}}
+    
+    intent = analysis_dict.get("intent", "chat")
+    if isinstance(intent, str):
+        intent = intent.strip()
+        
+    extracted_info = analysis_dict.get("extracted_info", {})
+    
+    # 应用启发式标题修正
+    if heuristic_title and not extracted_info.get("title"):
+        logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
+        extracted_info["title"] = heuristic_title
+        
+        # 如果 intent 是 clarify，修正为 create
+        if intent == "clarify":
+            intent = "create"
+            logger.info("根据 heuristic title 将 intent 修正为 create")
+    
+    logger.info(f"LLM 分析结果: intent='{intent}', extracted_info={extracted_info}")
+    
+    # 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
+    if pre_extracted_info:
+        for key, value in pre_extracted_info.items():
+            if value and not extracted_info.get(key):
+                extracted_info[key] = value
+                logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+    
+    # 保留原始分析结果中的其他字段
+    return {
+        "intent": intent,
+        "extracted_info": extracted_info,
+        "conflict_risk": analysis_dict.get("conflict_risk", "none"),
+        "conflicts": analysis_dict.get("conflicts", []),
+        "quick_mode": analysis_dict.get("quick_mode", False),
+    }
+
+
+def _dispatch_intent(
+    intent: str,
+    extracted_info: Dict,
+    analysis: Dict,
+    state: TodoAgentState,
+    user_id: Optional[int],
+    updates: Dict
+) -> Optional[Dict]:
+    """根据意图分发到对应的处理逻辑。
+    
+    Args:
+        intent: 识别的意图
+        extracted_info: 提取的信息
+        analysis: LLM 分析结果
+        state: 当前状态
+        user_id: 用户 ID
+        updates: 当前更新字典
+        
+    Returns:
+        Optional[Dict]: 如果需要提前返回则返回更新字典，否则返回 None
+    """
+    logger.info(f"Processing dispatch with intent='{intent}'")
+    
+    # 1. clarify 意图
+    if intent == "clarify":
+        logger.info("Entering clarify intent block")
+        # 如果在 clarify 意图中也发现了标题，尝试进行重复检测
+        if extracted_info.get("title"):
+            logger.info(f"Clarify Intent: Preparing to check duplicates for title='{extracted_info.get('title')}'")
+            duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
+            if duplicates:
+                updates["duplicate_candidates"] = duplicates
+                updates["pending_operation"] = {
+                    "action": "create",
+                    "data": extracted_info,
+                    "needs_clarification": True,
+                    "duplicate_warning": True
+                }
+                updates["extracted_info"] = extracted_info
+                logger.info(f"在澄清意图中发现 {len(duplicates)} 个相似任务，需用户确认")
+                return updates
+
+        result = process_clarify_intent(analysis, extracted_info)
+        updates.update(result.to_dict())
+        return updates
+    
+    # 2. confirm 意图
+    if intent == "confirm":
+        result = process_confirm_intent(state.get("pending_operation"), extracted_info)
+        updates.update(result.to_dict())
+        return updates
+    
+    # 3. 用户补充信息场景
+    pending_op = state.get("pending_operation")
+    if pending_op and pending_op.get("needs_clarification") and extracted_info:
+        existing_data = dict(pending_op.get("data", {}))
+        for key, value in extracted_info.items():
+            if value:
+                existing_data[key] = value
+        updated_op = dict(pending_op)
+        updated_op["data"] = existing_data
+        updates["pending_operation"] = updated_op
+        return updates
+    
+    # 4. 冲突风险标记
+    conflict_risk = analysis.get("conflict_risk", "none")
+    if conflict_risk != "none":
+        updates["detected_conflicts"] = analysis.get("conflicts", [])
+    
+    # 5. 重复检测 (Duplicate Detection for create intent)
+    if intent == "create" and extracted_info.get("title"):
+        duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
+        if duplicates:
+            updates["duplicate_candidates"] = duplicates
+            updates["pending_operation"] = {
+                "action": "create",
+                "data": extracted_info,
+                "needs_clarification": True,
+                "duplicate_warning": True
+            }
+            updates["extracted_info"] = extracted_info
+            logger.info(f"发现 {len(duplicates)} 个相似任务，需用户确认是否仍需创建")
+            return updates
+    
+    # 不需要提前返回
+    return None
+
 
 def analyze_intent(state: TodoAgentState) -> Dict:
     """分析用户意图节点（重构版）。
@@ -422,8 +526,40 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     parser = JsonOutputParser(pydantic_object=IntentResult)
     format_instructions = parser.get_format_instructions()
     
+    # Step 4: 渐进式策略注入 (Progressive Prompting)
+    progressive_injection = ""
+    round_count = len(messages) // 2  # 每轮两条消息 (human + ai)
+    user_confirmed = state.get("user_confirmed", False)
+    
+    # 获取最后一条用户消息
+    last_human_msg = ""
+    for msg in reversed(messages):
+        if hasattr(msg, 'type') and msg.type == 'human':
+            last_human_msg = msg.content if hasattr(msg, 'content') else str(msg)
+            break
+            
+    # 启发式标题提取（备用方案）
+    heuristic_title = extract_heuristic_title(last_human_msg) if last_human_msg else None
+
+    # 规则化意图检测（在调用 LLM 之前进行快速匹配）
+    pending_op = state.get("pending_operation")
+    rule_result = check_rule_based_intent(last_human_msg, pending_op)
+    if rule_result and rule_result.should_return_early:
+        updates.update(rule_result.to_dict())
+        return updates
+    
+    # 快速模式检测
+    quick_mode = state.get("quick_mode", False)
+    if not quick_mode and todo_config.is_quick_mode(last_human_msg):
+        quick_mode = True
+        updates["quick_mode"] = True
+        logger.info("检测到快速模式关键词，启用 quick_mode")
+    
+    # 根据轮数获取渐进式策略注入
+    progressive_injection = get_progressive_strategy(round_count, user_confirmed, quick_mode)
+    
     # 构建 Prompt
-    system_prompt = f"{ANALYZE_PROMPT}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
+    system_prompt = f"{TODO_INTENT_ANALYZE_PROMPT}{progressive_injection}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
     
     analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
@@ -435,22 +571,47 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         
         try:
             analysis_dict = parser.parse(result_text)
-        except Exception as e:
-            logger.warning(f"解析 JSON 失败，重试清理: {e}")
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON 解析失败，尝试清理: {e}")
             # 简单的 markdown json 清理
             clean_text = result_text.replace("```json", "").replace("```", "").strip()
             start = clean_text.find("{")
             end = clean_text.rfind("}")
             if start != -1 and end != -1:
                 clean_text = clean_text[start:end+1]
-            analysis_dict = json.loads(clean_text)
+                try:
+                    analysis_dict = json.loads(clean_text)
+                except json.JSONDecodeError:
+                    # 无法恢复，使用默认值
+                    logger.warning("JSON 清理后仍无法解析，使用默认意图")
+                    analysis_dict = {"intent": "clarify", "extracted_info": {}}
+            else:
+                analysis_dict = {"intent": "clarify", "extracted_info": {}}
+        except Exception as e:
+            logger.warning(f"解析意外错误: {e}，使用默认意图")
+            analysis_dict = {"intent": "clarify", "extracted_info": {}}
         
         analysis = analysis_dict
 
         intent = analysis.get("intent", "chat")
+        if isinstance(intent, str):
+            intent = intent.strip()
+            
         extracted_info = analysis.get("extracted_info", {})
         
-        # 🆕 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
+        # Heuristic: 使用启发式提取的标题
+        if heuristic_title and not extracted_info.get("title"):
+             logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
+             extracted_info["title"] = heuristic_title
+             
+             # 如果 intent 是 clarify，修正为 create
+             if intent == "clarify":
+                 intent = "create"
+                 logger.info(f"根据 heuristic title 将 intent 修正为 create")
+        
+        logger.info(f"LLM 分析结果: intent='{intent}', extracted_info={extracted_info}")
+        
+        # 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
         if pre_extracted_info:
             for key, value in pre_extracted_info.items():
                 if value and not extracted_info.get(key):
@@ -470,9 +631,28 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         extracted_info = detect_urgent_task(messages, intent, extracted_info, user_id)
         
         # Step 6: 意图分支处理
+        logger.info(f"Processing Step 6 with intent='{intent}'")
+        print(f"DEBUG: Processing Step 6 with intent='{intent}', extracted_info={extracted_info}")
         
         # 6.1 clarify 意图
         if intent == "clarify":
+            logger.info("Entering clarify intent block")
+            # 如果在 clarify 意图中也发现了标题，尝试进行重复检测
+            if extracted_info.get("title"):
+                 logger.info(f"Clarify Intent: Preparing to check duplicates for title='{extracted_info.get('title')}'")
+                 duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
+                 if duplicates:
+                    updates["duplicate_candidates"] = duplicates
+                    updates["pending_operation"] = {
+                        "action": "create",
+                        "data": extracted_info,
+                        "needs_clarification": True,
+                        "duplicate_warning": True
+                    }
+                    updates["extracted_info"] = extracted_info
+                    logger.info(f"在澄清意图中发现 {len(duplicates)} 个相似任务，需用户确认")
+                    return updates
+
             result = process_clarify_intent(analysis, extracted_info)
             updates.update(result.to_dict())
             return updates
@@ -494,48 +674,28 @@ def analyze_intent(state: TodoAgentState) -> Dict:
             updates["pending_operation"] = pending_op
             return updates
         
-        # 6.4 batch_create 意图
-        if intent == "batch_create":
-            result = process_batch_create_intent(extracted_info)
-            updates.update(result.to_dict())
-            return updates
+
         
-        # 6.5 summarize 意图
-        if intent == "summarize":
-            result = process_summarize_intent()
-            updates.update(result.to_dict())
-            return updates
-        
-        # 6.6 constraint 意图
-        if intent == "constraint":
-            result = process_constraint_intent(extracted_info, state.get("time_constraints"))
-            updates.update(result.to_dict())
-            return updates
-        
-        # 6.7 处理顺带的约束
-        analysis_time_constraints = analysis.get("time_constraints")
-        if analysis_time_constraints:
-            current_constraints = state.get("time_constraints") or {}
-            current_constraints.update(analysis_time_constraints)
-            updates["time_constraints"] = current_constraints
-        
-        # Step 7: 复杂任务和冲突风险标记
-        is_complex = analysis.get("is_complex", False)
+        # Step 7: 冲突风险标记
         conflict_risk = analysis.get("conflict_risk", "none")
-        
-        if is_complex:
-            draft_todos = list(state.get("draft_todos") or [])
-            draft_todos.append({
-                "title": extracted_info.get("title"),
-                "is_complex": True,
-                "subtask_hints": analysis.get("subtask_hints", []),
-                "dependencies": analysis.get("dependencies", []),
-                **extracted_info
-            })
-            updates["draft_todos"] = draft_todos
-        
         if conflict_risk != "none":
             updates["detected_conflicts"] = analysis.get("conflicts", [])
+        
+        # Step 7.5: 重复检测 (Duplicate Detection for create intent)
+        if intent == "create" and extracted_info.get("title"):
+            duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
+            if duplicates:
+                # 发现相似任务，需要用户确认
+                updates["duplicate_candidates"] = duplicates
+                updates["pending_operation"] = {
+                    "action": "create",
+                    "data": extracted_info,
+                    "needs_clarification": True,
+                    "duplicate_warning": True
+                }
+                updates["extracted_info"] = extracted_info
+                logger.info(f"发现 {len(duplicates)} 个相似任务，需用户确认是否仍需创建")
+                return updates
         
         # Step 8: 读取 quick_mode 并确定是否需要确认
         # quick_mode 可能来自 LLM 分析或 state
@@ -563,11 +723,24 @@ def analyze_intent(state: TodoAgentState) -> Dict:
             updates["extracted_info"] = extracted_info
             logger.info(f"直接执行: {intent}")
             
+    except json.JSONDecodeError as e:
+        # JSON 解析错误（可恢复）
+        logger.warning(f"意图分析 JSON 解析失败: {e}")
+        updates["pending_clarifications"] = ["请告诉我您想要完成什么任务？"]
+        updates["messages"] = [AIMessage(content="我没有完全理解您的意思，请告诉我具体需要完成什么任务？")]
+    except (ConnectionError, TimeoutError) as e:
+        # 网络/超时错误
+        logger.error(f"意图分析网络错误: {e}")
+        updates["messages"] = [AIMessage(content="网络连接出现问题，请稍后重试。")]
     except Exception as e:
-        logger.error(f"意图分析严重错误: {e}")
+        # 其他意外错误
+        logger.exception(f"意图分析意外错误: {e}")
         updates["pending_operation"] = None
+        updates["messages"] = [AIMessage(content="抱歉，处理您的请求时出现了问题。请重新描述您的需求。")]
     
     return updates
+
+
 def ask_confirmation(state: TodoAgentState) -> Dict:
     """请求用户确认节点。
     
@@ -838,8 +1011,17 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
             update_data.update(decision["args"])
             
         if update_data and state.get("pending_operation"):
-             logger.info(f"用户更新了参数: {update_data}")
-             state["pending_operation"]["data"].update(update_data)
+            # 返回更新后的 pending_operation（增量更新，不直接修改 state）
+            logger.info(f"用户更新了参数: {update_data}")
+            pending_op = state.get("pending_operation")
+            updated_pending_op = dict(pending_op)
+            updated_data = dict(pending_op.get("data", {}))
+            updated_data.update(update_data)
+            updated_pending_op["data"] = updated_data
+            return {
+                "user_confirmed": True,
+                "pending_operation": updated_pending_op
+            }
         
         return {"user_confirmed": True}
         
@@ -850,28 +1032,41 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
     return {"user_confirmed": False}
 
 
-def execute_operation(state: TodoAgentState) -> TodoAgentState:
+def execute_operation(state: TodoAgentState) -> Dict:
     """执行操作节点。
     
     职责：
     1. 检查用户确认状态
     2. 调用对应的工具函数
     3. 通过 custom 事件发送结构化结果
-    4. 返回结果（同时追加 AIMessage 用于历史记录）
+    4. 返回更新字典（LangGraph 推荐方式）
+    
+    Returns:
+        Dict: 需要更新的状态字段
     """
     logger.info("=== execute_operation 节点 ===")
     
+    # 初始化更新字典
+    updates: Dict = {}
+    
     # 获取 StreamWriter 用于发送自定义事件
-    writer = get_stream_writer()
+    try:
+        writer = get_stream_writer()
+    except Exception:
+        # Fallback for testing or when running outside of LangGraph context
+        writer = lambda x: None
     
     user_confirmed = state.get("user_confirmed")
     operation = state.get("pending_operation")
     extracted_info = state.get("extracted_info", {})
     
-    # 如果用户取消：静默处理，不追加任何消息
+    # 如果用户取消：静默处理，清理状态
     if user_confirmed is False:
         logger.info("用户拒绝操作，静默退出")
-        return state
+        updates["pending_operation"] = None
+        updates["user_confirmed"] = None
+        updates["quick_mode"] = None
+        return updates
     
     # 如果没有操作（如查询）
     if not operation:
@@ -886,10 +1081,10 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
             if result.get("data_type"):
                 additional_kwargs["data_type"] = result["data_type"]
             
-            state["messages"].append(AIMessage(
+            updates["messages"] = [AIMessage(
                 content=result["message"],
                 additional_kwargs=additional_kwargs
-            ))
+            )]
             
             # 发送 custom 事件用于前端流式渲染
             if result.get("data_type"):
@@ -904,9 +1099,9 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
             error_msg = f"❌ {result['message']}"
             if result.get("error"):
                 error_msg += f"\n错误详情: {result['error']}"
-            state["messages"].append(AIMessage(content=error_msg))
+            updates["messages"] = [AIMessage(content=error_msg)]
         
-        return state
+        return updates
 
     
     # 执行确认后的操作
@@ -916,24 +1111,8 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
     logger.info(f"执行操作: {action}")
     
     try:
-        if action == "create":
-            result = _execute_create(data, state)
-        elif action == "update":
-            result = _execute_update(data, state)
-        elif action == "complete":
-            result = _execute_complete(data, state)
-        elif action == "delete":
-            result = _execute_delete(data, state)
-        elif action == "batch_complete":
-            result = _execute_batch_complete(data, state)
-        elif action == "batch_create":
-            result = _execute_batch_create(data, state)
-        elif action == "query":
-            result = _execute_query(data, state)
-        elif action == "merge":
-            result = _execute_merge(data, state)
-        else:
-            result = ToolResultBuilder.error(f"暂不支持操作: {action}")
+        # 使用统一的分派函数（executor_map 模式）
+        result = _dispatch_execute(action, data, state)
         
         # 统一转换 ToolResult 为 AIMessage
         if result["success"]:
@@ -944,10 +1123,10 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
             if result.get("data_type"):
                 additional_kwargs["data_type"] = result["data_type"]
             
-            state["messages"].append(AIMessage(
+            updates["messages"] = [AIMessage(
                 content=result["message"],
                 additional_kwargs=additional_kwargs
-            ))
+            )]
             
             # 发送 custom 事件用于前端流式渲染
             if result.get("data_type"):
@@ -963,13 +1142,21 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
             error_msg = f"❌ {result['message']}"
             if result.get("error"):
                 error_msg += f"\n错误详情: {result['error']}"
-            state["messages"].append(AIMessage(content=error_msg))
+            updates["messages"] = [AIMessage(content=error_msg)]
             
+    except ValueError as e:
+        logger.warning(f"执行参数错误: {e}")
+        updates["messages"] = [AIMessage(content=f"❌ 参数错误: {str(e)}")]
     except Exception as e:
-        logger.exception(f"执行失败: {e}")
-        state["messages"].append(AIMessage(content=f"❌ 操作失败: {str(e)}"))
+        logger.exception(f"执行意外错误: {e}")
+        updates["messages"] = [AIMessage(content="❌ 操作失败，请稍后重试")]
     
-    return state
+    # 清理操作状态
+    updates["pending_operation"] = None
+    updates["user_confirmed"] = None
+    updates["quick_mode"] = None
+    
+    return updates
 
 
 # ==================== 工具调用辅助函数 ====================
@@ -979,21 +1166,77 @@ def execute_operation(state: TodoAgentState) -> TodoAgentState:
 _get_user_id_from_state = get_user_id
 
 
-def _execute_query(data: Dict, state: TodoAgentState) -> ToolResult:
-    """执行查询操作 - 返回结构化数据以供前端渲染 UI。"""
+# ==================== 执行器映射表 ====================
+# 使用延迟绑定，在函数定义后初始化
+_EXECUTOR_MAP: Dict[str, callable] = {}
+
+
+def _get_executor_map() -> Dict[str, callable]:
+    """获取执行器映射表（延迟初始化）。
+    
+    Returns:
+        Dict: action -> executor 函数映射
+    """
+    global _EXECUTOR_MAP
+    if not _EXECUTOR_MAP:
+        _EXECUTOR_MAP = {
+            "create": _execute_create,
+            "update": _execute_update,
+            "complete": _execute_complete,
+            "delete": _execute_delete,
+            "query": _execute_query,
+            "batch_create": _execute_batch_create,
+            "batch_complete": _execute_batch_complete,
+            "merge": _execute_merge,
+        }
+    return _EXECUTOR_MAP
+
+
+def _dispatch_execute(action: str, data: Dict, state: TodoAgentState) -> ToolResult:
+    """统一的操作分派函数。
+    
+    Args:
+        action: 操作类型
+        data: 操作数据
+        state: Agent 状态
+        
+    Returns:
+        ToolResult: 执行结果
+    """
+    executor_map = _get_executor_map()
+    executor = executor_map.get(action)
+    
+    if executor:
+        return executor(data, state)
+    else:
+        return ToolResultBuilder.error(f"暂不支持操作: {action}")
+
+
+def _execute_query(data: Dict, state: TodoAgentState, config: dict = None) -> ToolResult:
+    """执行查询操作 - 返回结构化数据以供前端渲染 UI。
+    
+    Args:
+        data: 查询参数
+        state: Agent 状态
+        config: LangGraph 运行配置（用于依赖注入）
+    """
     
     user_id = _get_user_id_from_state(state)
     
     status = data.get("status")
     category = data.get("category")
-    priority = data.get("priority")
+    priority = _parse_priority(data.get("priority")) if data.get("priority") else None
     keyword = data.get("keyword")
     
     logger.info(f"执行查询: user_id={user_id}, status={status}, category={category}, priority={priority}, keyword={keyword}")
     
+    # 使用依赖注入
+    deps = get_todo_dependencies(config)
+    
     try:
-        with get_db_context() as db:
-            todos = todo_repo.list_by_user(
+        with deps.get_db_context() as db:
+            repo = deps.get_repository()
+            todos = repo.list_by_user(
                 db, 
                 user_id, 
                 status=status,
@@ -1028,10 +1271,16 @@ def _execute_query(data: Dict, state: TodoAgentState) -> ToolResult:
                 data={"todos": todos_data}, 
                 data_type="todo_list"
             )
-            
+    
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"查询待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
+    except ValueError as e:
+        logger.warning(f"查询参数错误: {e}")
+        return ToolResultBuilder.error(f"查询参数无效: {str(e)}")
     except Exception as e:
-        logger.exception(f"查询待办失败: {e}")
-        return ToolResultBuilder.error("查询待办失败", str(e))
+        logger.exception(f"查询待办意外错误: {e}")
+        return ToolResultBuilder.error("查询待办失败，请稍后重试")
 
 
 def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1039,27 +1288,39 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.todo_tools import add_todo
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id}) 
+    # Use dict literal to avoid TypedDict instantiation issues
+    config = {"configurable": {"user_id": user_id}}
     
-    # 解析时间表达
-    due_date = data.get("time") or data.get("due_date")
+    logger.info(f"Invoking add_todo with user_id={user_id} and config={config}")
+    
+    # 优先使用 due_date (ISO 格式)，再回退到 time (可能是自然语言)
+    due_date = data.get("due_date") or data.get("time")
     
     try:
-        result_str = add_todo.invoke({
-            "title": data.get("title", "新待办"),
-            "description": data.get("description", ""),
-            "priority": _parse_priority(data.get("priority")),
-            "due_date": due_date,
-            "category": data.get("category"),
-            "tags": data.get("tags"),
-            "reminder_enabled": data.get("reminder_enabled", False),
-            "location": data.get("location")  # 传入 location (需确保 add_todo 支持)
-        }, config=config)
+        # 直接调用 func 以确保 config 正确传递
+        result_str = add_todo.func(
+            title=data.get("title", "新待办"),
+            description=data.get("description", ""),
+            priority=_parse_priority(data.get("priority")),
+            due_date=due_date,
+            category=data.get("category"),
+            tags=data.get("tags"),
+            reminder_enabled=data.get("reminder_enabled", False),
+            location=data.get("location"),
+            config=config  # 显式传递 config
+        )
         
         return ToolResultBuilder.success(result_str)
+    except ValueError as e:
+        logger.warning(f"创建待办参数错误: {e}")
+        return ToolResultBuilder.error(f"创建失败: {str(e)}")
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"创建待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
     except Exception as e:
-        logger.exception(f"创建待办失败: {e}")
-        return ToolResultBuilder.error("创建待办失败", str(e))
+        logger.exception(f"创建待办意外错误: {e}")
+        return ToolResultBuilder.error("创建待办失败，请稍后重试")
 
 
 def _execute_batch_create(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1071,7 +1332,8 @@ def _execute_batch_create(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.todo_tools import add_todo
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id})
+    config = {"configurable": {"user_id": user_id}}
     
     todos = data.get("todos", [])
     if not todos:
@@ -1082,17 +1344,19 @@ def _execute_batch_create(data: Dict, state: TodoAgentState) -> ToolResult:
     
     for todo_data in todos:
         try:
+            # 直接调用 func 以确保 config 正确传递
             due_date = todo_data.get("time") or todo_data.get("due_date")
-            result_str = add_todo.invoke({
-                "title": todo_data.get("title", "新待办"),
-                "description": todo_data.get("description", ""),
-                "priority": _parse_priority(todo_data.get("priority")),
-                "due_date": due_date,
-                "category": todo_data.get("category"),
-                "tags": todo_data.get("tags"),
-                "reminder_enabled": todo_data.get("reminder_enabled", False),
-                "config": config
-            })
+            result_str = add_todo.func(
+                title=todo_data.get("title", "新待办"),
+                description=todo_data.get("description", ""),
+                priority=_parse_priority(todo_data.get("priority")),
+                due_date=due_date,
+                category=todo_data.get("category"),
+                tags=todo_data.get("tags"),
+                reminder_enabled=todo_data.get("reminder_enabled", False),
+                location=todo_data.get("location"),
+                config=config
+            )
             created.append(todo_data.get("title", "新待办"))
             logger.info(f"批量创建: 成功创建 '{todo_data.get('title')}'")
         except Exception as e:
@@ -1123,32 +1387,38 @@ def _execute_update(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.todo_tools import update_todo
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id})
+    config = {"configurable": {"user_id": user_id}}
     
-    todo_id = data.get("todo_id")
+    todo_id = data.get("todo_id") or data.get("id")
     
     # 如果没有 todo_id，直接报错 (ID 解析应在 resolve 阶段完成)
     if not todo_id:
         return ToolResultBuilder.error("系统错误：缺失待办 ID (请先尝试解析该任务)")
     
     try:
-        result_str = update_todo.invoke({
-            "todo_id": todo_id,
-            "title": data.get("new_title"),  # 注意：更新时使用 new_title
-            "description": data.get("description"),
-            "priority": _parse_priority(data.get("priority")),
-            "due_date": data.get("due_date") or data.get("time"),
-            "category": data.get("category"),
-            "status": data.get("status"),
-            "config": config
-        })
+        # 直接调用 func
+        result_str = update_todo.func(
+            todo_id=todo_id,
+            title=data.get("new_title"),  # 注意：更新时使用 new_title
+            description=data.get("description"),
+            priority=_parse_priority(data.get("priority")) if data.get("priority") else None,
+            due_date=data.get("due_date") or data.get("time"),
+            category=data.get("category"),
+            status=data.get("status"),
+            config=config
+        )
         
         return ToolResultBuilder.success(result_str)
+    except ValueError as e:
+        logger.warning(f"更新待办参数错误: {e}")
+        return ToolResultBuilder.error(f"更新失败: {str(e)}")
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"更新待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
     except Exception as e:
-        logger.exception(f"更新待办失败: {e}")
-        return ToolResultBuilder.error("更新待办失败", str(e))
-
-
+        logger.exception(f"更新待办意外错误: {e}")
+        return ToolResultBuilder.error("更新待办失败，请稍后重试")
 
 
 
@@ -1157,18 +1427,26 @@ def _execute_complete(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.todo_tools import complete_todo
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id})
+    config = {"configurable": {"user_id": user_id}}
     
     try:
-        result_str = complete_todo.invoke({
-            "todo_id": data.get("todo_id"),
-            "config": config
-        })
+        # 直接调用 func
+        result_str = complete_todo.func(
+            todo_id=data.get("todo_id") or data.get("id"),
+            config=config
+        )
         
         return ToolResultBuilder.success(result_str)
+    except ValueError as e:
+        logger.warning(f"完成待办参数错误: {e}")
+        return ToolResultBuilder.error(f"完成失败: {str(e)}")
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"完成待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
     except Exception as e:
-        logger.exception(f"完成待办失败: {e}")
-        return ToolResultBuilder.error("完成待办失败", str(e))
+        logger.exception(f"完成待办意外错误: {e}")
+        return ToolResultBuilder.error("完成待办失败，请稍后重试")
 
 
 def _execute_delete(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1176,21 +1454,30 @@ def _execute_delete(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.todo_tools import delete_todo
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id})
+    config = {"configurable": {"user_id": user_id}}
     
-    if not data.get("todo_id"):
+    todo_id = data.get("todo_id") or data.get("id")
+    if not todo_id:
         return ToolResultBuilder.error("系统错误：缺失待办 ID (请先尝试解析该任务)")
     
     try:
-        result_str = delete_todo.invoke({
-            "todo_id": data.get("todo_id"),
-            "config": config
-        })
+        # 直接调用 func
+        result_str = delete_todo.func(
+            todo_id=todo_id,
+            config=config
+        )
         
         return ToolResultBuilder.success(result_str)
+    except ValueError as e:
+        logger.warning(f"删除待办参数错误: {e}")
+        return ToolResultBuilder.error(f"删除失败: {str(e)}")
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"删除待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
     except Exception as e:
-        logger.exception(f"删除待办失败: {e}")
-        return ToolResultBuilder.error("删除待办失败", str(e))
+        logger.exception(f"删除待办意外错误: {e}")
+        return ToolResultBuilder.error("删除待办失败，请稍后重试")
 
 
 def _execute_batch_complete(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1198,18 +1485,26 @@ def _execute_batch_complete(data: Dict, state: TodoAgentState) -> ToolResult:
     from app.ai.tools.batch_todo_tools import batch_complete_todos
     
     user_id = _get_user_id_from_state(state)
-    config = RunnableConfig(configurable={"user_id": user_id})
+    # config = RunnableConfig(configurable={"user_id": user_id})
+    config = {"configurable": {"user_id": user_id}}
     
     try:
-        result_str = batch_complete_todos.invoke({
-            "todo_ids": data.get("todo_ids", []),
-            "config": config
-        })
+        # 直接调用 func
+        result_str = batch_complete_todos.func(
+            todo_ids=data.get("todo_ids", []),
+            config=config
+        )
         
         return ToolResultBuilder.success(result_str)
+    except ValueError as e:
+        logger.warning(f"批量完成待办参数错误: {e}")
+        return ToolResultBuilder.error(f"批量完成失败: {str(e)}")
+    except (ConnectionError, TimeoutError) as e:
+        logger.error(f"批量完成待办网络错误: {e}")
+        return ToolResultBuilder.error("网络连接失败，请稍后重试")
     except Exception as e:
-        logger.exception(f"批量完成待办失败: {e}")
-        return ToolResultBuilder.error("批量完成待办失败", str(e))
+        logger.exception(f"批量完成待办意外错误: {e}")
+        return ToolResultBuilder.error("批量完成待办失败，请稍后重试")
 
 
 def _execute_merge(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1279,82 +1574,57 @@ def _execute_merge(data: Dict, state: TodoAgentState) -> ToolResult:
 
 
 def _parse_priority(priority_str: Optional[str]) -> int:
-    """解析优先级字符串为数字。"""
-    if not priority_str:
-        return 2
+    """解析优先级字符串为数字。
     
-    priority_map = {
-        "高": 1, "high": 1, "1": 1,
-        "中": 2, "medium": 2, "2": 2,
-        "低": 3, "low": 3, "3": 3
-    }
-    
-    return priority_map.get(str(priority_str).lower(), 2)
+    使用配置类中的解析方法。
+    """
+    return todo_config.parse_priority(priority_str)
 
 
 # ==================== 路由函数 ====================
 
-def route_next(state: TodoAgentState) -> Literal["clarify", "decompose", "conflict", "resolve", "execute", "summarize", "end"]:
-    """路由到下一个节点 - 增强版。
+def route_next(state: TodoAgentState) -> Literal["clarify", "conflict", "resolve", "execute", "end"]:
+    """路由到下一个节点 - 简化版。
     
     流程优先级:
-    0. 汇总请求 → summarize
-    1. 有待办 + 需要澄清 → clarify (澄清完会再次进入 analyze)
-    2. 纯澄清 (无待办) → clarify
-    3. 有复杂任务 → decompose
-    4. 有待办需要冲突检测 → conflict
-    5. 有待办需要实体解析 → resolve（新增）
-    6. 有待办跳过确认（如查询） → execute
-    7. 默认执行 → execute
+    1. 有待办 + 需要澄清 → clarify
+    2. 跳过确认（如查询）→ execute
+    3. 有待办需要实体解析 → resolve
+    4. 默认执行 → execute
     """
     pending_op = state.get("pending_operation")
-    
-    # 0. 汇总请求 → summarize
-    if pending_op and pending_op.get("action") == "summarize":
-        logger.info("路由到: summarize (汇总输出)")
-        return "summarize"
     
     # 1. 检查是否需要跳过确认（如查询操作）
     if pending_op and pending_op.get("skip_confirmation"):
         logger.info("路由到: execute (跳过确认)")
         return "execute"
     
-    # 1. 有待办 + 需要澄清 → clarify (澄清完会再次进入 analyze)
+    # 2. 有待办 + 需要澄清 → clarify
     if pending_op and pending_op.get("needs_clarification"):
         logger.info("路由到: clarify (待办需要补充信息)")
         return "clarify"
     
-    # 2. 纯澄清 (无待办) → clarify
+    # 3. 纯澄清 (无待办) → clarify
     if state.get("pending_clarifications") and not pending_op:
         logger.info("路由到: clarify (纯澄清模式)")
         return "clarify"
     
-    # 3. 有复杂任务需要拆解?
-    draft_todos = state.get("draft_todos", [])
-    if any(t.get("is_complex") for t in draft_todos):
-        logger.info("路由到: decompose (任务拆解)")
-        return "decompose"
-    
-    # 4. 有待办需要冲突检测?
-    if draft_todos and not state.get("detected_conflicts"):
-        logger.info("路由到: conflict (冲突检测)")
-        return "conflict"
-    
-    # 5. 有待办需要实体解析或确认 → resolve（新流程）
-    if state.get("pending_operation"):
+    # 4. 有待办需要实体解析或确认 → resolve
+    if pending_op:
         logger.info("路由到: resolve (实体解析)")
         return "resolve"
     
-    # 6. 默认执行
-    logger.info("路由到: execute")
-    return "execute"
+    # 5. 默认路由 (无待办 -> 澄清/聊天)
+    # Fix: 避免无 pending_operation 时错误进入 execute
+    logger.info("路由到: clarify (默认)")
+    return "clarify"
 
 
 
 # ==================== 图构建 ====================
 
 def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str = None, checkpointer=None):
-    """创建 LangGraph 待办 Agent - 多轮对话增强版。
+    """创建 LangGraph 待办 Agent - 简化版。
     
     Args:
         model: LLM 实例
@@ -1365,57 +1635,38 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
     Returns:
         编译后的 Graph 实例
     """
-    # 导入增强节点
     from app.ai.agents.todo_enhanced_nodes import (
         clarify_node,
-        conflict_detection_node,
-        task_decomposition_node
+        conflict_detection_node
     )
-    from app.ai.agents.summarize_node import summarize_node
     
-    # 创建工作流
     workflow = StateGraph(TodoAgentState)
     
     # === 添加节点 ===
     workflow.add_node("analyze", analyze_intent)
     workflow.add_node("clarify", clarify_node)
-    workflow.add_node("decompose", task_decomposition_node)
     workflow.add_node("conflict", conflict_detection_node)
-    workflow.add_node("resolve", resolve_entity)              # 新增：实体解析节点
-    workflow.add_node("confirm", ask_confirmation)           # 发送确认消息
-    workflow.add_node("wait_confirm", wait_for_confirmation) # 等待用户决策
+    workflow.add_node("resolve", resolve_entity)
+    workflow.add_node("confirm", ask_confirmation)
+    workflow.add_node("wait_confirm", wait_for_confirmation)
     workflow.add_node("execute", execute_operation)
-    workflow.add_node("summarize", summarize_node)  # 汇总节点
     
-    # === 设置入口 ===
     workflow.set_entry_point("analyze")
     
     # === 设置边 ===
-    
-    # analyze → 条件路由 (clarify/decompose/conflict/resolve/execute)
     workflow.add_conditional_edges(
         "analyze",
         route_next,
         {
             "clarify": "clarify",
-            "decompose": "decompose",
             "conflict": "conflict",
-            "resolve": "resolve",  # 新增：实体解析路由
-            "execute": "execute",
-            "summarize": "summarize"  # 汇总路由
+            "resolve": "resolve",
+            "execute": "execute"
         }
     )
     
-    # clarify → END (等待用户回复)
     workflow.add_edge("clarify", END)
     
-    # decompose → conflict (拆解后检测冲突)
-    workflow.add_edge("decompose", "conflict")
-    
-    # summarize → END (汇总后结束)
-    workflow.add_edge("summarize", END)
-    
-    # conflict → resolve (改为先解析再确认)
     workflow.add_conditional_edges(
         "conflict",
         lambda state: "resolve" if state.get("pending_operation") else "execute",
@@ -1425,7 +1676,6 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
         }
     )
     
-    # resolve → 条件路由 (clarify/confirm/execute)
     workflow.add_conditional_edges(
         "resolve",
         route_after_resolve,
@@ -1436,14 +1686,8 @@ def create_todo_graph(model=None, enable_thinking: bool = False, model_id: str =
         }
     )
     
-    # confirm → wait_confirm (发送消息后等待)
     workflow.add_edge("confirm", "wait_confirm")
-    
-    # wait_confirm → execute (收到决策后执行)
-    #注意：如果用户拒绝，execute_node 会处理 user_confirmed=False 的情况并取消
     workflow.add_edge("wait_confirm", "execute")
-    
-    # execute → END
     workflow.add_edge("execute", END)
     
     # === 编译图 ===

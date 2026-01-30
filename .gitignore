@@ -61,6 +61,10 @@ pnpm-debug.log*
 npm-debug.log*
 yarn-error.log*
 
+# 数据目录（大文件不纳入版本控制）
+data/
+!data/README.md
+
 # 其他（按需扩展）
 *.swp
 *.swo

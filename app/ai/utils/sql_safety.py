@@ -1,0 +1,297 @@
+"""SQL 安全检查工具（中文注释）。
+
+提供统一的 SQL 安全检查功能：
+- 危险操作检测（DROP, DELETE, UPDATE 等）
+- 敏感表访问检测
+- Schema 白名单检测
+- 多语句检测
+- 自动添加 LIMIT
+
+统一替代分散在 data_query_tools.py, data_graph.py, data_intent_helpers.py 中的重复实现。
+"""
+import re
+import logging
+from typing import Tuple, Optional, Set, List
+
+from app.ai.utils.sql_parser import extract_tables_from_sql, is_select_only, get_query_type
+from app.core.config import ANALYTICS_SCHEMAS
+
+logger = logging.getLogger(__name__)
+
+
+# ==================== 配置常量 ====================
+
+# 危险 SQL 关键词（禁止执行）
+DANGEROUS_KEYWORDS: Set[str] = {
+    "DROP", "DELETE", "UPDATE", "TRUNCATE", "ALTER", 
+    "INSERT", "CREATE", "GRANT", "REVOKE", "EXECUTE",
+    "CALL",  # 存储过程调用
+}
+
+# 敏感表黑名单（禁止访问）
+SENSITIVE_TABLES: Set[str] = {
+    # 用户/认证相关
+    "t_user", "users", "t_users",
+    "password", "passwords",
+    "secret", "secrets",
+    "token", "tokens",
+    "api_key", "api_keys",
+    "credential", "credentials",
+    "auth", "authentication",
+    # 系统配置相关
+    "t_llm_models",
+    "t_system_config",
+    # 聊天/待办相关（系统数据）
+    "t_chat_message", "t_chat_assets", "t_chat_feedback",
+    "t_todo", "t_todo_history", "t_todo_reminder_queue",
+    # LangGraph 检查点
+    "checkpoints", "checkpoint_blobs", "checkpoint_writes",
+}
+
+# 系统 Schema 黑名单（禁止访问）
+SYSTEM_SCHEMAS: Set[str] = {
+    "pg_catalog",
+    "information_schema",
+    "pg_toast",
+    "pg_temp",
+}
+
+# 默认查询结果限制
+DEFAULT_LIMIT = 1000
+
+
+# ==================== 主要函数 ====================
+
+def check_sql_safety(sql: str, check_schema: bool = True) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 语句的安全性（综合检查）。
+    
+    检查项：
+    1. 是否为只读查询（SELECT/WITH）
+    2. 是否包含危险操作关键词
+    3. 是否访问敏感表
+    4. 是否访问允许的 Schema（可选）
+    5. 是否包含多条语句
+    
+    Args:
+        sql: SQL 语句
+        check_schema: 是否检查 Schema 白名单（默认 True）
+        
+    Returns:
+        (is_safe, error_message) 元组
+        - is_safe: 是否安全
+        - error_message: 错误描述（如果不安全）
+    """
+    if not sql or not sql.strip():
+        return (False, "SQL 语句为空")
+    
+    sql = sql.strip()
+    
+    # 检查是否为只读查询
+    if not is_select_only(sql):
+        query_type = get_query_type(sql)
+        return (False, f"只允许 SELECT 查询，检测到 {query_type} 语句")
+    
+    # 检查危险关键词
+    is_safe, error = check_dangerous_keywords(sql)
+    if not is_safe:
+        return (False, error)
+    
+    # 检查敏感表
+    is_safe, error = check_sensitive_tables(sql)
+    if not is_safe:
+        return (False, error)
+    
+    # 检查 Schema 白名单
+    if check_schema:
+        is_safe, error = check_schema_whitelist(sql)
+        if not is_safe:
+            return (False, error)
+    
+    # 检查多语句
+    is_safe, error = check_multiple_statements(sql)
+    if not is_safe:
+        return (False, error)
+    
+    return (True, None)
+
+
+def check_dangerous_keywords(sql: str) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 是否包含危险操作关键词。
+    
+    使用词边界匹配，避免误判（如 "UPDATE_TIME" 不应被判定为 UPDATE）。
+    
+    Args:
+        sql: SQL 语句
+        
+    Returns:
+        (is_safe, error_message) 元组
+    """
+    sql_upper = sql.upper()
+    
+    for keyword in DANGEROUS_KEYWORDS:
+        # 使用词边界匹配
+        if re.search(rf'\b{keyword}\b', sql_upper):
+            logger.warning(f"SQL 安全检查: 检测到危险关键词 {keyword}")
+            return (False, f"检测到危险操作: {keyword}")
+    
+    return (True, None)
+
+
+def check_sensitive_tables(sql: str) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 是否访问敏感表。
+    
+    使用 sqlglot 解析器提取表名，比简单正则更准确。
+    
+    Args:
+        sql: SQL 语句
+        
+    Returns:
+        (is_safe, error_message) 元组
+    """
+    # 使用统一的表名提取工具
+    tables = extract_tables_from_sql(sql)
+    
+    # 标准化敏感表名（小写）
+    sensitive_lower = {t.lower() for t in SENSITIVE_TABLES}
+    
+    for table in tables:
+        # 提取纯表名（去除 schema 前缀）
+        table_name = table.split('.')[-1].lower()
+        
+        if table_name in sensitive_lower:
+            logger.warning(f"SQL 安全检查: 检测到敏感表访问 {table}")
+            return (False, f"检测到敏感表访问: {table}")
+    
+    return (True, None)
+
+
+def check_schema_whitelist(sql: str) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 访问的 Schema 是否在白名单中。
+    
+    只允许访问 ANALYTICS_SCHEMAS 中配置的 Schema。
+    
+    Args:
+        sql: SQL 语句
+        
+    Returns:
+        (is_safe, error_message) 元组
+    """
+    # 使用统一的表名提取工具
+    tables = extract_tables_from_sql(sql)
+    
+    # 标准化允许的 Schema（小写）
+    allowed_schemas = {s.lower() for s in ANALYTICS_SCHEMAS}
+    system_schemas = {s.lower() for s in SYSTEM_SCHEMAS}
+    
+    for table in tables:
+        # 检查是否包含 schema 前缀
+        if '.' in table:
+            parts = table.split('.')
+            schema = parts[0].lower()
+            
+            # 检查系统 Schema 黑名单
+            if schema in system_schemas:
+                logger.warning(f"SQL 安全检查: 检测到系统 Schema 访问 {schema}")
+                return (False, f"禁止访问系统 Schema: {schema}")
+            
+            # 检查 Schema 白名单
+            if schema not in allowed_schemas:
+                logger.warning(f"SQL 安全检查: Schema {schema} 不在白名单中")
+                return (False, f"Schema '{schema}' 不在允许访问的范围内。允许的 Schema: {', '.join(allowed_schemas)}")
+    
+    return (True, None)
+
+
+def check_multiple_statements(sql: str) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 是否包含多条语句。
+    
+    通过分号分隔检测，防止 SQL 注入攻击。
+    
+    Args:
+        sql: SQL 语句
+        
+    Returns:
+        (is_safe, error_message) 元组
+    """
+    # 移除字符串字面量中的分号（简化处理）
+    # 完整实现应使用 SQL 解析器
+    sql_cleaned = re.sub(r"'[^']*'", "''", sql)  # 替换单引号字符串
+    sql_cleaned = re.sub(r'"[^"]*"', '""', sql_cleaned)  # 替换双引号字符串
+    
+    # 检查分号
+    statements = [s.strip() for s in sql_cleaned.split(';') if s.strip()]
+    
+    if len(statements) > 1:
+        logger.warning(f"SQL 安全检查: 检测到多条语句 ({len(statements)} 条)")
+        return (False, "不允许执行多条 SQL 语句")
+    
+    return (True, None)
+
+
+def add_limit_if_missing(sql: str, limit: int = DEFAULT_LIMIT) -> str:
+    """如果 SQL 缺少 LIMIT 子句，自动添加。
+    
+    防止返回过大的结果集导致性能问题。
+    
+    Args:
+        sql: SQL 语句
+        limit: 默认限制行数
+        
+    Returns:
+        添加 LIMIT 后的 SQL
+    """
+    if not sql or not sql.strip():
+        return sql
+    
+    sql_upper = sql.upper()
+    
+    # 检查是否已有 LIMIT
+    if "LIMIT" not in sql_upper:
+        sql = sql.rstrip().rstrip(';')
+        return f"{sql} LIMIT {limit}"
+    
+    return sql
+
+
+def sanitize_sql(sql: str, auto_limit: bool = True, limit: int = DEFAULT_LIMIT) -> Tuple[str, bool, Optional[str]]:
+    """综合处理 SQL 语句：安全检查 + 自动添加 LIMIT。
+    
+    Args:
+        sql: 原始 SQL 语句
+        auto_limit: 是否自动添加 LIMIT
+        limit: 默认限制行数
+        
+    Returns:
+        (processed_sql, is_safe, error_message) 元组
+        - processed_sql: 处理后的 SQL（如果安全）
+        - is_safe: 是否安全
+        - error_message: 错误描述（如果不安全）
+    """
+    # 安全检查
+    is_safe, error = check_sql_safety(sql)
+    
+    if not is_safe:
+        return (sql, False, error)
+    
+    # 自动添加 LIMIT
+    if auto_limit:
+        sql = add_limit_if_missing(sql, limit)
+    
+    return (sql, True, None)
+
+
+# ==================== 导出 ====================
+
+__all__ = [
+    "check_sql_safety",
+    "check_dangerous_keywords",
+    "check_sensitive_tables",
+    "check_schema_whitelist",
+    "check_multiple_statements",
+    "add_limit_if_missing",
+    "sanitize_sql",
+    "DANGEROUS_KEYWORDS",
+    "SENSITIVE_TABLES",
+    "SYSTEM_SCHEMAS",
+    "DEFAULT_LIMIT",
+]

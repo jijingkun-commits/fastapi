@@ -51,55 +51,11 @@ class ChartParams(BaseModel):
 
 # ==================== 提取 Prompt ====================
 
-TODO_EXTRACTOR_PROMPT = """从用户消息中提取待办事项参数。
-
-用户消息: {message}
-当前时间: {now}
-
-提取以下信息:
-- title: 待办事项标题（必填）
-- due_date: 截止时间（ISO格式，如 "2026-01-15T15:00:00"）
-- priority: 优先级（low/medium/high）
-- category: 分类（如: 工作/生活/学习）
-- reminder: 提醒内容
-- description: 详细描述
-
-时间理解规则:
-- "明天" = 当前日期 + 1天
-- "下周一" = 最近的下一个周一
-- "下午3点" = 15:00
-- "晚上8点" = 20:00
-
-返回 JSON 格式，无法确定的字段置为 null。"""
-
-
-QUERY_EXTRACTOR_PROMPT = """从用户消息中提取数据库查询参数。
-
-用户消息: {message}
-
-提取以下信息:
-- table_name: 表名
-- columns: 查询字段列表
-- conditions: 查询条件字典
-- limit: 结果数量限制
-- order_by: 排序字段
-
-返回 JSON 格式。"""
-
-
-CHART_EXTRACTOR_PROMPT = """从用户消息中提取图表绘制参数。
-
-用户消息: {message}
-
-提取以下信息:
-- chart_type: 图表类型（line/bar/pie/scatter/circle/rectangle）
-- title: 图表标题
-- x_label: X轴标签
-- y_label: Y轴标签
-- data: 数据（如有）
-- style: 样式参数
-
-返回 JSON 格式。"""
+from app.ai.prompts.common_prompts import (
+    TODO_PARAM_EXTRACT_PROMPT,
+    QUERY_PARAM_EXTRACT_PROMPT,
+    CHART_PARAM_EXTRACT_PROMPT
+)
 
 
 # ==================== 提取函数 ====================
@@ -131,7 +87,7 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
         structured_llm = llm.with_structured_output(TodoParams)
         
         result = await structured_llm.ainvoke(
-            TODO_EXTRACTOR_PROMPT.format(
+            TODO_PARAM_EXTRACT_PROMPT.format(
                 message=message[:1000],
                 now=datetime.now().isoformat()
             )
@@ -157,7 +113,7 @@ async def extract_query_params(message: str, model_id: str = None) -> QueryParam
         structured_llm = llm.with_structured_output(QueryParams)
         
         result = await structured_llm.ainvoke(
-            QUERY_EXTRACTOR_PROMPT.format(message=message[:1000])
+            QUERY_PARAM_EXTRACT_PROMPT.format(message=message[:1000])
         )
         
         logger.info("查询参数提取完成: table=%s", result.table_name)
@@ -177,7 +133,7 @@ async def extract_chart_params(message: str, model_id: str = None) -> ChartParam
         structured_llm = llm.with_structured_output(ChartParams)
         
         result = await structured_llm.ainvoke(
-            CHART_EXTRACTOR_PROMPT.format(message=message[:1000])
+            CHART_PARAM_EXTRACT_PROMPT.format(message=message[:1000])
         )
         
         logger.info("图表参数提取完成: type=%s", result.chart_type)

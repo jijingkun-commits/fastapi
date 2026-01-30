@@ -1,23 +1,21 @@
-"""问数工具：基于 Vanna 的语义查询工具（中文注释）。
+"""问数工具：两层漏斗查询策略（中文注释）。
 
-提供自然语言到 SQL 的转换和执行功能。
+实现逻辑：
+1. 第一层：匹配预定义指标 → 使用 sql_template
+2. 第二层：无匹配 → AI 自由生成 SQL
+
+包含表可用性检查和缺表友好提示。
 """
 import logging
-from typing import Optional, Dict, Any, List
-import json
+from typing import Optional
+from datetime import date
 
 from langchain_core.tools import tool
 from langchain_core.runnables.config import RunnableConfig
 
-from app.ai.semantic import get_vanna
-from app.ai.workflow.data_intent_helpers import (
-    match_metric,
-    parse_time_range,
-    extract_dimensions,
-    check_sql_safety,
-    add_limit_if_missing
-)
-from app.db.session import get_analytics_db_context
+from app.services.metric_service import get_metric_service
+from app.ai.utils.sql_safety import check_sql_safety, add_limit_if_missing
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,40 +27,45 @@ def semantic_query(
 ) -> str:
     """基于自然语言的数据查询工具。
     
-    使用 Vanna RAG 将自然语言问题转换为 SQL 并执行。
-    支持预定义指标匹配和自由查询。
+    两层漏斗策略：
+    1. 优先匹配预定义指标，使用 sql_template
+    2. 无匹配时，使用 AI 生成 SQL
     
     Args:
-        question: 自然语言查询问题，如"本月销售额是多少"
+        question: 自然语言查询问题，如"本月存款余额是多少"
         
     Returns:
         查询结果的自然语言描述和数据
     """
     logger.info(f"语义查询: {question}")
     
-    try:
-        vanna = get_vanna()
+    metric_service = get_metric_service()
+    
+    # ========== 第一层：指标匹配 ==========
+    metric = metric_service.match_metric(question)
+    
+    if metric and metric.sql_template:
+        logger.info(f"匹配到指标: {metric.metric_name} ({metric.metric_id})")
         
-        # 尝试匹配预定义指标
-        metric_name = match_metric(question)
-        if metric_name:
-            logger.info(f"匹配到预定义指标: {metric_name}")
+        # 检查表可用性
+        all_available, missing = metric_service.check_tables_availability(metric.sql_template)
         
-        # 解析时间范围
-        time_type, time_text = parse_time_range(question)
-        if time_type:
-            logger.info(f"识别到时间范围: {time_type} ({time_text})")
+        if not all_available:
+            missing_str = ", ".join(missing)
+            logger.warning(f"指标 {metric.metric_id} 缺少表: {missing_str}")
+            return (
+                f"⚠️ 指标「{metric.metric_name}」暂不可用\n\n"
+                f"**原因**：缺少以下数据表：\n"
+                f"- {chr(10).join('`' + t + '`' for t in missing)}\n\n"
+                f"请联系数据管理员导入相关数据表后重试。"
+            )
         
-        # 提取维度
-        dimensions = extract_dimensions(question)
-        if dimensions:
-            logger.info(f"识别到维度: {dimensions}")
-        
-        # 生成 SQL
-        sql = vanna.generate_sql(question)
-        
-        if not sql:
-            return "无法理解您的查询需求，请尝试更具体的描述。"
+        # 准备 SQL（替换参数）
+        today = date.today().isoformat()
+        sql = metric_service.prepare_sql(
+            metric.sql_template, 
+            {"data_dt": today, "date": today}
+        )
         
         # 安全检查
         is_safe, error_msg = check_sql_safety(sql)
@@ -70,27 +73,94 @@ def semantic_query(
             logger.warning(f"SQL 安全检查失败: {error_msg}")
             return f"查询被拒绝：{error_msg}"
         
-        # 自动添加 LIMIT
+        # 添加 LIMIT
         sql = add_limit_if_missing(sql)
         
-        logger.info(f"生成 SQL: {sql[:100]}...")
+        # 执行 SQL
+        return _execute_and_format(sql, metric.metric_name, metric.unit)
+    
+    # ========== 第二层：AI 自由生成 ==========
+    logger.info("未匹配到指标，使用 AI 生成 SQL")
+    
+    try:
+        from app.ai.semantic import get_vanna
+        vanna = get_vanna()
+        
+        # 生成 SQL
+        sql = vanna.generate_sql(question)
+        
+        if not sql:
+            return "无法理解您的查询需求，请尝试更具体的描述。"
+        
+        # 检查表可用性
+        all_available, missing = metric_service.check_tables_availability(sql)
+        
+        if not all_available:
+            missing_str = ", ".join(missing)
+            logger.warning(f"AI 生成的 SQL 缺少表: {missing_str}")
+            return (
+                f"⚠️ 无法执行此查询\n\n"
+                f"**原因**：需要的数据表不存在：\n"
+                f"- {chr(10).join('`' + t + '`' for t in missing)}\n\n"
+                f"当前系统仅支持查询存款和贷款相关数据。"
+            )
+        
+        # 安全检查
+        is_safe, error_msg = check_sql_safety(sql)
+        if not is_safe:
+            logger.warning(f"SQL 安全检查失败: {error_msg}")
+            return f"查询被拒绝：{error_msg}"
+        
+        # 添加 LIMIT
+        sql = add_limit_if_missing(sql)
+        
+        logger.info(f"AI 生成 SQL: {sql[:100]}...")
         
         # 执行 SQL
+        return _execute_and_format(sql)
+        
+    except Exception as e:
+        logger.exception(f"AI 生成 SQL 失败: {e}")
+        return f"查询执行失败: {str(e)}"
+
+
+def _execute_and_format(sql: str, metric_name: Optional[str] = None, unit: Optional[str] = None) -> str:
+    """执行 SQL 并格式化结果。
+    
+    Args:
+        sql: SQL 语句
+        metric_name: 指标名称（用于结果描述）
+        unit: 单位
+        
+    Returns:
+        格式化的结果字符串
+    """
+    try:
+        from app.ai.semantic import get_vanna
+        vanna = get_vanna()
+        
         df = vanna.run_sql(sql)
         
-        # 格式化结果
         if df is None or df.empty:
             return f"查询完成，没有找到符合条件的数据。\n\n执行的 SQL：\n```sql\n{sql}\n```"
         
-        # 转换为可读格式
         row_count = len(df)
+        
+        # 单值结果
         if row_count == 1 and len(df.columns) <= 3:
-            # 单行少列结果，直接展示值
             values = ", ".join([f"{col}: {df.iloc[0][col]}" for col in df.columns])
-            result_text = f"查询结果：{values}"
+            if metric_name:
+                result_text = f"**{metric_name}**：{values}"
+            else:
+                result_text = f"查询结果：{values}"
+            if unit:
+                result_text += f" ({unit})"
         else:
-            # 多行结果，展示表格
-            result_text = f"查询返回 {row_count} 条记录：\n\n"
+            # 多行结果
+            if metric_name:
+                result_text = f"**{metric_name}** 查询返回 {row_count} 条记录：\n\n"
+            else:
+                result_text = f"查询返回 {row_count} 条记录：\n\n"
             result_text += df.head(10).to_markdown(index=False)
             if row_count > 10:
                 result_text += f"\n\n... 共 {row_count} 条记录"
@@ -100,8 +170,8 @@ def semantic_query(
         return result_text
         
     except Exception as e:
-        logger.exception(f"语义查询失败: {e}")
-        return f"查询执行失败: {str(e)}"
+        logger.exception(f"SQL 执行失败: {e}")
+        return f"执行失败: {str(e)}\n\n执行的 SQL：\n```sql\n{sql}\n```"
 
 
 @tool
@@ -121,6 +191,13 @@ def execute_sql(
     """
     logger.info(f"执行 SQL: {sql[:100]}...")
     
+    metric_service = get_metric_service()
+    
+    # 表可用性检查
+    all_available, missing = metric_service.check_tables_availability(sql)
+    if not all_available:
+        return f"SQL 执行失败：缺少数据表 {', '.join(missing)}"
+    
     # 安全检查
     is_safe, error_msg = check_sql_safety(sql)
     if not is_safe:
@@ -130,6 +207,7 @@ def execute_sql(
     sql = add_limit_if_missing(sql)
     
     try:
+        from app.ai.semantic import get_vanna
         vanna = get_vanna()
         df = vanna.run_sql(sql)
         

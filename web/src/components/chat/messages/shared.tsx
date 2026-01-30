@@ -7,7 +7,12 @@ import {
   CopyCheck,
   ChevronLeft,
   ChevronRight,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
+import { submitFeedback } from "@/lib/backend";
+import { toast } from "sonner";
+
 import { TooltipIconButton } from "../tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
@@ -63,6 +68,59 @@ function ContentCopyable({
         )}
       </AnimatePresence>
     </TooltipIconButton>
+  );
+}
+
+function FeedbackButtons({
+  messageId,
+  initialScore = 0,
+  disabled,
+}: {
+  messageId: number | string;
+  initialScore?: number;
+  disabled: boolean;
+}) {
+  // score: 1(like), -1(dislike), 0(none)
+  const [score, setScore] = useState(initialScore);
+
+  const handleFeedback = async (newScore: number) => {
+    // Toggle: if clicking same button, cancel it (set to 0)
+    const finalScore = score === newScore ? 0 : newScore;
+
+    // Optimistic update
+    setScore(finalScore);
+
+    try {
+      await submitFeedback(messageId, finalScore);
+      // toast.success(finalScore === 0 ? "已取消" : "感谢反馈");
+    } catch (err) {
+      // Revert on error
+      setScore(score);
+      toast.error("反馈失败");
+    }
+  };
+
+  return (
+    <>
+      <TooltipIconButton
+        disabled={disabled}
+        tooltip="Good response"
+        variant="ghost"
+        onClick={() => handleFeedback(1)}
+        className={score === 1 ? "text-green-600 bg-green-50" : ""}
+      >
+        <ThumbsUp className={score === 1 ? "fill-current" : ""} />
+      </TooltipIconButton>
+      <TooltipIconButton
+        disabled={disabled}
+        tooltip="Bad response"
+        variant="ghost"
+        onClick={() => handleFeedback(-1)}
+        className={score === -1 ? "text-red-600 bg-red-50" : ""}
+      >
+        <ThumbsDown className={score === -1 ? "fill-current" : ""} />
+      </TooltipIconButton>
+    </>
   );
 }
 
@@ -124,7 +182,9 @@ export function CommandBar({
   handleSubmitEdit,
   handleRegenerate,
   isLoading,
+  messageId,
 }: {
+
   content: string;
   isHumanMessage?: boolean;
   isAiMessage?: boolean;
@@ -132,6 +192,8 @@ export function CommandBar({
   setIsEditing?: React.Dispatch<React.SetStateAction<boolean>>;
   handleSubmitEdit?: () => void;
   handleRegenerate?: () => void;
+  messageId?: number | string;
+  initialScore?: number;
   isLoading: boolean;
 }) {
   if (isHumanMessage && isAiMessage) {
@@ -203,6 +265,13 @@ export function CommandBar({
         >
           <RefreshCcw />
         </TooltipIconButton>
+      )}
+      {isAiMessage && messageId && (
+        <FeedbackButtons
+          messageId={messageId}
+          initialScore={0}
+          disabled={isLoading}
+        />
       )}
       {showEdit && (
         <TooltipIconButton

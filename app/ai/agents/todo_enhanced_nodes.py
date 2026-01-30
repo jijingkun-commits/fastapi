@@ -4,6 +4,11 @@
 - clarify_node: 澄清追问
 - conflict_detection_node: 冲突检测  
 - task_decomposition_node: 任务拆解
+
+设计原则 (LangGraph Best Practices):
+1. 所有节点函数返回 Dict 而非直接修改 state
+2. 使用配置类管理硬编码值
+3. 细化错误处理
 """
 import json
 import logging
@@ -13,12 +18,16 @@ from langchain_core.runnables.config import RunnableConfig
 
 from app.ai.llm_util import get_llm
 from app.ai.state import TodoAgentState
+from app.ai.config.todo_config import get_todo_config
 
-# 🆕 导入自定义事件工具
+# 导入自定义事件工具
 from langgraph.config import get_stream_writer
 from app.ai.events import emit_clarification, emit_token, emit_status
 
 logger = logging.getLogger(__name__)
+
+# 获取配置实例
+config = get_todo_config()
 
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field  # 使用标准 pydantic（LangChain 1.x+ 兼容）
@@ -47,67 +56,37 @@ class DecompositionResult(BaseModel):
 
 # ==================== 澄清节点 ====================
 
-CLARIFY_PROMPT = """你是待办助手的澄清专家。
+from app.ai.prompts.todo_prompts import TODO_CLARIFY_PROMPT
 
-## 任务
-评估信息完整度,生成精准追问。
-
-## 场景识别
-
-### 场景1: 模糊起始
-**用户**: "帮我理一理", "太多了", "整理一下"
-**问题**: 缺少范围、时间、类型
-**追问**:
-- 您希望整理哪个时间段的任务?(本周/本月/全部)
-- 是否只关注工作相关的事项?
-- 有特别紧急需要优先处理的吗?
-
-### 场景2: 高层级输入
-**用户**: "有几个项目要做"
-**问题**: 缺少项目细节
-
-
-**追问**:
-- 这些项目分别是什么?
-- 每个项目的截止时间是?  
-- 您负责哪些部分?
-
-### 场景3: 隐含需求
-**用户**: "领导下周要听汇报"
-**问题**: 未明确要做什么
-**追问**:
-- 汇报的主题是什么?
-- 需要准备哪些材料?(PPT/报告/数据)
-- 有哪些关键要点needs覆盖?
-
-## 输出格式
-```json
-{
-  "needs_clarification": true,
-  "missing_info": ["具体任务", "时间范围"],
-  "questions": [
-    "您希望整理哪个时间段的任务?",
-    "是否只关注工作相关的事项?"
-  ],
-  "context_summary": "用户提到有很多事情,但未具体说明"
-}
-```
-"""
-
-def clarify_node(state: TodoAgentState) -> TodoAgentState:
+def clarify_node(state: TodoAgentState) -> Dict:
     """澄清节点 - 识别信息不完整并生成追问。
     
     支持三种模式:
     1. 纯澄清: 无待办信息,生成开放式追问
     2. 确认式澄清: 有部分待办信息,展示待办详情并询问用户确认或补充
-    3. 🆕 逐项目追问: 多个项目时依次追问每个项目详情
+    3. 逐项目追问: 多个项目时依次追问每个项目详情
+    
+    Returns:
+        Dict: 需要更新的状态字段（LangGraph 推荐方式）
     """
     logger.info("=== clarify_node节点 ===")
     
-    # 🆕 获取 StreamWriter 用于发送自定义事件
-    writer = get_stream_writer()
+    # 初始化更新字典
+    updates: Dict = {}
     
-    # 🆕 模式3: 逐项目追问循环
+    # Check if last message is AI message (e.g. Cancel confirmation)
+    if state.get("messages") and isinstance(state["messages"][-1], AIMessage):
+        logger.info("上一条消息是 AI 回复，跳过澄清生成")
+        return updates
+    
+    # 获取 StreamWriter 用于发送自定义事件
+    try:
+        writer = get_stream_writer()
+    except Exception:
+        # Fallback for testing or when running outside of LangGraph context
+        writer = lambda x: None
+    
+    # 模式3: 逐项目追问循环
     project_queue = state.get("project_queue", [])
     current_idx = state.get("current_project_index", 0)
     
@@ -125,23 +104,57 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
         lines.append("*回复后我会继续询问下一个项目*")
         
         clarify_text = "\n".join(lines)
-        state["messages"].append(AIMessage(content=clarify_text))
+        updates["messages"] = [AIMessage(content=clarify_text)]
         
-        # 🆕 发送澄清事件给前端
+        # 发送澄清事件给前端
         emit_clarification(writer, 
                           questions=["1. 这个项目的主要任务是什么？", "2. 截止时间是什么时候？", "3. 您负责哪些部分？"],
                           message=clarify_text,
                           node="clarify_node")
         
-        state["current_project_index"] = current_idx + 1
-        state["current_focus"] = current_project
+        updates["current_project_index"] = current_idx + 1
+        updates["current_focus"] = current_project
         logger.info(f"逐项目追问: {current_project} ({current_idx + 1}/{len(project_queue)})")
-        return state
+        return updates
     
     # 检查是否有部分待办信息
     pending_op = state.get("pending_operation")
     
     if pending_op and pending_op.get("needs_clarification"):
+        # 模式2.5: 重复检测警告 (发现相似任务)
+        if pending_op.get("duplicate_warning"):
+            data = pending_op["data"]
+            new_title = data.get("title", "新待办")
+            duplicates = state.get("duplicate_candidates", [])
+            
+            lines = ["⚠️ **检测到相似任务**", ""]
+            lines.append(f"您要创建的待办：**{new_title}**")
+            lines.append("")
+            lines.append("🔍 已存在以下相似任务：")
+            
+            for i, dup in enumerate(duplicates[:3], 1):
+                due_info = f"，截止 {dup['due_date']}" if dup.get("due_date") else ""
+                sim_pct = int(dup.get("similarity", 0) * 100)
+                lines.append(f"  {i}. `#{dup['id']}` {dup['title']} (相似度 {sim_pct}%{due_info})")
+            
+            lines.append("")
+            lines.append("**请选择：**")
+            lines.append("1. 回复「**仍需新建**」创建新任务")
+            lines.append("2. 回复「**用 #ID**」关联到已有任务")
+            lines.append("3. 回复「**取消**」放弃操作")
+            
+            clarify_text = "\n".join(lines)
+            updates["messages"] = [AIMessage(content=clarify_text)]
+            
+            # 发送澄清事件给前端
+            emit_clarification(writer, 
+                               questions=["1. 仍需新建", "2. 用已有任务", "3. 取消"],
+                               message=clarify_text,
+                               node="clarify_node")
+            
+            logger.info(f"生成重复警告澄清: {new_title}, 相似任务数: {len(duplicates)}")
+            return updates
+        
         # 模式2: 确认式澄清 (有部分待办信息)
         data = pending_op["data"]
         action = pending_op.get("action", "create")
@@ -156,9 +169,8 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
         is_urgent = data.get("is_urgent", False)
         affected_tasks = data.get("affected_tasks", [])
         
-        # 优先级映射
-        priority_map = {1: "🔴 高", 2: "🟡 中", 3: "🟢 低"}
-        priority_str = priority_map.get(priority, "中")
+        # 使用配置获取优先级显示
+        priority_str = config.get_priority_display(priority) if priority else "中"
         
         # 构建详细的待办信息展示
         if is_urgent:
@@ -180,7 +192,7 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
         if description:
             lines.append(f"- 📄 描述：{description}")
         
-        # 🆕 Phase 3: 显示受影响的任务
+        # Phase 3: 显示受影响的任务
         if affected_tasks:
             lines.append("")
             lines.append("⚠️ **注意：以下同日任务可能需要调整：**")
@@ -196,9 +208,9 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
         lines.append("2. 补充更多信息（如具体时间、地点、提醒等）")
         
         clarify_text = "\n".join(lines)
-        state["messages"].append(AIMessage(content=clarify_text))
+        updates["messages"] = [AIMessage(content=clarify_text)]
         
-        # 🆕 发送澄清事件给前端
+        # 发送澄清事件给前端
         emit_clarification(writer, 
                           questions=["1. 回复「确认」直接创建", "2. 补充更多信息"],
                           message=clarify_text,
@@ -216,12 +228,12 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
                 break
         
         if not last_user_msg:
-            return state
+            return updates
         
         # 调用LLM评估
         llm = get_llm()
         clarify_messages = [
-            SystemMessage(content=CLARIFY_PROMPT),
+            SystemMessage(content=TODO_CLARIFY_PROMPT),
             HumanMessage(content=f"用户消息: {last_user_msg}\n\n当前上下文: {state.get('conversation_context', {})}")
         ]
         
@@ -229,10 +241,10 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
         parser = JsonOutputParser(pydantic_object=ClarificationResult)
         
         try:
-            # 🔧 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
+            # 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
             response = llm.invoke(clarify_messages, config={"tags": ["internal_thought"]})
             
-            # ✅ 使用标准 Parser 解析，无需正则 hacking
+            # 使用标准 Parser 解析
             result = parser.parse(response.content)
             
             if result.get("needs_clarification"):
@@ -248,10 +260,10 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
                     else:
                         clarify_text = "请告诉我更多细节，以便我更好地帮助你。"
                 
-                state["pending_clarifications"] = questions
-                state["messages"].append(AIMessage(content=clarify_text))
+                updates["pending_clarifications"] = questions
+                updates["messages"] = [AIMessage(content=clarify_text)]
                 
-                # 🆕 发送澄清事件给前端
+                # 发送澄清事件给前端
                 emit_clarification(writer, 
                                   questions=questions,
                                   message=clarify_text,
@@ -261,40 +273,46 @@ def clarify_node(state: TodoAgentState) -> TodoAgentState:
             else:
                 # 不需要澄清，生成友好提示
                 friendly_msg = "好的，请告诉我具体需要完成什么任务？"
-                state["messages"].append(AIMessage(content=friendly_msg))
+                updates["messages"] = [AIMessage(content=friendly_msg)]
             
         except json.JSONDecodeError as e:
-            logger.error(f"澄清节点 JSON 解析失败: {e}, 原始内容: {response.content[:200]}")
+            logger.warning(f"澄清节点 JSON 解析失败: {e}")
             # 降级: 生成友好的提示消息,避免JSON泄漏
             fallback_msg = "我需要了解更多信息:\n\n请告诉我:\n1. 您希望完成什么任务?\n2. 相关的时间安排是?\n3. 有什么特别要注意的吗?"
-            state["messages"].append(AIMessage(content=fallback_msg))
+            updates["messages"] = [AIMessage(content=fallback_msg)]
         except Exception as e:
-            logger.error(f"澄清节点失败: {e}")
+            logger.error(f"澄清节点意外错误: {e}")
             # 降级: 生成友好的提示消息,避免JSON泄漏
             fallback_msg = "我需要了解更多信息:\n\n请告诉我:\n1. 您希望完成什么任务?\n2. 相关的时间安排是?\n3. 有什么特别要注意的吗?"
-            state["messages"].append(AIMessage(content=fallback_msg))
+            updates["messages"] = [AIMessage(content=fallback_msg)]
     
-    return state
+    return updates
 
 
 # ==================== 冲突检测节点 ====================
 
-def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
+def conflict_detection_node(state: TodoAgentState) -> Dict:
     """冲突检测节点 - 检测时间/优先级/工作量冲突。
     
     Phase 2 增强：
     1. 使用 blocked_weekdays 检测不可用日期冲突
     2. 基于工时估算检测工作量超载
     3. 生成调整建议
+    
+    Returns:
+        Dict: 需要更新的状态字段
     """
     logger.info("=== conflict_detection_node节点 ===")
+    
+    # 初始化更新字典
+    updates: Dict = {}
     
     draft_todos = state.get("draft_todos", [])
     time_constraints = state.get("time_constraints", {})
     conflicts = []
     
     if not draft_todos:
-        return state
+        return updates
     
     # 获取 blocked_weekdays (来自 NaturalTimeParser 提取)
     blocked_weekdays = set(time_constraints.get("blocked_weekdays", []))
@@ -317,12 +335,14 @@ def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
                 if date_key not in deadline_groups:
                     deadline_groups[date_key] = {"todos": [], "weekday": weekday}
                 deadline_groups[date_key]["todos"].append(todo)
+            except ValueError as e:
+                logger.warning(f"日期格式错误: {deadline}, {e}")
             except Exception as e:
-                logger.warning(f"日期解析失败: {deadline}, {e}")
+                logger.error(f"日期解析意外错误: {deadline}, {e}")
     
-    # 2. 检测工作量超载 (同一天 > 2个任务 或 > 6小时)
-    DEFAULT_HOURS_PER_TASK = 2  # 默认每个任务2小时
-    MAX_DAILY_HOURS = 8
+    # 2. 检测工作量超载 (使用配置)
+    default_hours = config.default_hours_per_task
+    max_hours = config.max_daily_hours
     
     for date_key, group in deadline_groups.items():
         todos = group["todos"]
@@ -330,7 +350,7 @@ def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
         
         # 计算该日总工时
         total_hours = sum(
-            t.get("estimated_hours", DEFAULT_HOURS_PER_TASK) 
+            t.get("estimated_hours", default_hours) 
             for t in todos
         )
         
@@ -344,14 +364,14 @@ def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
                 "description": f"⚠️ {date_key} (周{['一','二','三','四','五','六','日'][weekday-1]}) 您不可用，但有 {len(todos)} 个任务截止",
                 "suggestion": f"建议将任务调整到其他日期"
             })
-        elif total_hours > MAX_DAILY_HOURS:
+        elif total_hours > max_hours:
             conflicts.append({
                 "type": "workload_overflow",
                 "date": date_key,
                 "total_hours": total_hours,
-                "available_hours": MAX_DAILY_HOURS,
+                "available_hours": max_hours,
                 "tasks": [t.get("title") for t in todos],
-                "description": f"📅 {date_key} 任务过载: 预计需要 {total_hours}h，可用 {MAX_DAILY_HOURS}h",
+                "description": f"📅 {date_key} 任务过载: 预计需要 {total_hours}h，可用 {max_hours}h",
                 "suggestion": "建议延后部分低优先级任务"
             })
         elif len(todos) > 2:
@@ -374,14 +394,14 @@ def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
     
     if conflicts:
         # 合并到已有冲突列表 (避免重复)
-        existing_conflicts = state.get("detected_conflicts") or []
+        existing_conflicts = list(state.get("detected_conflicts") or [])
         existing_descs = {c["description"] for c in existing_conflicts}
         
         for c in conflicts:
             if c["description"] not in existing_descs:
                 existing_conflicts.append(c)
         
-        state["detected_conflicts"] = existing_conflicts
+        updates["detected_conflicts"] = existing_conflicts
         
         # 生成冲突提示消息
         conflict_text = "⚠️ **检测到以下潜在冲突**:\n\n"
@@ -391,75 +411,40 @@ def conflict_detection_node(state: TodoAgentState) -> TodoAgentState:
                 conflict_text += f"   💡 {c['suggestion']}\n"
         conflict_text += "\n是否需要调整任务安排?"
         
-        state["messages"].append(AIMessage(content=conflict_text))
+        updates["messages"] = [AIMessage(content=conflict_text)]
         logger.info(f"检测到 {len(conflicts)} 个新冲突, 总计 {len(existing_conflicts)} 个")
     
-    return state
+    return updates
 
 
 # ==================== 任务拆解节点 ====================
 
-DECOMPOSE_PROMPT = """你是任务分解专家。
+from app.ai.prompts.todo_prompts import TODO_DECOMPOSE_PROMPT
 
-## 任务
-识别复合任务并拆解为可执行子任务。
-
-## 拆解规则
-
-### 识别复合任务
-**特征**:
-- 包含"和"/"以及"等连接词
-- 提到多个动作 (写、准备、提交)
-- 明确列举子项
-
-**示例**:
-"技术方案里要写系统架构、信创适配、实施计划"
-→ 复合任务,需拆解
-
-### 拆解方法
-1. 提取主任务标题
-2. 识别所有子任务
-3. 标记依赖关系
-4. 评估工作量
-
-## 输出格式
-```json
-{
-  "is_complex": true,
-  "main_task": "预售资金投标材料",
-  "subtasks": [
-    {
-      "title": "技术方案 - 系统架构设计",
-      "parent": "预售资金投标材料",
-      "estimated_hours": 4,
-      "dependencies": []
-    },
-    {
-      "title": "技术方案 - 信创适配说明",
-      "estimated_hours": 2,
-      "dependencies": ["系统架构设计"]
-    }
-  ],
-  "external_dependencies": [
-    "等待公司部提supply商务方案"
-  ]
-}
-```
-"""
-
-def task_decomposition_node(state: TodoAgentState) -> TodoAgentState:
-    """任务拆解节点 - 自动拆分复合任务。"""
+def task_decomposition_node(state: TodoAgentState) -> Dict:
+    """任务拆解节点 - 自动拆分复合任务。
+    
+    Returns:
+        Dict: 需要更新的状态字段
+    """
     logger.info("=== task_decomposition_node节点 ===")
     
+    # 初始化更新字典
+    updates: Dict = {}
+    
     draft_todos = state.get("draft_todos", [])
+    if not draft_todos:
+        return updates
+        
     decomposed_todos = []
+    messages_to_add = []
     
     for todo in draft_todos:
         if todo.get("is_complex"):
             # 调用LLM拆解
             llm = get_llm()
             decompose_messages = [
-                SystemMessage(content=DECOMPOSE_PROMPT),
+                SystemMessage(content=TODO_DECOMPOSE_PROMPT),
                 HumanMessage(content=f"任务: {todo.get('title')}\n描述: {todo.get('description', '')}")
             ]
             
@@ -467,13 +452,11 @@ def task_decomposition_node(state: TodoAgentState) -> TodoAgentState:
             parser = JsonOutputParser(pydantic_object=DecompositionResult)
 
             try:
-                # 🔧 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
+                # 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
                 response = llm.invoke(decompose_messages, config={"tags": ["internal_thought"]})
                 
-                # ✅ 使用标准 Parser 解析
+                # 使用标准 Parser 解析
                 result = parser.parse(response.content)
-                
-
                 
                 if result.get("subtasks"):
                     # 添加子任务
@@ -489,7 +472,7 @@ def task_decomposition_node(state: TodoAgentState) -> TodoAgentState:
                     
                     # 标记外部依赖
                     if result.get("external_dependencies"):
-                        state["messages"].append(AIMessage(
+                        messages_to_add.append(AIMessage(
                             content=f"📌 注意: {result['main_task']} 依赖于:\n" + 
                             "\n".join([f"- {dep}" for dep in result["external_dependencies"]])
                         ))
@@ -498,14 +481,20 @@ def task_decomposition_node(state: TodoAgentState) -> TodoAgentState:
                 else:
                     decomposed_todos.append(todo)
             
+            except json.JSONDecodeError as e:
+                logger.warning(f"任务拆解 JSON 解析失败: {e}")
+                decomposed_todos.append(todo)
             except Exception as e:
-                logger.error(f"任务拆解失败: {e}")
+                logger.error(f"任务拆解意外错误: {e}")
                 decomposed_todos.append(todo)
         else:
             decomposed_todos.append(todo)
     
-    state["draft_todos"] = decomposed_todos
-    return state
+    updates["draft_todos"] = decomposed_todos
+    if messages_to_add:
+        updates["messages"] = messages_to_add
+    
+    return updates
 
 
 # ==================== 辅助函数 ====================

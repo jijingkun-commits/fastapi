@@ -221,65 +221,14 @@ def extract_dimensions(question: str) -> List[str]:
 
 
 # ==================== SQL 安全校验 ====================
+# 使用统一的安全检查工具（向后兼容导出）
 
-DANGEROUS_KEYWORDS = [
-    "DROP", "DELETE", "UPDATE", "TRUNCATE", "ALTER", 
-    "INSERT", "CREATE", "GRANT", "REVOKE", "EXECUTE"
-]
-
-SENSITIVE_TABLES = [
-    "t_user", "users", "password", "secret", "token", 
-    "api_key", "credential", "auth"
-]
-
-
-def check_sql_safety(sql: str) -> Tuple[bool, Optional[str]]:
-    """检查 SQL 语句的安全性。
-    
-    Args:
-        sql: SQL 语句
-        
-    Returns:
-        (is_safe, error_message) 元组
-    """
-    sql_upper = sql.upper()
-    
-    # 检查危险关键词
-    for keyword in DANGEROUS_KEYWORDS:
-        # 使用词边界匹配，避免误判（如 "UPDATE_TIME"）
-        if re.search(rf'\b{keyword}\b', sql_upper):
-            return (False, f"检测到危险操作: {keyword}")
-    
-    # 检查敏感表
-    for table in SENSITIVE_TABLES:
-        if table.upper() in sql_upper:
-            return (False, f"检测到敏感表访问: {table}")
-    
-    # 检查多语句（分号分隔）
-    statements = [s.strip() for s in sql.split(';') if s.strip()]
-    if len(statements) > 1:
-        return (False, "不允许执行多条 SQL 语句")
-    
-    return (True, None)
-
-
-def add_limit_if_missing(sql: str, limit: int = 1000) -> str:
-    """如果 SQL 缺少 LIMIT，自动添加。
-    
-    Args:
-        sql: SQL 语句
-        limit: 默认限制行数
-        
-    Returns:
-        添加 LIMIT 后的 SQL
-    """
-    sql_upper = sql.upper()
-    
-    if "LIMIT" not in sql_upper:
-        sql = sql.rstrip().rstrip(';')
-        return f"{sql} LIMIT {limit}"
-    
-    return sql
+from app.ai.utils.sql_safety import (
+    check_sql_safety,
+    add_limit_if_missing,
+    DANGEROUS_KEYWORDS,
+    SENSITIVE_TABLES,
+)
 
 
 # ==================== 导出 ====================

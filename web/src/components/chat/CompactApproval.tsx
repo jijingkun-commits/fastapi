@@ -32,8 +32,8 @@ export function CompactApproval() {
     const actionName = firstAction?.name || "操作";
     const actionArgs = firstAction?.args || {};
 
-    // 提取显示内容
-    const displayMessage = actionArgs._display_message || "";
+    // 提取显示内容：优先使用 _display_message，其次使用 sql_query
+    const displayMessage = actionArgs._display_message || actionArgs.sql_query || "";
 
     // 操作类型映射
     const actionLabels: Record<string, string> = {
@@ -87,9 +87,9 @@ export function CompactApproval() {
                         </span>
                     </div>
                     {displayMessage && (
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate max-w-md">
-                            {displayMessage.replace(/\n/g, ' ')}
-                        </div>
+                        <code className="text-xs text-zinc-600 dark:text-zinc-300 font-mono bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded max-w-xl max-h-20 overflow-auto block whitespace-pre-wrap break-all">
+                            {displayMessage}
+                        </code>
                     )}
                 </div>
             </div>

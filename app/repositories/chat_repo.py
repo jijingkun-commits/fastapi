@@ -71,6 +71,7 @@ def get_messages_by_thread(
     db: Session,
     thread_id: str,
     limit: int = 100,
+    exclude_intermediate: bool = True,
 ) -> List[ChatMessage]:
     """根据线程 ID 获取对话历史。
     
@@ -78,13 +79,30 @@ def get_messages_by_thread(
         db: 数据库会话
         thread_id: 对话线程 ID
         limit: 最大返回条数
+        exclude_intermediate: 是否排除中间消息（interrupt 场景的临时 AI 回复）
         
     Returns:
         ChatMessage 列表，按创建时间升序
     """
+    from sqlalchemy import or_, and_, text
+    from sqlalchemy.sql import func
+    
+    query = db.query(ChatMessage).filter(ChatMessage.thread_id == thread_id)
+    
+    # 排除中间消息：只排除 metadata->>'is_intermediate' = 'true' 的记录
+    # 保留：metadata 为 NULL、metadata 为空对象、或 is_intermediate 不是 'true'
+    if exclude_intermediate:
+        # 使用 COALESCE 处理 NULL 值：如果 is_intermediate 为 NULL 则视为 'false'
+        is_intermediate_value = func.coalesce(
+            ChatMessage.extra_data.op("->>")("is_intermediate"),
+            "false"
+        )
+        query = query.filter(
+            ~is_intermediate_value.in_(["true", "True"])
+        )
+    
     return (
-        db.query(ChatMessage)
-        .filter(ChatMessage.thread_id == thread_id)
+        query
         .order_by(ChatMessage.create_time.asc())
         .limit(limit)
         .all()
@@ -414,21 +432,105 @@ def save_conversation_from_messages(
                 title=title,
             )
     
-    # 4. 保存 ai 消息（只保存最后一条）
+    # 4. 保存 ai 消息（只保存最后一条，带去重检查）
     if last_ai:  # 使用 last_ai 对象判断，确保能获取 metadata
-        # 提取 metadata (additional_kwargs)
-        extra_data = getattr(last_ai, "additional_kwargs", None)
-        
-        save_message(
-            db,
-            user_id=user_id,
-            thread_id=thread_id,
-            role="ai",
-            content_type="markdown",
-            content=ai_content,
-            extra_data=extra_data,  # 保存 metadata
+        # 检查是否已存在相同内容的 AI 消息（防止 interrupt/resume 与 postprocess 重复保存）
+        existing_ai = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.thread_id == thread_id,
+                ChatMessage.role == "ai",
+                ChatMessage.content == ai_content,
+            )
+            .first()
         )
+        
+        if existing_ai:
+            logger.info("跳过重复 AI 消息: thread_id=%s, content=%s...", 
+                       thread_id, ai_content[:30] if ai_content else "")
+        else:
+            # 提取 metadata (additional_kwargs)
+            extra_data = getattr(last_ai, "additional_kwargs", None)
+            
+            save_message(
+                db,
+                user_id=user_id,
+                thread_id=thread_id,
+                role="ai",
+                content_type="markdown",
+                content=ai_content,
+                extra_data=extra_data,  # 保存 metadata
+            )
     
     logger.info("对话已保存: thread_id=%s, human=%d字, ai=%d字", 
                thread_id, len(str(human_content)), len(str(ai_content)))
+
+
+def save_feedback(
+    db: Session,
+    user_id: int,
+    message_id: int,
+    score: int,
+    reason: Optional[str] = None,
+) -> dict:
+    """保存或更新消息反馈。
+    
+    Args:
+        db: 数据库会话
+        user_id: 用户 ID
+        message_id: 消息 ID
+        score: 分数 (1: Like, -1: Dislike, 0: Cancel)
+        reason: 原因（可选）
+        
+    Returns:
+        反馈记录字典
+    """
+    from sqlalchemy import text
+    
+    # 使用 ON CONFLICT 更新或插入
+    # 注意：PostgreSQL 语法
+    sql = text("""
+        INSERT INTO t_chat_feedback (user_id, message_id, score, reason, updated_at)
+        VALUES (:user_id, :message_id, :score, :reason, NOW())
+        ON CONFLICT (user_id, message_id) 
+        DO UPDATE SET score = EXCLUDED.score, reason = EXCLUDED.reason, updated_at = NOW()
+        RETURNING id
+    """)
+    
+    try:
+        result = db.execute(sql, {
+            "user_id": user_id,
+            "message_id": message_id,
+            "score": score,
+            "reason": reason
+        })
+        db.commit()
+        feedback_id = result.scalar()
+        logger.info("用户 %d 对消息 %d 反馈: %d", user_id, message_id, score)
+        return {
+            "id": feedback_id,
+            "user_id": user_id,
+            "message_id": message_id,
+            "score": score,
+            "reason": reason
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error("保存反馈失败: %s", e)
+        raise e
+
+
+def get_feedback_by_message(db: Session, message_id: int, user_id: int) -> Optional[dict]:
+    """获取指定消息的反馈。"""
+    from sqlalchemy import text
+    try:
+        sql = text("SELECT * FROM t_chat_feedback WHERE message_id = :mid AND user_id = :uid")
+        row = db.execute(sql, {"mid": message_id, "uid": user_id}).mappings().first()
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        logger.error("获取反馈失败: %s", e)
+        return None
+
 

@@ -10,16 +10,21 @@ class MetaTable(Base):
     __tablename__ = "t_meta_tables"
 
     id = Column(Integer, primary_key=True, index=True)
-    table_name = Column(String(100), unique=True, nullable=False, comment="表名")
+    schema_name = Column(String(100), default="public", nullable=False, comment="Schema 名称")
+    table_name = Column(String(100), nullable=False, comment="表名")
     display_name = Column(String(100), comment="显示名称")
     description = Column(Text, comment="描述")
     category = Column(String(50), comment="分类")
-    embedding = Column(Vector(1024), comment="表描述向量（智谱 embedding-3）")
+    embedding = Column(Vector(2048), comment="表描述向量（智谱 embedding-3）")
     
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     columns = relationship("MetaColumn", back_populates="table", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        UniqueConstraint('schema_name', 'table_name', name='uq_schema_table'),
+    )
 
 class MetaColumn(Base):
     """字段元数据"""
@@ -36,7 +41,7 @@ class MetaColumn(Base):
     foreign_table = Column(String(100), comment="外键关联表")
     foreign_column = Column(String(100), comment="外键关联字段")
     sample_values = Column(Text, comment="示例值")
-    embedding = Column(Vector(1024), comment="字段描述向量（智谱 embedding-3）")
+    embedding = Column(Vector(2048), comment="字段描述向量（智谱 embedding-3）")
 
     table = relationship("MetaTable", back_populates="columns")
 
@@ -70,7 +75,7 @@ class DataQueryLog(Base):
     is_correct = Column(Boolean, comment="是否正确（用户反馈）")
     corrected_sql = Column(Text, comment="人工修正后的 SQL")
     trained = Column(Boolean, default=False, comment="是否已训练进向量库")
-    question_embedding = Column(Vector(1024), comment="问题向量（智谱 embedding-3）")
+    question_embedding = Column(Vector(2048), comment="问题向量（智谱 embedding-3）")
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Metric(Base):
@@ -86,7 +91,7 @@ class Metric(Base):
     formula = Column(Text, comment="计算公式（派生指标）")
     filter_condition = Column(Text, comment="WHERE 条件")
     synonyms = Column(ARRAY(String), comment="同义词数组")
-    embedding = Column(Vector(1024), comment="指标描述向量（智谱 embedding-3）")
+    embedding = Column(Vector(2048), comment="指标描述向量（智谱 embedding-3）")
     
     created_by = Column(Integer, comment="创建人ID")
     created_at = Column(TIMESTAMP, server_default=func.now())

@@ -33,29 +33,7 @@ class IntentResult(BaseModel):
 
 
 # 意图分类 Prompt（精简版，节省 Token）
-INTENT_PROMPT = """分类用户意图，返回 JSON。
-
-意图类型:
-- greeting: 问候、闲聊
-- web_search: 联网查询（天气/新闻/价格）
-- knowledge_query: 知识库查询（公司规定/文档）
-- data_query: 简单数据库查询
-- data_analysis: 复杂数据分析（多步骤处理）
-- todo_management: 待办事项管理
-- chart_drawing: 绘图请求
-- image_analysis: 图片识别
-- file_processing: 文件处理
-
-用户消息: {message}
-
-返回格式: {{"intent": "类型", "confidence": 0.0-1.0, "route_to": "目标"}}
-
-route_to 规则:
-- greeting/web_search/knowledge_query/data_query/chart_drawing/image_analysis → "supervisor"
-- data_analysis/file_processing → "data_expert"
-- todo_management → "todo_expert"
-
-只返回 JSON，不要其他内容。"""
+from app.ai.prompts.common_prompts import INTENT_CLASSIFY_PROMPT
 
 
 async def classify_intent(message: str, model_id: str = None) -> IntentResult:
@@ -98,7 +76,7 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
     
     try:
         response = await llm.ainvoke(
-            INTENT_PROMPT.format(message=message[:500])  # 截断过长消息
+            INTENT_CLASSIFY_PROMPT.format(message=message[:500])  # 截断过长消息
         )
         
         content = response.content.strip()

@@ -91,11 +91,26 @@ class LLMConfigService:
         cls.load_from_db(db)
 
     @classmethod
+    def _lazy_init(cls):
+        """Lazy initialization to recover from startup failures."""
+        if not cls._initialized:
+            from app.db.session import SessionLocal
+            logger.info("Triggering lazy initialization of LLM config...")
+            try:
+                with SessionLocal() as db:
+                    cls.load_from_db(db)
+            except Exception as e:
+                logger.error(f"Lazy initialization failed: {e}")
+
+    @classmethod
     def get_model_config(cls, model_code: str) -> Optional[LLMModelConfig]:
         """获取指定模型的配置。"""
         if not cls._initialized:
-            logger.warning("LLMConfigService 未初始化，缓存为空")
+            cls._lazy_init()
+            
+        if not cls._initialized:
             return None
+            
         return cls._models_cache.get(model_code)
 
     @classmethod
@@ -131,10 +146,12 @@ class LLMConfigService:
             model_type: 模型类型（chat/vision/embedding/rerank/asr/tts）
             
         Returns:
-            该类型的默认模型配置，如果没有则返回 None
+            嗨类型的默认模型配置，如果没有则返回 None
         """
         if not cls._initialized:
-            logger.warning("LLMConfigService 未初始化，缓存为空")
+            cls._lazy_init()
+            
+        if not cls._initialized:
             return None
         
         # 查找该类型的默认模型

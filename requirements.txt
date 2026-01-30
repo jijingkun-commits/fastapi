@@ -39,4 +39,5 @@ pgvector>=0.2.0
 
 # Data Agent / Text-to-SQL
 vanna>=0.3.0
+sqlglot>=26.0.0
 

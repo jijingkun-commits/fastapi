@@ -24,3 +24,11 @@ class ChatRequest(BaseModel):
     current_todo_id: Optional[int] = None  # 当前正在讨论的待办 ID
 
 
+class FeedbackRequest(BaseModel):
+    """消息反馈请求模型。"""
+    message_id: int
+    score: int  # 1: Like, -1: Dislike, 0: Cancel
+    reason: Optional[str] = None
+
+
+

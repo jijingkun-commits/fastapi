@@ -1,0 +1,84 @@
+"""AI 配置模块。
+
+整合了原 config.py 和新的 todo_config.py 的内容。
+"""
+# 从 core.config 导入原有的 AI 配置（向后兼容）
+from app.core.config import (
+    MODEL_PROVIDER,
+    MODEL_TYPE,
+    MODEL_NAME,
+    MODEL_API_KEY,
+    MODEL_BASE_URL,
+    MODEL_TEMPERATURE,
+    MESSAGE_MAX_TOKENS,
+    STREAMING,
+    REQUEST_TIMEOUT,
+    MAX_RETRIES,
+    REASONING_EFFORT,
+    MODEL_CORE_NAME,
+    MODEL_REVIEW_NAME,
+    MODEL_DEBUG_NAME,
+    TAVILY_API_KEY,
+    PUBLIC_DIR,
+    SQL_REQUIRE_APPROVAL,
+    ENABLE_THINKING,
+    THINKING_BUDGET,
+    MCP_CHART_SERVER_URL,
+    MCP_CHART_ENABLED,
+    MINIO_ENDPOINT,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_SECURE,
+    MINIO_BUCKET_ASSETS,
+    API_PUBLIC_URL,
+)
+
+# 从 todo_config 导入 Todo Agent 配置
+from app.ai.config.todo_config import (
+    TodoAgentConfig, 
+    get_todo_config, 
+    reset_todo_config,
+    TodoDependencies,
+    get_todo_dependencies,
+    set_todo_dependencies,
+    reset_todo_dependencies,
+)
+
+__all__ = [
+    # 原有 AI 配置
+    "MODEL_PROVIDER",
+    "MODEL_TYPE",
+    "MODEL_NAME",
+    "MODEL_API_KEY",
+    "MODEL_BASE_URL",
+    "MODEL_TEMPERATURE",
+    "MESSAGE_MAX_TOKENS",
+    "STREAMING",
+    "REQUEST_TIMEOUT",
+    "MAX_RETRIES",
+    "REASONING_EFFORT",
+    "MODEL_CORE_NAME",
+    "MODEL_REVIEW_NAME",
+    "MODEL_DEBUG_NAME",
+    "TAVILY_API_KEY",
+    "PUBLIC_DIR",
+    "SQL_REQUIRE_APPROVAL",
+    "ENABLE_THINKING",
+    "THINKING_BUDGET",
+    "MCP_CHART_SERVER_URL",
+    "MCP_CHART_ENABLED",
+    "MINIO_ENDPOINT",
+    "MINIO_ACCESS_KEY",
+    "MINIO_SECRET_KEY",
+    "MINIO_SECURE",
+    "MINIO_BUCKET_ASSETS",
+    "API_PUBLIC_URL",
+    # Todo Agent 配置
+    "TodoAgentConfig",
+    "get_todo_config", 
+    "reset_todo_config",
+    "TodoDependencies",
+    "get_todo_dependencies",
+    "set_todo_dependencies",
+    "reset_todo_dependencies",
+]

@@ -7,14 +7,19 @@
 1. 辅助函数接收必要参数，返回处理结果
 2. 不直接修改 state，而是返回需要更新的数据
 3. 便于单元测试
+4. 使用配置类管理硬编码值
 """
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from app.ai.config.todo_config import get_todo_config
 
 logger = logging.getLogger(__name__)
+
+# 获取配置实例
+todo_config = get_todo_config()
 
 
 # ==================== 消息过滤 ====================
@@ -180,8 +185,8 @@ def detect_urgent_task(
             last_user_msg = msg.content
             break
     
-    urgent_keywords = ["刚刚", "紧急", "立刻", "马上", "领导说", "老板说", "赶紧"]
-    is_urgent = any(kw in last_user_msg for kw in urgent_keywords)
+    # 使用配置检测紧急关键词
+    is_urgent = todo_config.is_urgent(last_user_msg)
     
     if not is_urgent or intent != "create":
         return extracted_info
@@ -364,51 +369,145 @@ def process_confirm_intent(
     return result.early_return()
 
 
-def process_batch_create_intent(extracted_info: Dict) -> IntentProcessResult:
-    """处理 batch_create 意图。"""
-    result = IntentProcessResult()
-    
-    todos = extracted_info.get("todos", [])
-    if todos:
-        result.set("draft_todos", todos)
-        result.set("pending_operation", {
-            "action": "batch_create",
-            "data": {"count": len(todos), "todos": todos}
-        })
-        logger.info(f"批量创建: {len(todos)} 个待办")
-    
-    return result.early_return()
+# 注: process_batch_create_intent, process_summarize_intent, process_constraint_intent 已移除
+# 作为简化重构的一部分，现在只支持单个待办操作
 
 
-def process_summarize_intent() -> IntentProcessResult:
-    """处理 summarize 意图。"""
-    result = IntentProcessResult()
+def check_rule_based_intent(
+    last_human_msg: str,
+    pending_op: Optional[Dict],
+    extracted_info: Optional[Dict] = None
+) -> Optional[IntentProcessResult]:
+    """规则化意图检测 - 在调用 LLM 之前进行快速匹配。
     
-    result.set("pending_operation", {
-        "action": "summarize",
-        "data": {},
-        "skip_confirmation": True
-    })
-    logger.info("识别到汇总请求")
+    检测顺序:
+    1. 强制创建关键词（跳过重复检测）
+    2. 取消关键词
+    3. 确认关键词
     
-    return result.early_return()
+    Args:
+        last_human_msg: 最后一条用户消息
+        pending_op: 待确认的操作
+        extracted_info: 已提取的信息
+        
+    Returns:
+        如果匹配到规则，返回 IntentProcessResult；否则返回 None
+    """
+    if not last_human_msg.strip():
+        return None
+    
+    if not pending_op:
+        return None
+    
+    msg_clean = last_human_msg.strip()
+    
+    # 规则1: 强制创建关键词检测（用于跳过重复检测）
+    if pending_op.get("duplicate_warning"):
+        if todo_config.is_force_create(msg_clean):
+            logger.info(f"规则化检测: 用户确认仍需新建 '{last_human_msg}'")
+            result = IntentProcessResult()
+            
+            # 清除重复警告标志，继续正常创建流程
+            pending_op_copy = dict(pending_op)
+            pending_op_copy["duplicate_warning"] = False
+            pending_op_copy["needs_clarification"] = False
+            pending_op_copy["skip_confirmation"] = True
+            
+            result.set("pending_operation", pending_op_copy)
+            result.set("duplicate_candidates", None)
+            result.set("user_confirmed", True)
+            
+            # 触发确认流程
+            confirm_result = process_confirm_intent(pending_op_copy, pending_op_copy.get("data", {}))
+            result.updates.update(confirm_result.to_dict())
+            
+            return result.early_return()
+    
+    # 规则2: 取消关键词检测
+    if todo_config.is_cancel(last_human_msg):
+        logger.info(f"规则化检测: 用户取消操作 '{last_human_msg}'")
+        result = IntentProcessResult()
+        result.set("pending_operation", None)
+        result.set("duplicate_candidates", None)
+        
+        from langchain_core.messages import AIMessage
+        result.set("messages", [AIMessage(content="好的，已取消该操作。")])
+        
+        return result.early_return()
+    
+    # 规则3: 确认关键词检测
+    if todo_config.is_confirm(last_human_msg):
+        logger.info(f"规则化检测: 用户确认 '{last_human_msg}'")
+        result = IntentProcessResult()
+        
+        # 清除阻止执行的标志
+        pending_op_copy = dict(pending_op)
+        pending_op_copy["needs_clarification"] = False
+        pending_op_copy["skip_confirmation"] = True
+        
+        result.set("pending_operation", pending_op_copy)
+        result.set("user_confirmed", True)
+        
+        # 触发确认流程
+        confirm_result = process_confirm_intent(pending_op_copy, pending_op_copy.get("data", {}))
+        result.updates.update(confirm_result.to_dict())
+        
+        return result.early_return()
+    
+    return None
 
 
-def process_constraint_intent(
-    extracted_info: Dict, 
-    current_time_constraints: Optional[Dict]
-) -> IntentProcessResult:
-    """处理 constraint 意图。"""
-    result = IntentProcessResult()
+def extract_heuristic_title(message: str) -> Optional[str]:
+    """从消息中启发式提取标题。
     
-    ext_constraints = extracted_info.get("constraints", {})
-    if ext_constraints:
-        current_constraints = current_time_constraints or {}
-        current_constraints.update(ext_constraints)
-        result.set("time_constraints", current_constraints)
-        logger.info(f"更新时间约束: {ext_constraints}")
+    用于当 LLM 未能正确提取标题时的备用方案。
     
-    return result.early_return()
+    Args:
+        message: 用户消息
+        
+    Returns:
+        提取到的标题，或 None
+    """
+    import re
+    
+    patterns = [
+        r"(?:再|帮我|请)?创建一个?任务[：:]\s*(.+)",
+        r"创建待办[：:]\s*(.+)",
+        r"记一下[：:]\s*(.+)"
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            return match.group(1).strip()
+    
+    return None
+
+
+def get_progressive_strategy(round_count: int, user_confirmed: bool, quick_mode: bool) -> str:
+    """根据对话轮数获取渐进式策略注入。
+    
+    Args:
+        round_count: 当前对话轮数
+        user_confirmed: 用户是否已确认
+        quick_mode: 是否为快速模式
+        
+    Returns:
+        策略注入字符串
+    """
+    from app.ai.prompts.todo_prompts import (
+        PROGRESSIVE_STRATEGY_DECISIVE,
+        PROGRESSIVE_STRATEGY_RESET,
+    )
+    
+    if round_count > todo_config.progressive_reset_threshold:
+        logger.info(f"轮次 {round_count} > {todo_config.progressive_reset_threshold}，注入重置策略")
+        return PROGRESSIVE_STRATEGY_RESET
+    elif round_count > todo_config.progressive_round_threshold and not user_confirmed and not quick_mode:
+        logger.info(f"轮次 {round_count} > {todo_config.progressive_round_threshold} 且未确认，注入果断策略")
+        return PROGRESSIVE_STRATEGY_DECISIVE
+    
+    return ""
 
 
 def determine_confirmation_need(
@@ -439,15 +538,8 @@ def determine_confirmation_need(
         if extracted_info:
             title = (extracted_info.get("title") or "").strip()
            
-            # 标题明确且不模糊 -> 只需确认，不需要澄清
-            vague_keywords = ["这个", "那个", "它", "东西", "事情"]
-            is_vague = (
-                not title or  # 标题为空
-                len(title) < 2 or  # 标题太短（但允许单字如"会"）
-                any(title == kw for kw in vague_keywords)  # 完全等于模糊词
-            )
-            
-            if is_vague:
+            # 使用配置检查标题是否模糊
+            if todo_config.is_vague_title(title):
                 logger.info(f"创建操作: 标题模糊 (title='{title}')，需要澄清")
                 return True, True
             else:
@@ -458,7 +550,7 @@ def determine_confirmation_need(
         logger.info("创建操作: 无信息，需要澄清")
         return True, True
     
-    if intent in ["delete", "update", "batch_complete", "merge"]:
+    if intent in ["delete", "update"]:
         return True, False
     
     if intent in ["query", "complete"]:

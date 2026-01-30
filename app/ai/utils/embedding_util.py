@@ -20,7 +20,7 @@ def get_embedding(text: str, model_code: Optional[str] = None) -> Optional[List[
         model_code: 指定模型代码，为 None 时使用默认 embedding 模型
         
     Returns:
-        向量列表（智谱 embedding-3 为 1024 维）
+        向量列表（智谱 embedding-3 为 2048 维）
     """
     if not text or not text.strip():
         logger.warning("嵌入文本为空，跳过")

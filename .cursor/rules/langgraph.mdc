@@ -1,0 +1,75 @@
+---
+description: LangGraph Agent 开发规范
+globs: ["**/ai/**/*.py"]
+alwaysApply: false
+---
+
+# LangGraph 开发规范
+
+## 图架构（强约束）
+
+所有 Workflow 必须遵循 **Pre -> Core -> Post** 三段式：
+
+```
+START -> Preprocess -> AgentCore -> Postprocess -> END
+```
+
+- **Preprocess**: 消息验证、上下文注入、安全护栏
+- **AgentCore**: LLM 推理与工具调用
+- **Postprocess**: 数据库持久化、资源清理（禁止跳过）
+
+## 多智能体架构
+
+- 禁止添加独立 `intent_classify` 节点
+- 意图识别由 Supervisor 统一处理
+
+## State 管理
+
+```python
+class AgentState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    user_id: Optional[int]
+    thread_id: Optional[str]
+```
+
+- 必须使用 `add_messages` reducer
+- State 必须可序列化（否则 checkpointer 失败）
+
+## 流式输出
+
+- 使用 `astream_events(version="v2")`
+- 输出转换为 `AgentEvent` 标准格式
+- 禁止直接 yield 原始 chunk
+
+## 消息持久化（强约束）
+
+### 保存时机与职责
+
+| 场景 | 组件 | 保存内容 | 标记 |
+|------|------|---------|------|
+| interrupt 时 | `sse_stream` | Human + 中间 AI | `metadata.is_intermediate: true` |
+| resume 完成 | `_postprocess` | 最终 AI 消息 | 无标记 |
+
+### 中间消息过滤
+
+- `get_messages_by_thread(exclude_intermediate=True)` 默认过滤中间消息
+- 中间消息通过 `metadata->>'is_intermediate' = 'true'` 标记
+- 参考：LangGraph 官方 Agent Chat UI 的 `do-not-render-` 前缀机制
+
+### 禁止事项
+
+- 禁止在 `sse_resume_stream` 中保存 AI 消息（会与 postprocess 重复）
+- 禁止绕过 `_postprocess` 直接保存最终消息
+
+## 禁止事项
+
+- 禁止跳过 Pre/Post 节点
+- 禁止使用 legacy AgentExecutor
+- 禁止在 Node 中直接 print
+- 禁止存储不可序列化对象
+- 禁止在 Service 层直接保存 AI 消息（由 Postprocess 统一处理）
+
+## 参考实现
+
+- 单 Agent: `app/ai/workflow/chat_graph.py`
+- 多 Agent: `app/ai/workflow/multi_agent_graph.py`
