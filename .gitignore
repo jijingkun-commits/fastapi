@@ -9,6 +9,11 @@ Thumbs.db
 .vscode/
 .idea/
 
+# IDE/Agent 配置目录
+.agent/
+.cursor/
+.trae/
+
 # 通用日志与构建输出
 *.log
 logs/
