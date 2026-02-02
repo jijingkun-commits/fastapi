@@ -8,26 +8,29 @@ import {
 
 /**
  * Hook to manage selected model and its thinking capability
+ * selectedModel 为 undefined 时表示使用后端默认模型
  */
 export function useModelConfig() {
-    // Initial state with default to avoid hydration mismatch
-    const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
+    // Initial state: undefined 表示使用后端默认模型
+    const [selectedModel, setSelectedModel] = useState<string | undefined>(DEFAULT_MODEL_ID);
     const [enableThinking, setEnableThinking] = useState(false);
 
     // Initial load from local storage
     useEffect(() => {
         if (typeof window !== "undefined") {
             const savedModel = localStorage.getItem("chat:selectedModel");
-            if (savedModel && savedModel !== DEFAULT_MODEL_ID) {
+            // 只有当用户显式选择过模型时才使用 localStorage 的值
+            // 旧值 "deepseek-chat" 不再作为有效选择（让后端使用默认）
+            if (savedModel && savedModel !== "deepseek-chat") {
                 setSelectedModel(savedModel);
-                // Also restore thinking state based on model default if needed
-                // But simplified: just set model, handleModelChange logic handles the rest usually
             }
         }
     }, []);
 
-    // Get current capability
-    const thinkingCapability: ThinkingCapability = getModelConfig(selectedModel)?.thinking ?? "never";
+    // Get current capability (undefined 模型表示使用后端默认，默认不支持 thinking)
+    const thinkingCapability: ThinkingCapability = selectedModel 
+        ? (getModelConfig(selectedModel)?.thinking ?? "never") 
+        : "never";
 
     /**
      * Handle Model Change

@@ -15,7 +15,7 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.user import router as user_router
 from app.api.v1.endpoints.chat_api import router as chat_router
 from app.api.v1.endpoints.assets_api import router as assets_router
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_admin_user
 
 
 api_router = APIRouter(prefix="/api/v1")
@@ -39,21 +39,23 @@ api_router.include_router(upload_router, dependencies=[Depends(get_current_user)
 # 待办看板路由：需要登录
 from app.api.v1.endpoints.todo_api import router as todo_router
 api_router.include_router(todo_router, prefix="/todo", tags=["Todo"], dependencies=[Depends(get_current_user)])
-# 问数管理路由：需要登录
+
+# ==================== 后台管理路由（仅管理员可访问） ====================
+# 问数管理路由：仅管理员
 from app.api.v1.endpoints.data_admin_api import router as data_admin_router
-api_router.include_router(data_admin_router, dependencies=[Depends(get_current_user)])
-# 数据访问控制管理路由：需要登录
+api_router.include_router(data_admin_router, dependencies=[Depends(get_admin_user)])
+# 数据访问控制管理路由：仅管理员
 from app.api.v1.endpoints.access_admin_api import router as access_admin_router
-api_router.include_router(access_admin_router, dependencies=[Depends(get_current_user)])
-# LLM 配置管理路由：需要登录
+api_router.include_router(access_admin_router, dependencies=[Depends(get_admin_user)])
+# LLM 配置管理路由：仅管理员
 from app.api.v1.endpoints.llm_admin_api import router as llm_admin_router
-api_router.include_router(llm_admin_router, dependencies=[Depends(get_current_user)])
-# 技能管理路由：需要登录
+api_router.include_router(llm_admin_router, dependencies=[Depends(get_admin_user)])
+# 技能管理路由：仅管理员
 from app.api.v1.endpoints.skill_admin_api import router as skill_admin_router
-api_router.include_router(skill_admin_router, dependencies=[Depends(get_current_user)])
-# 系统配置管理路由：需要登录
+api_router.include_router(skill_admin_router, dependencies=[Depends(get_admin_user)])
+# 系统配置管理路由：仅管理员
 from app.api.v1.endpoints.system_admin_api import router as system_admin_router
-api_router.include_router(system_admin_router, dependencies=[Depends(get_current_user)])
+api_router.include_router(system_admin_router, dependencies=[Depends(get_admin_user)])
 
 
 

@@ -15,7 +15,6 @@ from app.models.agent_skill import AgentSkill
 SKILLS_TO_RESTORE = [
     # Office / Productivity
     "meeting-minutes",
-    "todo-intent",
     "email-pro",
     "copywriter",
     "translator",

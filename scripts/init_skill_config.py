@@ -26,12 +26,12 @@ def init_skill_config():
             return
 
         # Insert default config
-        logger.info("正在插入 'skill_similarity_threshold' 配置 (默认 0.5)...")
+        logger.info("正在插入 'skill_similarity_threshold' 配置 (默认 0.55)...")
         conn.execute(text("""
             INSERT INTO t_system_config 
             (config_key, config_value, value_type, category, description, is_secret, create_time, update_time)
             VALUES 
-            ('skill_similarity_threshold', '0.5', 'number', 'ai', '技能检索的向量相似度阈值', false, now(), now())
+            ('skill_similarity_threshold', '0.55', 'number', 'ai', '技能检索的向量相似度阈值', false, now(), now())
         """))
         conn.commit()
         logger.info("配置初始化完成。")

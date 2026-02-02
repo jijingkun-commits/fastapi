@@ -5,7 +5,6 @@
 - 对话历史查询和管理
 - 恢复被中断的流程（人工审核）
 """
-import hashlib
 import logging
 from typing import Optional, List, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,20 +18,13 @@ from app.services.chat_service import sse_stream, sse_resume_stream
 from app.schemas.chat import ChatRequest, FeedbackRequest
 from app.repositories import chat_repo
 from app.api.deps import get_current_user
+from app.core.utils import content_hash as _content_hash
 
 from app.models.user import User
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("api.chat")
-
-
-def _content_hash(content: str) -> str:
-    """计算内容的短 hash，用于日志对比。"""
-    if not content:
-        return "empty"
-    normalized = content.strip()
-    return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
 # ==================== Schemas ====================
@@ -90,18 +82,18 @@ async def chat_stream(
     """流式对话接口。
     
     支持多轮对话，返回 SSE 格式的事件流。
+    幂等性由系统中间件统一处理（通过 Idempotency-Key 请求头）。
     """
     trace_id = request.headers.get("X-Trace-Id", "-")
     remote = getattr(request.client, "host", "-")
     logger.info(
-        "Chat流请求 来自=%s 提示词长度=%d 延迟毫秒=%d trace_id=%s user_id=%d thinking=%s multi_agent=%s",
+        "Chat流请求 来自=%s 提示词长度=%d 延迟毫秒=%d trace_id=%s user_id=%d thinking=%s",
         remote,
         len(payload.prompt),
         payload.delay_ms,
         trace_id,
         current_user.id,
         payload.enable_thinking,
-        payload.use_multi_agent,
     )
     gen = sse_stream(
         payload.prompt, 
@@ -110,7 +102,6 @@ async def chat_stream(
         current_user.id,
         payload.enable_thinking,
         payload.model_id,
-        payload.use_multi_agent,
         payload.attachments,
         payload.current_todo_id,
     )
@@ -171,12 +162,7 @@ def get_thread_messages(
     
     result = []
     for m in messages:
-        # 替换消息内容中的 minio:// URL
         content = m.content
-        if content and "minio://" in content:
-             # 旧数据兼容：如果仍有 minio://，保留原样或日志警告，不再尝试转换
-             # 因为 message_processor 已被移除
-             pass
         
         # 同步追踪日志（仅对 AI 消息记录）
         if m.role == "ai":

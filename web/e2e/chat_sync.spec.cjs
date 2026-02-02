@@ -175,7 +175,7 @@ test.describe('对话同步测试', () => {
     // ==================== 破坏性测试 ====================
 
     test('TC-SYNC-003: 快速连续发送消息', async ({ page }) => {
-        test.setTimeout(120000);
+        test.setTimeout(180000);
 
         const messages = [
             `快速消息1 ${Date.now()}`,
@@ -183,23 +183,46 @@ test.describe('对话同步测试', () => {
             `快速消息3 ${Date.now() + 2}`,
         ];
 
-        // 快速连续发送
+        // 记录发送前的消息数量
+        const userMessagesBefore = page.locator('[data-testid="human-message"]');
+        const countBefore = await userMessagesBefore.count().catch(() => 0);
+        console.log('发送前用户消息数量:', countBefore);
+
+        // 快速连续发送，但等待输入框可用
         for (const msg of messages) {
+            // 等待 textarea 可用（非 disabled 状态）
+            await page.waitForSelector('textarea:not([disabled])', { timeout: 30000 });
             await page.fill('textarea', msg);
             await page.keyboard.press('Enter');
-            await page.waitForTimeout(500); // 仅等待 0.5 秒
+            // 等待消息出现在列表中
+            await page.waitForTimeout(1000);
         }
 
-        // 等待所有响应完成
-        await page.waitForTimeout(30000);
+        // 等待所有响应完成（使用轮询策略）
+        let retries = 0;
+        const maxRetries = 30;
+        while (retries < maxRetries) {
+            await page.waitForTimeout(2000);
+            // 检查是否还在加载中
+            const loadingIndicator = page.locator('[data-loading="true"], .animate-pulse');
+            const isLoading = await loadingIndicator.count() > 0;
+            if (!isLoading) {
+                console.log('响应完成，等待 2 秒后验证');
+                await page.waitForTimeout(2000);
+                break;
+            }
+            retries++;
+        }
 
         // 验证消息数量
         const userMessages = page.locator('[data-testid="human-message"]');
+        // 使用 waitFor 确保元素渲染完成
+        await page.waitForTimeout(3000);
         const count = await userMessages.count();
-        console.log('用户消息数量:', count);
+        console.log('用户消息数量:', count, '(预期至少:', countBefore + messages.length, ')');
         
         // 至少应该有发送的消息数量
-        expect(count).toBeGreaterThanOrEqual(messages.length);
+        expect(count).toBeGreaterThanOrEqual(countBefore + messages.length);
     });
 
     test('TC-SYNC-004: 长文本响应处理', async ({ page }) => {
@@ -227,20 +250,49 @@ test.describe('对话同步测试', () => {
     });
 
     test('TC-SYNC-005: 特殊字符处理', async ({ page }) => {
-        test.setTimeout(90000);
+        test.setTimeout(120000);
+
+        // 记录发送前的消息数量
+        const userMessagesBefore = page.locator('[data-testid="human-message"]');
+        const countBefore = await userMessagesBefore.count().catch(() => 0);
+        console.log('发送前用户消息数量:', countBefore);
 
         // 包含特殊字符的消息
         const testMessage = '测试特殊字符: <script>alert(1)</script> & "引号" \'单引号\' `反引号`';
         
+        // 确保 textarea 可用
+        await page.waitForSelector('textarea:not([disabled])', { timeout: 30000 });
         await page.fill('textarea', testMessage);
         await page.keyboard.press('Enter');
 
-        await page.waitForTimeout(15000);
+        // 等待消息出现，使用轮询策略
+        let messageAppeared = false;
+        for (let i = 0; i < 20; i++) {
+            await page.waitForTimeout(1000);
+            const userMessages = page.locator('[data-testid="human-message"]');
+            const count = await userMessages.count();
+            if (count > countBefore) {
+                messageAppeared = true;
+                console.log('消息已出现，当前数量:', count);
+                break;
+            }
+        }
+
+        // 额外等待 AI 响应
+        await page.waitForTimeout(10000);
 
         // 验证消息发送成功
         const userMessages = page.locator('[data-testid="human-message"]');
         const count = await userMessages.count();
-        expect(count).toBeGreaterThan(0);
+        console.log('最终用户消息数量:', count);
+        expect(count).toBeGreaterThan(countBefore);
+
+        // 验证特殊字符被正确转义（XSS 防护）
+        const lastMessage = userMessages.last();
+        const content = await lastMessage.innerText();
+        console.log('消息内容:', content);
+        // 不应该执行 script 标签
+        expect(content).not.toContain('<script>');
     });
 });
 

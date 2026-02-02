@@ -183,19 +183,18 @@ class SkillService:
         top_k: int = 2,
         threshold: float = None
     ) -> List[AgentSkill]:
-        # 优先使用传入参数 -> 其次 DB 动态配置 -> 最后 env/默认值
-        if threshold is None:
-            threshold = SystemConfigService.get_float("skill_similarity_threshold", SKILL_SIMILARITY_THRESHOLD)
         """向量检索相关技能。
         
         Args:
             query: 查询文本
             top_k: 返回数量
-            threshold: 相似度阈值
+            threshold: 相似度阈值（优先使用传入参数 -> 其次 DB 动态配置 -> 最后 env/默认值）
             
         Returns:
             匹配的技能列表
         """
+        if threshold is None:
+            threshold = SystemConfigService.get_float("skill_similarity_threshold", SKILL_SIMILARITY_THRESHOLD)
         query_embedding = get_embedding(query)
         if not query_embedding:
             return []
@@ -215,11 +214,13 @@ class SkillService:
             
             result = db.execute(sql, {
                 "query_vec": query_embedding,
-                "limit": top_k
+                "limit": top_k * 2
             })
             
             skills = []
+            candidates = []
             for row in result:
+                candidates.append((row.skill_id, row.similarity))
                 if row.similarity >= threshold:
                     skill = AgentSkill(
                         id=row.id,
@@ -229,9 +230,13 @@ class SkillService:
                         content=row.content
                     )
                     skills.append(skill)
-                    logger.debug(f"匹配技能: {row.skill_id} (相似度: {row.similarity:.3f})")
             
-            return skills
+            if candidates:
+                candidate_str = ", ".join([f"{s}({sim:.3f})" for s, sim in candidates[:4]])
+                matched_count = len(skills)
+                logger.info(f"技能检索: 阈值={threshold}, 候选=[{candidate_str}], 匹配={matched_count}个")
+            
+            return skills[:top_k]
     
     @classmethod
     def get_by_id(cls, skill_id: str) -> Optional[AgentSkill]:

@@ -1,3 +1,7 @@
+"""数据导入脚本：导入存款数据到分析库。
+
+事务策略：TRUNCATE + COPY 在同一事务中执行，失败时整体回滚。
+"""
 import sys
 from pathlib import Path
 import time
@@ -8,7 +12,14 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import create_engine, text
 from app.core.config import ANALYTICS_DATABASE_URL
 
+
 def import_data():
+    """导入存款数据。
+    
+    使用单一事务包装 TRUNCATE + COPY，确保原子性：
+    - 成功：TRUNCATE + COPY 一起提交
+    - 失败：整体回滚，原数据保持不变
+    """
     print(f"Starting import to {ANALYTICS_DATABASE_URL}...")
     
     # Check file existence
@@ -20,56 +31,55 @@ def import_data():
     # Create Engine
     engine = create_engine(ANALYTICS_DATABASE_URL)
     
-    # We need a raw connection for COPY
-    # SQLAlchemy connection.connection returns the DBAPI connection (psycopg connection)
+    copy_sql = """
+    COPY fdmdata.f_mid_dep_tb 
+    FROM STDIN 
+    WITH (
+        FORMAT text, 
+        DELIMITER E'\x1b', 
+        ENCODING 'UTF8',
+        NULL ''
+    )
+    """
+    
+    # 使用单一事务：TRUNCATE + COPY 一起提交或回滚
     with engine.connect() as conn:
-        with conn.connection.cursor() as cur:
-            print("Truncating target table fdmdata.f_mid_dep_tb...")
-            cur.execute("TRUNCATE TABLE fdmdata.f_mid_dep_tb")
-            conn.commit() # Ensure truncate is committed if using transaction
+        try:
+            with conn.connection.cursor() as cur:
+                print("Truncating target table fdmdata.f_mid_dep_tb...")
+                cur.execute("TRUNCATE TABLE fdmdata.f_mid_dep_tb")
+                # 注意：此处不提交，与 COPY 在同一事务中
 
-            print("Beginning COPY import...")
-            start_time = time.time()
-            
-            # Using COPY FROM STDIN with the specific delimiter
-            # text format is default. NULL string handling might be needed if \N is used.
-            # If the file is strictly \x1b delimited text
-            
-            copy_sql = """
-            COPY fdmdata.f_mid_dep_tb 
-            FROM STDIN 
-            WITH (
-                FORMAT text, 
-                DELIMITER E'\x1b', 
-                ENCODING 'UTF8',
-                NULL ''
-            )
-            """
-            # Note: NULL '' assumes empty strings between delimiters are NULLs. 
-            # If the file uses \N for nulls, remove NULL ''.
-            
-            try:
+                print("Beginning COPY import...")
+                start_time = time.time()
+                
                 with open(data_file, 'r', encoding='utf-8') as f:
-                    # psycopg3 copy syntax
-                    # If this is psycopg 3:
                     if hasattr(cur, 'copy'):
+                        # psycopg3 syntax
                         with cur.copy(copy_sql) as copy:
-                            while data := f.read(1024 * 1024): # 1MB chunks
+                            while data := f.read(1024 * 1024):  # 1MB chunks
                                 copy.write(data)
                     else:
-                        # Fallback for psycopg2 or older generic DBAPI
+                        # psycopg2 fallback
                         cur.copy_expert(copy_sql, f)
-                        
-                # Commit the transaction on the raw connection just to be sure
+                
+                # 统一提交：TRUNCATE + COPY 作为整体
                 conn.connection.commit()
                 elapsed = time.time() - start_time
-                print(f"Import completed successfully in {elapsed:.2f} seconds.")
+                print(f"✅ Import completed successfully in {elapsed:.2f} seconds.")
                 
-            except Exception as e:
-                print(f"Import failed: {e}")
-                conn.rollback() # SQLAlchemy rollback
+        except Exception as e:
+            # 整体回滚：TRUNCATE + COPY 都撤销
+            conn.connection.rollback()
+            print(f"❌ Import failed (rolled back): {e}")
+            raise
                 
     # Verify persistence with a fresh connection
+    _verify_import(engine)
+
+
+def _verify_import(engine):
+    """验证导入结果。"""
     print("Verifying persistence with fresh connection...")
     with engine.connect() as conn:
         cnt = conn.execute(text("SELECT count(*) FROM fdmdata.f_mid_dep_tb")).scalar()

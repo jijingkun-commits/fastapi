@@ -5,8 +5,6 @@
 - SSE 协议升级，支持 token/thinking/tool_start/tool_end 事件
 - 双写逻辑：LangGraph 自动写 SQLite Checkpoint，业务数据写 MySQL
 """
-import asyncio
-import hashlib
 import json
 import logging
 from typing import AsyncGenerator, Optional
@@ -14,23 +12,17 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, AIMessage
 
-from app.ai.workflow import get_chat_graph, get_multi_agent_graph
+from app.ai.workflow import get_multi_agent_graph
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
+from app.core.utils import content_hash as _content_hash
 
 
 logger = logging.getLogger(__name__)
 
 
-def _content_hash(content: str) -> str:
-    """计算内容的短 hash，用于日志对比。"""
-    if not content:
-        return "empty"
-    normalized = content.strip()
-    return hashlib.md5(normalized.encode()).hexdigest()[:8]
-
-
-# 注意：对话保存逻辑已移至 chat_graph.py 的 postprocess 节点
+# 注意：对话保存逻辑已移至 multi_agent_graph.py 的 postprocess 节点
 # 不再需要在 service 层手动保存
+# 单智能体模式已废弃（2026-01-31），系统默认使用多智能体模式
 
 
 
@@ -40,17 +32,14 @@ class ChatService:
     def __init__(self, default_delay_ms: int = 0):
         self.default_delay_ms = default_delay_ms
     
-    async def get_graph(self, enable_thinking: bool = False, model_id: str = None, use_multi_agent: bool = False):
-        """异步获取 Graph 实例。
+    async def get_graph(self, enable_thinking: bool = False, model_id: str = None):
+        """异步获取 Graph 实例（多智能体模式）。
         
         Args:
             enable_thinking: 是否启用深度思考模式
             model_id: 指定模型 ID
-            use_multi_agent: 是否使用多智能体模式（Supervisor 路由）
         """
-        if use_multi_agent:
-            return await get_multi_agent_graph(enable_thinking=enable_thinking, model_id=model_id)
-        return await get_chat_graph(enable_thinking=enable_thinking, model_id=model_id)
+        return await get_multi_agent_graph(enable_thinking=enable_thinking, model_id=model_id)
 
     async def stream(
         self,
@@ -60,7 +49,6 @@ class ChatService:
         delay_ms: Optional[int] = None,
         enable_thinking: bool = False,
         model_id: Optional[str] = None,
-        use_multi_agent: bool = False,
         attachments: Optional[list] = None,  # List[Attachment] objects
         current_todo_id: Optional[int] = None,
     ) -> AsyncGenerator[bytes, None]:
@@ -158,15 +146,16 @@ class ChatService:
         thinking_content = None
         # 用于收集流式过程中的结构化数据（result 事件）
         collected_additional_kwargs = {}
+        keyword_logged = False
         
-        logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s, multi_agent=%s", 
-                    thread_id, len(prompt), enable_thinking, model_id or "默认", use_multi_agent)
+        logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s", 
+                    thread_id, len(prompt), enable_thinking, model_id or "默认")
         
         # 发送初始化事件
         yield self._format_sse("init", {"thread_id": thread_id})
         
         try:
-            graph = await self.get_graph(enable_thinking=enable_thinking, model_id=model_id, use_multi_agent=use_multi_agent)
+            graph = await self.get_graph(enable_thinking=enable_thinking, model_id=model_id)
             try:
                 # 统一架构：只使用 stream_mode="custom"
                 # 所有用户可见的输出都通过 emit_token/emit_result 等发送
@@ -412,7 +401,6 @@ async def sse_stream(
     user_id: Optional[int] = None,
     enable_thinking: bool = False,
     model_id: Optional[str] = None,
-    use_multi_agent: bool = False,
     attachments: Optional[list] = None,
     current_todo_id: Optional[int] = None,
 ) -> AsyncGenerator[bytes, None]:
@@ -420,6 +408,7 @@ async def sse_stream(
     
     直接转发 ChatService.stream() 的所有事件。
     图片通过 emit_result("image", {url}) 主动推送，无需拦截处理。
+    幂等性由系统中间件统一处理（通过 Idempotency-Key 请求头）。
     
     Args:
         prompt: 用户输入
@@ -428,7 +417,6 @@ async def sse_stream(
         user_id: 用户 ID
         enable_thinking: 是否启用深度思考模式
         model_id: 模型标识
-        use_multi_agent: 是否使用多智能体模式
         attachments: 附件列表
         current_todo_id: 当前讨论的待办 ID
         
@@ -439,7 +427,7 @@ async def sse_stream(
     
     async for chunk in svc.stream(
         prompt, thread_id, user_id, delay_ms, 
-        enable_thinking, model_id, use_multi_agent, attachments, current_todo_id
+        enable_thinking, model_id, attachments, current_todo_id
     ):
         yield chunk
 
@@ -487,25 +475,17 @@ async def sse_resume_stream(
         
         enable_thinking = False
         model_id = None
-        use_multi_agent = False
         
         if snapshot and "channel_values" in snapshot:
             values = snapshot["channel_values"]
             enable_thinking = values.get("enable_thinking", False)
             model_id = values.get("model_id")
-            
-            # 使用显式的 _graph_type 字段判断 Graph 类型
-            graph_type = values.get("_graph_type")
-            if graph_type == "multi_agent":
-                use_multi_agent = True
         
-        logger.info("Resume 自动检测: multi_agent=%s, thinking=%s, model=%s", 
-                   use_multi_agent, enable_thinking, model_id)
+        logger.info("Resume 自动检测: thinking=%s, model=%s", enable_thinking, model_id)
 
         graph = await svc.get_graph(
             enable_thinking=enable_thinking, 
-            model_id=model_id, 
-            use_multi_agent=use_multi_agent
+            model_id=model_id
         )
         
         # 使用 Command 恢复执行

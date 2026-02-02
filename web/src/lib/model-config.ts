@@ -28,8 +28,8 @@ export interface ModelConfig {
     isDefault?: boolean;
 }
 
-/** 默认模型 ID（后备值） */
-export const DEFAULT_MODEL_ID = "deepseek-chat";
+/** 默认模型 ID（undefined 表示使用后端默认模型） */
+export const DEFAULT_MODEL_ID: string | undefined = undefined;
 
 /** 模型列表缓存 */
 let _cachedModels: ModelConfig[] | null = null;

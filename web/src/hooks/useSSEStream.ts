@@ -31,6 +31,7 @@ import { StateType, StreamContextValue, MessageMetadata } from "@/providers/Stre
 import { useMessageUpdater } from "@/hooks/use-message-updater";
 import { useModelConfig } from "@/hooks/use-model-config";
 import { replaceImagePlaceholders, type KbImages } from "@/components/chat/utils";
+import { safeParseJson, SelectedTodoSchema } from "@/lib/utils";
 
 /**
  * SSE 流消息处理 Hook
@@ -61,25 +62,15 @@ export function useSSEStream(): StreamContextValue {
         handleThinking
     } = useMessageUpdater(setMessages);
 
-    // 3. UI Toggles (MultiAgent, HideToolCalls)
-    const [useMultiAgent, setUseMultiAgentState] = useState(false);
+    // 3. UI Toggles (HideToolCalls)
+    // 注意：useMultiAgent 已废弃（2026-01-31），系统默认使用多智能体模式
     const [hideToolCalls, setHideToolCallsState] = useState(false);
 
     // 从 localStorage 恢复开关状态
     useEffect(() => {
         if (typeof window !== "undefined") {
-            const savedMultiAgent = localStorage.getItem("chat:useMultiAgent");
-            if (savedMultiAgent === "true") setUseMultiAgentState(true);
-
             const savedHideToolCalls = localStorage.getItem("chat:hideToolCalls");
             if (savedHideToolCalls === "true") setHideToolCallsState(true);
-        }
-    }, []);
-
-    const setUseMultiAgent = useCallback((value: boolean) => {
-        setUseMultiAgentState(value);
-        if (typeof window !== "undefined") {
-            localStorage.setItem("chat:useMultiAgent", value.toString());
         }
     }, []);
 
@@ -202,19 +193,14 @@ export function useSSEStream(): StreamContextValue {
             setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
             setIsLoading(true);
             isStreamingRef.current = true;
+            const idempotencyKey = uuidv4();
 
-            // 读取当前选中的待办 ID
+            // 读取当前选中的待办 ID（使用 Zod 校验）
             let currentTodoId: number | undefined;
             if (typeof window !== 'undefined') {
-                try {
-                    const stored = sessionStorage.getItem('selectedTodo');
-                    if (stored) {
-                        const parsed = JSON.parse(stored);
-                        currentTodoId = parsed.id;
-                    }
-                } catch (e) {
-                    console.error('解析 selectedTodo 失败:', e);
-                }
+                const stored = sessionStorage.getItem('selectedTodo');
+                const parsed = safeParseJson(stored, SelectedTodoSchema, null);
+                currentTodoId = parsed?.id;
             }
 
             const { stop: stopFn, promise } = startLLMStream(
@@ -313,9 +299,9 @@ export function useSSEStream(): StreamContextValue {
                 threadId ?? undefined,
                 enableThinking,
                 selectedModel,
-                useMultiAgent,
                 update?.attachments,
                 currentTodoId,
+                idempotencyKey,
             );
 
             stopRef.current = stopFn;
@@ -333,7 +319,6 @@ export function useSSEStream(): StreamContextValue {
         threadId,
         enableThinking,
         selectedModel,
-        useMultiAgent,
         extractText,
         appendToAiMessage,
         handleThinking,
@@ -412,8 +397,6 @@ export function useSSEStream(): StreamContextValue {
         selectedModel,
         handleModelChange,
         thinkingCapability,
-        useMultiAgent,
-        setUseMultiAgent,
         hideToolCalls,
         setHideToolCalls,
         currentStatus, // 当前处理状态

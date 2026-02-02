@@ -3,7 +3,6 @@
 提供对话消息的 CRUD 操作。
 基于单表 t_chat_message 设计，title 存储在第一条 human 消息中。
 """
-import hashlib
 import json
 import logging
 from typing import Optional, List, Any
@@ -14,17 +13,10 @@ from sqlalchemy.orm import Session
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.repositories import chat_assets_repository
+from app.core.utils import content_hash as _content_hash
 
 
 logger = logging.getLogger(__name__)
-
-
-def _content_hash(content: str) -> str:
-    """计算内容的短 hash，用于日志对比和去重。"""
-    if not content:
-        return "empty"
-    normalized = content.strip()
-    return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
 def save_message(
@@ -125,7 +117,8 @@ def get_threads_by_user(
 ) -> List[dict]:
     """获取用户的对话列表。
     
-    通过查询每个 thread_id 的第一条消息获取 title。
+    使用窗口函数一次查询获取所有线程及其第一条消息，
+    避免 N+1 查询问题。
     
     Args:
         db: 数据库会话
@@ -135,8 +128,22 @@ def get_threads_by_user(
     Returns:
         对话列表，包含 thread_id 和 title
     """
-    # 获取用户的所有 thread_id 及时间信息
-    threads = (
+    from sqlalchemy import and_, literal_column
+    from sqlalchemy.orm import aliased
+    
+    # 子查询：获取每个 thread 的第一条消息 ID
+    first_msg_subq = (
+        db.query(
+            ChatMessage.thread_id,
+            func.min(ChatMessage.id).label("first_msg_id"),
+        )
+        .filter(ChatMessage.user_id == user_id)
+        .group_by(ChatMessage.thread_id)
+        .subquery()
+    )
+    
+    # 子查询：获取每个 thread 的时间范围
+    thread_times_subq = (
         db.query(
             ChatMessage.thread_id,
             func.min(ChatMessage.create_time).label("first_time"),
@@ -144,37 +151,41 @@ def get_threads_by_user(
         )
         .filter(ChatMessage.user_id == user_id)
         .group_by(ChatMessage.thread_id)
-        .order_by(func.max(ChatMessage.create_time).desc())
+        .subquery()
+    )
+    
+    # 主查询：JOIN 获取第一条消息的 title 和 content
+    results = (
+        db.query(
+            thread_times_subq.c.thread_id,
+            thread_times_subq.c.first_time,
+            thread_times_subq.c.last_time,
+            ChatMessage.title,
+            ChatMessage.content,
+        )
+        .join(
+            first_msg_subq,
+            first_msg_subq.c.thread_id == thread_times_subq.c.thread_id,
+        )
+        .join(
+            ChatMessage,
+            ChatMessage.id == first_msg_subq.c.first_msg_id,
+        )
+        .order_by(thread_times_subq.c.last_time.desc())
         .limit(limit)
         .all()
     )
     
-    result = []
-    for t in threads:
-        # 获取该线程的第一条消息（可能包含 title）
-        first_msg = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.thread_id == t.thread_id)
-            .order_by(ChatMessage.create_time.asc())
-            .first()
-        )
-        
-        # 优先使用 title 字段，否则用 content 前50字
-        title = "新对话"
-        if first_msg:
-            if first_msg.title:
-                title = first_msg.title
-            elif first_msg.content:
-                title = str(first_msg.content)[:50]
-        
-        result.append({
-            "thread_id": t.thread_id,
-            "title": title,
-            "created_at": t.first_time.isoformat() if t.first_time else None,
-            "updated_at": t.last_time.isoformat() if t.last_time else None,
-        })
-    
-    return result
+    # 构建结果
+    return [
+        {
+            "thread_id": r.thread_id,
+            "title": r.title if r.title else (str(r.content)[:50] if r.content else "新对话"),
+            "created_at": r.first_time.isoformat() if r.first_time else None,
+            "updated_at": r.last_time.isoformat() if r.last_time else None,
+        }
+        for r in results
+    ]
 
 
 def update_thread_title(
@@ -386,6 +397,7 @@ def save_conversation_from_messages(
     # 【背景】knowledge_search 工具返回 [IMG-N] 占位符和 kb_images 映射
     # 【处理】在保存前，将 LLM 输出中的 [IMG-N] 替换为实际的 Markdown 图片
     # ============================================================
+    
     if kb_images and ai_content:
         import re as re2
         # 先统计 ai_content 中有多少占位符
@@ -398,9 +410,11 @@ def save_conversation_from_messages(
             placeholder = f"[IMG-{idx_str}]"
             if placeholder in ai_content:
                 markdown_img = f"![参考图片]({url})"
-                ai_content = ai_content.replace(placeholder, markdown_img, 1)
-                replaced_count += 1
-                logger.info("替换图片占位符: %s -> %s", placeholder, url)
+                # 使用 replace 不限制次数，替换所有匹配项（修复多次引用同一占位符的问题）
+                count_before = ai_content.count(placeholder)
+                ai_content = ai_content.replace(placeholder, markdown_img)
+                replaced_count += count_before
+                logger.info("替换图片占位符: %s -> %s (共 %d 处)", placeholder, url, count_before)
             else:
                 logger.info("占位符 %s 不在 AI 回复中", placeholder)
         
@@ -435,88 +449,33 @@ def save_conversation_from_messages(
     if not human_content and not ai_content:
         return
     
-    # 3. 保存 human 消息（带去重检查，防止 interrupt 和 postprocess 重复保存）
+    # 3. 保存 human 消息
     if human_content:
-        human_content_str = str(human_content)
-        human_hash = _content_hash(human_content_str)
-        
-        # 检查最近的 human 消息是否有相同 hash（使用归一化内容比较）
-        recent_humans = (
-            db.query(ChatMessage)
-            .filter(
-                ChatMessage.thread_id == thread_id,
-                ChatMessage.role == "human",
-            )
-            .order_by(ChatMessage.create_time.desc())
-            .limit(3)  # 只检查最近3条
-            .all()
+        title = human_content[:50] if len(human_content) > 50 else human_content
+        save_message(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
+            role="human",
+            content_type="text",
+            content=human_content,
+            title=title,
         )
-        
-        existing_human = None
-        for msg in recent_humans:
-            if _content_hash(msg.content or "") == human_hash:
-                existing_human = msg
-                break
-        
-        if existing_human:
-            logger.info("跳过重复 human 消息 (hash匹配): thread_id=%s, hash=%s, content=%s...", 
-                       thread_id, human_hash, human_content_str[:30])
-        else:
-            title = human_content[:50] if len(human_content) > 50 else human_content
-            save_message(
-                db,
-                user_id=user_id,
-                thread_id=thread_id,
-                role="human",
-                content_type="text",
-                content=human_content,
-                title=title,
-            )
     
-    # 4. 保存 ai 消息（只保存最后一条，带去重检查）
+    # 4. 保存 ai 消息（只保存最后一条）
     extra_data = None  # 在外部定义，确保日志可访问
     if last_ai:  # 使用 last_ai 对象判断，确保能获取 metadata
         # 提取 metadata (additional_kwargs)
         extra_data = getattr(last_ai, "additional_kwargs", None)
-        ai_hash = _content_hash(ai_content)
-        
-        # 检查最近的 AI 消息是否有相同 hash（使用归一化内容比较）
-        recent_ais = (
-            db.query(ChatMessage)
-            .filter(
-                ChatMessage.thread_id == thread_id,
-                ChatMessage.role == "ai",
-            )
-            .order_by(ChatMessage.create_time.desc())
-            .limit(3)  # 只检查最近3条
-            .all()
+        save_message(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
+            role="ai",
+            content_type="markdown",
+            content=ai_content,
+            extra_data=extra_data,  # 保存 metadata
         )
-        
-        existing_ai = None
-        for msg in recent_ais:
-            if _content_hash(msg.content or "") == ai_hash:
-                existing_ai = msg
-                break
-        
-        if existing_ai:
-            logger.info("跳过重复 AI 消息 (hash匹配): thread_id=%s, hash=%s, content=%s...", 
-                       thread_id, ai_hash, ai_content[:30] if ai_content else "")
-            # 如果已存在但 extra_data 不同，更新 extra_data（确保结构化数据不丢失）
-            if extra_data and (not existing_ai.extra_data or existing_ai.extra_data != extra_data):
-                existing_ai.extra_data = extra_data
-                db.commit()
-                logger.info("更新已存在消息的 extra_data: msg_id=%d, keys=%s", 
-                           existing_ai.id, list(extra_data.keys()))
-        else:
-            save_message(
-                db,
-                user_id=user_id,
-                thread_id=thread_id,
-                role="ai",
-                content_type="markdown",
-                content=ai_content,
-                extra_data=extra_data,  # 保存 metadata
-            )
     
     # 详细同步追踪日志
     saved_extra_keys = list(extra_data.keys()) if extra_data else []

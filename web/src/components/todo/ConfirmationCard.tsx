@@ -2,10 +2,12 @@
  * 移动端友好的待办确认卡片组件
  * 
  * 特性:
+ * - 支持 create / update / delete / complete 操作
  * - 列表形式展示部分信息
  * - 点击展开查看/编辑详情
- * - 复选框支持批量操作
  * - 响应式设计 (手机/平板/桌面)
+ * 
+ * 注：batch_create 已废弃（2026-02-01），系统不支持批量创建
  */
 'use client'
 
@@ -14,7 +16,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
     CheckCircle,
     XCircle,
@@ -23,7 +24,8 @@ import {
     ChevronUp,
     Edit2,
     AlertCircle,
-    Trash2
+    Trash2,
+    ArrowRight
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -37,16 +39,16 @@ interface TodoItem {
 }
 
 interface ConfirmationData {
-    action: string
-    data: Record<string, any>
+    action: 'create' | 'update' | 'delete' | 'complete'
+    data: Record<string, unknown>
     summary?: string
     target_task?: { id: number; title: string }
-    diff?: Record<string, { old: any; new: any }>
+    diff?: Record<string, { old: unknown; new: unknown }>
 }
 
 interface ConfirmationCardProps {
     operation: ConfirmationData
-    onConfirm: (data?: Record<string, any>) => void
+    onConfirm: (data?: Record<string, unknown>) => void
     onCancel: () => void
 }
 
@@ -57,15 +59,48 @@ export default function ConfirmationCard({
     onConfirm,
     onCancel
 }: ConfirmationCardProps) {
-    // 统一使用 action 字段
-    const { action } = operation
+    const [isExpanded, setIsExpanded] = useState(false)
+    const [editedData, setEditedData] = useState<TodoItem | null>(null)
 
-    // Update 操作的 Diff 视图
-    if (action === 'update') {
+    // 获取待办数据
+    const getTodoData = (): TodoItem => {
+        return (operation.data as TodoItem) || { title: '' }
+    }
+
+    const todo = editedData || getTodoData()
+
+    // 编辑待办
+    const handleEdit = (field: string, value: string | number) => {
+        setEditedData({ ...todo, [field]: value })
+    }
+
+    // 确认操作
+    const handleConfirm = () => {
+        onConfirm(editedData || operation.data)
+    }
+
+    const priorityNames: Record<number, string> = { 1: '高', 2: '中', 3: '低' }
+    const priorityColors: Record<number, string> = {
+        1: 'bg-red-100 text-red-700 border-red-200',
+        2: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+        3: 'bg-green-100 text-green-700 border-green-200'
+    }
+
+    // 字段翻译
+    const translateField = (field: string): string => {
+        const map: Record<string, string> = {
+            title: '标题', description: '描述', due_date: '截止时间',
+            priority: '优先级', category: '分类', progress: '进度', time: '时间'
+        }
+        return map[field] || field
+    }
+
+    // ==================== Update 视图 ====================
+    if (operation.action === 'update') {
         const { target_task, diff } = operation
         return (
             <div className="w-full max-w-md mx-auto">
-                <Card className="border-blue-500 bg-blue-50/50">
+                <Card className="border-2 border-blue-500 bg-blue-50/50">
                     <CardContent className="p-4 space-y-4">
                         <div className="flex items-center gap-2 border-b border-blue-200 pb-2">
                             <Edit2 className="h-5 w-5 text-blue-600" />
@@ -76,7 +111,7 @@ export default function ConfirmationCard({
                             <span className="text-gray-500">目标任务：</span>
                             <span className="font-medium ml-1">
                                 {target_task?.id ? `#${target_task.id} ` : ''}
-                                {target_task?.title || '未知任务'}
+                                {target_task?.title || (operation.data.title as string) || '未知任务'}
                             </span>
                         </div>
 
@@ -84,14 +119,14 @@ export default function ConfirmationCard({
                             <div className="space-y-2 bg-white rounded-md p-3 border">
                                 {Object.entries(diff).map(([field, change]) => (
                                     <div key={field} className="grid grid-cols-[80px_1fr] gap-2 text-sm items-center">
-                                        <span className="text-gray-500 font-medium text-right translate-field">
+                                        <span className="text-gray-500 font-medium text-right">
                                             {translateField(field)}:
                                         </span>
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                             {change.old !== undefined && change.old !== null && (
                                                 <>
                                                     <span className="line-through text-gray-400">{String(change.old)}</span>
-                                                    <span className="text-gray-400">→</span>
+                                                    <ArrowRight className="h-3 w-3 text-gray-400" />
                                                 </>
                                             )}
                                             <span className="text-blue-600 font-medium">{String(change.new)}</span>
@@ -100,14 +135,25 @@ export default function ConfirmationCard({
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-sm text-gray-500 italic">无明显变化</div>
+                            <div className="space-y-2 bg-white rounded-md p-3 border">
+                                {Object.entries(operation.data).filter(([k, v]) => 
+                                    v && !['todo_id', 'id', 'resolved_title'].includes(k)
+                                ).map(([field, value]) => (
+                                    <div key={field} className="grid grid-cols-[80px_1fr] gap-2 text-sm items-center">
+                                        <span className="text-gray-500 font-medium text-right">{translateField(field)}:</span>
+                                        <span className="text-blue-600 font-medium">{String(value)}</span>
+                                    </div>
+                                ))}
+                            </div>
                         )}
 
                         <div className="flex gap-2 pt-2">
                             <Button onClick={() => onConfirm(operation.data)} className="flex-1 bg-blue-600 hover:bg-blue-700">
-                                确认更新
+                                <CheckCircle className="mr-2 h-4 w-4" />确认更新
                             </Button>
-                            <Button onClick={onCancel} variant="outline" className="flex-1">取消</Button>
+                            <Button onClick={onCancel} variant="outline" className="flex-1">
+                                <XCircle className="mr-2 h-4 w-4" />取消
+                            </Button>
                         </div>
                     </CardContent>
                 </Card>
@@ -115,31 +161,40 @@ export default function ConfirmationCard({
         )
     }
 
-    // Delete 操作视图
-    if (action === 'delete') {
+    // ==================== Delete 视图 ====================
+    if (operation.action === 'delete') {
         const { target_task } = operation
         return (
             <div className="w-full max-w-md mx-auto">
-                <Card className="border-red-500 bg-red-50/50">
+                <Card className="border-2 border-red-500 bg-red-50/50">
                     <CardContent className="p-4 space-y-4">
                         <div className="flex items-center gap-2 border-b border-red-200 pb-2">
                             <Trash2 className="h-5 w-5 text-red-600" />
                             <div className="font-semibold text-red-700">确认删除</div>
                         </div>
 
-                        <div className="py-2 text-center">
+                        <div className="flex items-start gap-2 bg-red-100 rounded-md p-3">
+                            <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                            <div className="text-sm text-red-700">
+                                此操作不可恢复，请确认是否要删除该待办任务。
+                            </div>
+                        </div>
+
+                        <div className="py-2 text-center bg-white rounded-md border">
                             <div className="text-sm text-gray-600 mb-1">即将删除任务</div>
                             <div className="font-bold text-lg">
                                 {target_task?.id ? `#${target_task.id} ` : ''}
-                                {target_task?.title || operation.data.title || '未知任务'}
+                                {target_task?.title || (operation.data.title as string) || '未知任务'}
                             </div>
                         </div>
 
                         <div className="flex gap-2 pt-2">
                             <Button onClick={() => onConfirm(operation.data)} variant="destructive" className="flex-1">
-                                确认删除
+                                <Trash2 className="mr-2 h-4 w-4" />确认删除
                             </Button>
-                            <Button onClick={onCancel} variant="outline" className="flex-1">取消</Button>
+                            <Button onClick={onCancel} variant="outline" className="flex-1">
+                                <XCircle className="mr-2 h-4 w-4" />取消
+                            </Button>
                         </div>
                     </CardContent>
                 </Card>
@@ -147,51 +202,164 @@ export default function ConfirmationCard({
         )
     }
 
-    // fallback 到旧的 Create 视图逻辑 (简化版)
-    // ... (保留部分原有逻辑用于 Create)
-    // 为节省篇幅，这里暂时只支持 Update/Delete 的新结构，Create 仍使用简易兼容
-    // 实际项目中应完整重构 Create 部分以匹配新设计
+    // ==================== Complete 视图 ====================
+    if (operation.action === 'complete') {
+        const { target_task } = operation
+        return (
+            <div className="w-full max-w-md mx-auto">
+                <Card className="border-2 border-emerald-500 bg-emerald-50/50">
+                    <CardContent className="p-4 space-y-4">
+                        <div className="flex items-center gap-2 border-b border-emerald-200 pb-2">
+                            <CheckCircle className="h-5 w-5 text-emerald-600" />
+                            <div className="font-semibold text-emerald-700">确认完成</div>
+                        </div>
 
-    // 这里简单渲染 Create 的摘要
+                        <div className="py-4 text-center bg-white rounded-md border">
+                            <div className="text-sm text-gray-600 mb-2">即将完成任务</div>
+                            <div className="font-bold text-lg text-emerald-700">
+                                {target_task?.id ? `#${target_task.id} ` : ''}
+                                {target_task?.title || (operation.data.title as string) || '未知任务'}
+                            </div>
+                            <div className="mt-3 text-3xl">🎉</div>
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                            <Button onClick={() => onConfirm(operation.data)} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+                                <CheckCircle className="mr-2 h-4 w-4" />确认完成
+                            </Button>
+                            <Button onClick={onCancel} variant="outline" className="flex-1">
+                                <XCircle className="mr-2 h-4 w-4" />取消
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        )
+    }
+
+    // ==================== Create 视图（单个待办创建）====================
     return (
         <div className="w-full max-w-md mx-auto">
-            <Card className="border-green-500 bg-green-50/50">
-                <CardContent className="p-4 space-y-4">
-                    <div className="flex items-center gap-2 border-b border-green-200 pb-2">
-                        <CheckCircle className="h-5 w-5 text-green-600" />
-                        <div className="font-semibold">确认{action === 'create' ? '创建' : '操作'}</div>
+            <Card className="border-2 border-blue-500 bg-blue-50/50 backdrop-blur-xl">
+                <CardContent className="p-4 space-y-3">
+                    {/* 头部 */}
+                    <div className="flex items-center gap-2 pb-2 border-b">
+                        <CheckCircle className="h-5 w-5 text-blue-600" />
+                        <h3 className="font-semibold text-base">待创建</h3>
                     </div>
 
-                    <div className="space-y-2 bg-white rounded-md p-3 border text-sm">
-                        {operation.summary ? (
-                            <div className="whitespace-pre-wrap font-medium">{operation.summary}</div>
-                        ) : (
-                            Object.entries(operation.data).map(([k, v]) => (
-                                v && <div key={k}><span className="text-gray-500">{k}:</span> {String(v)}</div>
-                            ))
+                    {/* 待办卡片 */}
+                    <div className="border rounded-lg border-blue-500 bg-blue-50">
+                        {/* 列表项头部 */}
+                        <div className="p-3 flex items-center gap-3">
+                            <div className="flex-1 min-w-0" onClick={() => setIsExpanded(!isExpanded)}>
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-sm truncate">
+                                            {todo.title || '未命名待办'}
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                                            {todo.time && (
+                                                <span className="flex items-center gap-1">
+                                                    <Calendar className="h-3 w-3" />
+                                                    {todo.time}
+                                                </span>
+                                            )}
+                                            <Badge
+                                                variant="outline"
+                                                className={`text-xs h-5 ${priorityColors[todo.priority as number] || priorityColors[2]}`}
+                                            >
+                                                {priorityNames[todo.priority as number] || '中'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+
+                                    {/* 展开按钮 */}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            setIsExpanded(!isExpanded)
+                                        }}
+                                        className="p-1 hover:bg-gray-100 rounded"
+                                    >
+                                        {isExpanded ? (
+                                            <ChevronUp className="h-4 w-4 text-gray-500" />
+                                        ) : (
+                                            <ChevronDown className="h-4 w-4 text-gray-500" />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 展开的详情 (可编辑) */}
+                        {isExpanded && (
+                            <div className="px-3 pb-3 pt-0 space-y-3 border-t bg-gray-50/50">
+                                {/* 标题编辑 */}
+                                <div>
+                                    <label className="text-xs font-medium text-gray-500 mb-1 block">标题</label>
+                                    <Input
+                                        value={todo.title || ''}
+                                        onChange={(e) => handleEdit('title', e.target.value)}
+                                        className="h-8 text-sm"
+                                        placeholder="待办标题"
+                                    />
+                                </div>
+
+                                {/* 时间编辑 */}
+                                <div>
+                                    <label className="text-xs font-medium text-gray-500 mb-1 block">截止时间</label>
+                                    <Input
+                                        value={todo.time || ''}
+                                        onChange={(e) => handleEdit('time', e.target.value)}
+                                        className="h-8 text-sm"
+                                        placeholder="YYYY-MM-DD HH:MM"
+                                    />
+                                </div>
+
+                                {/* 描述 */}
+                                {todo.description && (
+                                    <div>
+                                        <label className="text-xs font-medium text-gray-500 mb-1 block">描述</label>
+                                        <div className="text-sm text-gray-700 p-2 bg-white rounded border">
+                                            {todo.description}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 提示 */}
+                                {!todo.time && (
+                                    <div className="flex items-start gap-2 p-2 rounded bg-amber-50 border border-amber-200">
+                                        <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5" />
+                                        <div className="text-xs text-amber-700">
+                                            未设置截止时间, 默认为早上9点
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
 
+                    {/* 底部操作按钮 */}
                     <div className="flex gap-2 pt-2">
-                        <Button onClick={() => onConfirm(operation.data)} className="flex-1 bg-green-600 hover:bg-green-700">
-                            确认
+                        <Button
+                            onClick={handleConfirm}
+                            className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+                        >
+                            <CheckCircle className="mr-2 h-4 w-4" />
+                            确认创建
                         </Button>
-                        <Button onClick={onCancel} variant="outline" className="flex-1">取消</Button>
+                        <Button
+                            onClick={onCancel}
+                            variant="outline"
+                            className="flex-1"
+                        >
+                            <XCircle className="mr-2 h-4 w-4" />
+                            取消
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
         </div>
     )
-}
-
-function translateField(field: string): string {
-    const map: Record<string, string> = {
-        title: '标题',
-        description: '描述',
-        due_date: '截止时间',
-        priority: '优先级',
-        category: '分类',
-        progress: '进度'
-    }
-    return map[field] || field
 }

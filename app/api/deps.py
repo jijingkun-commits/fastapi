@@ -25,6 +25,21 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
+def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """管理员权限验证，仅允许 role=admin 的用户访问。"""
+    try:
+        payload = decode_token(token)
+        uid = int(payload.get("uid"))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
+    user = get_by_id(db, uid)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    return user
+
+
 # 可选的 OAuth2 认证（不强制要求 token）
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/login", auto_error=False)
 

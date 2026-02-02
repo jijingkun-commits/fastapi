@@ -206,6 +206,7 @@ interface ImageWithLightboxProps {
 
 const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const imageName = alt || "图片";
 
   if (!src) return null;
@@ -218,11 +219,16 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) 
         alt={imageName}
         className={cn(
           "max-w-xs max-h-48 rounded-lg my-2 cursor-pointer hover:opacity-90 transition-opacity shadow-sm border",
+          loadError && "hidden",
           className
         )}
         loading="lazy"
         onClick={() => setLightboxOpen(true)}
+        onError={() => setLoadError(true)}
       />
+      {loadError && (
+        <span className="text-xs text-gray-400">[图片加载失败]</span>
+      )}
 
       {/* 点击放大弹窗 - 使用新的 ImageViewer 组件 */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>

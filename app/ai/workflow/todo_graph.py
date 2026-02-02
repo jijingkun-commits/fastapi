@@ -58,6 +58,7 @@ from app.ai.workflow.todo_intent_helpers import (
     check_rule_based_intent,
     extract_heuristic_title,
     get_progressive_strategy,
+    apply_goal_defaults,
 )
 
 # 创建仓库实例
@@ -103,6 +104,8 @@ class TodoAgentState(TypedDict):
 
 from app.ai.prompts.todo_prompts import (
     TODO_INTENT_ANALYZE_PROMPT,
+    build_intent_prompt_with_goal,
+    get_goal_default_values,
 )
 
 
@@ -558,8 +561,22 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     # 根据轮数获取渐进式策略注入
     progressive_injection = get_progressive_strategy(round_count, user_confirmed, quick_mode)
     
-    # 构建 Prompt
-    system_prompt = f"{TODO_INTENT_ANALYZE_PROMPT}{progressive_injection}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
+    # Step 4.1: Goal 模板注入（借鉴 Temporal AI Agent）
+    # 如果规则匹配已检测到意图，使用对应的 Few-shot 示例增强 Prompt
+    detected_intent_hint = None
+    if rule_result and rule_result.intent:
+        detected_intent_hint = rule_result.intent
+        logger.info(f"规则匹配预检测到意图: {detected_intent_hint}，将注入对应 Goal 模板")
+    
+    # 构建增强后的 Prompt（包含 Few-shot 示例）
+    enhanced_prompt = build_intent_prompt_with_goal(
+        base_prompt=TODO_INTENT_ANALYZE_PROMPT,
+        detected_intent=detected_intent_hint,
+        max_examples=3
+    )
+    
+    # 构建最终 Prompt
+    system_prompt = f"{enhanced_prompt}{progressive_injection}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
     
     analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
@@ -632,7 +649,6 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         
         # Step 6: 意图分支处理
         logger.info(f"Processing Step 6 with intent='{intent}'")
-        print(f"DEBUG: Processing Step 6 with intent='{intent}', extracted_info={extracted_info}")
         
         # 6.1 clarify 意图
         if intent == "clarify":
@@ -697,6 +713,10 @@ def analyze_intent(state: TodoAgentState) -> Dict:
                 logger.info(f"发现 {len(duplicates)} 个相似任务，需用户确认是否仍需创建")
                 return updates
         
+        # Step 7.6: 应用 Goal 模板默认值（渐进式策略）
+        # 当对话轮次超过阈值时，使用 Goal 模板定义的默认值填充缺失字段
+        extracted_info = apply_goal_defaults(intent, extracted_info, round_count)
+        
         # Step 8: 读取 quick_mode 并确定是否需要确认
         # quick_mode 可能来自 LLM 分析或 state
         quick_mode = analysis.get("quick_mode", False) or state.get("quick_mode", False)
@@ -732,7 +752,22 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         # 网络/超时错误
         logger.error(f"意图分析网络错误: {e}")
         updates["messages"] = [AIMessage(content="网络连接出现问题，请稍后重试。")]
+    except PermissionError as e:
+        # API 权限/配额错误
+        logger.error(f"意图分析权限错误: {e}")
+        error_str = str(e)
+        if "free tier" in error_str.lower() or "quota" in error_str.lower():
+            updates["messages"] = [AIMessage(content="AI 服务配额已用尽，请联系管理员或稍后重试。")]
+        else:
+            updates["messages"] = [AIMessage(content="AI 服务权限不足，请检查配置或联系管理员。")]
     except Exception as e:
+        # 检查是否是 OpenAI 权限错误（PermissionDeniedError）
+        error_type = type(e).__name__
+        error_str = str(e)
+        if error_type == "PermissionDeniedError" or "403" in error_str or "quota" in error_str.lower():
+            logger.error(f"意图分析 API 配额/权限错误: {e}")
+            updates["messages"] = [AIMessage(content="AI 服务配额已用尽或权限不足，请联系管理员或稍后重试。")]
+            return updates
         # 其他意外错误
         logger.exception(f"意图分析意外错误: {e}")
         updates["pending_operation"] = None
@@ -792,10 +827,6 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
 
 直接说"确认"即可创建，或"拒绝"告诉我补充内容～
 """
-    
-    elif action == "batch_complete":
-        count = data.get("count", 0)
-        confirm_msg = f"即将批量完成 {count} 个待办，确认吗？"
     
     elif action == "delete":
         # 优先使用 resolve 节点解析后的信息
@@ -867,10 +898,6 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
         title = data.get("title", "待办")
         friendly_summary = f"**删除待办**\n📝 标题：{title}"
         
-    elif action == "batch_complete":
-        count = data.get("count", 0)
-        friendly_summary = f"**批量操作**\n✅ 完成 {count} 个待办"
-        
     elif action == "merge":
         target_tasks = data.get("target_tasks", [])
         friendly_summary = f"**合并待办**\n🔗 将合并以下任务:\n" + "\n".join([f"- {t}" for t in target_tasks])
@@ -927,8 +954,16 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
         operation_data["diff"] = diff
         
     elif action == "delete":
-         todo_id = data.get("todo_id")
-         if todo_id:
+        todo_id = data.get("todo_id")
+        if todo_id:
+            operation_data["target_task"] = {
+                "id": todo_id,
+                "title": data.get("resolved_title") or data.get("title")
+            }
+    
+    elif action == "complete":
+        todo_id = data.get("todo_id")
+        if todo_id:
             operation_data["target_task"] = {
                 "id": todo_id,
                 "title": data.get("resolved_title") or data.get("title")
@@ -1179,14 +1214,13 @@ def _get_executor_map() -> Dict[str, callable]:
     """
     global _EXECUTOR_MAP
     if not _EXECUTOR_MAP:
+        # 注：batch_create 已废弃（2026-02-01），系统不支持批量创建
         _EXECUTOR_MAP = {
             "create": _execute_create,
             "update": _execute_update,
             "complete": _execute_complete,
             "delete": _execute_delete,
             "query": _execute_query,
-            "batch_create": _execute_batch_create,
-            "batch_complete": _execute_batch_complete,
             "merge": _execute_merge,
         }
     return _EXECUTOR_MAP
@@ -1323,59 +1357,8 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
         return ToolResultBuilder.error("创建待办失败，请稍后重试")
 
 
-def _execute_batch_create(data: Dict, state: TodoAgentState) -> ToolResult:
-    """执行批量创建操作。
-    
-    用于处理用户在一条消息中提到多个待办的场景，如：
-    "明天开会，后天出差"
-    """
-    from app.ai.tools.todo_tools import add_todo
-    
-    user_id = _get_user_id_from_state(state)
-    # config = RunnableConfig(configurable={"user_id": user_id})
-    config = {"configurable": {"user_id": user_id}}
-    
-    todos = data.get("todos", [])
-    if not todos:
-        return ToolResultBuilder.error("没有待创建的待办项")
-    
-    created = []
-    failed = []
-    
-    for todo_data in todos:
-        try:
-            # 直接调用 func 以确保 config 正确传递
-            due_date = todo_data.get("time") or todo_data.get("due_date")
-            result_str = add_todo.func(
-                title=todo_data.get("title", "新待办"),
-                description=todo_data.get("description", ""),
-                priority=_parse_priority(todo_data.get("priority")),
-                due_date=due_date,
-                category=todo_data.get("category"),
-                tags=todo_data.get("tags"),
-                reminder_enabled=todo_data.get("reminder_enabled", False),
-                location=todo_data.get("location"),
-                config=config
-            )
-            created.append(todo_data.get("title", "新待办"))
-            logger.info(f"批量创建: 成功创建 '{todo_data.get('title')}'")
-        except Exception as e:
-            failed.append(todo_data.get("title", "未知"))
-            logger.exception(f"批量创建失败: {todo_data.get('title')}, 错误: {e}")
-    
-    # 汇总结果
-    if created and not failed:
-        return ToolResultBuilder.success(
-            f"成功创建 {len(created)} 个待办：{', '.join(created)}"
-        )
-    elif created and failed:
-        return ToolResultBuilder.success(
-            f"部分成功：创建了 {len(created)} 个，失败 {len(failed)} 个\n"
-            f"成功：{', '.join(created)}\n"
-            f"失败：{', '.join(failed)}"
-        )
-    else:
-        return ToolResultBuilder.error(f"批量创建失败：{', '.join(failed)}")
+# _execute_batch_create 已废弃（2026-02-01）
+# 系统不支持批量创建意图，用户一次只能创建一个待办
 
 
 def _execute_update(data: Dict, state: TodoAgentState) -> ToolResult:
@@ -1478,33 +1461,6 @@ def _execute_delete(data: Dict, state: TodoAgentState) -> ToolResult:
     except Exception as e:
         logger.exception(f"删除待办意外错误: {e}")
         return ToolResultBuilder.error("删除待办失败，请稍后重试")
-
-
-def _execute_batch_complete(data: Dict, state: TodoAgentState) -> ToolResult:
-    """执行批量完成操作。"""
-    from app.ai.tools.batch_todo_tools import batch_complete_todos
-    
-    user_id = _get_user_id_from_state(state)
-    # config = RunnableConfig(configurable={"user_id": user_id})
-    config = {"configurable": {"user_id": user_id}}
-    
-    try:
-        # 直接调用 func
-        result_str = batch_complete_todos.func(
-            todo_ids=data.get("todo_ids", []),
-            config=config
-        )
-        
-        return ToolResultBuilder.success(result_str)
-    except ValueError as e:
-        logger.warning(f"批量完成待办参数错误: {e}")
-        return ToolResultBuilder.error(f"批量完成失败: {str(e)}")
-    except (ConnectionError, TimeoutError) as e:
-        logger.error(f"批量完成待办网络错误: {e}")
-        return ToolResultBuilder.error("网络连接失败，请稍后重试")
-    except Exception as e:
-        logger.exception(f"批量完成待办意外错误: {e}")
-        return ToolResultBuilder.error("批量完成待办失败，请稍后重试")
 
 
 def _execute_merge(data: Dict, state: TodoAgentState) -> ToolResult:

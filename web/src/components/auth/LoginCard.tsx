@@ -28,7 +28,8 @@ export function LoginCard() {
       const payload = isMobile ? { mobile: identifier, password } : { username: identifier, password };
       const data = await login(payload);
       try {
-        window.localStorage.setItem("auth:token", data.access_token);
+        // 使用 sessionStorage 存储 token，会话级别安全性更高
+        window.sessionStorage.setItem("auth:token", data.access_token);
       } catch (e) {
         console.warn("写入令牌失败", e);
       }

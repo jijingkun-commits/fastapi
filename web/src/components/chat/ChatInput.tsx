@@ -24,7 +24,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Plus, LoaderCircle, Mic, ArrowUp } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, safeParseJson, SelectedTodoSchema } from "@/lib/utils";
 import { CompactApproval } from "./CompactApproval";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { ContentBlock } from "@langchain/core/messages";
@@ -62,8 +62,7 @@ export interface ChatInputProps {
     // - enableThinking
     // - setEnableThinking
     // - thinkingCapability
-    // - useMultiAgent
-    // - setUseMultiAgent
+    // 注意：useMultiAgent 已废弃（2026-01-31），系统默认使用多智能体模式
 
     /** 文件上传内容块 */
     contentBlocks: ContentBlock.Multimodal.Data[];
@@ -102,8 +101,6 @@ export function ChatInput({
         stop: onStop,
         enableThinking,
         setEnableThinking,
-        useMultiAgent,
-        setUseMultiAgent,
     } = stream as any; // Cast to any because some props might be added by SSE/custom provider
 
     const thinkingCapability = (stream as any).thinkingCapability;
@@ -130,18 +127,10 @@ export function ChatInput({
         // 监听待办选中事件
         const handleTodoSelected = () => {
             const stored = sessionStorage.getItem('selectedTodo');
-            if (stored) {
-                try {
-                    const parsed = JSON.parse(stored);
-                    // 验证是否属于当前对话
-                    if (parsed.threadId === threadId) {
-                        setSelectedTodo(parsed);
-                    } else {
-                        setSelectedTodo(null);
-                    }
-                } catch (e) {
-                    console.error('Failed to parse selected todo', e);
-                }
+            const parsed = safeParseJson(stored, SelectedTodoSchema, null);
+            // 验证是否属于当前对话
+            if (parsed && parsed.threadId === threadId) {
+                setSelectedTodo(parsed);
             } else {
                 setSelectedTodo(null);
             }
@@ -303,21 +292,7 @@ export function ChatInput({
                                             </Label>
                                         </div>
 
-                                        {/* 多智能体模式开关 */}
-                                        <div className="flex items-center space-x-1">
-                                            <Switch
-                                                id="use-multi-agent"
-                                                checked={useMultiAgent}
-                                                onCheckedChange={setUseMultiAgent}
-                                                className="scale-75"
-                                            />
-                                            <Label
-                                                htmlFor="use-multi-agent"
-                                                className="text-[11px] text-gray-600 whitespace-nowrap cursor-pointer"
-                                            >
-                                                多Agent
-                                            </Label>
-                                        </div>
+                                        {/* 多智能体模式已默认开启，无需开关 */}
                                     </div>
 
                                     {/* 麦克风按钮 */}

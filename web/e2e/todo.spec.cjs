@@ -1,3 +1,10 @@
+/**
+ * 待办 Agent 基础 E2E 测试
+ * 
+ * @test-case TC-CRUD-01 创建单个待办
+ * @test-case TC-CRUD-02 查询待办列表
+ * @see docs/开发文档/测试管理/待办助手测试案例.md
+ */
 const { test, expect } = require('@playwright/test');
 
 test.describe('Todo Agent E2E Flow', () => {
@@ -32,6 +39,10 @@ test.describe('Todo Agent E2E Flow', () => {
         await expect(page.getByText('AI 可能会出错')).toBeVisible();
     });
 
+    /**
+     * @test-case TC-CRUD-01, TC-CRUD-02
+     * @description 创建待办并通过查询验证
+     */
     test('should create and list todos via chat', async ({ page }) => {
         test.setTimeout(60000);
 

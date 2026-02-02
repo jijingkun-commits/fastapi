@@ -55,7 +55,7 @@ export function DataAdminPanel() {
     const loadLogs = useCallback(async () => {
         setLoading(true);
         try {
-            let params: { is_correct?: boolean; trained?: boolean } = {};
+            const params: { is_correct?: boolean; trained?: boolean } = {};
             if (filter === "correct") params.is_correct = true;
             else if (filter === "incorrect") params.is_correct = false;
             else if (filter === "pending") params.trained = false;

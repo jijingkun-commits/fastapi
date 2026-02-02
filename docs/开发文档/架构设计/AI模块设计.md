@@ -25,10 +25,11 @@ app/ai/
 │   ├── vision_tool.py         # 图片分析工具
 │   ├── ragflow_tool.py        # 知识库检索工具
 │   └── embedding_util.py      # [New] 嵌入向量生成工具
-├── data/
-│   └── skills/                # [New] 技能知识库
-│       ├── todo-intent/       # 待办意图识别
-│       └── ...
+├── skills/                    # 技能知识库（启动时自动同步到数据库）
+│   ├── knowledge-search/      # 知识库检索
+│   ├── sql-expert/            # SQL 专家
+│   ├── fastapi-expert/        # FastAPI 专家
+│   └── ...                    # 共 23 个技能
 ├── prompts/                   # 渐进披露 Prompt 管理
 │   ├── agent_prompts.py       # 核心 Prompt
 │   ├── prompt_loader.py       # 参考文档加载器
@@ -70,6 +71,15 @@ app/ai/
 1. **注入系统上下文**：为所有 Agent 提供当前时间等系统信息
 2. **检索相关技能**：根据用户消息动态检索业务技能
 
+**配置参数**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `skill_similarity_threshold` | 0.55 | 相似度阈值，低于此值的技能不会被加载 |
+| `top_k` | 2 | 最多返回的技能数量 |
+
+> **调试日志**: 技能检索会输出候选技能及相似度分数，格式：`技能检索: 阈值=0.55, 候选=[skill(0.7), ...], 匹配=1个`
+
 ```mermaid
 graph LR
     UserMsg -->Preprocess[预处理节点]
@@ -109,6 +119,62 @@ class MultiAgentState(TypedDict):
     skill_context: Optional[str]              # 检索到的相关技能上下文
     system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
 ```
+
+### 状态生命周期管理 (2026-02)
+
+> [!IMPORTANT]
+> LangGraph checkpoint 会持久化所有状态字段。为避免跨轮次状态污染，需明确区分**持久化状态**和**瞬态状态**。
+
+#### 状态分类
+
+| 类型 | 字段 | 说明 |
+|------|------|------|
+| **持久化状态** | `messages`, `user_id`, `thread_id`, `model_id`, `enable_thinking` | 跨轮次保留，用于上下文连续性 |
+| **瞬态状态** | `pending_handoff`, `pending_operation`, `evaluation`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_context` | 仅在单轮有效，每轮结束时清理 |
+
+#### 清理机制
+
+**位置**: `_postprocess` 函数（Graph 唯一出口）
+
+**设计原则**: 出口清理，符合"资源在哪里分配就在哪里释放"原则。
+
+```python
+def _postprocess(state: MultiAgentState) -> dict:
+    # ... 保存对话、清理 DataFrame 缓存 ...
+    
+    # 统一清理临时状态字段，确保下一轮从干净状态开始
+    return {
+        # 委派控制
+        "pending_handoff": None,
+        # 操作状态
+        "pending_operation": None,
+        "user_confirmed": None,
+        "quick_mode": None,
+        # 评估状态
+        "evaluation": None,
+        "iteration_count": 0,
+        # 意图识别
+        "detected_intent": None,
+        "intent_route": None,
+        # 预处理结果
+        "attachment_analysis": None,
+        "skill_context": None,
+    }
+```
+
+#### 为什么不用 LangGraph 原生方案
+
+LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持久化到 checkpoint）。社区讨论了以下替代方案，但各有局限：
+
+| 方案 | 说明 | 局限 |
+|------|------|------|
+| 通过 `config` 传递 | 瞬态数据不放入 state | 需要改变所有节点的状态访问方式，改动巨大 |
+| Input/Output 分离 | 定义不同的 input/output schema | checkpoint 仍会保存所有字段 |
+| `entrypoint.final()` | 明确指定保存值 | 仅适用于 Functional API |
+
+**当前方案**（postprocess 清理）是最务实的选择：改动小、效果等价、未来可平滑迁移。
+
+> 更多背景：参考 LangGraph [Discussion #3192](https://github.com/langchain-ai/langgraph/discussions/3192)
 
 ### 核心节点（简化架构）
 
@@ -177,132 +243,58 @@ if handoff_result:
 
 ---
 
-## 📋 Todo Graph 架构 (2026-01 重构)
+## 📋 Todo Graph 架构
+
+> **详细设计文档**: [待办Agent设计](./待办Agent设计.md)
 
 **文件**: `app/ai/workflow/todo_graph.py`
 
-### 节点流程
+Todo Agent 是一个独立的 StateGraph，采用**意图驱动架构**，支持多轮对话、确认流程、冲突检测等特性。
 
-```mermaid
-graph TD
-    A[analyze_intent] --> B{route_next}
-    B -->|clarify| C[clarify_node]
-    B -->|decompose| D[task_decomposition_node]
-    B -->|conflict| E[conflict_detection_node]
-    B -->|resolve| R[resolve_entity]
-    B -->|execute| H[execute_operation]
-    B -->|summarize| I[summarize_node]
-    
-    C --> END
-    D --> E
-    E --> R
-    R --> B2{route_after_resolve}
-    B2 -->|clarify| C
-    B2 -->|confirm| F[ask_confirmation]
-    B2 -->|execute| H
-    F --> G[wait_for_confirmation]
-    G --> H
-    H --> END
-    I --> END
+### 核心节点
+
+| 节点 | 职责 |
+|-----|------|
+| `analyze_intent` | LLM 分析用户意图，提取待办信息 |
+| `clarify` | 信息不完整时生成追问 |
+| `resolve` | 模糊标识 → 具体 todo_id |
+| `confirm` + `wait_confirm` | 确认流程 (使用 `interrupt()`) |
+| `execute` | 执行 CRUD 操作 |
+
+### 节点流程图
+
+```
+analyze → route_next → [clarify|conflict|resolve|execute]
+                              │
+                        route_after_resolve
+                              │
+                    [clarify|confirm|execute]
+                              │
+                        wait_confirm → execute → END
 ```
 
-### 核心改动 (2026-01)
+### 智能特性
 
-| 原设计 | 新设计 | 改进点 |
-|--------|--------|--------|
-| `request_confirmation` 单节点 | `ask_confirmation` + `wait_for_confirmation` | 分离消息发送与中断等待 |
-| 正则解析 LLM 输出 | Pydantic `IntentResult` 模型 | 结构化验证 |
-| 分散的 `user_id` 获取 | 统一 `state_helpers.py` | 集中管理 |
-| 执行阶段模糊匹配 ID | **新增 `resolve_entity` 节点** | 在确认前解析 ID，避免歧义 |
-| 文本确认消息 | **结构化 ConfirmationCard** | 前端渲染 Diff 视图 |
+| 特性 | 说明 |
+|-----|------|
+| 重复检测 | Jaccard n-gram 相似度，阈值 0.4 |
+| 渐进式策略 | 多轮对话后自动给默认值 |
+| 快速模式 | 检测关键词跳过确认 |
+| 实体解析 | 模糊匹配用户指定的待办 |
 
-### resolve_entity 节点
+### 工具调用架构 (ADR-001)
 
-**文件**: `app/ai/agents/resolve_node.py`
+**决策**: 不采用 LangGraph `ToolNode`，使用自定义 `execute_operation` 节点
 
-专门在确认前解析模糊的待办标识为具体 `todo_id`：
+| 维度 | ToolNode 模式 | 当前实现 |
+|------|---------------|----------|
+| 工具调用触发 | LLM 生成 `tool_calls` | `analyze_intent` 构造 `pending_operation` |
+| 用户确认 | 无内置支持 | `ask_confirmation` + `wait_for_confirmation` |
+| 结果格式 | 标准 `ToolMessage(content)` | 自定义 `ToolResult(data_type, data, message)` |
 
-| 匹配结果 | 处理 |
-|---------|------|
-| 0 个匹配 | 路由到 `clarify`，提示找不到 |
-| 1 个匹配 | 写入 `todo_id` 到 `pending_operation`，路由到 `confirm` |
-| 多个匹配 | 路由到 `clarify`，列出选项供选择 |
+**选择理由**: 需要在工具执行前插入确认、冲突检测、参数补全等业务逻辑。
 
-### 状态辅助函数
-
-**文件**: `app/ai/utils/state_helpers.py`
-
-```python
-from app.ai.utils.state_helpers import get_user_id, get_user_id_optional, get_current_todo_id
-
-# 获取 user_id（抛异常版）
-user_id = get_user_id(state, config)
-
-# 获取 user_id（返回 None 版）
-user_id = get_user_id_optional(state, config)
-
-# 获取当前讨论的 todo_id
-todo_id = get_current_todo_id(state, config)
-```
-
-### 渐进式提示词策略 (Progressive Prompting)
-
-**文件**: `app/ai/prompts/todo_prompts.py`
-
-为避免用户在多轮对话中陷入细节纠结，Todo Agent 实现了基于对话轮次的渐进式策略注入：
-
-#### 策略定义
-
-| 策略 | 触发条件 | 行为 |
-|-----|---------|------|
-| `PROGRESSIVE_STRATEGY_DECISIVE` | 轮次 > 2 且未确认 | 停止追问，直接给出默认方案 |
-| `PROGRESSIVE_STRATEGY_RESET` | 轮次 > 5 | 礼貌询问是否重新开始 |
-| `QUICK_MODE_KEYWORDS` | 用户说 "别问了"、"直接创建" 等 | 跳过确认，直接执行 |
-
-#### 果断策略示例
-
-```python
-PROGRESSIVE_STRATEGY_DECISIVE = """
-## 策略调整 (Progressive Override)
-对话已进行多轮，用户似乎陷入了细节纠结。
-
-**禁止**：继续反问用户细节。
-**必须**：直接给出一个合理的默认方案。
-
-**默认值规则**：
-- 时间未知 → 默认"明天下午3点"
-- 优先级未知 → 默认"🟡中"
-- 分类未知 → 默认"工作"
-"""
-```
-
-#### 实现机制
-
-**位置**: `todo_graph.py` → `analyze_intent` 节点
-
-```python
-# 根据轮数注入策略
-round_count = len(messages) // 2  # 每轮两条消息 (human + ai)
-
-if round_count > 5:
-    progressive_injection = PROGRESSIVE_STRATEGY_RESET
-elif round_count > 2 and not user_confirmed and not quick_mode:
-    progressive_injection = PROGRESSIVE_STRATEGY_DECISIVE
-
-# 拼接到系统提示词
-system_prompt = f"{TODO_INTENT_ANALYZE_PROMPT}{progressive_injection}..."
-```
-
-#### 快速模式关键词
-
-```python
-QUICK_MODE_KEYWORDS = [
-    "别问了", "快点", "直接创建", "不要问那么多", 
-    "先创建", "快速创建", "随便", "默认就行"
-]
-```
-
-检测到这些关键词后，设置 `quick_mode=True`，跳过确认环节直接执行操作。
+> 更多详情（状态定义、路由逻辑、配置管理、提示词策略等）请参阅 [待办Agent设计](./待办Agent设计.md)
 
 ---
 
@@ -310,64 +302,18 @@ QUICK_MODE_KEYWORDS = [
 
 ### Todo Tools
 
+> **详细说明**: [待办Agent设计 - 工具函数](./待办Agent设计.md#6-工具函数)
+
 **文件**: `app/ai/tools/todo_tools.py`
 
-| 工具 | 用途 | 关键参数 |
-|------|------|----------|
-| `add_todo` | 创建待办 | title, due_date, priority, category |
-| `list_todos` | 查询待办 | status, category, keyword |
-| `update_todo` | 更新待办 | todo_id, 各属性字段 |
-| `update_progress` | 更新进度 | todo_id, progress (0-100) |
-| `complete_todo` | 标记完成 | todo_id |
-| `delete_todo` | 删除待办 | todo_id |
-
-### 工具返回格式
-
-所有工具返回字符串，格式如下：
-
-```python
-# 成功
-"✅ 成功创建待办事项：「周一开会」\n  ID: 123\n  截止: 2024-01-15 09:00"
-
-# 失败
-"❌ 操作失败：未找到 ID 为 999 的待办事项"
-
-# 列表
-"📋 找到 3 条待办事项：\n\n1. [ID:101] 周一开会 ⏰ 01-15 09:00\n2. ..."
-```
-
-### 工具调用架构 (ADR-001)
-
-**决策**: 不采用 LangGraph `ToolNode`，使用自定义 `execute_operation` 节点
-
-**背景**: LangGraph 提供了预构建的 `ToolNode` 用于标准 ReAct Agent 模式，但我们的 Todo Agent 采用"意图驱动"架构。
-
-**对比分析**:
-
-| 维度 | ToolNode 模式 | 当前实现 |
-|------|---------------|----------|
-| 工具调用触发 | LLM 生成 `tool_calls` | `analyze_intent` 构造 `pending_operation` |
-| 用户确认 | 无内置支持 | `ask_confirmation` + `wait_for_confirmation` |
-| 结果格式 | 标准 `ToolMessage(content)` | 自定义 `ToolResult(data_type, data, message)` |
-| SSE 事件 | 需在工具内部调用 | `execute_operation` 统一管理 |
-
-**选择理由**:
-
-1. **执行前干预** - 需要在工具执行前插入确认、冲突检测、参数补全等业务逻辑
-2. **结果格式灵活** - 支持结构化数据用于前端卡片渲染
-3. **关注点分离** - 工具只负责业务逻辑，SSE 事件由图节点统一处理
-
-**实现位置**: `app/ai/workflow/todo_graph.py` → `execute_operation` 节点
-
-```python
-def execute_operation(state: TodoAgentState) -> Dict:
-    """执行操作节点 - 手动调用工具函数。"""
-    if action == "create":
-        result = _execute_create(data, state)  # 调用 add_todo.func()
-    # 统一发送 SSE 事件
-    emit_result(writer, data_type=result["data_type"], data=result["data"], ...)
-    return updates
-```
+| 工具 | 用途 |
+|------|------|
+| `add_todo` | 创建待办 |
+| `list_todos` | 查询待办 (支持多维度过滤) |
+| `update_todo` | 更新待办 |
+| `update_progress` | 更新进度 (自动联动状态) |
+| `complete_todo` | 标记完成 |
+| `delete_todo` | 软删除 |
 
 ---
 
@@ -1244,6 +1190,53 @@ LANGFUSE_HOST=https://cloud.langfuse.com  # 可选
 | `get_related_ddl()` | `t_meta_tables` + `t_meta_columns` | 检索相关表结构（DDL），构建完整 CREATE TABLE |
 | `get_related_documentation()` | `t_metric_definition` | 检索相关指标定义，提供业务语义 |
 | `get_related_question_sql()` | `t_data_query_log` (trained=true) | 检索相似历史问答，Few-shot 示例 |
+
+**完整检索与训练流程**：
+
+```mermaid
+flowchart TD
+    subgraph 检索阶段
+        Q[用户问题] -->|get_embedding| E[问题向量]
+        
+        E -->|向量相似度| T[t_meta_tables]
+        T -->|Top-5 相关表| DDL[构建 DDL]
+        
+        E -->|向量相似度| M[t_metric_definition]
+        M -->|匹配指标| SQL1[指标 SQL 模板]
+        
+        E -->|向量相似度| H[t_data_query_log]
+        H -->|trained=true| SQL2[历史问答示例]
+    end
+    
+    subgraph 生成阶段
+        DDL --> LLM[LLM 生成 SQL]
+        SQL1 --> LLM
+        SQL2 -->|Few-shot| LLM
+        LLM --> EXEC[执行 SQL]
+    end
+    
+    subgraph 训练闭环
+        EXEC -->|记录| LOG[t_data_query_log]
+        LOG -->|用户反馈| FB{is_correct?}
+        FB -->|正确| TRAIN[标记 trained=true]
+        FB -->|错误| CORRECT[管理员修正 SQL]
+        CORRECT --> TRAIN
+        TRAIN -->|生成 embedding| H
+    end
+```
+
+**代码位置**：`app/ai/workflow/data_graph.py` 第 213-219 行
+
+```python
+# 检索相关 DDL（传递 schema 参数，缩小检索范围）
+ddl_list = vanna.get_related_ddl(question, schema=target_schema)
+
+# 检索相关文档/指标
+docs = vanna.get_related_documentation(question)
+
+# 检索历史问答
+similar_qs = vanna.get_related_question_sql(question)
+```
 
 **DDL 检索流程**：
 

@@ -47,7 +47,8 @@ def resolve_entity(state: TodoAgentState) -> Dict:
     data = dict(pending_op.get("data", {}))
     
     # 不需要解析的操作类型
-    skip_actions = ["create", "batch_create", "query", "summarize", "clarify", "constraint"]
+    # 注：batch_create 已废弃（2026-02-01），系统不支持批量创建意图
+    skip_actions = ["create", "query", "summarize", "clarify", "constraint"]
     if action in skip_actions:
         logger.info(f"操作 '{action}' 无需实体解析，跳过")
         return {}

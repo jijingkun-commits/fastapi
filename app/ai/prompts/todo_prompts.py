@@ -6,7 +6,13 @@
 - 意图分析 (Intent Analysis)
 - Agent 系统提示 (System Prompt)
 - 渐进式策略 (Progressive Strategy)
+- Goal 模板注入 (Few-shot Examples) - 借鉴 Temporal AI Agent
 """
+
+import json
+from typing import Optional
+
+from app.ai.config.goal_templates import GOAL_TEMPLATES, get_goal_template
 
 # ==================== 渐进式策略 (Phase 2) ====================
 
@@ -280,10 +286,6 @@ TODO_AGENT_SYSTEM_PROMPT = """你是一位专业的任务管理助手，帮助�
 - 逻辑删除任务（标记为已删除）
 - 可通过历史记录追溯
 
-### 7. 批量操作 (`batch_complete_todos`)
-- 批量完成多个待办
-- 支持按条件筛选批量操作
-
 ## 🌟 智能创建待办流程（重要）
 
 当用户说出一句包含待办意图的话时（例如"明天要去上海"、"下周开会"），你应该：
@@ -421,3 +423,83 @@ TODO_AGENT_SYSTEM_PROMPT = """你是一位专业的任务管理助手，帮助�
 
 记住：你的目标是帮助用户养成良好的任务管理习惯，让工作和生活更有条理！用自然对话而非机械问答，让用户感受到贴心服务。
 """
+
+
+# ==================== Goal 模板注入 (Phase 3) ====================
+# 借鉴 Temporal AI Agent 的 example_conversation_history 设计
+
+def build_intent_prompt_with_goal(
+    base_prompt: str,
+    detected_intent: Optional[str] = None,
+    max_examples: int = 3
+) -> str:
+    """构建包含 Goal 模板的意图分析 Prompt。
+    
+    借鉴 Temporal AI Agent 的 generate_genai_prompt 结构，
+    在基础 Prompt 后注入对应意图的 Few-shot 示例。
+    
+    Args:
+        base_prompt: 基础意图分析 Prompt (TODO_INTENT_ANALYZE_PROMPT)
+        detected_intent: 规则匹配预检测到的意图（可选）
+        max_examples: 最大 Few-shot 示例数量（避免 Token 过多）
+        
+    Returns:
+        增强后的 Prompt 文本
+    """
+    prompt_lines = [base_prompt]
+    
+    # 1. 如果已检测到意图，注入对应的 Few-shot 示例
+    if detected_intent and detected_intent in GOAL_TEMPLATES:
+        template = GOAL_TEMPLATES[detected_intent]
+        
+        prompt_lines.append(f"\n## 当前意图参考 ({detected_intent})")
+        
+        # 意图提示
+        if template.prompt_hint:
+            prompt_lines.append(f"\n**提示**: {template.prompt_hint}")
+        
+        # 必填/选填字段
+        if template.required_slots:
+            prompt_lines.append(f"**必填字段**: {', '.join(template.required_slots)}")
+        if template.optional_slots:
+            prompt_lines.append(f"**选填字段**: {', '.join(template.optional_slots)}")
+        
+        # Few-shot 示例（参考 Temporal 的 example_conversation_history）
+        examples = template.few_shot_examples[:max_examples]
+        if examples:
+            prompt_lines.append("\n**示例**:")
+            for user_input, expected_output in examples:
+                prompt_lines.append(f'输入: "{user_input}"')
+                prompt_lines.append(f'输出: {json.dumps(expected_output, ensure_ascii=False)}')
+                prompt_lines.append("")
+    
+    # 2. 如果没有检测到意图，提供通用示例（涵盖常见意图）
+    else:
+        prompt_lines.append("\n## 意图示例（参考）")
+        # 选取最常见的 4 种意图各 1 个示例
+        common_intents = ["create", "query", "complete", "confirm"]
+        for intent_name in common_intents:
+            template = GOAL_TEMPLATES.get(intent_name)
+            if template and template.few_shot_examples:
+                user_input, expected_output = template.few_shot_examples[0]
+                prompt_lines.append(f'- "{user_input}" → {json.dumps(expected_output, ensure_ascii=False)}')
+    
+    return "\n".join(prompt_lines)
+
+
+def get_goal_default_values(intent: str) -> dict:
+    """获取指定意图的默认值（用于渐进式策略第3轮）。
+    
+    当对话轮次超过阈值时，使用默认值填充缺失字段，
+    避免无限追问用户。
+    
+    Args:
+        intent: 意图名称
+        
+    Returns:
+        默认值字典，如 {"priority": "中", "category": "工作"}
+    """
+    template = get_goal_template(intent)
+    if template:
+        return template.default_values.copy()
+    return {}

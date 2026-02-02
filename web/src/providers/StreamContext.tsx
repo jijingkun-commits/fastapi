@@ -60,16 +60,13 @@ export interface StreamContextValue {
     enableThinking: boolean;
     /** 设置深度思考开关 */
     setEnableThinking: (value: boolean) => void;
-    /** 当前选中的模型 ID */
-    selectedModel: string;
+    /** 当前选中的模型 ID（undefined 表示使用后端默认模型） */
+    selectedModel: string | undefined;
     /** 模型变更处理函数 */
     handleModelChange: (modelId: string) => void;
     /** 当前模型的推理能力 */
     thinkingCapability: "always" | "never" | "optional";
-    /** 多智能体模式开关 */
-    useMultiAgent: boolean;
-    /** 设置多智能体模式开关 */
-    setUseMultiAgent: (value: boolean) => void;
+    // 注意：useMultiAgent 已废弃（2026-01-31），系统默认使用多智能体模式
     /** 隐藏工具调用开关 */
     hideToolCalls: boolean;
     /** 设置隐藏工具调用开关 */

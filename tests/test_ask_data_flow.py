@@ -201,15 +201,30 @@ def fix_embedding_config():
         }
         
         for tbl, col in tables_map.items():
-            # Check dimension first
-            dim_check = conn.execute(text(f"""
-                SELECT atttypmod FROM pg_attribute 
-                WHERE attrelid = '{tbl}'::regclass AND attname = '{col}'
+            # 先检查表是否存在
+            table_exists = conn.execute(text(f"""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = '{tbl}'
+                )
             """)).scalar()
-            logger.info(f"表 {tbl}.{col} 当前 typmod: {dim_check}")
             
-            # 1536 dims -> typmod usually -1? No. pgvector stores dims.
-            # Just Force Alter irrespective of current state to be sure
+            if not table_exists:
+                logger.warning(f"表 {tbl} 不存在，跳过")
+                continue
+            
+            # Check dimension first
+            try:
+                dim_check = conn.execute(text(f"""
+                    SELECT atttypmod FROM pg_attribute 
+                    WHERE attrelid = '{tbl}'::regclass AND attname = '{col}'
+                """)).scalar()
+                logger.info(f"表 {tbl}.{col} 当前 typmod: {dim_check}")
+            except Exception as e:
+                logger.warning(f"检查 {tbl}.{col} 维度失败: {e}")
+                continue
+            
+            # Force Alter
             try:
                 conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE vector(1024) USING NULL::vector"))
                 logger.info(f"已执行 ALTER {tbl}.{col}")

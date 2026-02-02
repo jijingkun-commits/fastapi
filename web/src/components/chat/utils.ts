@@ -32,8 +32,10 @@ export function replaceImagePlaceholders(content: string, kbImages: KbImages): s
   for (const [idx, url] of Object.entries(kbImages)) {
     const placeholder = `[IMG-${idx}]`;
     if (result.includes(placeholder)) {
-      result = result.replace(placeholder, `![参考图片](${url})`);
+      // 使用 split+join 来替换所有匹配项（修复多次引用同一占位符的问题）
+      result = result.split(placeholder).join(`![参考图片](${url})`);
     }
   }
+  
   return result;
 }

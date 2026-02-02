@@ -34,10 +34,9 @@ async def main():
         headers = {
             "Authorization": f"Bearer {access_token}"
         }
-        # Use valid parameters: use_multi_agent=True
+        # 多智能体模式现已默认启用
         payload = {
-            "prompt": "Give me some marketing ideas",
-            "use_multi_agent": True
+            "prompt": "Give me some marketing ideas"
         }
 
         found_expected_status = False

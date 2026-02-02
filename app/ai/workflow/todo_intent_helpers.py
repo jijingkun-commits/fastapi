@@ -510,6 +510,48 @@ def get_progressive_strategy(round_count: int, user_confirmed: bool, quick_mode:
     return ""
 
 
+def apply_goal_defaults(
+    intent: str,
+    extracted_info: Dict,
+    round_count: int
+) -> Dict:
+    """应用 Goal 模板的默认值（用于渐进式策略第3轮+）。
+    
+    当对话轮次超过阈值时，使用 Goal 模板中定义的默认值
+    填充缺失字段，避免无限追问用户。
+    
+    借鉴自 Temporal AI Agent 的 AgentGoal.default_values 设计。
+    
+    Args:
+        intent: 意图类型
+        extracted_info: 已提取的信息
+        round_count: 当前对话轮数
+        
+    Returns:
+        填充默认值后的 extracted_info
+    """
+    from app.ai.config.goal_templates import get_goal_template
+    
+    # 只有在轮次超过阈值时才应用默认值
+    if round_count <= todo_config.progressive_round_threshold:
+        return extracted_info
+    
+    template = get_goal_template(intent)
+    if not template or not template.default_values:
+        return extracted_info
+    
+    # 复制一份避免修改原对象
+    result = dict(extracted_info) if extracted_info else {}
+    
+    # 填充缺失的默认值
+    for key, default_value in template.default_values.items():
+        if not result.get(key):
+            result[key] = default_value
+            logger.info(f"渐进式策略: 应用默认值 {key}='{default_value}' (轮次={round_count})")
+    
+    return result
+
+
 def determine_confirmation_need(
     intent: str, 
     quick_mode: bool,

@@ -33,6 +33,9 @@ from app.ai.protocol import HandoffResult
 from app.ai.prompts.agent_prompts import SUPERVISOR_PROMPT
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 
+# Schema 路由增强（借鉴 TypeAgent Dispatcher）
+from app.ai.schema.agent_schema import route_by_schema, get_enabled_agents
+
 logger = logging.getLogger(__name__)
 
 
@@ -197,6 +200,9 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     # 显式标记 Graph 类型，用于 resume 时检测
     updates = {"_graph_type": "multi_agent"}
     
+    # 注意：临时状态（pending_handoff 等）在 postprocess 节点统一清理
+    # 详见：_postprocess 函数的状态清理逻辑
+    
     # ========== 1. 消息验证与修复 ==========
     # 【补丁代码】修复 DeepSeek Reasoner 的 reasoning_content 缺失问题
     # 详见: app.ai.message_utils.fix_deepseek_reasoning
@@ -260,7 +266,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         
         # 只有在 embedding 模型配置好时才执行检索
         if LLMConfigService.is_type_configured("embedding") and content:
-            skills = SkillService.search_skills(content, top_k=2, threshold=0.4)
+            skills = SkillService.search_skills(content, top_k=2)
             if skills:
                 skill_context = SkillService.format_skills_as_context(skills)
                 updates["skill_context"] = skill_context
@@ -375,9 +381,6 @@ async def create_multi_agent_graph(
             # kb_images 映射：在收到 ToolMessage 时动态填充
             kb_images = {}
             
-            # 记录初始消息数量
-            input_message_count = len(state.get("messages", []))
-            
             # protocol parser
             from app.ai.protocol import AgentOutputParser
             
@@ -430,7 +433,11 @@ async def create_multi_agent_graph(
                         pruned_messages[insert_pos:]
                     )
                 
-                logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {len(pruned_messages)} msgs")
+                # 重要：input_message_count 必须基于实际传递给 Agent 的消息数量
+                # 而不是原始 state 的消息数量（因为可能插入了系统消息）
+                input_message_count = len(pruned_state.get("messages", []))
+                
+                logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {input_message_count} msgs")
 
                 sent_tool_call_ids = set()
                 # 跟踪已发送的文本消息 ID，防止 values 模式重复发送
@@ -688,7 +695,30 @@ async def create_multi_agent_graph(
             except Exception as e:
                 logger.warning("多智能体后处理-清理缓存失败: %s", e)
         
-        return {}
+        # 统一清理临时状态字段，确保下一轮从干净状态开始
+        # 设计原则：出口清理，符合"资源在哪里分配就在哪里释放"
+        # 详见：docs/开发文档/架构设计/AI模块设计.md - 状态生命周期管理
+        return {
+            # === 委派控制 ===
+            "pending_handoff": None,
+            
+            # === 操作状态 ===
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            
+            # === 评估状态 ===
+            "evaluation": None,
+            "iteration_count": 0,  # 重置为 0，而非 None
+            
+            # === 意图识别 ===
+            "detected_intent": None,
+            "intent_route": None,
+            
+            # === 预处理结果（下一轮会重新生成）===
+            "attachment_analysis": None,
+            "skill_context": None,
+        }
 
     # 6. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
@@ -820,12 +850,14 @@ async def create_multi_agent_graph(
     def supervisor_should_continue(state: MultiAgentState) -> str:
         """判断 Supervisor 下一步路由。
         
-        路由逻辑：
-        1. 如果有 pending_handoff → 路由到对应专家 (data_expert / todo_expert)
+        路由逻辑（增强版 - 借鉴 TypeAgent Dispatcher）：
+        1. 如果有 pending_handoff → 使用 Schema 路由到对应专家
         2. 如果有其他 tool_calls → 路由到 evaluate
         3. 否则 → 路由到 postprocess
         
-        增强：添加 Handoff 校验，记录无效目标并重新路由回 Supervisor
+        增强：
+        - 使用 route_by_schema 进行 Schema 匹配路由
+        - 添加 Handoff 校验，记录无效目标并重新路由
         """
         from app.ai.exceptions import HandoffValidationError
         
@@ -833,10 +865,20 @@ async def create_multi_agent_graph(
         pending_handoff = state.get("pending_handoff")
         if pending_handoff:
             target_agent = pending_handoff.get("target_agent")
-            logger.info(f"Supervisor 检测到 pending_handoff，目标: {target_agent}")
+            detected_intent = pending_handoff.get("detected_intent", "unknown")
+            
+            logger.info(f"Supervisor 检测到 pending_handoff，目标: {target_agent}, 意图: {detected_intent}")
             
             # 有效的 Agent 列表
             VALID_AGENTS = {AgentType.DATA, AgentType.TODO}
+            
+            # 使用 Schema 路由增强（借鉴 TypeAgent Dispatcher）
+            # 如果 target_agent 无效但有 detected_intent，尝试使用 Schema 路由
+            if target_agent not in VALID_AGENTS and detected_intent:
+                schema_route = route_by_schema(detected_intent)
+                if schema_route in ["data_expert", "todo_expert"]:
+                    logger.info(f"Schema 路由增强: intent={detected_intent} -> {schema_route}")
+                    return schema_route
             
             if target_agent in VALID_AGENTS:
                 # 有效的 Handoff

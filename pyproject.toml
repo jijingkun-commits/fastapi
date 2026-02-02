@@ -51,6 +51,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest==8.3.4",
+  "pytest-cov==4.1.0",
   "httpx==0.27.2",
 ]
 
@@ -59,6 +60,20 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-q"
-testpaths = ["app/tests"]
+addopts = "-q --cov=app --cov-report=term-missing --cov-report=html"
+testpaths = ["app/tests", "tests"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/tests/*", "*/conftest.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+fail_under = 30
+show_missing = true
 

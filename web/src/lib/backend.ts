@@ -22,7 +22,8 @@ export async function apiFetch(
 ) {
   const addAuth = options?.auth !== false;
   const handle401 = options?.handle401 !== false;
-  const token = typeof window !== "undefined" ? window.localStorage.getItem("auth:token") : null;
+  // 使用 sessionStorage 存储 token，会话级别安全性更高（关闭浏览器自动清除）
+  const token = typeof window !== "undefined" ? window.sessionStorage.getItem("auth:token") : null;
   const baseHeaders = init.headers ?? {};
   const hasAuth = typeof baseHeaders === "object" && baseHeaders !== null && "Authorization" in (baseHeaders as any);
   const authHeader = addAuth && !hasAuth && token ? { Authorization: `Bearer ${token}` } : {};
@@ -32,7 +33,7 @@ export async function apiFetch(
   // 处理 401 未认证响应：清除 token 并跳转登录页
   if (response.status === 401 && handle401) {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem("auth:token");
+      window.sessionStorage.removeItem("auth:token");
       window.location.href = "/auth";
     }
   }
@@ -210,9 +211,9 @@ export async function streamLLM(
     aiConfigId?: string;
     threadId?: string;
     enableThinking?: boolean;
-    useMultiAgent?: boolean;
     attachments?: Attachment[];
     currentTodoId?: number;
+    idempotencyKey?: string;
     signal?: AbortSignal;
   },
 ) {
@@ -220,15 +221,21 @@ export async function streamLLM(
     typeof callbacks === "function" ? { onToken: callbacks } : callbacks;
   const { onToken, onThinking, onToolStart, onToolEnd, onInit, onDone, onError, onInterrupt, onResult, onStatus, onClarification, onKbImages } = cb;
 
+  // 构建请求头：幂等键通过 Header 传递
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options?.idempotencyKey) {
+    headers["Idempotency-Key"] = options.idempotencyKey;
+  }
+
+  // 注意：use_multi_agent 已废弃（2026-01-31），后端默认使用多智能体模式
   const response = await apiFetch(`/api/v1/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       prompt,
       model_id: options?.modelId,
       thread_id: options?.threadId,
       enable_thinking: options?.enableThinking,
-      use_multi_agent: options?.useMultiAgent,
       attachments: options?.attachments,
       current_todo_id: options?.currentTodoId,
     }),
@@ -340,6 +347,9 @@ export async function streamLLM(
   }
 }
 
+// SSE 流超时时间（毫秒）
+const SSE_TIMEOUT_MS = 120_000; // 2 分钟
+
 export function startLLMStream(
   prompt: string,
   callbacks: StreamCallbacks | ((token: string) => void),
@@ -347,23 +357,37 @@ export function startLLMStream(
   threadId?: string,
   enableThinking: boolean = false,
   modelId?: string,
-  useMultiAgent: boolean = false,
   attachments?: Attachment[],
   currentTodoId?: number,
+  idempotencyKey?: string,
+  timeoutMs: number = SSE_TIMEOUT_MS,
 ) {
   const ctrl = new AbortController();
+  
+  // 设置超时自动取消
+  const timeoutId = setTimeout(() => {
+    ctrl.abort();
+    const cb = typeof callbacks === "function" ? { onError: undefined } : callbacks;
+    cb.onError?.("请求超时，请重试");
+  }, timeoutMs);
+  
   const promise = streamLLM(prompt, callbacks, {
     modelId,
     threadId,
     enableThinking,
-    useMultiAgent,
     attachments,
     currentTodoId,
+    idempotencyKey,
     signal: ctrl.signal,
+  }).finally(() => {
+    clearTimeout(timeoutId);
   });
 
   return {
-    stop: () => ctrl.abort(),
+    stop: () => {
+      clearTimeout(timeoutId);
+      ctrl.abort();
+    },
     promise,
   };
 }

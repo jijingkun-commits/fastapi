@@ -97,6 +97,7 @@ def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
     # 仅处理前 30 个片段
     chunks = chunks[:30]
     logger.debug("JJK-ragchunks tool返回的前10条: %s", chunks)
+    
     for i, chunk in enumerate(chunks, 0):
         content = chunk.get("content", "")
         

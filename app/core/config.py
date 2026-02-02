@@ -118,7 +118,7 @@ ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
 # 技能检索
-SKILL_SIMILARITY_THRESHOLD: float = float(os.getenv("SKILL_SIMILARITY_THRESHOLD", "0.5"))
+SKILL_SIMILARITY_THRESHOLD: float = float(os.getenv("SKILL_SIMILARITY_THRESHOLD", "0.55"))
 
 # 静态资源
 PUBLIC_DIR = os.getenv("PUBLIC_DIR", "public")

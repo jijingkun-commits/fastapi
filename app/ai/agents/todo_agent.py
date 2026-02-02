@@ -52,8 +52,6 @@ def create_todo_agent(
             complete_todo, 
             delete_todo
         )
-        from app.ai.tools.batch_todo_tools import batch_complete_todos
-        
         tools = [
             add_todo, 
             list_todos, 
@@ -61,7 +59,6 @@ def create_todo_agent(
             update_todo,
             complete_todo, 
             delete_todo,
-            batch_complete_todos
         ]
         logger.info("待办管理工具已加载（升级版），工具数量: %d", len(tools))
     except ImportError as e:

@@ -31,7 +31,6 @@
 
 | Skill ID | 说明 | 来源 |
 |---|---|---|
-| `todo-intent` | 待办意图识别规则 | 自定义 |
 | `meeting-minutes` | 会议纪要整理专家 | awesome-cursorrules |
 | `code-review` | 代码审查助手 | awesome-cursorrules |
 | `translator` | 中英互译专家 | 自定义 |
