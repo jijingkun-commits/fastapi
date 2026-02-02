@@ -1,0 +1,66 @@
+# 文档同步检查 GitHub Action
+# 在 PR 中检测代码变更是否有对应文档更新
+
+name: Doc Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'web/src/**'
+
+jobs:
+  check-doc-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check doc sync
+        run: |
+          echo "========================================="
+          echo "  文档同步检查"
+          echo "========================================="
+          echo ""
+
+          # 获取本次 PR 中变更的代码文件
+          CHANGED_CODE=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^(app/|web/src/)' || true)
+
+          # 获取本次 PR 中变更的文档文件
+          CHANGED_DOCS=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^docs/' || true)
+
+          if [ -z "$CHANGED_CODE" ]; then
+            echo "未检测到代码文件变更，跳过检查"
+            exit 0
+          fi
+
+          echo "变更的代码文件："
+          echo "$CHANGED_CODE" | while read -r file; do
+            echo "  - $file"
+          done
+          echo ""
+
+          if [ -n "$CHANGED_DOCS" ]; then
+            echo "变更的文档文件："
+            echo "$CHANGED_DOCS" | while read -r file; do
+              echo "  - $file"
+            done
+            echo ""
+            echo "文档同步检查通过"
+          else
+            echo "::warning::检测到代码变更但无文档更新，请确认是否需要同步文档"
+            echo ""
+            echo "提示："
+            echo "  - 查阅 .cursor/rules/doc_sync.mdc 了解文档映射规则"
+            echo "  - 跳过条件：纯格式化/重构、简单 Bug 修复"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## 文档同步检查完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "请确保代码变更有对应的文档更新。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "参考文档映射规则：\`.cursor/rules/doc_sync.mdc\`" >> $GITHUB_STEP_SUMMARY

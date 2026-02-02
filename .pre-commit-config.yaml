@@ -1,0 +1,40 @@
+# pre-commit 配置文件
+# 安装: pip install pre-commit && pre-commit install
+# 文档: https://pre-commit.com/
+
+repos:
+  # 文档同步检查
+  - repo: local
+    hooks:
+      - id: doc-sync-check
+        name: 文档同步检查
+        entry: scripts/check_doc_sync.sh
+        language: script
+        files: ^(app/|web/src/)
+        pass_filenames: false
+        always_run: false
+        verbose: true
+
+  # Python 代码格式化（可选，按需启用）
+  # - repo: https://github.com/psf/black
+  #   rev: 24.1.0
+  #   hooks:
+  #     - id: black
+  #       language_version: python3.12
+
+  # Python 导入排序（可选，按需启用）
+  # - repo: https://github.com/pycqa/isort
+  #   rev: 5.13.2
+  #   hooks:
+  #     - id: isort
+  #       args: ["--profile", "black"]
+
+  # YAML 格式检查
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+        args: [--unsafe]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
