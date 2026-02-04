@@ -265,10 +265,179 @@ CREATE TABLE IF NOT EXISTS t_meta_relations (
 
 COMMENT ON TABLE t_meta_relations IS '表关系元数据';
 
+-- 指标定义表
+CREATE TABLE IF NOT EXISTS t_metric_definition (
+    metric_id VARCHAR(50) PRIMARY KEY,
+    metric_name VARCHAR(200) NOT NULL,
+    aliases TEXT,
+    description TEXT NOT NULL,
+    category VARCHAR(100),
+    sub_category VARCHAR(100),
+    unit VARCHAR(50),
+    frequency VARCHAR(20),
+    sql_template TEXT,
+    embedding VECTOR(1024),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_def_name ON t_metric_definition(metric_name);
+CREATE INDEX IF NOT EXISTS idx_metric_def_category ON t_metric_definition(category);
+
+COMMENT ON TABLE t_metric_definition IS '指标定义表';
+COMMENT ON COLUMN t_metric_definition.metric_id IS '指标唯一编码';
+COMMENT ON COLUMN t_metric_definition.metric_name IS '指标名称';
+COMMENT ON COLUMN t_metric_definition.aliases IS '别名/同义词（逗号分隔）';
+COMMENT ON COLUMN t_metric_definition.description IS '自然语言口径描述（向量化核心字段）';
+COMMENT ON COLUMN t_metric_definition.sql_template IS '完整SQL模板';
+COMMENT ON COLUMN t_metric_definition.embedding IS '语义向量（1024维）';
+
 -- ============================================================
--- 注意：以下表由其他脚本创建
+-- AI 技能与反馈
+-- ============================================================
+
+-- AI 技能表
+CREATE TABLE IF NOT EXISTS t_agent_skills (
+    id SERIAL PRIMARY KEY,
+    skill_id VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    content TEXT NOT NULL,
+    file_hash VARCHAR(64),
+    embedding VECTOR(2048),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_skills_skill_id ON t_agent_skills(skill_id);
+
+COMMENT ON TABLE t_agent_skills IS 'AI技能表';
+COMMENT ON COLUMN t_agent_skills.skill_id IS '技能唯一标识';
+COMMENT ON COLUMN t_agent_skills.name IS '技能名称';
+COMMENT ON COLUMN t_agent_skills.description IS '技能描述（用于向量匹配）';
+COMMENT ON COLUMN t_agent_skills.content IS 'SKILL.md完整内容';
+COMMENT ON COLUMN t_agent_skills.file_hash IS '文件MD5（增量同步用）';
+COMMENT ON COLUMN t_agent_skills.embedding IS '语义向量（2048维）';
+
+-- 对话反馈表
+CREATE TABLE IF NOT EXISTS t_chat_feedback (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    message_id BIGINT NOT NULL,
+    score INTEGER NOT NULL CHECK (score IN (-1, 0, 1)),
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_feedback_user_message UNIQUE (user_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_message_id ON t_chat_feedback(message_id);
+
+COMMENT ON TABLE t_chat_feedback IS '对话反馈表';
+COMMENT ON COLUMN t_chat_feedback.score IS '评分: -1=差评, 0=中立, 1=好评';
+COMMENT ON COLUMN t_chat_feedback.reason IS '反馈原因';
+
+-- ============================================================
+-- LLM 配置
+-- ============================================================
+
+-- 模型提供商表
+CREATE TABLE IF NOT EXISTS t_llm_provider (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    base_url VARCHAR(500),
+    api_key VARCHAR(500),
+    is_active BOOLEAN DEFAULT true,
+    sort_order INTEGER DEFAULT 0,
+    extra_config JSONB,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE t_llm_provider IS 'LLM提供商表';
+COMMENT ON COLUMN t_llm_provider.code IS '提供商代码: qwen/deepseek/openai';
+COMMENT ON COLUMN t_llm_provider.name IS '显示名称';
+COMMENT ON COLUMN t_llm_provider.base_url IS 'API基础地址';
+COMMENT ON COLUMN t_llm_provider.api_key IS 'API Key';
+
+-- 模型表
+CREATE TABLE IF NOT EXISTS t_llm_model (
+    id SERIAL PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES t_llm_provider(id) ON DELETE CASCADE,
+    model_code VARCHAR(100) NOT NULL,
+    model_name VARCHAR(200) NOT NULL,
+    model_type VARCHAR(50) DEFAULT 'chat',
+    supports_thinking BOOLEAN DEFAULT false,
+    supports_tool_call BOOLEAN DEFAULT true,
+    supports_streaming BOOLEAN DEFAULT true,
+    max_output_tokens INTEGER DEFAULT 4096,
+    context_window INTEGER DEFAULT 32000,
+    default_temperature FLOAT DEFAULT 0.7,
+    thinking_budget INTEGER DEFAULT 4096,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_default BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    rpm_limit INTEGER,
+    tpm_limit INTEGER,
+    extra_config JSONB,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider_id, model_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_model_provider ON t_llm_model(provider_id);
+CREATE INDEX IF NOT EXISTS idx_llm_model_active ON t_llm_model(is_active) WHERE is_active = true;
+
+COMMENT ON TABLE t_llm_model IS 'LLM模型表';
+COMMENT ON COLUMN t_llm_model.model_code IS '模型代码: qwen-plus/deepseek-reasoner';
+COMMENT ON COLUMN t_llm_model.model_type IS '类型: chat/reasoning/embedding';
+COMMENT ON COLUMN t_llm_model.supports_thinking IS '支持深度思考';
+COMMENT ON COLUMN t_llm_model.supports_tool_call IS '支持工具调用';
+
+-- 系统配置表
+CREATE TABLE IF NOT EXISTS t_system_config (
+    id SERIAL PRIMARY KEY,
+    config_key VARCHAR(100) UNIQUE NOT NULL,
+    config_value TEXT NOT NULL,
+    value_type VARCHAR(20) DEFAULT 'string',
+    category VARCHAR(50),
+    description TEXT,
+    is_secret BOOLEAN DEFAULT false,
+    is_readonly BOOLEAN DEFAULT false,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_config_category ON t_system_config(category);
+
+COMMENT ON TABLE t_system_config IS '系统配置表';
+COMMENT ON COLUMN t_system_config.config_key IS '配置键: ai.message_max_tokens';
+COMMENT ON COLUMN t_system_config.value_type IS '类型: string/number/boolean/json';
+COMMENT ON COLUMN t_system_config.is_secret IS '是否敏感（UI掩码显示）';
+
+-- 更新时间触发器
+CREATE OR REPLACE FUNCTION update_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.update_time = CURRENT_TIMESTAMP;
+   RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_llm_provider_modtime ON t_llm_provider;
+CREATE TRIGGER update_llm_provider_modtime BEFORE UPDATE ON t_llm_provider FOR EACH ROW EXECUTE PROCEDURE update_timestamp();
+
+DROP TRIGGER IF EXISTS update_llm_model_modtime ON t_llm_model;
+CREATE TRIGGER update_llm_model_modtime BEFORE UPDATE ON t_llm_model FOR EACH ROW EXECUTE PROCEDURE update_timestamp();
+
+DROP TRIGGER IF EXISTS update_system_config_modtime ON t_system_config;
+CREATE TRIGGER update_system_config_modtime BEFORE UPDATE ON t_system_config FOR EACH ROW EXECUTE PROCEDURE update_timestamp();
+
+-- ============================================================
+-- 注意：以下表由其他方式创建
 -- ============================================================
 -- LangGraph Checkpoint 表：由 AsyncPostgresSaver.setup() 自动创建
--- LLM 配置表：由 install/sql/003_llm_config.sql 创建
--- 技能表：由 scripts/init_skill_config.py 创建
--- 指标表：由 install/data_import/ 脚本创建
+-- 业务数据表（fdmdata/sdmdata）：由 install/data_import/ 脚本创建

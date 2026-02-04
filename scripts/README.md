@@ -64,10 +64,7 @@ install/                   # 部署安装相关
 │   ├── init_minio_buckets.py  # MinIO Bucket 初始化
 │   └── init_system_config.py  # 系统配置初始化
 └── sql/                   # 基础 SQL 脚本
-    ├── init_postgres.sql  # ★ 核心表结构
-    ├── 003_llm_config.sql # LLM 配置表
-    ├── 004_create_todo_table.sql  # 待办表
-    └── create_chat_assets_table.sql  # 附件表
+    └── init_postgres.sql  # ★ 全量建表（用户、会话、待办、LLM配置等）
 ```
 
 ## 常用脚本

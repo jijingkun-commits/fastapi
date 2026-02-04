@@ -142,10 +142,7 @@ print('扩展已启用')
     
     # 2. 执行 SQL 迁移
     log_info "  [2/6] 执行 SQL 迁移..."
-    for sql_file in install/sql/init_postgres.sql \
-                    install/sql/003_llm_config.sql \
-                    install/sql/004_create_todo_table.sql \
-                    install/sql/create_chat_assets_table.sql; do
+    for sql_file in install/sql/init_postgres.sql; do
         if [[ -f "$sql_file" ]]; then
             log_info "    执行: $sql_file"
             python3 -c "

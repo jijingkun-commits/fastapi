@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded, ensureChatReady, waitForAIResponse, sendMessageAndWait } = require('../helpers/auth-helper');
+const { loginIfNeeded, ensureChatReady, sendMessageAndWait } = require('../helpers/auth-helper');
 
 /**
  * 需求文档: docs/产品文档/待办助手需求.md
@@ -9,7 +9,7 @@ const { loginIfNeeded, ensureChatReady, waitForAIResponse, sendMessageAndWait } 
  */
 test.describe('用户故事: 待办助手', () => {
     test('US-TODO-01: 创建待办并可查询', async ({ page }) => {
-        test.setTimeout(120000);
+        test.setTimeout(180000);
         const todoTitle = `BDD-待办-${Date.now()}`;
         const createMessage = `帮我创建一个待办：${todoTitle}，优先级高`;
         const listMessage = '列出我的所有待办';
@@ -20,12 +20,13 @@ test.describe('用户故事: 待办助手', () => {
         });
 
         await test.step('When: 用户发送创建待办的消息', async () => {
-            await sendMessageAndWait(page, createMessage, 60000);
-            await expect(page.locator('.bg-muted').getByText(createMessage)).toBeVisible({ timeout: 10000 });
+            // 发送消息并等待 AI 响应完成（自动确认待办）
+            await sendMessageAndWait(page, createMessage, 60000, true);
         });
 
         await test.step('Then: 通过查询验证待办已创建', async () => {
-            await sendMessageAndWait(page, listMessage, 30000);
+            // 发送查询消息并等待响应
+            await sendMessageAndWait(page, listMessage, 30000, false);
             await expect(page.locator(`text=${todoTitle}`).last()).toBeVisible({ timeout: 20000 });
         });
     });

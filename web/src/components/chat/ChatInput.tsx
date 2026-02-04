@@ -182,7 +182,16 @@ export function ChatInput({
             )}
 
             {/* 内容区域：审核卡片 或 输入表单 */}
-            <div className="w-full">
+            {/* data-chat-state 用于 E2E 测试判断当前状态：
+                - idle: 空闲，可以输入
+                - streaming: AI 正在响应
+                - waiting-confirm: 等待用户确认
+            */}
+            <div 
+                className="w-full" 
+                data-testid="chat-input-container"
+                data-chat-state={hasInterrupt ? "waiting-confirm" : (isLoading ? "streaming" : "idle")}
+            >
                 {hasInterrupt ? (
                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                         <CompactApproval />
