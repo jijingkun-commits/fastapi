@@ -45,11 +45,14 @@ export function toDatetimeLocal(isoStr?: string): string {
 
 /**
  * 优先级颜色映射
+ * - 高: 橙色系 - 醒目但不与删除按钮红色冲突
+ * - 中: 黄色系 - 中等优先级，柔和提醒
+ * - 低: 灰蓝色系 - 低调不抢眼
  */
 export const priorityColors: Record<number, string> = {
-    1: 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900',
-    2: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900',
-    3: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900'
+    1: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900',
+    2: 'bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 dark:bg-yellow-950/30 dark:text-yellow-400 dark:border-yellow-900',
+    3: 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700'
 }
 
 /**

@@ -11,7 +11,7 @@ from app.ai.utils.sql_safety import (
     add_limit_if_missing,
     sanitize_sql,
     DANGEROUS_KEYWORDS,
-    SENSITIVE_TABLES
+    DEFAULT_SENSITIVE_TABLES,
 )
 
 
@@ -188,7 +188,7 @@ class TestConstants(unittest.TestCase):
         self.assertIn("DROP", [k.upper() for k in DANGEROUS_KEYWORDS])
     
     def test_sensitive_tables_exist(self):
-        self.assertIsInstance(SENSITIVE_TABLES, (list, tuple, set))
+        self.assertIsInstance(DEFAULT_SENSITIVE_TABLES, (list, tuple, set))
 
 
 if __name__ == '__main__':

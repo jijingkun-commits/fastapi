@@ -42,6 +42,12 @@ CONFIGS = [
     
     # AI 模型参数
     ("ai.model_temperature", "0.7", "number", "ai", "模型温度参数（0-2）"),
+    
+    # 问数助手配置
+    ("askdata.schema_whitelist", "fdmdata,sdmdata,public", "string", "askdata", "允许查询的 Schema 白名单（逗号分隔）"),
+    ("askdata.schema_blacklist", "pg_catalog,information_schema", "string", "askdata", "禁止查询的系统 Schema（逗号分隔）"),
+    ("askdata.table_blacklist", "t_user,t_chat_message,t_chat_feedback,t_chat_asset,t_todo,t_llm_model,t_agent_skills,t_system_config,t_metric_definitions", "string", "askdata", "禁止查询的敏感表（逗号分隔）"),
+    ("askdata.require_approval", "true", "boolean", "askdata", "SQL 执行是否需要人工确认"),
 ]
 
 

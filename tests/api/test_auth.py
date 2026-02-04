@@ -21,25 +21,28 @@ class TestLoginAPI:
         """测试缺少凭据时返回 400。"""
         response = client.post("/api/v1/login", json={"password": "test123"})
         assert response.status_code == 400
-        assert "username或mobile至少提供一个" in response.json()["detail"]
+        data = response.json()
+        # 统一响应格式: {"code", "message", "data"}
+        assert "username或mobile至少提供一个" in data.get("message", data.get("detail", ""))
     
     def test_login_invalid_credentials(self):
         """测试无效凭据时返回 401。"""
-        with patch("app.services.user_service.authenticate") as mock_auth:
+        with patch("app.api.v1.endpoints.auth.authenticate") as mock_auth:
             mock_auth.return_value = None
             response = client.post(
                 "/api/v1/login", 
                 json={"username": "testuser", "password": "wrongpass"}
             )
             assert response.status_code == 401
-            assert "用户名或密码错误" in response.json()["detail"]
+            data = response.json()
+            assert "用户名或密码错误" in data.get("message", data.get("detail", ""))
     
     def test_login_success(self):
         """测试登录成功返回令牌。"""
         mock_user = MagicMock()
         mock_user.id = 1
         
-        with patch("app.services.user_service.authenticate") as mock_auth:
+        with patch("app.api.v1.endpoints.auth.authenticate") as mock_auth:
             mock_auth.return_value = mock_user
             response = client.post(
                 "/api/v1/login", 
@@ -52,14 +55,15 @@ class TestLoginAPI:
     
     def test_login_db_error(self):
         """测试数据库异常返回 500（不泄露细节）。"""
-        with patch("app.services.user_service.authenticate") as mock_auth:
+        with patch("app.api.v1.endpoints.auth.authenticate") as mock_auth:
             mock_auth.side_effect = Exception("DB connection failed")
             response = client.post(
                 "/api/v1/login", 
                 json={"username": "testuser", "password": "test123"}
             )
             assert response.status_code == 500
-            assert "数据库连接失败或查询异常" in response.json()["detail"]
+            data = response.json()
+            assert "数据库连接失败或查询异常" in data.get("message", data.get("detail", ""))
 
 
 class TestMeAPI:

@@ -1,6 +1,7 @@
 """安全相关：密码校验与JWT令牌（中文注释）。"""
 import logging
 import time
+import uuid
 from typing import Any, Dict, Optional
 
 import jwt
@@ -36,10 +37,19 @@ def verify_password(plain_password: str, stored_password: Optional[str]) -> bool
 
 
 def create_access_token(subject: str, extra: Optional[Dict[str, Any]] = None) -> str:
-    """创建JWT访问令牌，包含主题、签发与过期时间。"""
+    """创建JWT访问令牌，包含主题、签发、过期时间和唯一标识(jti)。
+    
+    jti (JWT ID) 用于Token黑名单机制，支持服务端登出。
+    """
     now = int(time.time())
     exp_seconds = int(access_token_expires().total_seconds())
-    payload: Dict[str, Any] = {"sub": subject, "iat": now, "exp": now + exp_seconds}
+    jti = str(uuid.uuid4())
+    payload: Dict[str, Any] = {
+        "sub": subject,
+        "iat": now,
+        "exp": now + exp_seconds,
+        "jti": jti,
+    }
     if extra:
         payload.update(extra)
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)

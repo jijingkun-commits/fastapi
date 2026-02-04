@@ -6,6 +6,7 @@
  * - 切换对话
  * - 删除对话
  * - 重命名对话
+ * - 批量删除对话
  */
 import { Button } from "@/components/ui/button";
 import { useThreads, Thread } from "@/providers/Thread";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   PanelRightOpen,
   PanelRightClose,
@@ -27,9 +29,12 @@ import {
   Check,
   X,
   MessageSquare,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { toast } from "sonner";
+import { deleteThreadsBatch } from "@/lib/backend";
 
 interface ThreadItemProps {
   thread: Thread;
@@ -37,6 +42,10 @@ interface ThreadItemProps {
   onSelect: (threadId: string) => void;
   onDelete: (threadId: string) => void;
   onRename: (threadId: string, title: string) => void;
+  // 批量选择相关
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (threadId: string) => void;
 }
 
 function ThreadItem({
@@ -45,6 +54,9 @@ function ThreadItem({
   onSelect,
   onDelete,
   onRename,
+  isSelectMode = false,
+  isSelected = false,
+  onToggleSelect,
 }: ThreadItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(thread.title);
@@ -84,6 +96,14 @@ function ThreadItem({
     }
   };
 
+  const handleClick = () => {
+    if (isSelectMode && onToggleSelect) {
+      onToggleSelect(thread.thread_id);
+    } else {
+      onSelect(thread.thread_id);
+    }
+  };
+
   return (
     <div
       className="w-full px-1"
@@ -91,12 +111,24 @@ function ThreadItem({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
-        className={`group relative flex w-full items-center rounded-md px-2 py-2 transition-colors ${isActive
+        className={`group relative flex w-full items-center rounded-md px-2 py-2 transition-colors ${
+          isSelected
+            ? "bg-indigo-50 border border-indigo-200"
+            : isActive
             ? "bg-primary/10 text-primary"
             : "hover:bg-gray-100"
           }`}
       >
-        <MessageSquare className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
+        {/* 批量选择模式：显示 Checkbox */}
+        {isSelectMode ? (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={() => onToggleSelect?.(thread.thread_id)}
+            className="mr-2 h-4 w-4 shrink-0"
+          />
+        ) : (
+          <MessageSquare className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
+        )}
 
         {isEditing ? (
           <div className="flex flex-1 items-center gap-1">
@@ -132,13 +164,13 @@ function ThreadItem({
           <>
             <button
               className="flex-1 truncate text-left text-sm"
-              onClick={() => onSelect(thread.thread_id)}
+              onClick={handleClick}
             >
               {thread.title || "新对话"}
             </button>
 
-            {/* 操作按钮 - 悬停时显示 */}
-            {isHovered && (
+            {/* 操作按钮 - 悬停时显示（非选择模式） */}
+            {!isSelectMode && isHovered && (
               <div className="absolute right-1 flex items-center gap-0.5">
                 <Button
                   variant="ghost"
@@ -171,9 +203,15 @@ function ThreadItem({
 function ThreadList({
   threads,
   onThreadClick,
+  isSelectMode,
+  selectedIds,
+  onToggleSelect,
 }: {
   threads: Thread[];
   onThreadClick?: (threadId: string) => void;
+  isSelectMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (threadId: string) => void;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { deleteThread, updateThreadTitle } = useThreads();
@@ -203,6 +241,9 @@ function ThreadList({
           onSelect={handleSelect}
           onDelete={deleteThread}
           onRename={updateThreadTitle}
+          isSelectMode={isSelectMode}
+          isSelected={selectedIds?.has(t.thread_id)}
+          onToggleSelect={onToggleSelect}
         />
       ))}
     </div>
@@ -228,6 +269,11 @@ export default function ThreadHistory() {
 
   const { threads, threadsLoading, refreshThreads } = useThreads();
 
+  // 批量选择状态
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // 页面加载时获取对话列表
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -235,26 +281,149 @@ export default function ThreadHistory() {
     }
   }, [refreshThreads]);
 
+  // 切换选择
+  const handleToggleSelect = (threadId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(threadId)) {
+        next.delete(threadId);
+      } else {
+        next.add(threadId);
+      }
+      return next;
+    });
+  };
+
+  // 全选/取消全选
+  const handleSelectAll = () => {
+    if (selectedIds.size === threads.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(threads.map((t) => t.thread_id)));
+    }
+  };
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个对话吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await deleteThreadsBatch(Array.from(selectedIds));
+      toast.success(`已删除 ${selectedIds.size} 个对话`);
+      setSelectedIds(new Set());
+      setIsSelectMode(false);
+      refreshThreads();
+    } catch (e: any) {
+      toast.error(e.message || "批量删除失败");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // 退出选择模式
+  const exitSelectMode = () => {
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  // 渲染工具栏
+  const renderToolbar = () => (
+    <div className="flex w-full items-center justify-between border-b border-slate-200 px-4 py-3">
+      {isSelectMode ? (
+        <>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              onClick={handleSelectAll}
+            >
+              {selectedIds.size === threads.length ? (
+                <CheckSquare className="h-4 w-4 mr-1" />
+              ) : (
+                <Square className="h-4 w-4 mr-1" />
+              )}
+              {selectedIds.size === threads.length ? "取消全选" : "全选"}
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              已选 {selectedIds.size} 项
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-8"
+                onClick={handleBatchDelete}
+                disabled={isDeleting}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {isDeleting ? "删除中..." : "删除"}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={exitSelectMode}
+            >
+              取消
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <h1 className="text-lg font-semibold tracking-tight">对话历史</h1>
+          <div className="flex items-center gap-1">
+            {threads.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hover:bg-gray-200"
+                onClick={() => setIsSelectMode(true)}
+                title="批量管理"
+              >
+                <CheckSquare className="size-4" />
+              </Button>
+            )}
+            <Button
+              className="hover:bg-gray-200"
+              variant="ghost"
+              size="icon"
+              onClick={() => setChatHistoryOpen((p) => !p)}
+            >
+              {chatHistoryOpen ? (
+                <PanelRightOpen className="size-5" />
+              ) : (
+                <PanelRightClose className="size-5" />
+              )}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <>
       {/* 大屏幕侧边栏 */}
       <div className="shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-4 border-r-[1px] border-slate-300 bg-gray-50 lg:flex">
-        <div className="flex w-full items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h1 className="text-lg font-semibold tracking-tight">对话历史</h1>
-          <Button
-            className="hover:bg-gray-200"
-            variant="ghost"
-            size="icon"
-            onClick={() => setChatHistoryOpen((p) => !p)}
-          >
-            {chatHistoryOpen ? (
-              <PanelRightOpen className="size-5" />
-            ) : (
-              <PanelRightClose className="size-5" />
-            )}
-          </Button>
-        </div>
-        {threadsLoading ? <ThreadHistoryLoading /> : <ThreadList threads={threads} />}
+        {renderToolbar()}
+        {threadsLoading ? (
+          <ThreadHistoryLoading />
+        ) : (
+          <ThreadList
+            threads={threads}
+            isSelectMode={isSelectMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+          />
+        )}
       </div>
 
       {/* 小屏幕抽屉 */}
@@ -264,18 +433,75 @@ export default function ThreadHistory() {
           onOpenChange={(open) => {
             if (isLargeScreen) return;
             setChatHistoryOpen(open);
+            if (!open) exitSelectMode();
           }}
         >
           <SheetContent side="left" className="flex w-[300px] flex-col lg:hidden">
-            <SheetHeader>
-              <SheetTitle>对话历史</SheetTitle>
+            <SheetHeader className="border-b pb-3">
+              {isSelectMode ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2"
+                      onClick={handleSelectAll}
+                    >
+                      {selectedIds.size === threads.length ? "取消全选" : "全选"}
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      已选 {selectedIds.size}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {selectedIds.size > 0 && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="h-8"
+                        onClick={handleBatchDelete}
+                        disabled={isDeleting}
+                      >
+                        删除
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8"
+                      onClick={exitSelectMode}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <SheetTitle>对话历史</SheetTitle>
+                  {threads.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsSelectMode(true)}
+                    >
+                      <CheckSquare className="h-4 w-4 mr-1" />
+                      管理
+                    </Button>
+                  )}
+                </div>
+              )}
             </SheetHeader>
             {threadsLoading ? (
               <ThreadHistoryLoading />
             ) : (
               <ThreadList
                 threads={threads}
-                onThreadClick={() => setChatHistoryOpen(false)}
+                onThreadClick={() => {
+                  if (!isSelectMode) setChatHistoryOpen(false);
+                }}
+                isSelectMode={isSelectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={handleToggleSelect}
               />
             )}
           </SheetContent>

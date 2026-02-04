@@ -64,6 +64,11 @@ class UpdateTitleRequest(BaseModel):
     title: str
 
 
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求模型。"""
+    thread_ids: List[str]
+
+
 class ResumeRequest(BaseModel):
     """恢复中断请求模型。"""
     thread_id: str
@@ -186,6 +191,36 @@ def get_thread_messages(
         ))
     
     return result
+
+
+@router.delete("/threads/batch")
+def delete_threads_batch(
+    request: BatchDeleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """批量删除对话线程及其资产（仅限当前用户）。
+    
+    注意：此接口必须在 /threads/{thread_id} 之前定义，
+    否则 FastAPI 会将 "batch" 匹配为 thread_id。
+    """
+    if not request.thread_ids:
+        raise HTTPException(status_code=400, detail="thread_ids 不能为空")
+    if len(request.thread_ids) > 100:
+        raise HTTPException(status_code=400, detail="单次最多删除 100 个对话")
+    
+    # 清理内存中的 DataFrame 缓存
+    from app.ai.tools.chatTools import cleanup_thread_dataframes
+    for thread_id in request.thread_ids:
+        cleanup_thread_dataframes(thread_id)
+    
+    # 批量删除
+    stats = chat_repo.delete_threads_batch(db, request.thread_ids, current_user.id)
+    
+    return {
+        "message": f"已删除 {stats['threads_deleted']} 个对话",
+        "stats": stats,
+    }
 
 
 @router.delete("/threads/{thread_id}")

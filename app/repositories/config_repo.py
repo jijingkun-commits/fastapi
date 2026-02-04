@@ -20,6 +20,23 @@ def get_config_by_key(db: Session, key: str) -> Optional[SystemConfig]:
     return db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
 
 
+def get_config_value(db: Session, key: str, default: str = None) -> Optional[str]:
+    """根据 key 获取配置值。
+    
+    Args:
+        db: 数据库会话
+        key: 配置键
+        default: 默认值（配置不存在时返回）
+        
+    Returns:
+        配置值字符串，不存在时返回 default
+    """
+    config = get_config_by_key(db, key)
+    if config and config.config_value:
+        return config.config_value
+    return default
+
+
 def upsert_config(db: Session, key: str, value: str, value_type: str = "string",
                   category: str = None, description: str = None) -> SystemConfig:
     """插入或更新配置项。"""

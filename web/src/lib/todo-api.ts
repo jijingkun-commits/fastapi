@@ -17,7 +17,7 @@ export async function updateTodoAPI(
     updates: Partial<Todo>
 ): Promise<void> {
     const response = await apiFetch(`${API_BASE}/${todoId}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: {
             'Content-Type': 'application/json',
         },

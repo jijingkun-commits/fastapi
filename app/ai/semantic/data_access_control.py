@@ -1,12 +1,14 @@
 """数据访问控制模块（中文注释）。
 
 提供 Data Agent 的数据权限控制功能：
-- 表级别白名单
+- 表级别黑名单（从数据库配置读取）
+- Schema 级别黑名单（禁止访问系统 schema）
 - 行级别安全 (RLS) 支持
 - SQL 审计日志
 """
 import logging
-from typing import List, Optional, Dict, Set
+import time
+from typing import List, Optional, Dict, Set, Tuple
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -24,20 +26,86 @@ DEFAULT_TABLE_WHITELIST: Set[str] = {
     "t_sales",
 }
 
-# 敏感表黑名单（绝对禁止访问）
-TABLE_BLACKLIST: Set[str] = {
+# 敏感表黑名单（默认值，生产环境从数据库读取）
+DEFAULT_TABLE_BLACKLIST: Set[str] = {
     "t_user",
-    "t_llm_models",
+    "t_chat_message",
+    "t_chat_feedback",
+    "t_chat_asset",
+    "t_todo",
+    "t_llm_model",
     "t_agent_skills",
-    "t_conversations",
-    "t_messages",
+    "t_system_config",
+    "t_metric_definitions",
 }
 
-# 系统 schema 白名单（允许访问这些 schema 下的所有表）
-SYSTEM_SCHEMA_WHITELIST: Set[str] = {
-    "information_schema",
+# 系统 schema 黑名单（默认值，禁止访问系统元数据表）
+DEFAULT_SCHEMA_BLACKLIST: Set[str] = {
     "pg_catalog",
+    "information_schema",
 }
+
+# 允许访问的 information_schema 只读视图（用于元数据查询）
+# 这些视图只包含表结构信息，不含敏感数据
+ALLOWED_METADATA_VIEWS: Set[str] = {
+    "information_schema.tables",
+    "information_schema.columns",
+    "information_schema.schemata",
+    "information_schema.table_constraints",
+    "information_schema.key_column_usage",
+    "information_schema.views",
+}
+
+# 配置缓存（避免每次查询都访问数据库）
+_config_cache: Dict[str, Tuple[Set[str], float]] = {}  # key -> (value_set, timestamp)
+_CACHE_TTL = 300  # 缓存 5 分钟
+
+
+def _load_config_from_db(config_key: str, default: Set[str]) -> Set[str]:
+    """从数据库加载配置，带缓存。
+    
+    Args:
+        config_key: t_system_config 中的配置键
+        default: 默认值
+        
+    Returns:
+        配置值集合
+    """
+    global _config_cache
+    
+    # 检查缓存
+    if config_key in _config_cache:
+        cached_value, cached_time = _config_cache[config_key]
+        if time.time() - cached_time < _CACHE_TTL:
+            return cached_value
+    
+    # 从数据库加载
+    try:
+        from app.repositories import config_repo
+        with get_db_context() as db:
+            value = config_repo.get_config_value(db, config_key)
+            if value:
+                result = {s.strip().lower() for s in value.split(",") if s.strip()}
+                _config_cache[config_key] = (result, time.time())
+                logger.debug(f"从数据库加载配置 {config_key}: {result}")
+                return result
+    except Exception as e:
+        logger.warning(f"加载配置 {config_key} 失败，使用默认值: {e}")
+    
+    # 返回默认值并缓存（统一转小写）
+    default_lower = {s.lower() for s in default}
+    _config_cache[config_key] = (default_lower, time.time())
+    return default_lower
+
+
+def get_schema_blacklist() -> Set[str]:
+    """获取 Schema 黑名单（从数据库配置读取）。"""
+    return _load_config_from_db("askdata.schema_blacklist", DEFAULT_SCHEMA_BLACKLIST)
+
+
+def get_table_blacklist() -> Set[str]:
+    """获取表黑名单（从数据库配置读取）。"""
+    return _load_config_from_db("askdata.table_blacklist", DEFAULT_TABLE_BLACKLIST)
 
 
 class DataAccessControl:
@@ -92,20 +160,30 @@ class DataAccessControl:
         """
         table_lower = table_name.lower()
         
+        # 优先检查是否为允许的元数据视图
+        if table_lower in {v.lower() for v in ALLOWED_METADATA_VIEWS}:
+            logger.debug(f"允许访问元数据视图: {table_name}")
+            return True
+        
+        # 获取最新的黑名单配置
+        schema_blacklist = get_schema_blacklist()
+        table_blacklist = get_table_blacklist()
+        
         # 检查是否为系统 schema 的表（如 information_schema.tables）
         if '.' in table_lower:
             schema = table_lower.split('.')[0]
-            if schema in {s.lower() for s in SYSTEM_SCHEMA_WHITELIST}:
-                logger.debug(f"系统表访问允许: {table_name}")
-                return True
+            # 检查 schema 黑名单（禁止访问系统 schema）
+            if schema in schema_blacklist:
+                logger.warning(f"表访问被拒绝（系统 Schema 黑名单）: {table_name}")
+                return False
             # 提取纯表名用于后续检查
             pure_table = table_lower.split('.')[-1]
         else:
             pure_table = table_lower
         
-        # 黑名单优先
-        if pure_table in {t.lower() for t in TABLE_BLACKLIST}:
-            logger.warning(f"表访问被拒绝（黑名单）: {table_name}")
+        # 检查表黑名单
+        if pure_table in table_blacklist:
+            logger.warning(f"表访问被拒绝（表黑名单）: {table_name}")
             return False
         
         # 检查白名单（如果启用）
@@ -241,4 +319,19 @@ def get_access_control(user_id: Optional[int] = None) -> DataAccessControl:
 
 
 # 导出
-__all__ = ["DataAccessControl", "get_access_control", "DEFAULT_TABLE_WHITELIST", "TABLE_BLACKLIST", "SYSTEM_SCHEMA_WHITELIST"]
+# 向后兼容别名
+TABLE_BLACKLIST = DEFAULT_TABLE_BLACKLIST
+SYSTEM_SCHEMA_WHITELIST = DEFAULT_SCHEMA_BLACKLIST
+
+__all__ = [
+    "DataAccessControl", 
+    "get_access_control", 
+    "get_schema_blacklist",
+    "get_table_blacklist",
+    "DEFAULT_TABLE_WHITELIST", 
+    "DEFAULT_TABLE_BLACKLIST", 
+    "DEFAULT_SCHEMA_BLACKLIST",
+    "ALLOWED_METADATA_VIEWS",
+    "TABLE_BLACKLIST",
+    "SYSTEM_SCHEMA_WHITELIST",
+]

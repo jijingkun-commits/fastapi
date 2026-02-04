@@ -28,8 +28,8 @@ DANGEROUS_KEYWORDS: Set[str] = {
     "CALL",  # 存储过程调用
 }
 
-# 敏感表黑名单（禁止访问）
-SENSITIVE_TABLES: Set[str] = {
+# 敏感表黑名单（默认值，运行时从数据库读取）
+DEFAULT_SENSITIVE_TABLES: Set[str] = {
     # 用户/认证相关
     "t_user", "users", "t_users",
     "password", "passwords",
@@ -39,22 +39,59 @@ SENSITIVE_TABLES: Set[str] = {
     "credential", "credentials",
     "auth", "authentication",
     # 系统配置相关
-    "t_llm_models",
+    "t_llm_model", "t_llm_models",
     "t_system_config",
+    "t_agent_skills",
+    "t_metric_definitions",
     # 聊天/待办相关（系统数据）
-    "t_chat_message", "t_chat_assets", "t_chat_feedback",
+    "t_chat_message", "t_chat_asset", "t_chat_assets", "t_chat_feedback",
     "t_todo", "t_todo_history", "t_todo_reminder_queue",
     # LangGraph 检查点
     "checkpoints", "checkpoint_blobs", "checkpoint_writes",
 }
 
-# 系统 Schema 黑名单（禁止访问）
-SYSTEM_SCHEMAS: Set[str] = {
+# 系统 Schema 黑名单（默认值，运行时从数据库读取）
+DEFAULT_SYSTEM_SCHEMAS: Set[str] = {
     "pg_catalog",
     "information_schema",
     "pg_toast",
     "pg_temp",
 }
+
+# 允许访问的 information_schema 只读视图（用于元数据查询）
+# 这些视图只包含表结构信息，不含敏感数据
+ALLOWED_METADATA_VIEWS: Set[str] = {
+    "information_schema.tables",
+    "information_schema.columns",
+    "information_schema.schemata",
+    "information_schema.table_constraints",
+    "information_schema.key_column_usage",
+    "information_schema.views",
+}
+
+
+def get_sensitive_tables() -> Set[str]:
+    """获取敏感表黑名单（从数据库配置读取）。"""
+    try:
+        from app.ai.semantic.data_access_control import get_table_blacklist
+        db_blacklist = get_table_blacklist()
+        # 合并默认值和数据库配置
+        return DEFAULT_SENSITIVE_TABLES | db_blacklist
+    except Exception as e:
+        logger.warning(f"获取敏感表配置失败，使用默认值: {e}")
+        return DEFAULT_SENSITIVE_TABLES
+
+
+def get_system_schemas() -> Set[str]:
+    """获取系统 Schema 黑名单（从数据库配置读取）。"""
+    try:
+        from app.ai.semantic.data_access_control import get_schema_blacklist
+        db_blacklist = get_schema_blacklist()
+        # 合并默认值和数据库配置
+        return DEFAULT_SYSTEM_SCHEMAS | db_blacklist
+    except Exception as e:
+        logger.warning(f"获取系统 Schema 配置失败，使用默认值: {e}")
+        return DEFAULT_SYSTEM_SCHEMAS
 
 # 默认查询结果限制
 DEFAULT_LIMIT = 1000
@@ -141,6 +178,7 @@ def check_sensitive_tables(sql: str) -> Tuple[bool, Optional[str]]:
     """检查 SQL 是否访问敏感表。
     
     使用 sqlglot 解析器提取表名，比简单正则更准确。
+    敏感表列表从数据库配置动态读取。
     
     Args:
         sql: SQL 语句
@@ -151,8 +189,9 @@ def check_sensitive_tables(sql: str) -> Tuple[bool, Optional[str]]:
     # 使用统一的表名提取工具
     tables = extract_tables_from_sql(sql)
     
-    # 标准化敏感表名（小写）
-    sensitive_lower = {t.lower() for t in SENSITIVE_TABLES}
+    # 从数据库获取最新的敏感表配置
+    sensitive_tables = get_sensitive_tables()
+    sensitive_lower = {t.lower() for t in sensitive_tables}
     
     for table in tables:
         # 提取纯表名（去除 schema 前缀）
@@ -169,6 +208,8 @@ def check_schema_whitelist(sql: str) -> Tuple[bool, Optional[str]]:
     """检查 SQL 访问的 Schema 是否在白名单中。
     
     只允许访问 ANALYTICS_SCHEMAS 中配置的 Schema。
+    系统 Schema 黑名单从数据库配置动态读取。
+    特例：允许访问 ALLOWED_METADATA_VIEWS 中的元数据视图。
     
     Args:
         sql: SQL 语句
@@ -181,16 +222,26 @@ def check_schema_whitelist(sql: str) -> Tuple[bool, Optional[str]]:
     
     # 标准化允许的 Schema（小写）
     allowed_schemas = {s.lower() for s in ANALYTICS_SCHEMAS}
-    system_schemas = {s.lower() for s in SYSTEM_SCHEMAS}
+    # 从数据库获取最新的系统 Schema 黑名单
+    system_schemas = get_system_schemas()
+    system_schemas_lower = {s.lower() for s in system_schemas}
+    # 允许的元数据视图（小写）
+    allowed_metadata_views = {v.lower() for v in ALLOWED_METADATA_VIEWS}
     
     for table in tables:
         # 检查是否包含 schema 前缀
         if '.' in table:
+            full_table = table.lower()
             parts = table.split('.')
             schema = parts[0].lower()
             
+            # 优先检查是否为允许的元数据视图
+            if full_table in allowed_metadata_views:
+                logger.debug(f"SQL 安全检查: 允许访问元数据视图 {table}")
+                continue
+            
             # 检查系统 Schema 黑名单
-            if schema in system_schemas:
+            if schema in system_schemas_lower:
                 logger.warning(f"SQL 安全检查: 检测到系统 Schema 访问 {schema}")
                 return (False, f"禁止访问系统 Schema: {schema}")
             
@@ -290,8 +341,11 @@ __all__ = [
     "check_multiple_statements",
     "add_limit_if_missing",
     "sanitize_sql",
+    "get_sensitive_tables",
+    "get_system_schemas",
     "DANGEROUS_KEYWORDS",
-    "SENSITIVE_TABLES",
-    "SYSTEM_SCHEMAS",
+    "DEFAULT_SENSITIVE_TABLES",
+    "DEFAULT_SYSTEM_SCHEMAS",
+    "ALLOWED_METADATA_VIEWS",
     "DEFAULT_LIMIT",
 ]

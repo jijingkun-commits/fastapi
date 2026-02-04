@@ -1,1 +1,15 @@
-
+# Alembic 迁移脚本目录
+#
+# 项目采用混合迁移策略：
+#
+# 【开发阶段】
+#   python scripts/sync_database.py
+#
+# 【投产后增量变更】
+#   方式A: alembic revision --autogenerate -m "描述"
+#          alembic upgrade head
+#
+#   方式B: 新建 install/scripts/init_postgres.sql/020_xxx.sql
+#
+# 【新环境部署】
+#   执行 install/sql/init_postgres.sql（全量建表）

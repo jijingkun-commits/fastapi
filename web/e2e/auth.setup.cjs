@@ -44,8 +44,8 @@ setup('authenticate', async ({ page }) => {
         }
         await loginButton.click();
 
-        // 等待登录完成
-        await page.waitForURL('**/chat**', { timeout: 30000 });
+        // 等待登录完成 - 等待离开 /auth 页面
+        await page.waitForFunction(() => !window.location.pathname.includes('/auth'), { timeout: 30000 });
     }
 
     // 保存认证状态

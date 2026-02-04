@@ -49,6 +49,10 @@ def save_message(
     if isinstance(content, (list, dict)):
         content = json.dumps(content, ensure_ascii=False)
     
+    # AI 消息去除首尾换行（LLM 输出常带有多余换行）
+    if role == "ai" and isinstance(content, str):
+        content = content.strip('\n')
+    
     message = ChatMessage(
         user_id=user_id,
         thread_id=thread_id,
@@ -243,6 +247,43 @@ def delete_thread(db: Session, thread_id: str, user_id: Optional[int] = None) ->
     return count
 
 
+def delete_threads_batch(
+    db: Session,
+    thread_ids: List[str],
+    user_id: int
+) -> dict:
+    """批量删除对话线程及其资产。
+    
+    Args:
+        db: 数据库会话
+        thread_ids: 要删除的对话线程 ID 列表
+        user_id: 用户 ID（用于权限校验，只能删除自己的对话）
+        
+    Returns:
+        删除统计: {"total_messages": N, "total_assets": M, "total_minio": K, "threads_deleted": L}
+    """
+    stats = {
+        "total_messages": 0,
+        "total_assets": 0,
+        "total_minio": 0,
+        "threads_deleted": 0
+    }
+    
+    for thread_id in thread_ids:
+        result = delete_thread_with_assets(db, thread_id, user_id)
+        if result["messages"] > 0:
+            stats["total_messages"] += result["messages"]
+            stats["total_assets"] += result["assets"]
+            stats["total_minio"] += result["minio_deleted"]
+            stats["threads_deleted"] += 1
+    
+    logger.info(
+        "批量删除完成: user_id=%d, requested=%d, deleted=%d",
+        user_id, len(thread_ids), stats["threads_deleted"]
+    )
+    return stats
+
+
 def delete_thread_with_assets(db: Session, thread_id: str, user_id: Optional[int] = None) -> dict:
     """删除对话线程及其所有资产（MinIO 文件 + 数据库记录）。
     
@@ -304,7 +345,7 @@ def save_conversation_from_messages(
     thread_id: str,
     messages: list,
 ):
-    """从 LangGraph 消息列表保存对话到 MySQL。
+    """从 LangGraph 消息列表保存对话到 PostgreSQL。
     
     只保存最后一轮对话：
     - 最后一条 human 消息
@@ -449,18 +490,8 @@ def save_conversation_from_messages(
     if not human_content and not ai_content:
         return
     
-    # 3. 保存 human 消息
-    if human_content:
-        title = human_content[:50] if len(human_content) > 50 else human_content
-        save_message(
-            db,
-            user_id=user_id,
-            thread_id=thread_id,
-            role="human",
-            content_type="text",
-            content=human_content,
-            title=title,
-        )
+    # human 消息已在 stream 开始时保存，postprocess 只负责保存 AI 消息
+    # 职责划分：human -> stream开始, interrupt AI -> interrupt, final AI -> postprocess
     
     # 4. 保存 ai 消息（只保存最后一条）
     extra_data = None  # 在外部定义，确保日志可访问

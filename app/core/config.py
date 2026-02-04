@@ -21,7 +21,7 @@ PROJECT_ROOT: Path = _BASE
 
 
 
-# 数据库连接串（示例：mysql+pymysql://user:pass@host:port/schema）
+# 数据库连接串（示例：postgresql+psycopg://user:pass@host:port/schema）
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
     "postgresql+psycopg://postgres:postgres@localhost:5432/chat_db",
@@ -48,6 +48,11 @@ for pair in _schema_aliases_str.split(","):
     if ":" in pair:
         alias, schema = pair.split(":", 1)
         SCHEMA_ALIASES[alias.strip()] = schema.strip().lower()
+
+# Embedding 向量维度（必须与数据库 Vector 列定义一致）
+# 智谱 embedding-3: 2048 维, embedding-2: 1024 维
+# 重要：数据库中 Vector 列均定义为 2048 维，必须使用 embedding-3 模型
+EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "2048"))
 
 # 数据库连接池参数
 DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
@@ -150,7 +155,7 @@ MINIO_BUCKET_ASSETS = os.getenv("MINIO_BUCKET_ASSETS", "chat-assets")
 # 注意: langgraph 使用 psycopg 3，需要标准 postgres:// 格式
 PG_CHECKPOINTER_URI: str = os.getenv(
     "PG_CHECKPOINTER_URI", 
-    "postgres://postgres:postgres@localhost:5432/checkpoints"
+    "postgres://postgres:postgres@localhost:5432/chat_db"
 )
 
 

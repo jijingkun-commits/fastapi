@@ -565,3 +565,133 @@ export async function submitFeedback(
   if (!r.ok) throw new Error("提交反馈失败");
 }
 
+/**
+ * 批量删除对话线程
+ */
+export async function deleteThreadsBatch(threadIds: string[]): Promise<{
+  message: string;
+  stats: {
+    total_messages: number;
+    total_assets: number;
+    total_minio: number;
+    threads_deleted: number;
+  };
+}> {
+  const r = await apiFetch(`/api/v1/chat/threads/batch`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ thread_ids: threadIds }),
+  });
+  if (!r.ok) throw new Error("批量删除对话失败");
+  return r.json();
+}
+
+// ==================== 用户管理 API ====================
+
+/**
+ * 用户列表项
+ */
+export interface UserListItem {
+  id: number;
+  username: string | null;
+  mobile: string | null;
+  role: string | null;
+  org_code: string | null;
+  org_name: string | null;
+  dept_code: string | null;
+  dept_name: string | null;
+  is_active: boolean;
+  create_time: string | null;
+}
+
+/**
+ * 用户列表响应
+ */
+export interface UserListResponse {
+  items: UserListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/**
+ * 创建用户请求
+ */
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  mobile?: string;
+  role?: "user" | "analyst" | "admin";
+  org_code?: string;
+  org_name?: string;
+  dept_code?: string;
+  dept_name?: string;
+}
+
+/**
+ * 获取用户列表（管理员）
+ */
+export async function listUsers(
+  page: number = 1,
+  pageSize: number = 20,
+  search?: string
+): Promise<UserListResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (search) params.append("search", search);
+  
+  const r = await apiFetch(`/api/v1/users?${params}`);
+  if (!r.ok) throw new Error("获取用户列表失败");
+  return r.json();
+}
+
+/**
+ * 创建用户（管理员）
+ */
+export async function createUser(data: CreateUserRequest): Promise<UserListItem> {
+  const r = await apiFetch(`/api/v1/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: "创建用户失败" }));
+    throw new Error(err.detail || "创建用户失败");
+  }
+  return r.json();
+}
+
+/**
+ * 更新用户状态（管理员）
+ */
+export async function updateUserStatus(
+  userId: number,
+  isActive: boolean
+): Promise<UserListItem> {
+  const r = await apiFetch(`/api/v1/users/${userId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: "更新状态失败" }));
+    throw new Error(err.detail || "更新状态失败");
+  }
+  return r.json();
+}
+
+/**
+ * 用户登出
+ */
+export async function logout(): Promise<void> {
+  const r = await apiFetch(`/api/v1/logout`, {
+    method: "POST",
+  }, { handle401: false });
+  // 不论服务端是否成功，都清除本地 token
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem("auth:token");
+  }
+}
+

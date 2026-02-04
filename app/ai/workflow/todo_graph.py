@@ -820,11 +820,6 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
 - 🏷️ 分类：{category if category else '未分类'}
 {f'- 📄 待办内容：{description}' if description else ''}
 
-要补充一些信息吗？比如：
-1. 具体时间（几点）
-2. 详细描述
-3. 是否需要提醒
-
 直接说"确认"即可创建，或"拒绝"告诉我补充内容～
 """
     
@@ -1095,12 +1090,14 @@ def execute_operation(state: TodoAgentState) -> Dict:
     operation = state.get("pending_operation")
     extracted_info = state.get("extracted_info", {})
     
-    # 如果用户取消：静默处理，清理状态
+    # 如果用户取消：生成取消确认消息并清理状态
     if user_confirmed is False:
-        logger.info("用户拒绝操作，静默退出")
+        logger.info("用户拒绝操作，生成取消确认消息")
         updates["pending_operation"] = None
         updates["user_confirmed"] = None
         updates["quick_mode"] = None
+        # 生成取消确认消息，避免 postprocess 保存与 interrupt 相同的消息
+        updates["messages"] = [AIMessage(content="好的，已取消操作。有其他需要帮助的吗？")]
         return updates
     
     # 如果没有操作（如查询）

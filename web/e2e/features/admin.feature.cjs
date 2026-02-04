@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const { loginIfNeeded } = require('../helpers/auth-helper');
 
 /**
- * 需求文档: docs/内部参考/需求文档/管理后台需求.md
+ * 需求文档: docs/产品文档/管理后台需求.md
  * 测试用例: docs/开发文档/测试管理/管理后台测试案例.md
  * @test-case TC-ADMIN-02
  */

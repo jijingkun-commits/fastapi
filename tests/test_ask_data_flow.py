@@ -175,23 +175,23 @@ def verify_generation():
     return all_passed
 
 def fix_embedding_config():
-    """强制将 Embedding 模型改为 embedding-2 (1024维)，以匹配数据库定义。"""
+    """强制将 Embedding 模型改为 embedding-3 (2048维)，以匹配数据库定义。"""
     logger.info("检查并修复 Embedding 模型配置...")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as conn:
         # 检查当前的 embedding 模型
         current = conn.execute(text("SELECT model_code FROM t_llm_model WHERE model_type='embedding' AND is_active=true")).scalar()
-        if current and current != 'embedding-2':
-            logger.warning(f"检测到当前 Embedding 模型为 {current} (可能不兼容 1024 维)，正在切换为 embedding-2...")
+        if current and current != 'embedding-3':
+            logger.warning(f"检测到当前 Embedding 模型为 {current} (可能不兼容 2048 维)，正在切换为 embedding-3...")
             # 更新配置
-            conn.execute(text("UPDATE t_llm_model SET model_code='embedding-2', model_name='Zhipu Embedding-2' WHERE model_type='embedding'"))
+            conn.execute(text("UPDATE t_llm_model SET model_code='embedding-3', model_name='Zhipu Embedding-3' WHERE model_type='embedding'"))
             conn.commit()
-            logger.info("已切换为 embedding-2")
+            logger.info("已切换为 embedding-3")
         
-        # 强制修正数据库字段维度为 1024
+        # 强制修正数据库字段维度为 2048
         
         
-        logger.info("正在修正数据库向量维度为 1024...")
+        logger.info("正在修正数据库向量维度为 2048...")
         tables_map = {
             "t_meta_tables": "embedding", 
             "t_meta_columns": "embedding", 
@@ -226,7 +226,7 @@ def fix_embedding_config():
             
             # Force Alter
             try:
-                conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE vector(1024) USING NULL::vector"))
+                conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE vector(2048) USING NULL::vector"))
                 logger.info(f"已执行 ALTER {tbl}.{col}")
             except Exception as e:
                 logger.warning(f"ALTER {tbl}.{col} 失败 (可能表或列不存在): {e}")
@@ -244,8 +244,8 @@ def fix_embedding_config():
         vec = get_embedding("test")
         if vec:
             logger.info(f"当前 Embedding 维度校验: {len(vec)}")
-            if len(vec) != 1024:
-                logger.error(f"⚠️ 警告: Embedding 维度仍为 {len(vec)}，与数据库定义 (1024) 不匹配！")
+            if len(vec) != 2048:
+                logger.error(f"⚠️ 警告: Embedding 维度仍为 {len(vec)}，与数据库定义 (2048) 不匹配！")
 
 
 

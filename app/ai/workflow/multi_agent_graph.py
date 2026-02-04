@@ -349,12 +349,13 @@ async def create_multi_agent_graph(
         name="supervisor",
     )
     
-    # 4. 创建 data_expert（使用独立的 DataAgent 模块）
-    from app.ai.agents.data_agent import create_data_agent
-    data_agent = create_data_agent(
+    # 4. 创建 data_expert（使用 DataGraph）
+    from app.ai.workflow.data_graph import create_data_graph
+    data_graph_app = create_data_graph(
         model=llm,
         enable_thinking=enable_thinking,
-        model_id=model_id
+        model_id=model_id,
+        checkpointer=checkpointer
     )
     
     # 5. 创建 todo_expert（使用 TodoGraph）
@@ -365,7 +366,7 @@ async def create_multi_agent_graph(
         checkpointer=checkpointer 
     )
 
-    # 4. 为专家节点创建流式包装器
+    # 6. 为专家节点创建流式包装器
     # agent wrapper 内部使用 astream 并通过 emit_token 发送 LLM 输出
     # 这使得 chat_service.py 只需监听 stream_mode="custom"
     def _create_streaming_agent_wrapper(agent, name: str):
@@ -604,6 +605,10 @@ async def create_multi_agent_graph(
                                         collected_content.append(msg_content)
                                         if msg_id:
                                             emitted_message_ids.add(msg_id)
+                        
+                        # 关键修复：更新 input_message_count，防止后续 values 更新重复处理同一条消息
+                        # 参见 SP-001 消息去重机制
+                        input_message_count = len(messages)
                 
                 # 调试日志：打印 LLM 输出统计
                 full_output = "".join(collected_content)
@@ -785,7 +790,7 @@ async def create_multi_agent_graph(
     workflow.add_node("preprocess", _preprocess_multimodal)
     # 修复: Supervisor 也需要流式包装器,确保 LLM 输出是流式的
     workflow.add_node("supervisor", _create_streaming_agent_wrapper(supervisor_agent, "supervisor"))
-    workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_agent, "data_expert"))
+    workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_graph_app, "data_expert"))
     workflow.add_node("todo_expert", _create_streaming_agent_wrapper(todo_graph_app, "todo_expert"))
     workflow.add_node("evaluate", _evaluate_expert_work)
     workflow.add_node("postprocess", _postprocess)

@@ -54,10 +54,12 @@ function parseAnthropicStreamedToolCalls(
 export function AssistantMessage({
   message,
   isLoading,
+  isLatestMessage = false,
   handleRegenerate,
 }: {
   message: Message | undefined;
   isLoading: boolean;
+  isLatestMessage?: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
   const content = message?.content ?? [];
@@ -163,6 +165,7 @@ export function AssistantMessage({
             todos={todoData}
             onAction={handleAction}
             readonly={false}
+            fetchLatest={isLatestMessage}
             onSelectionChange={(todoId, todo) => {
               if (typeof window !== 'undefined') {
                 const currentThreadId = new URL(window.location.href).searchParams.get('threadId');

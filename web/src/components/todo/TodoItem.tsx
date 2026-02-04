@@ -19,8 +19,7 @@ import {
     ChevronUp,
     Edit2,
     Repeat,
-    Tag,
-    RotateCcw
+    Tag
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Todo } from '@/types/todo'
@@ -44,7 +43,6 @@ interface TodoItemProps {
     onSave: () => void
     onCancelEdit: () => void
     onComplete: (id: number) => void
-    onReopen: (id: number) => void
     onDelete: (id: number) => void
 }
 
@@ -64,7 +62,6 @@ function TodoItemComponent({
     onSave,
     onCancelEdit,
     onComplete,
-    onReopen,
     onDelete
 }: TodoItemProps) {
     const isCompleted = todo.status === 'done'
@@ -147,60 +144,49 @@ function TodoItemComponent({
                         </div>
 
                         {/* 右侧按钮区 */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                             {!readonly && isSelected && (
                                 <>
-                                    {/* 编辑按钮 */}
+                                    {/* 编辑按钮 - 使用主题色 */}
                                     <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-6 text-xs font-normal px-2"
+                                        className="h-7 text-xs font-medium px-2.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
                                         onClick={(e) => {
                                             e.stopPropagation()
                                             onStartEdit(todo)
                                         }}
                                     >
-                                        <Edit2 className="w-3 h-3 mr-1" />
+                                        <Edit2 className="w-3.5 h-3.5 mr-1" />
                                         编辑
                                     </Button>
 
-                                    {/* 完成/重开按钮 */}
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className={cn(
-                                            "h-6 text-xs font-medium px-2 border",
-                                            isCompleted
-                                                ? "text-muted-foreground hover:bg-muted"
-                                                : "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100"
-                                        )}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            if (isCompleted) {
-                                                onReopen(todo.id)
-                                            } else {
+                                    {/* 完成按钮 - 仅对未完成任务显示 */}
+                                    {!isCompleted && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs font-medium px-2.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950/30"
+                                            onClick={(e) => {
+                                                e.stopPropagation()
                                                 onComplete(todo.id)
-                                            }
-                                        }}
-                                    >
-                                        {isCompleted ? (
-                                            <RotateCcw className="w-3 h-3 mr-1" />
-                                        ) : (
-                                            <CheckCircle className="w-3 h-3 mr-1" />
-                                        )}
-                                        {isCompleted ? '重开' : '完成'}
-                                    </Button>
+                                            }}
+                                        >
+                                            <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                            完成
+                                        </Button>
+                                    )}
 
-                                    {/* 删除按钮 - 使用 Popover 确认 */}
+                                    {/* 删除按钮 - 使用 Popover 确认，统一 outline 样式 */}
                                     <Popover>
                                         <PopoverTrigger asChild>
                                             <Button
                                                 size="sm"
-                                                variant="ghost"
-                                                className="h-6 text-xs font-medium px-2 border text-red-500 border-red-200 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30"
+                                                variant="outline"
+                                                className="h-7 text-xs font-medium px-2.5 text-rose-500 border-rose-200 hover:bg-rose-50 hover:border-rose-300 dark:text-rose-400 dark:border-rose-800 dark:hover:bg-rose-950/30"
                                                 onClick={(e) => e.stopPropagation()}
                                             >
-                                                <Trash2 className="w-3 h-3 mr-1" />
+                                                <Trash2 className="w-3.5 h-3.5 mr-1" />
                                                 删除
                                             </Button>
                                         </PopoverTrigger>

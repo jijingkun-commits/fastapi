@@ -227,7 +227,7 @@ from app.ai.utils.sql_safety import (
     check_sql_safety,
     add_limit_if_missing,
     DANGEROUS_KEYWORDS,
-    SENSITIVE_TABLES,
+    DEFAULT_SENSITIVE_TABLES,
 )
 
 

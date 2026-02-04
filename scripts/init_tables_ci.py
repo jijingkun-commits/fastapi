@@ -18,7 +18,7 @@ from app.models.todo import Todo, TodoHistory, TodoReminderQueue
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
-# If there are other models, they should be imported here.
+from app.models.token_blacklist import TokenBlacklist
 
 def init_tables():
     print("Dropping existing tables (if any)...")
@@ -54,9 +54,11 @@ def seed_users():
             print("Creating admin user...")
             admin_user = User(
                 username="admin",
-                password="12345678", # Match docker-compose env or simple default
+                password="12345678",
                 mobile="13800000000",
-                create_time=None, # Allow default
+                role="admin",
+                is_active=True,
+                create_time=None,
                 update_time=None
             )
             db.add(admin_user)

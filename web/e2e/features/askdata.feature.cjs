@@ -1,7 +1,7 @@
 const { test } = require('@playwright/test');
 
 /**
- * 需求文档: docs/内部参考/需求文档/问数引擎需求.md
+ * 需求文档: docs/产品文档/问数助手需求.md
  * 测试用例: docs/开发文档/测试管理/问数引擎测试案例.md
  * @test-case TC-AD-01
  * @test-case TC-AD-02

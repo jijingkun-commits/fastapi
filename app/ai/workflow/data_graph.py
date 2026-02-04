@@ -900,7 +900,7 @@ def route_after_execute(state: DataAgentState) -> Literal["end", "retry"]:
 
 # ==================== 图构建 ====================
 
-def create_data_graph(checkpointer=None):
+def create_data_graph(model=None, enable_thinking: bool = False, model_id: str = None, checkpointer=None):
     """创建问数 Agent LangGraph（含错误自愈机制）。
     
     工作流程：
@@ -912,6 +912,9 @@ def create_data_graph(checkpointer=None):
     6. 如果执行失败且可重试，回到 generate 重新生成（最多 3 次）
     
     Args:
+        model: LLM 实例（可选，未使用但保留以保持接口一致）
+        enable_thinking: 是否启用深度思考（可选）
+        model_id: 模型 ID（可选）
         checkpointer: 检查点保存器（可选）
         
     Returns:

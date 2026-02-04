@@ -3,7 +3,7 @@
 本模块实现：
 - LangGraph 事件流处理（astream_events）
 - SSE 协议升级，支持 token/thinking/tool_start/tool_end 事件
-- 双写逻辑：LangGraph 自动写 SQLite Checkpoint，业务数据写 MySQL
+- 双写逻辑：LangGraph 自动写 PostgreSQL Checkpoint，业务数据写 PostgreSQL
 """
 import json
 import logging
@@ -151,6 +151,22 @@ class ChatService:
         logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s", 
                     thread_id, len(prompt), enable_thinking, model_id or "默认")
         
+        # 在流开始时保存 human 消息（单一入口，确保顺序正确）
+        # AI 消息由 interrupt 或 postprocess 保存
+        from app.db.session import get_db_context
+        from app.repositories import chat_repo
+        with get_db_context() as db:
+            title = prompt[:50] if len(prompt) > 50 else prompt
+            chat_repo.save_message(
+                db,
+                user_id=user_id,
+                thread_id=thread_id,
+                role="human",
+                content_type="text",
+                content=prompt,
+                title=title,
+            )
+        
         # 发送初始化事件
         yield self._format_sse("init", {"thread_id": thread_id})
         
@@ -216,17 +232,16 @@ class ChatService:
             if snapshot and snapshot.tasks:
                 for task in snapshot.tasks:
                     if task.interrupts:
-                        # 在 interrupt 时保存已生成的消息
-                        # 注意：snapshot.values.messages 不包含 Supervisor 的流式回复
-                        # 因此我们直接使用 full_answer（流式收集的内容）和原始 prompt
+                        # 在 interrupt 时只保存 AI 消息
+                        # human 消息已在 stream 开始时保存，无需重复
                         ai_content = "".join(full_answer)
                         if ai_content:
                             self._save_conversation_fallback(
                                 thread_id=thread_id,
                                 user_id=user_id,
-                                prompt=prompt,
+                                prompt=None,  # human 已保存，不重复
                                 ai_content=ai_content,
-                                is_intermediate=True,
+                                is_intermediate=True,  # 标记为中间消息，避免与 postprocess 重复
                                 scenario="Interrupt",
                             )
                         

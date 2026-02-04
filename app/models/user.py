@@ -5,7 +5,7 @@
 """
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import Integer, String, DateTime
+from sqlalchemy import Integer, String, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -36,6 +36,10 @@ class User(Base):
     )
     dept_name: Mapped[Optional[str]] = mapped_column(
         String(200), comment="部门名称"
+    )
+    
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, comment="是否启用"
     )
     
     create_time: Mapped[Optional[datetime]] = mapped_column(

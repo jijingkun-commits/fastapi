@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const { loginIfNeeded, ensureChatReady } = require('../helpers/auth-helper');
 
 /**
- * 需求文档: docs/内部参考/需求文档/聊天系统需求.md
+ * 需求文档: docs/产品文档/聊天系统需求.md
  * 测试用例: docs/开发文档/测试管理/聊天系统测试案例.md
  * @test-case TC-CHAT-01
  */

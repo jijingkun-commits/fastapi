@@ -35,6 +35,10 @@ import { useQueryState } from "nuqs";
 
 /** 快捷提示词配置 */
 export const QUICK_PROMPTS = [
+    { label: "贷款余额", value: "查询贷款余额" },
+    { label: "存款总额", value: "存款总额是多少" },
+    { label: "不良贷款", value: "不良贷款余额" },
+    { label: "分行存款", value: "按分行统计存款" },
     { label: "t2sql", value: "查询我数据库中一个有几张表" },
     { label: "天气", value: "查询我嘉兴近一周的天气" },
     { label: "minio", value: "使用fig_inter工具，生成一个圆形，以图片方式展示。" },
@@ -217,6 +221,7 @@ export function ChatInput({
                                 className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
                                 style={{ fieldSizing: 'content' } as any}
                                 data-testid="chat-input"
+                                data-streaming={isLoading ? "true" : "false"}
                             />
 
                             {/* 底部操作栏 */}

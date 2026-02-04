@@ -44,7 +44,7 @@ test.describe('Todo Agent E2E Flow', () => {
      * @description 创建待办并通过查询验证
      */
     test('should create and list todos via chat', async ({ page }) => {
-        test.setTimeout(60000);
+        test.setTimeout(120000);
 
         const todoTitle = `Buy Milk ${Date.now()}`;
 
@@ -56,20 +56,18 @@ test.describe('Todo Agent E2E Flow', () => {
         // Wait for user message to appear (HumanMessage uses .bg-muted)
         await expect(page.locator('.bg-muted').getByText(createMessage)).toBeVisible({ timeout: 10000 });
 
-        // Wait for Agent Response (Approval or Confirmation)
-        // We look for a response that mentions "created" or asks for confirmation.
-        // Given the agent might ask for confirmation, we should handle that.
-        // Assuming the agent is "smart" or configured to auto-create or ask.
-        // Let's wait for a concise approval component or text response.
-
-        // Ideally, we wait for the "CompactApproval" or simple text confirming.
-        // For robustness, let's just query the list after a pause.
-        await page.waitForTimeout(5000); // Wait for processing
+        // Wait for AI response to complete (check data-streaming attribute)
+        await page.waitForSelector('textarea[data-testid="chat-input"][data-streaming="false"]', { timeout: 60000 });
+        await page.waitForTimeout(1000);
 
         // 2. Send List Request to verify
         const listMessage = '列出我的所有待办';
         await page.fill('textarea', listMessage);
         await page.keyboard.press('Enter');
+
+        // Wait for AI response to complete
+        await page.waitForSelector('textarea[data-testid="chat-input"][data-streaming="false"]', { timeout: 30000 });
+        await page.waitForTimeout(1000);
 
         // 3. Verify the new todo is in the response
         // The agent should return a markdown list or a card containing the title.

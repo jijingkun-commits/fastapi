@@ -30,9 +30,14 @@ scripts/                    # 运维和数据脚本
 ├── create_dim_tables.py   # 创建维度表
 ├── create_meta_tables.py  # 创建元数据表
 │
+├── # === 数据库迁移 ===
+├── sync_database.py       # ★ 自动同步工具（推荐）
+├── migrate_user_management.py  # 用户管理模块迁移
+├── migrate_todo_tables.py # 待办表迁移
+├── migrate_vector_dim.py  # 向量维度迁移
+│
 ├── # === 数据维护 ===
 ├── cleanup_chat_db.py     # 清理聊天历史
-├── migrate_vector_dim.py  # 迁移向量维度
 ├── force_import_skills.py # 强制重新导入技能
 ├── archive_restore_skills.py  # 归档/恢复技能
 ├── merge_skills_from_cursorrules.py  # 合并 Cursor 规则技能
@@ -67,6 +72,19 @@ install/                   # 部署安装相关
 
 ## 常用脚本
 
+### 数据库迁移（重要）
+
+```bash
+# ★ 推荐：自动同步数据库（检测并修复模型与数据库差异）
+python scripts/sync_database.py
+
+# 或手动执行特定迁移
+python scripts/migrate_user_management.py
+python scripts/migrate_todo_tables.py
+```
+
+> **说明**：`sync_database.py` 会自动创建缺失的表和列，无需手动写 SQL。
+
 ### 部署初始化
 
 ```bash
@@ -74,6 +92,7 @@ install/                   # 部署安装相关
 ./deploy.sh dev init
 
 # 或手动执行关键脚本
+python scripts/sync_database.py          # 先同步数据库
 python scripts/init_llm_config.py
 python scripts/init_metric_definition.py
 python scripts/expand_metrics.py

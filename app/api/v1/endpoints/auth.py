@@ -2,16 +2,23 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.schemas.user import LoginRequest, Token, UserOut
 from app.core.security import create_access_token
 from app.services.user_service import authenticate
-from app.api.deps import get_current_user
+from app.services.token_service import logout as token_logout
+from app.api.deps import get_current_user, get_raw_token
 
 
 router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
+
+
+class LogoutResponse(BaseModel):
+    """登出响应。"""
+    message: str
 
 
 @router.post("/login", response_model=Token)
@@ -28,6 +35,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     token = create_access_token(subject=str(user.id), extra={"uid": user.id})
     return Token(access_token=token)
+
+
+@router.post("/logout", response_model=LogoutResponse)
+def logout(
+    db: Session = Depends(get_db),
+    token: str = Depends(get_raw_token),
+    current_user = Depends(get_current_user)
+):
+    """登出接口：将当前Token加入黑名单。"""
+    success = token_logout(db, token)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="登出失败")
+    return LogoutResponse(message="登出成功")
 
 
 @router.get("/me", response_model=UserOut)

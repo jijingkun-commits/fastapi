@@ -336,10 +336,19 @@ export function useSSEStream(): StreamContextValue {
         setInterrupt(null);
         setIsLoading(true);
 
-        const aiId = currentAiIdRef.current || uuidv4();
-        if (!currentAiIdRef.current) {
+        // 复用最后一条 AI 消息，避免重复创建
+        let aiId = currentAiIdRef.current;
+        if (!aiId) {
+            // 查找最后一条 AI 消息的 ID
+            const lastAiMsg = messages.filter(m => m.type === "ai").pop();
+            if (lastAiMsg?.id) {
+                aiId = lastAiMsg.id;
+            } else {
+                // 只有在没有任何 AI 消息时才创建新的
+                aiId = uuidv4();
+                setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
+            }
             currentAiIdRef.current = aiId;
-            setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
         }
 
         const { stop: stopFn, promise } = startResumeStream(
@@ -376,7 +385,7 @@ export function useSSEStream(): StreamContextValue {
             stopRef.current = null;
             currentAiIdRef.current = null;
         });
-    }, [threadId, interrupt, appendToAiMessage, addToolCallToMessage, refreshThreads]);
+    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, refreshThreads]);
 
     const values: StateType = { messages, ui: [] };
 

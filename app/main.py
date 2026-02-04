@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
         logging.critical(f"配置校验失败: {e}")
         raise e
     
-    # MySQL 数据库初始化（已切换为 PostgreSQL，逻辑不变）
+    # PostgreSQL 数据库初始化
     if INIT_DB_ON_STARTUP:
         try:
             init_db(seed_admin=True)

@@ -3,7 +3,6 @@
 本包用于集中管理所有 Agent 及 LLM 相关的提示词模板。
 """
 
-from app.ai.prompts.agent_prompts import CHAT_AGENT_SYSTEM_PROMPT
 from app.ai.prompts.common_prompts import (
     INTENT_CLASSIFY_PROMPT,
     TODO_PARAM_EXTRACT_PROMPT,
@@ -23,7 +22,6 @@ from app.ai.prompts.judge_prompts import (
 from app.ai.prompts.knowledge_prompts import KNOWLEDGE_AGENT_SYSTEM_PROMPT
 
 __all__ = [
-    "CHAT_AGENT_SYSTEM_PROMPT",
     "INTENT_CLASSIFY_PROMPT",
     "TODO_PARAM_EXTRACT_PROMPT",
     "QUERY_PARAM_EXTRACT_PROMPT",
