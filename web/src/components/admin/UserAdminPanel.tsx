@@ -256,7 +256,7 @@ export function UserAdminPanel() {
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-8">
                       <div className="flex items-center justify-center gap-2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#A8D4D4] border-t-[#2F6868]" />
                         加载中...
                       </div>
                     </TableCell>

@@ -66,39 +66,49 @@ class TestMessagesAPI:
     def test_get_messages_not_found(self):
         """测试查询不存在的对话返回空列表。"""
         app.dependency_overrides[get_current_user] = _mock_user
-        
-        with patch("app.repositories.chat_repo.get_thread_messages") as mock_get:
-            mock_get.return_value = []
-            response = client.get("/api/v1/chat/threads/nonexistent/messages")
-            assert response.status_code == 200
-            assert response.json() == []
-        
-        app.dependency_overrides.clear()
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.get_messages_by_thread") as mock_get:
+                mock_get.return_value = []
+                response = client.get("/api/v1/chat/threads/nonexistent/messages")
+                assert response.status_code == 200
+                assert response.json() == []
+        finally:
+            app.dependency_overrides.clear()
     
     def test_get_messages_success(self):
         """测试成功获取消息列表。"""
         app.dependency_overrides[get_current_user] = _mock_user
-        
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
         mock_msg = MagicMock()
         mock_msg.id = 1
         mock_msg.thread_id = "thread-1"
         mock_msg.role = "human"
         mock_msg.content_type = "text"
         mock_msg.content = "你好"
-        mock_msg.metadata = None
-        mock_msg.additional_kwargs = None
+        mock_msg.extra_data = None
         mock_msg.title = None
         mock_msg.create_time = datetime.now()
-        
-        with patch("app.repositories.chat_repo.get_thread_messages") as mock_get:
-            mock_get.return_value = [mock_msg]
-            response = client.get("/api/v1/chat/threads/thread-1/messages")
-            assert response.status_code == 200
-            data = response.json()
-            assert len(data) == 1
-            assert data[0]["role"] == "human"
-        
-        app.dependency_overrides.clear()
+        try:
+            with patch("app.repositories.chat_repo.get_messages_by_thread") as mock_get:
+                mock_get.return_value = [mock_msg]
+                response = client.get("/api/v1/chat/threads/thread-1/messages")
+                assert response.status_code == 200
+                data = response.json()
+                assert len(data) == 1
+                assert data[0]["role"] == "human"
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestDeleteThreadAPI:
@@ -112,14 +122,21 @@ class TestDeleteThreadAPI:
     def test_delete_thread_success(self):
         """测试成功删除对话。"""
         app.dependency_overrides[get_current_user] = _mock_user
-        
-        with patch("app.repositories.chat_repo.delete_thread") as mock_delete:
-            mock_delete.return_value = 5  # 删除了 5 条消息
-            response = client.delete("/api/v1/chat/threads/thread-1")
-            assert response.status_code == 200
-            assert response.json()["deleted_count"] == 5
-        
-        app.dependency_overrides.clear()
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.delete_thread_with_assets") as mock_delete:
+                mock_delete.return_value = {"messages": 5, "assets": 0}
+                response = client.delete("/api/v1/chat/threads/thread-1")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["stats"]["messages"] == 5
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestUpdateTitleAPI:
@@ -128,32 +145,43 @@ class TestUpdateTitleAPI:
     def test_update_title_success(self):
         """测试成功更新标题。"""
         app.dependency_overrides[get_current_user] = _mock_user
-        
-        with patch("app.repositories.chat_repo.update_thread_title") as mock_update:
-            mock_update.return_value = True
-            response = client.put(
-                "/api/v1/chat/threads/thread-1/title",
-                json={"title": "新标题"}
-            )
-            assert response.status_code == 200
-            assert response.json()["success"] is True
-        
-        app.dependency_overrides.clear()
-    
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.update_thread_title") as mock_update:
+                mock_update.return_value = True
+                response = client.patch(
+                    "/api/v1/chat/threads/thread-1/title",
+                    json={"title": "新标题"}
+                )
+                assert response.status_code == 200
+                assert response.json()["title"] == "新标题"
+        finally:
+            app.dependency_overrides.clear()
+
     def test_update_title_not_found(self):
         """测试更新不存在的对话标题。"""
         app.dependency_overrides[get_current_user] = _mock_user
-        
-        with patch("app.repositories.chat_repo.update_thread_title") as mock_update:
-            mock_update.return_value = False
-            response = client.put(
-                "/api/v1/chat/threads/nonexistent/title",
-                json={"title": "新标题"}
-            )
-            # 根据实际实现，可能返回 404 或 200 with success=False
-            assert response.status_code in [200, 404]
-        
-        app.dependency_overrides.clear()
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.update_thread_title") as mock_update:
+                mock_update.return_value = False
+                response = client.patch(
+                    "/api/v1/chat/threads/nonexistent/title",
+                    json={"title": "新标题"}
+                )
+                assert response.status_code == 404
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestFeedbackAPI:

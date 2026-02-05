@@ -56,5 +56,69 @@ class TestNaturalTimeParser(unittest.TestCase):
         parsed, _ = self.parser.parse(text)
         self.assertEqual(parsed.hour, 18)
 
+    # ==================== 新增：具体时间点解析测试 ====================
+
+    def test_parse_specific_time_morning(self):
+        """测试早上时间点解析"""
+        text = "早上9点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 9)
+        self.assertEqual(parsed.minute, 0)
+
+    def test_parse_specific_time_afternoon(self):
+        """测试下午时间点解析"""
+        text = "下午3点半"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 15)
+        self.assertEqual(parsed.minute, 30)
+
+    def test_parse_specific_time_with_minutes(self):
+        """测试带分钟的时间点解析"""
+        text = "上午10点30分"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 10)
+        self.assertEqual(parsed.minute, 30)
+
+    def test_parse_specific_time_evening(self):
+        """测试晚上时间点解析"""
+        text = "晚上8点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 20)
+        self.assertEqual(parsed.minute, 0)
+
+    def test_parse_date_with_specific_time(self):
+        """测试日期+具体时间组合"""
+        text = "明天早上9点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.date(), (self.base_time + timedelta(days=1)).date())
+        self.assertEqual(parsed.hour, 9)
+
+    def test_parse_only_hour(self):
+        """测试只有小时无前缀的情况"""
+        text = "9点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 9)
+
+    def test_boundary_hour_overflow(self):
+        """测试小时超范围（应截断为23）"""
+        text = "25点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 23)
+
+    def test_boundary_minute_overflow(self):
+        """测试分钟超范围（应截断为59）"""
+        text = "10点99分"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.minute, 59)
+
+
 if __name__ == "__main__":
     unittest.main()

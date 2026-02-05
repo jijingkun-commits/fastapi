@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 from langchain_core.messages import AIMessage
+from app.ai.utils.message_factory import create_ai_message
 
 from app.db.session import get_db_context
 from app.repositories.todo_repository import todo_repo
@@ -92,8 +93,8 @@ def resolve_entity(state: TodoAgentState) -> Dict:
         return {
             "pending_operation": pending_op,
             "pending_clarifications": [f"找不到包含 '{keyword}' 的待办事项，请确认名称或直接告诉我待办 ID"],
-            "messages": [AIMessage(
-                content=f"❌ 找不到包含「{keyword}」的待办事项。\n\n请检查名称是否正确，或者直接告诉我待办的 ID。"
+            "messages": [create_ai_message(
+                f"❌ 找不到包含「{keyword}」的待办事项。\n\n请检查名称是否正确，或者直接告诉我待办的 ID。"
             )]
         }
     
@@ -125,8 +126,8 @@ def resolve_entity(state: TodoAgentState) -> Dict:
         return {
             "pending_operation": pending_op,
             "pending_clarifications": ["请选择具体是哪一个待办"],
-            "messages": [AIMessage(
-                content=f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个：\n\n{options_text}\n\n请说「第 X 个」或「ID 为 XX 的」。"
+            "messages": [create_ai_message(
+                f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个：\n\n{options_text}\n\n请说「第 X 个」或「ID 为 XX 的」。"
             )]
         }
 

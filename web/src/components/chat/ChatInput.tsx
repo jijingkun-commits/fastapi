@@ -161,14 +161,14 @@ export function ChatInput({
             {/* 选中待办提示 - 仅在非审核状态下显示 */}
             {!hasInterrupt && selectedTodo && (
                 <div className="mb-2">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs rounded-lg border border-indigo-200">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#E8F4F4] text-[#2F6868] text-xs rounded-lg border border-[#A8D4D4]">
                         <span className="font-medium">🎯 当前讨论:</span>
                         <span className="font-semibold">{selectedTodo.title}</span>
                         <span className="text-gray-400">|</span>
-                        <span className="text-indigo-600">ID {selectedTodo.id}</span>
+                        <span className="text-[#2F6868]">ID {selectedTodo.id}</span>
                         <button
                             type="button"
-                            className="ml-1 text-indigo-400 hover:text-indigo-600 transition-colors"
+                            className="ml-1 text-[#67B0B0] hover:text-[#2F6868] transition-colors"
                             onClick={() => {
                                 sessionStorage.removeItem('selectedTodo');
                                 setSelectedTodo(null);

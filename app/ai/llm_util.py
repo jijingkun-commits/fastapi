@@ -38,6 +38,44 @@ except ImportError:
     ChatDeepSeek = object
     AIMessage = object
 
+class InternalLLMWrapper:
+    """内部 LLM 调用包装器（中文注释）。
+    
+    用于封装需要隐藏输出的 LLM 调用（如意图分析、JSON 解析等），
+    自动为 invoke/ainvoke 添加 internal_thought tag，防止内容泄露到前端。
+    
+    使用方式：
+        llm = get_llm(internal=True)
+        response = llm.invoke(messages)  # 自动添加 tag
+    """
+    
+    def __init__(self, llm):
+        self._llm = llm
+    
+    def _merge_config(self, config: dict = None) -> dict:
+        """合并配置，确保包含 internal_thought tag。"""
+        config = config or {}
+        tags = config.get("tags", [])
+        if "internal_thought" not in tags:
+            tags = list(tags) + ["internal_thought"]
+        config["tags"] = tags
+        return config
+    
+    def invoke(self, input, config: dict = None, **kwargs):
+        """同步调用，自动添加 internal_thought tag。"""
+        merged_config = self._merge_config(config)
+        return self._llm.invoke(input, config=merged_config, **kwargs)
+    
+    async def ainvoke(self, input, config: dict = None, **kwargs):
+        """异步调用，自动添加 internal_thought tag。"""
+        merged_config = self._merge_config(config)
+        return await self._llm.ainvoke(input, config=merged_config, **kwargs)
+    
+    def __getattr__(self, name):
+        """代理其他属性到底层 LLM。"""
+        return getattr(self._llm, name)
+
+
 class CustomChatDeepSeek(ChatDeepSeek):
     """DeepSeek 客户端的自定义补丁类。
     
@@ -92,22 +130,32 @@ class CustomChatDeepSeek(ChatDeepSeek):
                 logger.warning("[CustomChatDeepSeek] 强制注入空 reasoning_content (索引 %d)", i)
 
 
-def get_llm(enable_streaming: bool = True, force_thinking: bool = False, model_id: str = None):
+def get_llm(
+    enable_streaming: bool = True, 
+    force_thinking: bool = False, 
+    model_id: str = None,
+    internal: bool = False
+):
     """获取 LLM 实例，支持动态模型选择。
     
     支持：
     - 普通对话模型
     - 深度思考模式：通过配置或参数启用 enable_thinking
     - 动态模型选择：通过 model_id 参数指定模型
+    - 内部调用模式：自动禁用流式输出 + 添加 internal_thought tag
     
     Args:
         enable_streaming: 是否启用流式输出，默认 True
         force_thinking: 是否启用深度思考模式，默认 False
         model_id: 可选模型标识，如 'deepseek-chat'、'qwen-flash' 等
+        internal: 内部调用模式，自动禁用流式 + 返回带 tag 的包装 LLM，默认 False
         
     Returns:
-        配置好的 LLM 实例
+        配置好的 LLM 实例（internal=True 时返回 InternalLLMWrapper）
     """
+    # 内部模式：强制禁用流式输出
+    if internal:
+        enable_streaming = False
     import os
     
     # 尝试使用 ConfigService 获取配置（优先）
@@ -206,6 +254,7 @@ def get_llm(enable_streaming: bool = True, force_thinking: bool = False, model_i
     # 对于 DeepSeek 模型，使用专门的 ChatDeepSeek 类以正确获取 reasoning_content
     # 注意：ChatDeepSeek 有兼容性问题，某些参数组合会导致 KeyError: 'messages'
     # 因此只传递必要的核心参数
+    llm = None
     if model_type == "deepseek":
         try:
             # 尝试使用 CustomChatDeepSeek
@@ -213,7 +262,7 @@ def get_llm(enable_streaming: bool = True, force_thinking: bool = False, model_i
                 raise ImportError("langchain_deepseek not installed")
                 
             logger.info("使用 CustomChatDeepSeek (patched+debug): model=%s, provider=chat_deepseek, base_url=%s", model_name, base_url)
-            return CustomChatDeepSeek(
+            llm = CustomChatDeepSeek(
                 model=model_name,
                 api_key=api_key,
                 api_base=base_url,
@@ -223,29 +272,35 @@ def get_llm(enable_streaming: bool = True, force_thinking: bool = False, model_i
             )
         except ImportError:
             logger.warning("未安装 langchain_deepseek，降级使用 ChatOpenAI（可能导致 reasoning_content 丢失）")
-            # 降级逻辑：继续向下执行，使用 ChatOpenAI
-            pass
+            # 降级逻辑：继续向下执行，使用 init_chat_model
 
     # 其他模型使用 init_chat_model
-    if model_type == "qwen":
-        provider = "openai"  # Qwen 使用 OpenAI 兼容 API
-    elif model_type in ("openai", "azure"):
-        provider = model_type
-    else:
-        provider = "openai"
+    if llm is None:
+        if model_type == "qwen":
+            provider = "openai"  # Qwen 使用 OpenAI 兼容 API
+        elif model_type in ("openai", "azure"):
+            provider = model_type
+        else:
+            provider = "openai"
 
-    return init_chat_model(
-        model=model_name,
-        model_provider=provider,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=temperature,
-        streaming=streaming,
-        timeout=timeout,
-        max_retries=max_retries,
-        extra_body=extra_body if extra_body else None,
-        **model_kwargs,
-    )
+        llm = init_chat_model(
+            model=model_name,
+            model_provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            streaming=streaming,
+            timeout=timeout,
+            max_retries=max_retries,
+            extra_body=extra_body if extra_body else None,
+            **model_kwargs,
+        )
+    
+    # 内部模式：使用包装器自动添加 internal_thought tag
+    if internal:
+        return InternalLLMWrapper(llm)
+    
+    return llm
 
 
 

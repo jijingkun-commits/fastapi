@@ -1,8 +1,13 @@
 # 待办 Agent 设计详解
 
-> **状态**: 已更新 (LangGraph 重构版)
-> **更新日期**: 2026-01-30
-> **版本**: 2.0
+> **状态**: 已更新 (LLM驱动版)
+> **更新日期**: 2026-02-04
+> **版本**: 3.0
+>
+> **重要更新 v3.0 (2026-02-04)**:
+> - 移除硬编码关键词规则，采用 LLM 驱动的意图识别
+> - 新增 `action_state` 和 `response_message` 机制
+> - 简化 `clarify_node`，直接使用 LLM 生成的回复
 
 ## 目录
 
@@ -224,9 +229,6 @@ class TodoAgentState(TypedDict, total=False):
     # ========== 信息提取 ==========
     extracted_info: Dict               # LLM 提取的信息
     draft_todos: List[Dict]            # 草稿待办（未确认）
-    
-    # ========== 重复检测 ==========
-    duplicate_candidates: List[Dict]   # 相似任务候选列表
 ```
 
 ### 3.2 字段详解
@@ -247,7 +249,6 @@ class TodoAgentState(TypedDict, total=False):
     },
     "needs_clarification": False,    # 是否需要澄清
     "skip_confirmation": False,      # 是否跳过确认
-    "duplicate_warning": False,      # 是否有重复警告
     "summary": "**创建待办**\n..."   # 用于前端显示
 }
 ```
@@ -391,15 +392,17 @@ def create_todo_graph(model=None, enable_thinking=False, model_id=None, checkpoi
 
 ## 5. 节点详解
 
-### 5.1 analyze_intent 节点
+### 5.1 analyze_intent 节点（v3.0 LLM驱动版）
 
-**职责**: 分析用户意图，提取待办信息。
+**职责**: 完全依赖 LLM 分析用户意图，决定下一步动作，生成回复消息。
 
 **文件**: `app/ai/workflow/todo_graph.py`
 
 **输入**: `TodoAgentState`
 
-**输出**: `Dict`（增量更新）
+**输出**: `Dict`（增量更新，包含 `action_state` 和 `response_message`）
+
+> **v3.0 变更**: 移除规则化意图检测，完全由 LLM 决策
 
 **处理流程**:
 
@@ -413,40 +416,26 @@ def create_todo_graph(model=None, enable_thinking=False, model_id=None, checkpoi
    │
    └── query_existing_todos() → 注入到提示词
 
-3. 规则化意图检测（快速匹配，避免 LLM 调用）
-   │
-   ├── 强制创建关键词 → 跳过重复检测
-   ├── 取消关键词 → 直接取消
-   └── 确认关键词 → 直接确认
-
-4. 快速模式检测
-   │
-   └── is_quick_mode() → 设置 quick_mode=True
-
-5. 渐进式策略注入
+3. 渐进式策略注入
    │
    └── get_progressive_strategy() → 根据轮次注入策略
 
-6. LLM 调用
+4. LLM 调用（核心决策）
    │
    ├── 构建 Prompt（意图分析 + 渐进策略 + 历史上下文）
-   └── 解析 JSON 响应 → IntentResult
+   ├── 解析 JSON 响应 → IntentResult
+   └── 提取 action_state, response_message, intent, quick_mode
 
-7. 时间解析
+5. 时间解析
    │
    └── parse_time_info() → 自然语言时间 → ISO 格式
 
-8. 紧急任务检测
+6. 根据 action_state 设置状态
    │
-   └── detect_urgent_task() → 自动提升优先级
-
-9. 重复检测（仅 create 意图）
-   │
-   └── _check_duplicate_todos() → 相似任务列表
-
-10. 确定是否需要确认
-    │
-    └── determine_confirmation_need()
+   ├── cancelled → 清空 pending_operation，返回取消消息
+   ├── need_clarify → 设置 needs_clarification，保存 response_message
+   ├── ready → 设置 skip_confirmation，直接执行
+   └── need_confirm → 进入确认流程
 ```
 
 **关键代码片段**:
@@ -460,80 +449,69 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         messages, state.get("pending_handoff")
     )
     
-    # Step 3: 规则化检测（快速路径）
-    rule_result = check_rule_based_intent(last_human_msg, pending_op)
-    if rule_result and rule_result.should_return_early:
-        updates.update(rule_result.to_dict())
-        return updates
-    
-    # Step 6: LLM 调用
+    # Step 4: LLM 调用（完全依赖 LLM 决策）
     parser = JsonOutputParser(pydantic_object=IntentResult)
-    system_prompt = f"{TODO_INTENT_ANALYZE_PROMPT}{progressive_injection}..."
     response = llm.invoke(analysis_messages, config={"tags": ["internal_thought"]})
     analysis_dict = parser.parse(response.content)
     
-    # Step 9: 重复检测
-    if intent == "create" and extracted_info.get("title"):
-        duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
-        if duplicates:
-            updates["duplicate_candidates"] = duplicates
-            updates["pending_operation"] = {
-                "action": "create",
-                "data": extracted_info,
-                "needs_clarification": True,
-                "duplicate_warning": True
-            }
-            return updates
+    # 提取 LLM 返回的核心字段
+    action_state = analysis_dict.get("action_state", "need_confirm")
+    response_message = analysis_dict.get("response_message", "")
+    
+    # 保存供后续节点使用
+    updates["response_message"] = response_message
+    
+    # Step 6: 根据 action_state 路由
+    if action_state == "cancelled":
+        updates["pending_operation"] = None
+        updates["messages"] = [create_ai_message(response_message or "好的，已取消。")]
+    elif action_state == "need_clarify":
+        updates["pending_operation"] = {"action": intent, "data": extracted_info, "needs_clarification": True}
+    # ... 其他状态处理
     
     return updates
 ```
 
-### 5.2 clarify_node 节点
+### 5.2 clarify_node 节点（v3.0 LLM驱动版）
 
-**职责**: 信息不完整时生成追问。
+**职责**: 使用 LLM 生成的 `response_message` 进行追问或确认。
 
 **文件**: `app/ai/agents/todo_enhanced_nodes.py`
 
-**支持三种模式**:
+> **v3.0 变更**: 不再内部调用 LLM，直接使用 `analyze_intent` 阶段生成的 `response_message`
+
+**核心逻辑**:
+
+```python
+def clarify_node(state: TodoAgentState) -> Dict:
+    # 优先使用 LLM 生成的 response_message
+    response_message = state.get("response_message")
+    
+    if response_message and response_message.strip():
+        updates["messages"] = [create_ai_message(response_message)]
+    else:
+        # 兜底消息
+        updates["messages"] = [create_ai_message("请告诉我您需要完成什么任务？")]
+    
+    return updates
+```
+
+**保留的特殊模式**:
 
 | 模式 | 触发条件 | 行为 |
 |-----|---------|------|
-| 纯澄清 | 无待办信息 | 调用 LLM 生成开放式追问 |
-| 确认式澄清 | 有部分待办信息 | 展示详情，询问确认或补充 |
-| 重复警告 | `duplicate_warning=True` | 展示相似任务，询问处理方式 |
 | 逐项目追问 | `project_queue` 非空 | 依次询问每个项目的详情 |
 
-**确认式澄清输出示例**:
+**输出示例**（由 LLM 生成）:
 
 ```
-我可以帮您记录这个待办 📝
+好的，我帮您记录这个待办：
 
-**待办信息：**
-- 📝 标题：去上海开会
-- ⏰ 时间：明天下午3点
-- ⭐ 优先级：🟡中
-- 🏷️ 分类：工作
+📝 标题：去上海开会
+⏰ 时间：明天下午3点
+⭐ 优先级：中
 
-您可以：
-1. 回复「**确认**」直接创建
-2. 补充更多信息（如具体时间、地点、提醒等）
-```
-
-**重复警告输出示例**:
-
-```
-⚠️ **检测到相似任务**
-
-您要创建的待办：**去上海开会**
-
-🔍 已存在以下相似任务：
-  1. `#45` 上海出差会议 (相似度 85%，截止 01-28)
-  2. `#32` 去上海拜访客户 (相似度 62%)
-
-**请选择：**
-1. 回复「**仍需新建**」创建新任务
-2. 回复「**用 #45**」关联到已有任务
-3. 回复「**取消**」放弃操作
+确认创建吗？您也可以补充更多信息。
 ```
 
 ### 5.3 resolve_entity 节点
@@ -766,34 +744,54 @@ def route_after_resolve(state: TodoAgentState) -> Literal["clarify", "confirm", 
 | `clarify` | - | 信息不完整 |
 | `chat` | - | 非待办相关 |
 
-### 7.2 IntentResult 模型
+### 7.2 IntentResult 模型（LLM驱动版 v3.0）
 
 **文件**: `app/ai/workflow/todo_graph.py`
 
 ```python
 class IntentResult(BaseModel):
-    """LLM 意图分析结果模型"""
-    intent: str = Field(description="用户意图")
-    extracted_info: Dict = Field(default={}, description="提取的实体信息")
+    """LLM 意图分析结果模型 - LLM驱动版本"""
+    intent: str = Field(description="用户意图: create, update, delete, query, confirm, cancel, chat 等")
+    action_state: str = Field(default="need_confirm", description="下一步动作: need_clarify, need_confirm, ready, cancelled")
+    response_message: str = Field(default="", description="LLM生成的自然语言回复")
+    extracted_info: Dict = Field(default={}, description="提取的实体信息: title, time, due_date, priority 等")
     missing_info: List[str] = Field(default=[], description="缺失的关键信息")
-    is_complex: bool = Field(default=False, description="是否为复杂任务")
-    conflict_risk: str = Field(default="none", description="冲突风险")
+    conflict_risk: str = Field(default="none", description="冲突风险: high, medium, none")
+    quick_mode: bool = Field(default=False, description="是否为快速模式")
     context_hints: Dict = Field(default={}, description="上下文线索")
     projects: List[str] = Field(default=[], description="涉及的项目列表")
     time_constraints: Dict = Field(default={}, description="时间约束")
 ```
 
-### 7.3 规则化意图检测
+**核心字段说明**：
 
-在调用 LLM 之前，先进行快速关键词匹配：
+| 字段 | 说明 | 值示例 |
+|-----|------|-------|
+| `action_state` | LLM 决定的下一步动作 | `need_clarify`, `need_confirm`, `ready`, `cancelled` |
+| `response_message` | LLM 生成的自然语言回复 | "好的，我帮您创建这个待办：明天下午3点开会。确认创建吗？" |
+| `quick_mode` | LLM 检测的快速模式标记 | `true` (用户说"直接创建"时) |
 
-**文件**: `app/ai/workflow/todo_intent_helpers.py` → `check_rule_based_intent()`
+### 7.3 意图检测策略（v3.0 LLM驱动）
 
-| 规则 | 关键词 | 行为 |
-|-----|-------|------|
-| 强制创建 | "仍需新建"、"继续创建" | 跳过重复检测，直接创建 |
-| 取消 | "取消"、"放弃"、"算了" | 清空 pending_operation |
-| 确认 | "可以"、"好的"、"确认" | 设置 user_confirmed=True |
+> **v3.0 更新**: 规则化意图检测已移除，完全由 LLM 驱动
+
+**旧版架构** (v2.0):
+- `check_rule_based_intent()` 在 LLM 之前进行关键词匹配
+- 硬编码取消、确认、快速模式、紧急关键词
+
+**新版架构** (v3.0):
+- 完全依赖 LLM 的 `action_state` 和 `intent` 判断
+- 关键词识别逻辑内化到提示词中（`TODO_INTENT_ANALYZE_PROMPT`）
+- 优势：更灵活的语义理解，无需维护关键词列表
+
+**action_state 路由映射**:
+
+| action_state | 路由目标 | 说明 |
+|-------------|---------|------|
+| `cancelled` | END | 用户取消，清空 pending_operation |
+| `need_clarify` | clarify | 信息不完整，使用 LLM 生成的 response_message |
+| `ready` | execute | 可直接执行（查询、已确认） |
+| `need_confirm` | confirm | 需要用户确认后执行 |
 
 ### 7.4 启发式标题提取
 
@@ -817,40 +815,7 @@ def extract_heuristic_title(message: str) -> Optional[str]:
 
 ## 8. 智能特性
 
-### 8.1 重复检测
-
-**算法**: Jaccard n-gram 相似度
-
-**文件**: `app/ai/workflow/todo_graph.py` → `_check_duplicate_todos()`
-
-```python
-def _calculate_title_similarity(new_title: str, existing_title: str) -> float:
-    # 完全匹配 → 1.0
-    if new_title == existing_title:
-        return 1.0
-    
-    # 包含关系 → 0.9
-    if new_title in existing_title or existing_title in new_title:
-        return 0.9
-    
-    # Jaccard 相似度（基于 2-gram）
-    def get_ngrams(text: str, n: int = 2) -> set:
-        return set(text[i:i+n] for i in range(len(text) - n + 1))
-    
-    ngrams_new = get_ngrams(new_title)
-    ngrams_existing = get_ngrams(existing_title)
-    
-    intersection = len(ngrams_new & ngrams_existing)
-    union = len(ngrams_new | ngrams_existing)
-    
-    return intersection / union if union > 0 else 0.0
-```
-
-**配置**:
-- 阈值: `0.4`（可通过 `TODO_AGENT_DUPLICATE_THRESHOLD` 覆盖）
-- 最大返回数: `5`
-
-### 8.2 渐进式策略
+### 8.1 渐进式策略
 
 **文件**: `app/ai/prompts/todo_prompts.py`
 
@@ -876,33 +841,35 @@ def get_progressive_strategy(round_count: int, user_confirmed: bool, quick_mode:
     return ""
 ```
 
-### 8.3 快速模式
+### 8.3 快速模式（v3.0 LLM驱动）
 
-**触发关键词**:
+> **v3.0 变更**: 不再使用硬编码关键词，由 LLM 识别
 
-```python
-QUICK_MODE_KEYWORDS = [
-    "快速", "直接", "立即", "马上", "帮我记",
-    "别问了", "不要问那么多", "直接创建"
-]
-```
+**触发方式**: LLM 分析用户消息，返回 `quick_mode: true`
 
-**行为**: 设置 `quick_mode=True`，跳过确认流程直接执行。
+**典型触发表达**:
+- "快速创建..."
+- "直接帮我记..."
+- "别问了，马上创建"
+- "不要问那么多"
 
-### 8.4 紧急任务检测
+**行为**: `quick_mode=True` 时跳过确认流程直接执行。
 
-**触发关键词**:
+### 8.4 紧急任务检测（v3.0 LLM驱动）
 
-```python
-URGENT_KEYWORDS = [
-    "刚刚", "紧急", "立刻", "马上", "领导说", "老板说", "赶紧"
-]
-```
+> **v3.0 变更**: 不再使用硬编码关键词，由 LLM 识别
+
+**触发方式**: LLM 分析用户消息，在 `extracted_info` 中设置 `is_urgent: true` 和 `priority: 1`
+
+**典型触发表达**:
+- "紧急任务..."
+- "领导/老板说..."
+- "赶紧/立刻..."
+- "刚刚来了个急事"
 
 **行为**:
-1. 自动提升优先级为 `1`（高）
-2. 设置 `is_urgent=True`
-3. 检测同一天可能受影响的任务
+1. LLM 自动设置 `priority: 1`（高优先级）
+2. LLM 在 `response_message` 中提醒用户这是紧急任务
 
 ### 8.5 自然语言时间解析
 
@@ -1021,49 +988,53 @@ class ToolResult(TypedDict):
 
 ## 11. 配置管理
 
-### 11.1 配置类
+### 11.1 配置类（v3.0 简化版）
 
 **文件**: `app/ai/config/todo_config.py`
+
+> **v3.0 变更**: 关键词配置已移除，相关检测由 LLM 处理
 
 ```python
 class TodoAgentConfig(BaseSettings):
     """Todo Agent 配置类，支持环境变量覆盖"""
     
-    # 重复检测
-    duplicate_threshold: float = 0.4
-    duplicate_max_results: int = 5
-    
-    # 工作量
+    # 工作量配置
     default_hours_per_task: int = 2
     max_daily_hours: int = 8
     max_todos_per_query: int = 200
     context_todos_limit: int = 10
     
-    # 渐进式策略
+    # 渐进式策略配置
     progressive_round_threshold: int = 2
     progressive_reset_threshold: int = 5
     
-    # 关键词
-    force_create_keywords: List[str] = ["仍需新建", "继续创建", ...]
-    cancel_keywords: List[str] = ["取消", "放弃", "算了", ...]
-    confirm_keywords: List[str] = ["可以", "好的", "确认", ...]
-    quick_mode_keywords: List[str] = ["快速", "直接", ...]
-    urgent_keywords: List[str] = ["紧急", "马上", "领导说", ...]
-    vague_title_keywords: List[str] = ["这个", "那个", "它", ...]
+    # 标题验证配置（仅保留兜底验证）
+    vague_title_keywords: List[str] = ["这个", "那个", "它", "东西", "事情"]
     
     # 优先级映射
     priority_map_cn: dict = {"高": 1, "中": 2, "低": 3}
     priority_map_en: dict = {"high": 1, "medium": 2, "low": 3}
+    priority_map_num: dict = {"1": 1, "2": 2, "3": 3}
     
     model_config = {"env_prefix": "TODO_AGENT_"}
 ```
+
+**已移除的配置** (v3.0):
+- `cancel_keywords` - 取消意图由 LLM 识别
+- `confirm_keywords` - 确认意图由 LLM 识别
+- `quick_mode_keywords` - 快速模式由 LLM 识别
+- `urgent_keywords` - 紧急任务由 LLM 识别
+
+**已移除的方法** (v3.0):
+- `is_cancel()` - 由 LLM 的 `action_state: "cancelled"` 替代
+- `is_confirm()` - 由 LLM 的 `intent: "confirm"` 替代
+- `is_quick_mode()` - 由 LLM 的 `quick_mode: true` 替代
+- `is_urgent()` - 由 LLM 的 `extracted_info.is_urgent` 替代
 
 ### 11.2 环境变量
 
 | 变量 | 默认值 | 说明 |
 |-----|-------|------|
-| `TODO_AGENT_DUPLICATE_THRESHOLD` | 0.4 | 重复检测阈值 |
-| `TODO_AGENT_DUPLICATE_MAX_RESULTS` | 5 | 重复检测最大返回数 |
 | `TODO_AGENT_DEFAULT_HOURS_PER_TASK` | 2 | 默认任务工时 |
 | `TODO_AGENT_MAX_DAILY_HOURS` | 8 | 每日最大工时 |
 | `TODO_AGENT_PROGRESSIVE_ROUND_THRESHOLD` | 2 | 果断策略触发轮数 |

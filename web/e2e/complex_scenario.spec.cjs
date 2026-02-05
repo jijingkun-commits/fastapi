@@ -6,8 +6,8 @@ test.describe('Complex Todo Agent Scenario', () => {
         await page.goto('/auth');
         // Login if needed
         if (await page.getByText('登录到系统').isVisible()) {
-            await page.fill('input#identifier', 'admin');
-            await page.fill('input#password', '123456');
+            await page.fill('input#identifier', 'jjk');
+            // jjk 账号开发环境无需密码
             await page.getByRole('button', { name: '登录' }).click();
             await page.waitForURL('**/chat', { timeout: 15000 });
         }

@@ -15,6 +15,7 @@ import re
 from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple
 
 from langchain_core.messages import BaseMessage, trim_messages
+from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
@@ -125,6 +126,10 @@ def _get_supervisor_tools():
         if search_tool is not None:
             tools.append(search_tool)
             logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索")
+        else:
+            logger.info(
+                "联网搜索未加入 Supervisor: search_tool 未加载（请检查 TAVILY_API_KEY 或安装 langchain-tavily）"
+            )
     except Exception as e:
         logger.warning("Supervisor 联网搜索工具加载失败: %s", e)
     
@@ -437,13 +442,39 @@ async def create_multi_agent_graph(
                 # 重要：input_message_count 必须基于实际传递给 Agent 的消息数量
                 # 而不是原始 state 的消息数量（因为可能插入了系统消息）
                 input_message_count = len(pruned_state.get("messages", []))
+                # 保存初始值，用于最后计算增量消息（input_message_count 会在流式处理中被更新）
+                initial_input_count = input_message_count
                 
                 logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {input_message_count} msgs")
 
                 sent_tool_call_ids = set()
                 # 跟踪已发送的文本消息 ID，防止 values 模式重复发送
                 emitted_message_ids = set()
-
+                
+                # 关键修复：预填充已存在消息的 ID，防止 interrupt/resume 后重复发送
+                # 这解决了 SP-001 中 resume 时 emitted_message_ids 被重置导致的重复问题
+                # 注意：需要从原始 state 预填充，而非 pruned_state（pruned_state 可能裁剪掉了部分消息）
+                for existing_msg in state.get("messages", []):
+                    if hasattr(existing_msg, 'id') and existing_msg.id:
+                        emitted_message_ids.add(existing_msg.id)
+                
+                # 增强修复：从子图的 checkpoint 获取已有消息 ID
+                # 当 resume 时，子图的消息可能还没有合并到主图 state，需要从子图状态获取
+                # 参见 SP-001 消息去重机制的 interrupt/resume 场景
+                try:
+                    subgraph_state = await agent.aget_state(config)
+                    if subgraph_state and hasattr(subgraph_state, 'values'):
+                        subgraph_messages = subgraph_state.values.get("messages", [])
+                        for msg in subgraph_messages:
+                            if hasattr(msg, 'id') and msg.id:
+                                emitted_message_ids.add(msg.id)
+                        if subgraph_messages:
+                            logger.debug(f"[{name}] 从子图 checkpoint 预填充 {len(subgraph_messages)} 条消息 ID")
+                except Exception as e:
+                    # 子图可能没有 checkpoint（首次调用），这是正常的
+                    logger.debug(f"[{name}] 无法获取子图状态（可能是首次调用）: {e}")
+                
+                logger.debug(f"[{name}] 预填充 emitted_message_ids: {len(emitted_message_ids)} 个")
                 
                 async for mode, chunk in agent.astream(
                     pruned_state, 
@@ -466,6 +497,11 @@ async def create_multi_agent_graph(
                                 tool_content = str(getattr(msg, "content", ""))
                                 tool_output = tool_content[:200]
                                 emit_tool_end(writer, tool_name, tool_output, node=name)
+                                if tool_name and "tavily" in (tool_name or "").lower():
+                                    logger.info(
+                                        "联网搜索返回: tool=%s, 结果长度=%s",
+                                        tool_name, len(tool_content)
+                                    )
                                 
                                 # 2. 检测 KB_IMAGES (Handoff 移至 values 模式处理以保证状态完整)
                                 new_images = AgentOutputParser.parse_kb_images(tool_content)
@@ -490,7 +526,6 @@ async def create_multi_agent_graph(
                                 # 发送 token
                                 collected_content.append(content)
                                 emit_token(writer, content, node=name)
-                                
                             # 提取 tool_calls 并发送 tool_start 事件
                             # 注意：messages 模式下 tool_calls.args 为空
                             # 工具调用事件在 values 模式下发送（有完整参数）
@@ -540,7 +575,8 @@ async def create_multi_agent_graph(
                                 logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
                                 
                                 # 构造增量更新：只包含新增消息和 handoff 标记
-                                delta_messages = messages[input_message_count:]
+                                # 使用 initial_input_count 而非 input_message_count（后者可能已被更新）
+                                delta_messages = messages[initial_input_count:]
                                 
                                 # 确保此时不丢失其他状态 (如 user_id, thread_id 等)
                                 other_keys = {k: v for k, v in final_state.items() if k != "messages"}
@@ -573,6 +609,11 @@ async def create_multi_agent_graph(
                                         if tc_id and tc_id not in sent_tool_call_ids and tool_name:
                                             sent_tool_call_ids.add(tc_id)
                                             logger.debug(f"发送 tool_start 事件: {tool_name}")
+                                            if tool_name and "tavily" in (tool_name or "").lower():
+                                                logger.info(
+                                                    "联网搜索被调用: tool=%s, args=%s",
+                                                    tool_name, tool_args
+                                                )
                                             emit_tool_start(writer, tool_name, tool_args, node=name)
                                 else:
                                     # 2. 处理非流式文本消息 (补发漏掉的消息)
@@ -601,7 +642,19 @@ async def create_multi_agent_graph(
                                     # 发送补漏消息
                                     if msg_content:
                                         logger.info(f"[{name}] values 模式补发消息: {msg_content[:30]}...")
-                                        emit_token(writer, msg_content, node=name)
+                                        # 检查是否有 additional_kwargs（如 data_type, data），使用 emit_result 发送完整数据
+                                        additional = getattr(new_msg, 'additional_kwargs', {})
+                                        data_type = additional.get('data_type')
+                                        if data_type:
+                                            from app.ai.events import emit_result
+                                            emit_result(writer, 
+                                                       data_type=data_type,
+                                                       data=additional.get('data', {}),
+                                                       message=msg_content,
+                                                       node=name)
+                                        else:
+                                            emit_token(writer, msg_content, node=name)
+                                        
                                         collected_content.append(msg_content)
                                         if msg_id:
                                             emitted_message_ids.add(msg_id)
@@ -624,7 +677,28 @@ async def create_multi_agent_graph(
                 logger.debug(f"  {full_output[:500]}")
                 logger.debug("="*60)
                 
-                return final_state or {}
+                # 方案4：统一状态管理 - 只返回增量消息
+                # 背景：
+                #   1. LangGraph add_messages reducer 通过消息 ID 去重
+                #   2. 消息工厂（message_factory.py）确保所有消息有唯一 ID
+                #   3. 但 LangGraph Issue #3648 显示子图仍可能返回完整状态
+                # 策略：
+                #   保留 delta_messages 计算作为兜底，即使消息有 ID
+                #   等待 LangGraph 修复 #3648 后可考虑简化
+                # 参见：docs/开发文档/架构设计/防屎山记录手册.md SP-001, SP-013
+                if final_state:
+                    messages = final_state.get("messages", [])
+                    # 使用 initial_input_count（流开始时的消息数），而非 input_message_count（已被更新）
+                    delta_messages = messages[initial_input_count:] if len(messages) > initial_input_count else []
+                    
+                    # 保留其他状态字段（user_id, thread_id, pending_operation 等）
+                    other_keys = {k: v for k, v in final_state.items() if k != "messages"}
+                    ret = other_keys.copy()
+                    ret["messages"] = delta_messages
+                    
+                    logger.debug(f"[{name}] 返回增量消息: {len(delta_messages)} 条 (原 {len(messages)} 条, 初始 {initial_input_count} 条)")
+                    return ret
+                return {}
                 
             except GraphInterrupt:
                 raise
@@ -635,7 +709,7 @@ async def create_multi_agent_graph(
                 error_msg = f"[System Error: {str(e)}]"
                 emit_token(writer, error_msg, node=name)
                 # 返回错误消息以结束当前节点执行
-                return {"messages": [AIMessage(content=error_msg)]}
+                return {"messages": [create_ai_message(error_msg)]}
         
         return streaming_wrapper
 

@@ -15,7 +15,7 @@ test.describe('用户故事: 待办助手', () => {
         const listMessage = '列出我的所有待办';
 
         await test.step('Given: 用户已登录并进入聊天界面', async () => {
-            await loginIfNeeded(page, { username: 'admin', password: '123456' });
+            await loginIfNeeded(page);
             await ensureChatReady(page);
         });
 

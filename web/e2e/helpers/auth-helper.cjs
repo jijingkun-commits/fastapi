@@ -1,7 +1,7 @@
 const { expect } = require('@playwright/test');
 
 async function loginIfNeeded(page, options = {}) {
-    const { username = 'admin', password = '123456' } = options;
+    const { username = 'jjk', password = '' } = options;
 
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -73,13 +73,17 @@ async function waitForAIResponse(page, timeout = 60000, autoConfirm = true) {
         }
         
         if (state === 'waiting-confirm' && autoConfirm) {
-            // 出现确认卡片，点击确认按钮
-            const confirmBtn = page.getByRole('button', { name: '确认', exact: true });
+            // 出现确认卡片，使用 data-testid 选择器点击确认按钮
+            const confirmBtn = page.locator('[data-testid="confirm-button"]');
             if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-                console.log('检测到确认卡片，点击确认');
-                await confirmBtn.click();
-                await page.waitForTimeout(1000);
-                continue;
+                // 等待按钮可点击（非 disabled）
+                const isDisabled = await confirmBtn.isDisabled().catch(() => true);
+                if (!isDisabled) {
+                    console.log('检测到确认卡片，点击确认');
+                    await confirmBtn.click();
+                    await page.waitForTimeout(1000);
+                    continue;
+                }
             }
         }
         

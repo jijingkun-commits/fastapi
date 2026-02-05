@@ -6,6 +6,9 @@
 1. 使用 Pydantic BaseSettings 支持环境变量覆盖
 2. 所有魔法值集中在此处定义
 3. 支持运行时配置注入
+
+注意：关键词检测（取消、确认、快速模式、紧急）已迁移到 LLM 驱动模式，
+不再使用硬编码关键词列表。相关方法已移除。
 """
 from typing import List, Optional
 from pydantic import Field
@@ -16,18 +19,8 @@ class TodoAgentConfig(BaseSettings):
     """Todo Agent 配置类。
     
     支持通过环境变量覆盖，环境变量前缀为 TODO_AGENT_。
-    例如：TODO_AGENT_DUPLICATE_THRESHOLD=0.5
+    例如：TODO_AGENT_MAX_DAILY_HOURS=10
     """
-    
-    # ==================== 重复检测配置 ====================
-    duplicate_threshold: float = Field(
-        default=0.4, 
-        description="重复检测相似度阈值 (0-1)"
-    )
-    duplicate_max_results: int = Field(
-        default=5,
-        description="重复检测最大返回数量"
-    )
     
     # ==================== 工作量配置 ====================
     default_hours_per_task: int = Field(
@@ -57,33 +50,11 @@ class TodoAgentConfig(BaseSettings):
         description="触发重置策略的对话轮数阈值"
     )
     
-    # ==================== 关键词配置 ====================
-    force_create_keywords: List[str] = Field(
-        default=["仍需新建", "仍然新建", "继续创建", "新建", "不用管重复"],
-        description="强制创建关键词（跳过重复检测）"
-    )
-    cancel_keywords: List[str] = Field(
-        default=["取消", "放弃", "算了", "不必了", "撤销", "no", "cancel"],
-        description="取消操作关键词"
-    )
-    confirm_keywords: List[str] = Field(
-        default=[
-            "可以", "好的", "确认", "没问题", "行", "对", 
-            "就这样", "创建吧", "好", "是的", "嗯", "OK", "ok"
-        ],
-        description="确认操作关键词"
-    )
-    quick_mode_keywords: List[str] = Field(
-        default=["快速", "直接", "立即", "马上", "帮我记"],
-        description="触发快速模式的关键词"
-    )
-    urgent_keywords: List[str] = Field(
-        default=["刚刚", "紧急", "立刻", "马上", "领导说", "老板说", "赶紧"],
-        description="紧急任务关键词"
-    )
+    # ==================== 标题验证配置 ====================
+    # 注意：取消、确认、快速模式、紧急等关键词检测已迁移到 LLM 驱动模式
     vague_title_keywords: List[str] = Field(
         default=["这个", "那个", "它", "东西", "事情"],
-        description="模糊标题关键词"
+        description="模糊标题关键词（用于兜底验证）"
     )
     
     # ==================== 优先级映射 ====================
@@ -135,30 +106,8 @@ class TodoAgentConfig(BaseSettings):
         
         return 2  # 默认中优先级
     
-    def is_force_create(self, message: str) -> bool:
-        """检查消息是否包含强制创建关键词。"""
-        return any(kw in message for kw in self.force_create_keywords)
-    
-    def is_cancel(self, message: str) -> bool:
-        """检查消息是否包含取消关键词。"""
-        msg_lower = message.lower().strip()
-        return any(kw in msg_lower for kw in self.cancel_keywords)
-    
-    def is_confirm(self, message: str) -> bool:
-        """检查消息是否为确认消息。"""
-        msg_lower = message.lower().strip()
-        return any(
-            msg_lower.startswith(kw.lower()) or msg_lower == kw.lower() 
-            for kw in self.confirm_keywords
-        )
-    
-    def is_quick_mode(self, message: str) -> bool:
-        """检查消息是否触发快速模式。"""
-        return any(kw in message for kw in self.quick_mode_keywords)
-    
-    def is_urgent(self, message: str) -> bool:
-        """检查消息是否包含紧急关键词。"""
-        return any(kw in message for kw in self.urgent_keywords)
+    # 注意：is_cancel, is_confirm, is_quick_mode, is_urgent 方法已移除
+    # 这些检测现在由 LLM 在意图分析阶段完成
     
     def is_vague_title(self, title: str) -> bool:
         """检查标题是否模糊。"""

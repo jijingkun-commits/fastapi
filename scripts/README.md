@@ -80,7 +80,7 @@ python scripts/migrate_user_management.py
 python scripts/migrate_todo_tables.py
 ```
 
-> **说明**：`sync_database.py` 会自动创建缺失的表和列，无需手动写 SQL。
+> **说明**：`sync_database.py` 会自动创建缺失的表、列和索引，无需手动写 SQL。索引定义在模型的 `__table_args__` 中。
 
 ### 部署初始化
 
@@ -90,11 +90,12 @@ python scripts/migrate_todo_tables.py
 
 # 或手动执行关键脚本
 python scripts/sync_database.py          # 先同步数据库
-python scripts/init_llm_config.py
-python scripts/init_metric_definition.py
-python scripts/expand_metrics.py
-python scripts/import_skills.py
-python scripts/schema_sync.py
+python scripts/init_llm_config.py        # LLM 模型配置
+python install/scripts/init_system_config.py  # 系统配置项
+python scripts/init_metric_definition.py # 指标定义
+python scripts/expand_metrics.py         # 扩展指标
+python scripts/import_skills.py          # AI 技能
+python scripts/schema_sync.py            # 元数据同步
 ```
 
 ### 日常维护

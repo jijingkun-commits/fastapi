@@ -11,6 +11,7 @@ from typing import AsyncGenerator, Optional
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, AIMessage
+from app.ai.utils.message_factory import create_human_message
 
 from app.ai.workflow import get_multi_agent_graph
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
@@ -127,7 +128,7 @@ class ChatService:
             logger.info("已将附件信息追加到 Prompt: %d 个附件 (%d 图片, %d 其他)", 
                        len(attachments), len(image_attachments), len(other_attachments))
             
-        input_messages = [HumanMessage(content=final_prompt)]
+        input_messages = [create_human_message(final_prompt)]
         config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id}}
         
         # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）

@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Integer, String, DateTime
+from sqlalchemy import BigInteger, Integer, String, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,3 +21,9 @@ class IdempotencyKey(Base):
     thread_id: Mapped[Optional[str]] = mapped_column(String(100), comment="对话线程ID")
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="更新时间")
+    
+    # 复合索引定义
+    __table_args__ = (
+        # 幂等键快速查找
+        Index("idx_idempotency_key_lookup", "key", "user_id"),
+    )

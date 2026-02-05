@@ -17,6 +17,7 @@ from typing import TypedDict, Optional, Dict, List, Annotated, Literal, Union
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from app.ai.utils.message_factory import create_ai_message
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
@@ -51,15 +52,11 @@ from app.ai.workflow.todo_intent_helpers import (
     filter_messages_for_todo,
     query_existing_todos,
     parse_time_info,
-    detect_urgent_task,
-    process_clarify_intent,
-    process_confirm_intent,
-    determine_confirmation_need,
-    check_rule_based_intent,
     extract_heuristic_title,
     get_progressive_strategy,
     apply_goal_defaults,
 )
+# 注意：process_clarify_intent, process_confirm_intent 已移除（LLM驱动重构）
 
 # 创建仓库实例
 todo_repo = TodoRepository()
@@ -74,7 +71,7 @@ logger = logging.getLogger(__name__)
 # ==================== 状态定义 ====================
 
 class TodoAgentState(TypedDict):
-    """待办 Agent 状态 - 简化版。"""
+    """待办 Agent 状态 - LLM驱动版。"""
     messages: Annotated[List[BaseMessage], add_messages]
     user_id: Optional[int]
     thread_id: Optional[str]
@@ -95,6 +92,9 @@ class TodoAgentState(TypedDict):
     
     # 澄清追问
     pending_clarifications: Optional[List[str]]
+    
+    # LLM 生成的回复消息（用于 clarify 等场景）
+    response_message: Optional[str]
 
 
 # 注意：OperationResult 已废弃，统一使用 ToolResult (从 app.core.types 导入)
@@ -143,12 +143,14 @@ from pydantic import BaseModel, Field
 # ==================== Pydantic 响应模型 (P1-4) ====================
 
 class IntentResult(BaseModel):
-    """LLM 意图分析结果模型"""
-    intent: str = Field(description="用户意图: create, update, delete, query, confirm, clarify 等")
+    """LLM 意图分析结果模型 - LLM驱动版本"""
+    intent: str = Field(description="用户意图: create, update, delete, query, confirm, cancel, chat 等")
+    action_state: str = Field(default="need_confirm", description="下一步动作: need_clarify, need_confirm, ready, cancelled")
+    response_message: str = Field(default="", description="LLM生成的自然语言回复")
     extracted_info: Dict = Field(default={}, description="提取的实体信息: title, time, due_date, priority 等")
     missing_info: List[str] = Field(default=[], description="缺失的关键信息")
-    is_complex: bool = Field(default=False, description="是否为复杂任务")
     conflict_risk: str = Field(default="none", description="冲突风险: high, medium, none")
+    quick_mode: bool = Field(default=False, description="是否为快速模式")
     context_hints: Dict = Field(default={}, description="上下文线索")
     projects: List[str] = Field(default=[], description="涉及的项目列表")
     time_constraints: Dict = Field(default={}, description="时间约束")
@@ -199,103 +201,6 @@ def _get_user_todo_context(user_id: int, config: dict = None) -> str:
         return ""
 
 
-def _check_duplicate_todos(user_id: int, new_title: str, threshold: float = None, config: dict = None) -> List[Dict]:
-    """检查是否存在相似的待办任务（重复检测）。
-    
-    Args:
-        user_id: 用户 ID
-        new_title: 新任务标题
-        threshold: 相似度阈值 (0-1)，默认使用配置值
-        config: LangGraph 运行配置（用于依赖注入）
-        
-    Returns:
-        相似任务列表 [{"id": int, "title": str, "similarity": float}, ...]
-    """
-    if threshold is None:
-        threshold = todo_config.duplicate_threshold
-        
-    if not user_id or not new_title:
-        logger.warning(f"重复检测跳过: user_id={user_id}, new_title={new_title}")
-        return []
-
-    logger.info(f"Start _check_duplicate_todos: user_id={user_id}, title={new_title}")
-    
-    # 使用依赖注入获取仓库和数据库上下文
-    deps = get_todo_dependencies(config)
-    
-    try:
-        with deps.get_db_context() as db:
-            # 获取用户未完成的待办 (使用配置的 limit)
-            repo = deps.get_repository()
-            existing_todos = repo.list_by_user(db, user_id, status="pending", limit=todo_config.max_todos_per_query)
-            logger.info(f"重复检测: 获取到 {len(existing_todos)} 个现有待办 (Limit=200)")
-            
-            if not existing_todos:
-                return []
-            
-            duplicates = []
-            new_title_lower = new_title.lower().strip()
-            
-            for todo in existing_todos:
-                existing_title = todo.title.lower().strip() if todo.title else ""
-                
-                # 计算相似度（简单的关键词匹配方法）
-                similarity = _calculate_title_similarity(new_title_lower, existing_title)
-                
-                if similarity >= threshold:
-                    logger.info(f"发现相似: '{existing_title}' score={similarity}")
-                    duplicates.append({
-                        "id": todo.id,
-                        "title": todo.title,
-                        "similarity": round(similarity, 2),
-                        "status": todo.status,
-                        "due_date": todo.due_date.strftime("%m-%d") if todo.due_date else None
-                    })
-            
-            # 按相似度降序排列
-            duplicates.sort(key=lambda x: x["similarity"], reverse=True)
-            
-            if duplicates:
-                logger.info(f"检测到 {len(duplicates)} 个相似任务: {[d['title'] for d in duplicates[:3]]}")
-            
-            return duplicates[:todo_config.duplicate_max_results]
-    except Exception as e:
-        logger.warning(f"重复检测失败: {e}")
-        return []
-
-
-def _calculate_title_similarity(new_title: str, existing_title: str) -> float:
-    """计算两个标题的相似度（基于关键词重叠）。
-    
-    使用 Jaccard 相似度计算。
-    """
-    if not new_title or not existing_title:
-        return 0.0
-    
-    # 完全匹配
-    if new_title == existing_title:
-        return 1.0
-    
-    # 包含关系
-    if new_title in existing_title or existing_title in new_title:
-        return 0.9
-    
-    # Jaccard 相似度（基于字符 n-gram）
-    def get_ngrams(text: str, n: int = 2) -> set:
-        return set(text[i:i+n] for i in range(len(text) - n + 1))
-    
-    ngrams_new = get_ngrams(new_title)
-    ngrams_existing = get_ngrams(existing_title)
-    
-    if not ngrams_new or not ngrams_existing:
-        return 0.0
-    
-    intersection = len(ngrams_new & ngrams_existing)
-    union = len(ngrams_new | ngrams_existing)
-    
-    return intersection / union if union > 0 else 0.0
-
-
 # ==================== LLM 调用辅助函数 ====================
 
 def _invoke_llm_for_intent(
@@ -329,13 +234,13 @@ def _invoke_llm_for_intent(
         >>> intent = analysis["intent"]
         >>> extracted_info = analysis["extracted_info"]
     """
-    llm = get_llm(enable_streaming=False)
+    llm = get_llm(internal=True)
     parser = JsonOutputParser(pydantic_object=IntentResult)
     
     analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
     
-    response = llm.invoke(analysis_messages, config={"tags": ["internal_thought"]})
+    response = llm.invoke(analysis_messages)  # internal=True 自动添加 tag
     result_text = response.content
     logger.info(f"LLM 分析结果长度: {len(result_text)}")
     
@@ -396,105 +301,17 @@ def _invoke_llm_for_intent(
     }
 
 
-def _dispatch_intent(
-    intent: str,
-    extracted_info: Dict,
-    analysis: Dict,
-    state: TodoAgentState,
-    user_id: Optional[int],
-    updates: Dict
-) -> Optional[Dict]:
-    """根据意图分发到对应的处理逻辑。
-    
-    Args:
-        intent: 识别的意图
-        extracted_info: 提取的信息
-        analysis: LLM 分析结果
-        state: 当前状态
-        user_id: 用户 ID
-        updates: 当前更新字典
-        
-    Returns:
-        Optional[Dict]: 如果需要提前返回则返回更新字典，否则返回 None
-    """
-    logger.info(f"Processing dispatch with intent='{intent}'")
-    
-    # 1. clarify 意图
-    if intent == "clarify":
-        logger.info("Entering clarify intent block")
-        # 如果在 clarify 意图中也发现了标题，尝试进行重复检测
-        if extracted_info.get("title"):
-            logger.info(f"Clarify Intent: Preparing to check duplicates for title='{extracted_info.get('title')}'")
-            duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
-            if duplicates:
-                updates["duplicate_candidates"] = duplicates
-                updates["pending_operation"] = {
-                    "action": "create",
-                    "data": extracted_info,
-                    "needs_clarification": True,
-                    "duplicate_warning": True
-                }
-                updates["extracted_info"] = extracted_info
-                logger.info(f"在澄清意图中发现 {len(duplicates)} 个相似任务，需用户确认")
-                return updates
-
-        result = process_clarify_intent(analysis, extracted_info)
-        updates.update(result.to_dict())
-        return updates
-    
-    # 2. confirm 意图
-    if intent == "confirm":
-        result = process_confirm_intent(state.get("pending_operation"), extracted_info)
-        updates.update(result.to_dict())
-        return updates
-    
-    # 3. 用户补充信息场景
-    pending_op = state.get("pending_operation")
-    if pending_op and pending_op.get("needs_clarification") and extracted_info:
-        existing_data = dict(pending_op.get("data", {}))
-        for key, value in extracted_info.items():
-            if value:
-                existing_data[key] = value
-        updated_op = dict(pending_op)
-        updated_op["data"] = existing_data
-        updates["pending_operation"] = updated_op
-        return updates
-    
-    # 4. 冲突风险标记
-    conflict_risk = analysis.get("conflict_risk", "none")
-    if conflict_risk != "none":
-        updates["detected_conflicts"] = analysis.get("conflicts", [])
-    
-    # 5. 重复检测 (Duplicate Detection for create intent)
-    if intent == "create" and extracted_info.get("title"):
-        duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
-        if duplicates:
-            updates["duplicate_candidates"] = duplicates
-            updates["pending_operation"] = {
-                "action": "create",
-                "data": extracted_info,
-                "needs_clarification": True,
-                "duplicate_warning": True
-            }
-            updates["extracted_info"] = extracted_info
-            logger.info(f"发现 {len(duplicates)} 个相似任务，需用户确认是否仍需创建")
-            return updates
-    
-    # 不需要提前返回
-    return None
-
-
 def analyze_intent(state: TodoAgentState) -> Dict:
-    """分析用户意图节点（重构版）。
+    """分析用户意图节点（LLM驱动版）。
     
-    使用辅助函数拆分逻辑，返回增量更新字典而非直接修改 state。
+    完全依赖 LLM 判断意图和决定下一步动作，移除硬编码关键词规则。
     
     职责：
-    1. 调用 LLM 分析最后一条用户消息
-    2. 判断是否需要确认
-    3. 提取待办相关信息
+    1. 调用 LLM 分析用户消息
+    2. 根据 LLM 返回的 action_state 决定路由
+    3. 使用 LLM 生成的 response_message 作为回复
     """
-    logger.info("=== analyze_intent 节点 ===")
+    logger.info("=== analyze_intent 节点 (LLM驱动版) ===")
     
     # 收集需要更新的字段
     updates: Dict = {}
@@ -522,17 +339,17 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     if state.get("detected_conflicts"):
         updates["detected_conflicts"] = []
     
-    # Step 3: 调用 LLM 分析
-    llm = get_llm(enable_streaming=False)
+    # Step 3: 调用 LLM 分析（internal=True 自动禁用流式 + 添加 tag）
+    llm = get_llm(internal=True)
     
     # 构建 Parser
     parser = JsonOutputParser(pydantic_object=IntentResult)
     format_instructions = parser.get_format_instructions()
     
     # Step 4: 渐进式策略注入 (Progressive Prompting)
-    progressive_injection = ""
     round_count = len(messages) // 2  # 每轮两条消息 (human + ai)
     user_confirmed = state.get("user_confirmed", False)
+    quick_mode = state.get("quick_mode", False)
     
     # 获取最后一条用户消息
     last_human_msg = ""
@@ -543,46 +360,31 @@ def analyze_intent(state: TodoAgentState) -> Dict:
             
     # 启发式标题提取（备用方案）
     heuristic_title = extract_heuristic_title(last_human_msg) if last_human_msg else None
-
-    # 规则化意图检测（在调用 LLM 之前进行快速匹配）
-    pending_op = state.get("pending_operation")
-    rule_result = check_rule_based_intent(last_human_msg, pending_op)
-    if rule_result and rule_result.should_return_early:
-        updates.update(rule_result.to_dict())
-        return updates
-    
-    # 快速模式检测
-    quick_mode = state.get("quick_mode", False)
-    if not quick_mode and todo_config.is_quick_mode(last_human_msg):
-        quick_mode = True
-        updates["quick_mode"] = True
-        logger.info("检测到快速模式关键词，启用 quick_mode")
     
     # 根据轮数获取渐进式策略注入
     progressive_injection = get_progressive_strategy(round_count, user_confirmed, quick_mode)
     
-    # Step 4.1: Goal 模板注入（借鉴 Temporal AI Agent）
-    # 如果规则匹配已检测到意图，使用对应的 Few-shot 示例增强 Prompt
-    detected_intent_hint = None
-    if rule_result and rule_result.intent:
-        detected_intent_hint = rule_result.intent
-        logger.info(f"规则匹配预检测到意图: {detected_intent_hint}，将注入对应 Goal 模板")
-    
-    # 构建增强后的 Prompt（包含 Few-shot 示例）
+    # Step 4.1: Goal 模板注入（包含 Few-shot 示例）
     enhanced_prompt = build_intent_prompt_with_goal(
         base_prompt=TODO_INTENT_ANALYZE_PROMPT,
-        detected_intent=detected_intent_hint,
+        detected_intent=None,  # 不再预检测意图，完全由 LLM 决定
         max_examples=3
     )
     
+    # 注入待确认操作的上下文（如果有）
+    pending_op_context = ""
+    pending_op = state.get("pending_operation")
+    if pending_op:
+        pending_op_context = f"\n\n## 当前待确认操作\n操作类型: {pending_op.get('action')}\n数据: {pending_op.get('data')}\n用户可能正在对此操作进行确认或取消。"
+    
     # 构建最终 Prompt
-    system_prompt = f"{enhanced_prompt}{progressive_injection}\n{handoff_context}\n{existing_todos_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
+    system_prompt = f"{enhanced_prompt}{progressive_injection}\n{handoff_context}\n{existing_todos_context}{pending_op_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
     
     analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
     
     try:
-        response = llm.invoke(analysis_messages, config={"tags": ["internal_thought"]})
+        response = llm.invoke(analysis_messages)  # internal=True 自动添加 tag
         result_text = response.content
         logger.info(f"LLM 分析结果长度: {len(result_text)}")
         
@@ -599,44 +401,54 @@ def analyze_intent(state: TodoAgentState) -> Dict:
                 try:
                     analysis_dict = json.loads(clean_text)
                 except json.JSONDecodeError:
-                    # 无法恢复，使用默认值
                     logger.warning("JSON 清理后仍无法解析，使用默认意图")
-                    analysis_dict = {"intent": "clarify", "extracted_info": {}}
+                    analysis_dict = {
+                        "intent": "clarify", 
+                        "action_state": "need_clarify",
+                        "response_message": "我没有完全理解您的意思，请告诉我具体需要完成什么任务？",
+                        "extracted_info": {}
+                    }
             else:
-                analysis_dict = {"intent": "clarify", "extracted_info": {}}
+                analysis_dict = {
+                    "intent": "clarify", 
+                    "action_state": "need_clarify",
+                    "response_message": "我没有完全理解您的意思，请告诉我具体需要完成什么任务？",
+                    "extracted_info": {}
+                }
         except Exception as e:
             logger.warning(f"解析意外错误: {e}，使用默认意图")
-            analysis_dict = {"intent": "clarify", "extracted_info": {}}
+            analysis_dict = {
+                "intent": "clarify", 
+                "action_state": "need_clarify",
+                "response_message": "我没有完全理解您的意思，请告诉我具体需要完成什么任务？",
+                "extracted_info": {}
+            }
         
-        analysis = analysis_dict
-
-        intent = analysis.get("intent", "chat")
+        # 提取 LLM 返回的核心字段
+        intent = analysis_dict.get("intent", "chat")
         if isinstance(intent, str):
             intent = intent.strip()
-            
-        extracted_info = analysis.get("extracted_info", {})
         
-        # Heuristic: 使用启发式提取的标题
+        action_state = analysis_dict.get("action_state", "need_confirm")
+        response_message = analysis_dict.get("response_message", "")
+        extracted_info = analysis_dict.get("extracted_info", {})
+        quick_mode = analysis_dict.get("quick_mode", False) or state.get("quick_mode", False)
+        
+        logger.info(f"LLM 分析结果: intent='{intent}', action_state='{action_state}', response_message='{response_message[:50]}...'")
+        
+        # Heuristic: 使用启发式提取的标题作为兜底
         if heuristic_title and not extracted_info.get("title"):
-             logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
-             extracted_info["title"] = heuristic_title
-             
-             # 如果 intent 是 clarify，修正为 create
-             if intent == "clarify":
-                 intent = "create"
-                 logger.info(f"根据 heuristic title 将 intent 修正为 create")
+            logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
+            extracted_info["title"] = heuristic_title
         
-        logger.info(f"LLM 分析结果: intent='{intent}', extracted_info={extracted_info}")
-        
-        # 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
+        # 合并 Handoff 预提取的信息
         if pre_extracted_info:
             for key, value in pre_extracted_info.items():
                 if value and not extracted_info.get(key):
                     extracted_info[key] = value
                     logger.info(f"使用 Handoff 预提取的 {key}: {value}")
         
-        
-        # Step 4: 时间解析
+        # Step 5: 时间解析
         extracted_info, time_constraints = parse_time_info(
             extracted_info, 
             state.get("time_constraints")
@@ -644,134 +456,100 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         if time_constraints:
             updates["time_constraints"] = time_constraints
         
-        # Step 5: 紧急任务检测
-        extracted_info = detect_urgent_task(messages, intent, extracted_info, user_id)
-        
-        # Step 6: 意图分支处理
-        logger.info(f"Processing Step 6 with intent='{intent}'")
-        
-        # 6.1 clarify 意图
-        if intent == "clarify":
-            logger.info("Entering clarify intent block")
-            # 如果在 clarify 意图中也发现了标题，尝试进行重复检测
-            if extracted_info.get("title"):
-                 logger.info(f"Clarify Intent: Preparing to check duplicates for title='{extracted_info.get('title')}'")
-                 duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
-                 if duplicates:
-                    updates["duplicate_candidates"] = duplicates
-                    updates["pending_operation"] = {
-                        "action": "create",
-                        "data": extracted_info,
-                        "needs_clarification": True,
-                        "duplicate_warning": True
-                    }
-                    updates["extracted_info"] = extracted_info
-                    logger.info(f"在澄清意图中发现 {len(duplicates)} 个相似任务，需用户确认")
-                    return updates
-
-            result = process_clarify_intent(analysis, extracted_info)
-            updates.update(result.to_dict())
-            return updates
-        
-        # 6.2 confirm 意图
-        if intent == "confirm":
-            result = process_confirm_intent(state.get("pending_operation"), extracted_info)
-            updates.update(result.to_dict())
-            return updates
-        
-        # 6.3 用户补充信息场景
-        pending_op = state.get("pending_operation")
-        if pending_op and pending_op.get("needs_clarification") and extracted_info:
-            existing_data = pending_op.get("data", {})
-            for key, value in extracted_info.items():
-                if value:
-                    existing_data[key] = value
-            pending_op["data"] = existing_data
-            updates["pending_operation"] = pending_op
-            return updates
-        
-
-        
-        # Step 7: 冲突风险标记
-        conflict_risk = analysis.get("conflict_risk", "none")
+        # Step 6: 冲突风险标记
+        conflict_risk = analysis_dict.get("conflict_risk", "none")
         if conflict_risk != "none":
-            updates["detected_conflicts"] = analysis.get("conflicts", [])
+            updates["detected_conflicts"] = analysis_dict.get("conflicts", [])
         
-        # Step 7.5: 重复检测 (Duplicate Detection for create intent)
-        if intent == "create" and extracted_info.get("title"):
-            duplicates = _check_duplicate_todos(user_id, extracted_info.get("title"))
-            if duplicates:
-                # 发现相似任务，需要用户确认
-                updates["duplicate_candidates"] = duplicates
-                updates["pending_operation"] = {
-                    "action": "create",
-                    "data": extracted_info,
-                    "needs_clarification": True,
-                    "duplicate_warning": True
-                }
-                updates["extracted_info"] = extracted_info
-                logger.info(f"发现 {len(duplicates)} 个相似任务，需用户确认是否仍需创建")
-                return updates
-        
-        # Step 7.6: 应用 Goal 模板默认值（渐进式策略）
-        # 当对话轮次超过阈值时，使用 Goal 模板定义的默认值填充缺失字段
+        # Step 7: 应用 Goal 模板默认值（渐进式策略）
         extracted_info = apply_goal_defaults(intent, extracted_info, round_count)
         
-        # Step 8: 读取 quick_mode 并确定是否需要确认
-        # quick_mode 可能来自 LLM 分析或 state
-        quick_mode = analysis.get("quick_mode", False) or state.get("quick_mode", False)
+        # Step 8: 根据 action_state 设置状态和路由
         if quick_mode:
             updates["quick_mode"] = True
-            logger.info("检测到快速创建模式")
+            logger.info("LLM 检测到快速模式")
         
-        needs_confirmation, needs_clarification = determine_confirmation_need(intent, quick_mode, extracted_info)
+        # 保存 response_message 供后续节点使用
+        updates["response_message"] = response_message
+        updates["extracted_info"] = extracted_info
         
-        if needs_confirmation:
+        if action_state == "cancelled":
+            # 用户取消操作
+            logger.info("用户取消操作")
+            updates["pending_operation"] = None
+            updates["messages"] = [create_ai_message(response_message or "好的，已取消该操作。")]
+            
+        elif action_state == "need_clarify":
+            # 需要澄清
+            logger.info(f"需要澄清: {intent}")
             updates["pending_operation"] = {
-                "action": intent,
+                "action": intent if intent != "clarify" else "create",
                 "data": extracted_info,
-                "needs_clarification": needs_clarification
+                "needs_clarification": True
             }
-            updates["extracted_info"] = extracted_info
-            logger.info(f"需要确认: {intent}, 需要先澄清: {needs_clarification}")
-        else:
-            updates["pending_operation"] = {
-                "action": intent,
-                "data": extracted_info,
-                "skip_confirmation": True
-            }
-            updates["extracted_info"] = extracted_info
+            updates["pending_clarifications"] = analysis_dict.get("missing_info", [])
+            # response_message 将由 clarify_node 使用
+            
+        elif action_state == "ready":
+            # 可直接执行（如查询、用户已确认）
             logger.info(f"直接执行: {intent}")
             
+            if intent == "confirm" and pending_op:
+                # 用户确认了待确认的操作
+                pending_op_copy = dict(pending_op)
+                pending_op_copy["needs_clarification"] = False
+                pending_op_copy["skip_confirmation"] = True
+                updates["pending_operation"] = pending_op_copy
+                updates["user_confirmed"] = True
+            else:
+                updates["pending_operation"] = {
+                    "action": intent,
+                    "data": extracted_info,
+                    "skip_confirmation": True
+                }
+            
+        elif action_state == "need_confirm":
+            # 需要用户确认
+            logger.info(f"需要确认: {intent}")
+            updates["pending_operation"] = {
+                "action": intent,
+                "data": extracted_info,
+                "needs_clarification": False
+            }
+            
+        else:
+            # 未知状态，默认需要确认
+            logger.warning(f"未知 action_state: {action_state}，默认需要确认")
+            updates["pending_operation"] = {
+                "action": intent,
+                "data": extracted_info,
+                "needs_clarification": False
+            }
+            
     except json.JSONDecodeError as e:
-        # JSON 解析错误（可恢复）
         logger.warning(f"意图分析 JSON 解析失败: {e}")
         updates["pending_clarifications"] = ["请告诉我您想要完成什么任务？"]
-        updates["messages"] = [AIMessage(content="我没有完全理解您的意思，请告诉我具体需要完成什么任务？")]
+        updates["messages"] = [create_ai_message("我没有完全理解您的意思，请告诉我具体需要完成什么任务？")]
     except (ConnectionError, TimeoutError) as e:
-        # 网络/超时错误
         logger.error(f"意图分析网络错误: {e}")
-        updates["messages"] = [AIMessage(content="网络连接出现问题，请稍后重试。")]
+        updates["messages"] = [create_ai_message("网络连接出现问题，请稍后重试。")]
     except PermissionError as e:
-        # API 权限/配额错误
         logger.error(f"意图分析权限错误: {e}")
         error_str = str(e)
         if "free tier" in error_str.lower() or "quota" in error_str.lower():
-            updates["messages"] = [AIMessage(content="AI 服务配额已用尽，请联系管理员或稍后重试。")]
+            updates["messages"] = [create_ai_message("AI 服务配额已用尽，请联系管理员或稍后重试。")]
         else:
-            updates["messages"] = [AIMessage(content="AI 服务权限不足，请检查配置或联系管理员。")]
+            updates["messages"] = [create_ai_message("AI 服务权限不足，请检查配置或联系管理员。")]
     except Exception as e:
-        # 检查是否是 OpenAI 权限错误（PermissionDeniedError）
         error_type = type(e).__name__
         error_str = str(e)
         if error_type == "PermissionDeniedError" or "403" in error_str or "quota" in error_str.lower():
             logger.error(f"意图分析 API 配额/权限错误: {e}")
-            updates["messages"] = [AIMessage(content="AI 服务配额已用尽或权限不足，请联系管理员或稍后重试。")]
+            updates["messages"] = [create_ai_message("AI 服务配额已用尽或权限不足，请联系管理员或稍后重试。")]
             return updates
-        # 其他意外错误
         logger.exception(f"意图分析意外错误: {e}")
         updates["pending_operation"] = None
-        updates["messages"] = [AIMessage(content="抱歉，处理您的请求时出现了问题。请重新描述您的需求。")]
+        updates["messages"] = [create_ai_message("抱歉，处理您的请求时出现了问题。请重新描述您的需求。")]
     
     return updates
 
@@ -965,13 +743,12 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
             }
 
     # 返回 AIMessage
-    msg = AIMessage(
-        content=confirm_msg,
+    msg = create_ai_message(
+        confirm_msg,
         additional_kwargs={
             "operation": operation_data
         }
     )
-    
     return {
         "messages": [msg],
         "pending_operation": operation_data, # 更新包含 summary 的完整信息
@@ -1097,7 +874,7 @@ def execute_operation(state: TodoAgentState) -> Dict:
         updates["user_confirmed"] = None
         updates["quick_mode"] = None
         # 生成取消确认消息，避免 postprocess 保存与 interrupt 相同的消息
-        updates["messages"] = [AIMessage(content="好的，已取消操作。有其他需要帮助的吗？")]
+        updates["messages"] = [create_ai_message("好的，已取消操作。有其他需要帮助的吗？")]
         return updates
     
     # 如果没有操作（如查询）
@@ -1113,25 +890,17 @@ def execute_operation(state: TodoAgentState) -> Dict:
             if result.get("data_type"):
                 additional_kwargs["data_type"] = result["data_type"]
             
-            updates["messages"] = [AIMessage(
-                content=result["message"],
+            updates["messages"] = [create_ai_message(
+                result["message"],
                 additional_kwargs=additional_kwargs
             )]
             
-            # 发送 custom 事件用于前端流式渲染
-            if result.get("data_type"):
-                emit_result(writer, 
-                           data_type=result["data_type"],
-                           data=result.get("data", {}),
-                           message=result["message"],
-                           node="execute_operation")
-            else:
-                emit_token(writer, content=result["message"], node="execute_operation")
+            # 消息发送由 streaming_wrapper 的 values 模式统一处理
         else:
             error_msg = f"❌ {result['message']}"
             if result.get("error"):
                 error_msg += f"\n错误详情: {result['error']}"
-            updates["messages"] = [AIMessage(content=error_msg)]
+            updates["messages"] = [create_ai_message(error_msg)]
         
         return updates
 
@@ -1155,33 +924,25 @@ def execute_operation(state: TodoAgentState) -> Dict:
             if result.get("data_type"):
                 additional_kwargs["data_type"] = result["data_type"]
             
-            updates["messages"] = [AIMessage(
-                content=result["message"],
+            updates["messages"] = [create_ai_message(
+                result["message"],
                 additional_kwargs=additional_kwargs
             )]
             
-            # 发送 custom 事件用于前端流式渲染
-            if result.get("data_type"):
-                emit_result(writer, 
-                           data_type=result["data_type"],
-                           data=result.get("data", {}),
-                           message=result["message"],
-                           node="execute_operation")
-            else:
-                emit_token(writer, content=result["message"], node="execute_operation")
+            # 消息发送由 streaming_wrapper 的 values 模式统一处理
         else:
             # 失败：显示错误信息
             error_msg = f"❌ {result['message']}"
             if result.get("error"):
                 error_msg += f"\n错误详情: {result['error']}"
-            updates["messages"] = [AIMessage(content=error_msg)]
+            updates["messages"] = [create_ai_message(error_msg)]
             
     except ValueError as e:
         logger.warning(f"执行参数错误: {e}")
-        updates["messages"] = [AIMessage(content=f"❌ 参数错误: {str(e)}")]
+        updates["messages"] = [create_ai_message(f"❌ 参数错误: {str(e)}")]
     except Exception as e:
         logger.exception(f"执行意外错误: {e}")
-        updates["messages"] = [AIMessage(content="❌ 操作失败，请稍后重试")]
+        updates["messages"] = [create_ai_message("❌ 操作失败，请稍后重试")]
     
     # 清理操作状态
     updates["pending_operation"] = None

@@ -20,6 +20,8 @@ from typing import Any, Optional
 from langchain_core.messages import AIMessage
 from langchain_core.messages.utils import trim_messages, count_tokens_approximately
 
+from app.ai.utils.message_factory import create_ai_message
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,14 +73,14 @@ def _ensure_reasoning_content(messages: list) -> list:
                 new_additional = dict(additional)
                 new_additional['reasoning_content'] = ''
                 
-                # 创建新的 AIMessage（保留所有原始属性）
-                fixed_msg = AIMessage(
-                    content=msg.content,
+                # 使用消息工厂创建（保留 id 时便于 add_messages 去重）
+                fixed_msg = create_ai_message(
+                    msg.content,
+                    id=getattr(msg, "id", None),
                     tool_calls=msg.tool_calls,
                     additional_kwargs=new_additional,
-                    response_metadata=getattr(msg, 'response_metadata', {}),
-                    id=getattr(msg, 'id', None),
-                    name=getattr(msg, 'name', None),
+                    response_metadata=getattr(msg, "response_metadata", {}),
+                    name=getattr(msg, "name", None),
                 )
                 fixed_messages.append(fixed_msg)
                 logger.debug("为 AIMessage (index=%d, is_current_turn=%s) 添加 reasoning_content 占位符", i, is_current_turn)

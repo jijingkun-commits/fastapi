@@ -12,12 +12,27 @@ test.describe("待办助手多轮对话测试", () => {
 
     test.beforeEach(async ({ page }) => {
         // 访问聊天页面
-        await page.goto("/");
-        await page.waitForURL(/\/(chat)?/, { timeout: 10000 });
-        console.log("Wait for / timeout, current URL:", page.url());
+        await page.goto("/auth");
+        
+        // 等待页面稳定
+        await page.waitForLoadState('networkidle');
+        
+        // 处理登录
+        const identifierInput = page.locator('input#identifier');
+        if (await identifierInput.isVisible().catch(() => false)) {
+            await identifierInput.fill('jjk');
+            await page.getByRole('button', { name: '登录' }).click();
+            try {
+                await page.waitForURL('**/', { timeout: 15000 });
+            } catch (e) {
+                console.log('Wait for / timeout, current URL:', page.url());
+            }
+        }
+        
+        console.log("Current URL:", page.url());
 
-        // 等待页面加载完成
-        await page.waitForSelector('textarea, input[type="text"]', { timeout: 10000 });
+        // 等待聊天输入框加载完成（使用 data-testid 选择器）
+        await page.waitForSelector('[data-testid="chat-input"]', { timeout: 30000 });
         await page.waitForTimeout(1000);
     });
 
@@ -28,7 +43,7 @@ test.describe("待办助手多轮对话测试", () => {
 
         // === 第一轮：创建待办 ===
         console.log("=== 第一轮：创建待办 ===");
-        const input = page.locator('textarea, input[type="text"]').first();
+        const input = page.locator('[data-testid="chat-input"]');
         await input.fill(`帮我创建一个待办：${todoTitle}`);
         
         // 发送消息
@@ -39,8 +54,8 @@ test.describe("待办助手多轮对话测试", () => {
         console.log("等待创建确认卡片...");
         
         try {
-            // 等待确认按钮出现（确认卡片的特征）
-            const confirmBtn = page.getByRole("button", { name: "确认", exact: true });
+            // 等待确认按钮出现（使用 data-testid 选择器）
+            const confirmBtn = page.locator('[data-testid="confirm-button"]');
             await confirmBtn.waitFor({ state: "visible", timeout: 60000 });
             console.log("确认卡片已出现，找到确认按钮");
             
@@ -84,7 +99,7 @@ test.describe("待办助手多轮对话测试", () => {
         await page.waitForTimeout(10000);
 
         try {
-            const completeConfirmBtn = page.getByRole("button", { name: "确认", exact: true });
+            const completeConfirmBtn = page.locator('[data-testid="confirm-button"]');
             if (await completeConfirmBtn.isVisible({ timeout: 10000 })) {
                 await completeConfirmBtn.click();
                 console.log("已确认完成待办");
@@ -109,16 +124,16 @@ test.describe("待办助手多轮对话测试", () => {
 
         // === 第一轮：创建待办 ===
         console.log("=== 第一轮：创建待办 ===");
-        const input = page.locator('textarea, input[type="text"]').first();
+        const input = page.locator('[data-testid="chat-input"]');
         await input.fill(`创建待办：${todoTitle}，优先级高`);
         
         const sendButton = page.locator('button[type="submit"], button:has-text("发送")').first();
         await sendButton.click();
         await page.waitForTimeout(15000);
 
-        // 确认创建
+        // 确认创建（使用 data-testid 选择器）
         try {
-            const confirmBtn = page.getByRole("button", { name: "确认", exact: true });
+            const confirmBtn = page.locator('[data-testid="confirm-button"]');
             if (await confirmBtn.isVisible({ timeout: 5000 })) {
                 await confirmBtn.click();
                 console.log("已确认创建");
@@ -135,7 +150,7 @@ test.describe("待办助手多轮对话测试", () => {
         await page.waitForTimeout(15000);
 
         try {
-            const confirmBtn = page.getByRole("button", { name: "确认", exact: true });
+            const confirmBtn = page.locator('[data-testid="confirm-button"]');
             if (await confirmBtn.isVisible({ timeout: 5000 })) {
                 await confirmBtn.click();
                 console.log("已确认修改");
@@ -152,7 +167,7 @@ test.describe("待办助手多轮对话测试", () => {
         await page.waitForTimeout(15000);
 
         try {
-            const confirmBtn = page.getByRole("button", { name: "确认", exact: true });
+            const confirmBtn = page.locator('[data-testid="confirm-button"]');
             if (await confirmBtn.isVisible({ timeout: 5000 })) {
                 await confirmBtn.click();
                 console.log("已确认删除");

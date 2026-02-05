@@ -11,6 +11,8 @@ from typing import Sequence, List, Set
 
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage
 
+from app.ai.utils.message_factory import create_ai_message
+
 logger = logging.getLogger(__name__)
 
 def fix_missing_image_links(messages: Sequence[BaseMessage]) -> Sequence[BaseMessage]:
@@ -125,13 +127,13 @@ def fix_missing_image_links(messages: Sequence[BaseMessage]) -> Sequence[BaseMes
     # 使用 model_copy (如果是 pydantic v2) 或者直接构造新对象
     # Langchain message 是 pydantic v1 usually
     
-    # 只要修改 content 即可，其他属性保持不变
-    new_ai_msg = AIMessage(
-        content=new_content,
-        additional_kwargs=last_ai_msg.additional_kwargs,
-        response_metadata=last_ai_msg.response_metadata,
+    # 使用消息工厂保持 ID 与附加属性一致（便于 add_messages 去重）
+    new_ai_msg = create_ai_message(
+        new_content,
         id=last_ai_msg.id,
-        name=last_ai_msg.name
+        additional_kwargs=last_ai_msg.additional_kwargs or {},
+        response_metadata=getattr(last_ai_msg, "response_metadata", None),
+        name=getattr(last_ai_msg, "name", None),
     )
     
     # 构造新的消息列表

@@ -4,7 +4,7 @@
 """
 from typing import Optional, Any
 from datetime import datetime
-from sqlalchemy import BigInteger, Integer, String, Text, DateTime, JSON, Column
+from sqlalchemy import BigInteger, Integer, String, Text, DateTime, JSON, Column, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -40,3 +40,11 @@ class ChatMessage(Base):
         comment="创建时间"
     )
     title: Mapped[Optional[str]] = mapped_column(String(255), comment="对话标题")
+    
+    # 复合索引定义
+    __table_args__ = (
+        # 按用户+时间排序查询（获取用户对话列表）
+        Index("idx_chat_message_user_time", "user_id", "create_time"),
+        # 按线程+时间排序查询（获取线程内消息）
+        Index("idx_chat_message_thread_time", "thread_id", "create_time"),
+    )

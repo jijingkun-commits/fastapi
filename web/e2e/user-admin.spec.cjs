@@ -10,7 +10,7 @@
 const { test, expect } = require('@playwright/test');
 
 // 测试配置
-const ADMIN_USERNAME = 'admin';
+const ADMIN_USERNAME = 'jjk';  // 登录用账号（jjk 拥有管理员权限）
 const TEST_USER_PREFIX = 'e2e_test_';
 
 // Sonner toast 选择器辅助函数

@@ -20,6 +20,7 @@ from app.ai.prompts.judge_prompts import (
     DETAILED_JUDGE_PROMPT
 )
 from app.ai.prompts.knowledge_prompts import KNOWLEDGE_AGENT_SYSTEM_PROMPT
+from app.ai.prompts.prompt_loader import load_reference, enrich_prompt
 
 __all__ = [
     "INTENT_CLASSIFY_PROMPT",
@@ -33,5 +34,8 @@ __all__ = [
     "OUTPUT_JUDGE_PROMPT",
     "DETAILED_JUDGE_PROMPT",
     "KNOWLEDGE_AGENT_SYSTEM_PROMPT",
+    # prompt_loader 工具函数
+    "load_reference",
+    "enrich_prompt",
 ]
 

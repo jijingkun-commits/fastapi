@@ -20,8 +20,8 @@ test.describe('Todo Agent E2E Flow', () => {
         // Handle login if redirected (check if we are on auth page)
         if (page.url().includes('/auth')) {
             await expect(page.getByText('登录到系统')).toBeVisible();
-            await page.fill('input#identifier', 'admin');
-            await page.fill('input#password', '123456');
+            await page.fill('input#identifier', 'jjk');
+            // jjk 账号开发环境无需密码
             await page.getByRole('button', { name: '登录' }).click();
         }
 

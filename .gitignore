@@ -20,6 +20,9 @@ logs/
 dist/
 build/
 coverage/
+
+# E2E 测试调试截图
+web/e2e/debug-step-*.png
 .coverage
 coverage.xml
 htmlcov/

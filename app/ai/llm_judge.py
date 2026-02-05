@@ -196,7 +196,32 @@ async def iterative_improvement(
 
 # ==================== 专项评估 ====================
 
-async def evaluate_sql_response(sql: str, result: str) -> JudgeResult:
+def evaluate_sql_response_sync(sql: str, result: str, model_id: str = None) -> JudgeResult:
+    """同步版本的 SQL 评估（供同步节点使用）。"""
+    from app.ai.llm_util import get_llm
+    
+    prompt = f"""评估 SQL 查询质量:
+
+SQL: {sql}
+执行状态: {result[:1000] if result else '待执行'}
+
+检查:
+1. SQL 语法是否正确
+2. 是否使用了正确的表名和列名
+3. 查询逻辑是否合理
+
+返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
+    
+    try:
+        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        structured_llm = llm.with_structured_output(JudgeResult)
+        return structured_llm.invoke(prompt)
+    except Exception as e:
+        logger.warning("SQL 评估失败: %s", e)
+        return JudgeResult(score="pass", feedback="评估跳过")
+
+
+async def evaluate_sql_response(sql: str, result: str, model_id: str = None) -> JudgeResult:
     """评估 SQL 查询结果。"""
     from app.ai.llm_util import get_llm
     

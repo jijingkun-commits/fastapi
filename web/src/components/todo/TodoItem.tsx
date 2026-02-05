@@ -116,7 +116,7 @@ function TodoItemComponent({
                             {/* 重复任务图标 */}
                             {todo.is_recurring && (
                                 <span
-                                    className="flex items-center text-blue-500 flex-shrink-0"
+                                    className="flex items-center text-[#2F6868] flex-shrink-0"
                                     title={`${todo.recurrence_pattern === 'daily' ? '每日' : todo.recurrence_pattern === 'weekly' ? '每周' : '每月'}重复`}
                                 >
                                     <Repeat className="w-3 h-3" />

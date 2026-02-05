@@ -113,7 +113,7 @@ function ThreadItem({
       <div
         className={`group relative flex w-full items-center rounded-md px-2 py-2 transition-colors ${
           isSelected
-            ? "bg-indigo-50 border border-indigo-200"
+            ? "bg-[#E8F4F4] border border-[#A8D4D4]"
             : isActive
             ? "bg-primary/10 text-primary"
             : "hover:bg-gray-100"
@@ -349,7 +349,7 @@ export default function ThreadHistory() {
               )}
               {selectedIds.size === threads.length ? "取消全选" : "全选"}
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
               已选 {selectedIds.size} 项
             </span>
           </div>
@@ -440,17 +440,22 @@ export default function ThreadHistory() {
             <SheetHeader className="border-b pb-3">
               {isSelectMode ? (
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="h-8 px-2"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
                       onClick={handleSelectAll}
+                      title={selectedIds.size === threads.length ? "取消全选" : "全选"}
                     >
-                      {selectedIds.size === threads.length ? "取消全选" : "全选"}
+                      {selectedIds.size === threads.length ? (
+                        <CheckSquare className="h-4 w-4" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
                     </Button>
-                    <span className="text-sm text-muted-foreground">
-                      已选 {selectedIds.size}
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">
+                      已选 {selectedIds.size} 项
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -458,17 +463,18 @@ export default function ThreadHistory() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        className="h-8"
+                        className="h-8 px-2"
                         onClick={handleBatchDelete}
                         disabled={isDeleting}
                       >
+                        <Trash2 className="h-4 w-4 mr-1" />
                         删除
                       </Button>
                     )}
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8"
+                      className="h-8 px-2"
                       onClick={exitSelectMode}
                     >
                       取消

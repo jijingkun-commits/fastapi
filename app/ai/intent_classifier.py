@@ -96,6 +96,8 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
             "意图识别完成: intent=%s, confidence=%.2f, route_to=%s",
             result.intent, result.confidence, result.route_to
         )
+        if result.intent == "web_search":
+            logger.info("意图识别为联网搜索: message=%s", message[:100] if message else "(空)")
         
         return result
         

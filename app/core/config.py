@@ -118,6 +118,9 @@ INTENT_CLASSIFIER_MODEL = os.getenv("INTENT_CLASSIFIER_MODEL", "glm-4.5-air")
 # 智谱 API Key (用于 Embedding 向量化)
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 
+# 阿里云 DashScope API Key (用于 Qwen/DeepSeek 模型)
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+
 
 # 搜索
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -133,6 +136,10 @@ API_PUBLIC_URL = os.getenv("API_PUBLIC_URL", "http://localhost:8000/public")
 SQL_REQUIRE_APPROVAL = os.getenv("SQL_REQUIRE_APPROVAL", "true").lower() == "true"
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
+
+# LLM Judge 输出评估（用于问数助手 SQL 质量评估）
+ENABLE_LLM_JUDGE = os.getenv("ENABLE_LLM_JUDGE", "false").lower() == "true"
+LLM_JUDGE_MODEL = os.getenv("LLM_JUDGE_MODEL", "glm-4.5-air")
 
 # MCP Chart
 MCP_CHART_SERVER_URL = os.getenv("MCP_CHART_SERVER_URL", "http://127.0.0.1:1122/sse")

@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
+from app.ai.utils.message_factory import create_ai_message
 
 from app.ai.state import TodoAgentState
 from app.db.session import get_db_context
@@ -104,8 +105,8 @@ def summarize_node(state: TodoAgentState) -> TodoAgentState:
                 logger.error(f"查询待办失败: {e}")
     
     if not todos:
-        state["messages"].append(AIMessage(
-            content="📋 当前没有待处理的待办事项。"
+        state["messages"].append(create_ai_message(
+            "📋 当前没有待处理的待办事项。"
         ))
         return state
     
@@ -164,7 +165,7 @@ def summarize_node(state: TodoAgentState) -> TodoAgentState:
     lines.append(f"共 **{total}** 项待办 | 🔴 {len(high_priority)} 高 | 🟡 {len(medium_priority)} 中 | 🔵 {len(low_priority)} 低")
     
     summary_text = "\n".join(lines)
-    state["messages"].append(AIMessage(content=summary_text))
+    state["messages"].append(create_ai_message(summary_text))
     
     logger.info(f"生成待办清单: {total} 项")
     return state

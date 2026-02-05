@@ -19,6 +19,7 @@ def init_db(seed_admin: bool = True) -> None:
                     username="admin",
                     password=password,
                     mobile="13800000000",
+                    role="admin",
                 )
                 db.add(user)
                 db.commit()

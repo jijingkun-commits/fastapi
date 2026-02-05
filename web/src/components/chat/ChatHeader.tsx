@@ -131,7 +131,7 @@ export function ChatHeader({
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="relative h-9 w-9 rounded-full">
                             <Avatar className="h-9 w-9">
-                                <AvatarFallback className="bg-indigo-100 text-indigo-600">
+                                <AvatarFallback className="bg-[#E8F4F4] text-[#2F6868]">
                                     <User className="h-4 w-4" />
                                 </AvatarFallback>
                             </Avatar>

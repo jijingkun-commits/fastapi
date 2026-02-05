@@ -165,7 +165,10 @@ class SkillService:
                 except Exception as e:
                     logger.error(f"导入技能失败 {skill_path}: {e}")
         
-        logger.info(f"共导入 {count} 个技能")
+        if count == 0 and skill_files:
+            logger.info("共导入 0 个技能（%d 个文件均已是最新，无需更新）", len(skill_files))
+        else:
+            logger.info(f"共导入 {count} 个技能")
         return count
     
     @classmethod

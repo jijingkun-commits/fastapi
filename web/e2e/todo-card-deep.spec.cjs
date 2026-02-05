@@ -15,8 +15,8 @@ test.describe('Todo Card Deep Testing', () => {
 
         await page.goto('/auth');
         if (page.url().includes('/auth')) {
-            await page.fill('input#identifier', 'admin');
-            await page.fill('input#password', '123456');
+            await page.fill('input#identifier', 'jjk');
+            // jjk 账号开发环境无需密码
             await page.getByRole('button', { name: '登录' }).click();
         }
         try {
@@ -39,8 +39,8 @@ test.describe('Todo Card Deep Testing', () => {
         // 2. 等待 ConfirmationCard 出现
         await page.waitForTimeout(8000);
 
-        // 3. 查找确认按钮并点击
-        const confirmBtn = page.getByRole('button', { name: /确认|Confirm/i });
+        // 3. 查找确认按钮并点击（使用 data-testid 选择器）
+        const confirmBtn = page.locator('[data-testid="confirm-button"]');
         if (await confirmBtn.isVisible({ timeout: 5000 })) {
             console.log('找到确认按钮，点击确认');
             await confirmBtn.click();
@@ -82,8 +82,8 @@ test.describe('Todo Card Deep Testing', () => {
             await titleInput.fill(`${todoTitle}_Modified`);
         }
 
-        // 5. 确认
-        const confirmBtn = page.getByRole('button', { name: /确认|Confirm|保存/i });
+        // 5. 确认（使用 data-testid 选择器）
+        const confirmBtn = page.locator('[data-testid="confirm-button"]');
         if (await confirmBtn.isVisible({ timeout: 3000 })) {
             await confirmBtn.click();
             await page.waitForTimeout(3000);
@@ -102,8 +102,8 @@ test.describe('Todo Card Deep Testing', () => {
         // 2. 等待 ConfirmationCard 出现
         await page.waitForTimeout(8000);
 
-        // 3. 查找拒绝按钮并点击（使用精确匹配，避免匹配历史对话中的按钮）
-        const rejectBtn = page.getByRole('button', { name: '拒绝', exact: true });
+        // 3. 查找拒绝按钮并点击（使用 data-testid 选择器）
+        const rejectBtn = page.locator('[data-testid="reject-button"]');
         if (await rejectBtn.isVisible({ timeout: 5000 })) {
             console.log('找到拒绝按钮，点击拒绝');
             await rejectBtn.click();

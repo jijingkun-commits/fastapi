@@ -25,6 +25,7 @@ from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
 from app.models.token_blacklist import TokenBlacklist
+from app.models.idempotency_key import IdempotencyKey
 
 
 def get_db_columns(table_name: str) -> set:
@@ -46,11 +47,69 @@ def check_table_exists(table_name: str) -> bool:
     return table_name in inspector.get_table_names()
 
 
+def get_all_models():
+    """获取所有需要同步的模型列表。"""
+    return [
+        User, Todo, TodoHistory, TodoReminderQueue,
+        ChatMessage, ChatAsset, MetaTable, MetaColumn,
+        MetaRelation, TokenBlacklist, IdempotencyKey
+    ]
+
+
+def get_db_indexes(table_name: str) -> set:
+    """获取数据库表的索引名集合。"""
+    inspector = inspect(engine)
+    if table_name not in inspector.get_table_names():
+        return set()
+    return {idx["name"] for idx in inspector.get_indexes(table_name) if idx["name"]}
+
+
+def sync_missing_indexes():
+    """同步缺失的索引（模型有、数据库没有）。"""
+    models = get_all_models()
+    changes: List[Tuple[str, str, object]] = []
+    
+    for model in models:
+        table_name = model.__tablename__
+        if not check_table_exists(table_name):
+            continue
+        
+        # 获取模型定义的索引
+        if not hasattr(model, "__table_args__"):
+            continue
+        
+        table_args = model.__table_args__
+        if not isinstance(table_args, tuple):
+            table_args = (table_args,)
+        
+        db_indexes = get_db_indexes(table_name)
+        
+        for arg in table_args:
+            # 只处理 Index 对象（跳过 UniqueConstraint 等其他约束）
+            if arg.__class__.__name__ == "Index" and hasattr(arg, "name"):
+                index_name = arg.name
+                if index_name and index_name not in db_indexes:
+                    changes.append((table_name, index_name, arg))
+    
+    if not changes:
+        print("所有索引已同步，无需创建。")
+        return
+    
+    print(f"\n发现 {len(changes)} 个缺失索引，开始创建...")
+    
+    with engine.begin() as conn:
+        for table_name, index_name, index_obj in changes:
+            print(f"  -> {table_name}.{index_name}")
+            try:
+                index_obj.create(conn)
+                print(f"     ✅ 成功")
+            except Exception as e:
+                print(f"     ❌ 失败: {e}")
+
+
 def sync_missing_columns():
     """同步缺失的列（模型有、数据库没有）。"""
-    models = [User, Todo, TodoHistory, TodoReminderQueue, 
-              ChatMessage, ChatAsset, MetaTable, MetaColumn, 
-              MetaRelation, TokenBlacklist]
+    models = get_all_models()
     
     changes: List[Tuple[str, str, str]] = []
     
@@ -107,9 +166,7 @@ def create_missing_tables():
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     
-    models = [User, Todo, TodoHistory, TodoReminderQueue,
-              ChatMessage, ChatAsset, MetaTable, MetaColumn,
-              MetaRelation, TokenBlacklist]
+    models = get_all_models()
     
     missing_tables = []
     for model in models:
@@ -164,12 +221,16 @@ def main():
     run_alembic_migrations()
     
     # 2. 创建缺失的表
-    print("\n[1/2] 检查缺失表...")
+    print("\n[1/3] 检查缺失表...")
     create_missing_tables()
     
     # 3. 同步缺失的列
-    print("\n[2/2] 检查缺失列...")
+    print("\n[2/3] 检查缺失列...")
     sync_missing_columns()
+    
+    # 4. 同步缺失的索引
+    print("\n[3/3] 检查缺失索引...")
+    sync_missing_indexes()
     
     print("\n" + "=" * 50)
     print("同步完成")

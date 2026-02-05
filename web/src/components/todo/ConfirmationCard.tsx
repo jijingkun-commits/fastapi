@@ -100,10 +100,10 @@ export default function ConfirmationCard({
         const { target_task, diff } = operation
         return (
             <div className="w-full max-w-md mx-auto">
-                <Card className="border-2 border-blue-500 bg-blue-50/50">
+                <Card className="border-2 border-[#2F6868] bg-[#E8F4F4]/50">
                     <CardContent className="p-4 space-y-4">
-                        <div className="flex items-center gap-2 border-b border-blue-200 pb-2">
-                            <Edit2 className="h-5 w-5 text-blue-600" />
+                        <div className="flex items-center gap-2 border-b border-[#A8D4D4] pb-2">
+                            <Edit2 className="h-5 w-5 text-[#2F6868]" />
                             <div className="font-semibold">确认更新</div>
                         </div>
 
@@ -129,7 +129,7 @@ export default function ConfirmationCard({
                                                     <ArrowRight className="h-3 w-3 text-gray-400" />
                                                 </>
                                             )}
-                                            <span className="text-blue-600 font-medium">{String(change.new)}</span>
+                                            <span className="text-[#2F6868] font-medium">{String(change.new)}</span>
                                         </div>
                                     </div>
                                 ))}
@@ -141,14 +141,14 @@ export default function ConfirmationCard({
                                 ).map(([field, value]) => (
                                     <div key={field} className="grid grid-cols-[80px_1fr] gap-2 text-sm items-center">
                                         <span className="text-gray-500 font-medium text-right">{translateField(field)}:</span>
-                                        <span className="text-blue-600 font-medium">{String(value)}</span>
+                                        <span className="text-[#2F6868] font-medium">{String(value)}</span>
                                     </div>
                                 ))}
                             </div>
                         )}
 
                         <div className="flex gap-2 pt-2">
-                            <Button onClick={() => onConfirm(operation.data)} className="flex-1 bg-blue-600 hover:bg-blue-700">
+                            <Button onClick={() => onConfirm(operation.data)} className="flex-1 bg-[#2F6868] hover:bg-[#245454]">
                                 <CheckCircle className="mr-2 h-4 w-4" />确认更新
                             </Button>
                             <Button onClick={onCancel} variant="outline" className="flex-1">
@@ -240,16 +240,16 @@ export default function ConfirmationCard({
     // ==================== Create 视图（单个待办创建）====================
     return (
         <div className="w-full max-w-md mx-auto">
-            <Card className="border-2 border-blue-500 bg-blue-50/50 backdrop-blur-xl">
+            <Card className="border-2 border-[#2F6868] bg-[#E8F4F4]/50 backdrop-blur-xl">
                 <CardContent className="p-4 space-y-3">
                     {/* 头部 */}
                     <div className="flex items-center gap-2 pb-2 border-b">
-                        <CheckCircle className="h-5 w-5 text-blue-600" />
+                        <CheckCircle className="h-5 w-5 text-[#2F6868]" />
                         <h3 className="font-semibold text-base">待创建</h3>
                     </div>
 
                     {/* 待办卡片 */}
-                    <div className="border rounded-lg border-blue-500 bg-blue-50">
+                    <div className="border rounded-lg border-[#2F6868] bg-[#E8F4F4]">
                         {/* 列表项头部 */}
                         <div className="p-3 flex items-center gap-3">
                             <div className="flex-1 min-w-0" onClick={() => setIsExpanded(!isExpanded)}>
@@ -344,7 +344,7 @@ export default function ConfirmationCard({
                     <div className="flex gap-2 pt-2">
                         <Button
                             onClick={handleConfirm}
-                            className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+                            className="flex-1 bg-[#2F6868] hover:bg-[#245454]"
                         >
                             <CheckCircle className="mr-2 h-4 w-4" />
                             确认创建

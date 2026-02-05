@@ -11,7 +11,7 @@ test.describe('用户故事: 管理后台', () => {
         test.setTimeout(60000);
 
         await test.step('Given: 管理员已登录', async () => {
-            await loginIfNeeded(page, { username: 'admin', password: '123456' });
+            await loginIfNeeded(page);
         });
 
         await test.step('When: 进入 LLM 配置页面', async () => {

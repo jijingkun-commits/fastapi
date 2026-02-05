@@ -16,7 +16,15 @@ class NaturalTimeParser:
         self.base_date = self.base_time.replace(hour=0, minute=0, second=0, microsecond=0)
     
     def parse(self, text: str) -> Tuple[Optional[datetime], Dict]:
-        """解析时间表达式。"""
+        """解析时间表达式。
+        
+        支持的格式：
+        - 相对日期：今天、明天、后天
+        - 星期：周一、下周二、本周三
+        - 周期：这周内、下周内
+        - 具体时间点：9点、10点30分、下午3点半、早上8点
+        - 时间段：早上、上午、下午、晚上、下班前
+        """
         if not text:
             return None, {}
 
@@ -39,14 +47,27 @@ class NaturalTimeParser:
         if not parsed_time:
             parsed_time = self._parse_period(text)
 
-        # 4. 时间微调 (上午/下午/下班前)
+        # 4. 提取具体时间点 (如 "9点"、"10点30分"、"3点半")
+        # 此步骤必须在设置默认时间之前
+        specific_time = self._parse_specific_time(text)
+        
+        # 5. 如果只有时间点没有日期，默认使用今天
+        if specific_time and not parsed_time:
+            parsed_time = self.base_date
+        
+        # 6. 时间微调 (上午/下午/下班前/早上)
         # 默认时间设为 9:00 (如果只是日期)
         if parsed_time:
-             # 如果之前没设置过小时（即 hour=0），初始化为 09:00
-             if parsed_time.hour == 0 and parsed_time.minute == 0:
-                 parsed_time = parsed_time.replace(hour=9)
-                 
-             parsed_time = self._adjust_time_of_day(parsed_time, text)
+            if specific_time:
+                # 有具体时间点，直接使用
+                hour, minute = specific_time
+                parsed_time = parsed_time.replace(hour=hour, minute=minute)
+            else:
+                # 没有具体时间点，使用默认值 9:00
+                if parsed_time.hour == 0 and parsed_time.minute == 0:
+                    parsed_time = parsed_time.replace(hour=9)
+                # 根据时间段调整
+                parsed_time = self._adjust_time_of_day(parsed_time, text)
 
         return parsed_time, {
             "original_text": text,
@@ -117,20 +138,86 @@ class NaturalTimeParser:
             
         return None
 
+    def _parse_specific_time(self, text: str) -> Optional[Tuple[int, int]]:
+        """提取具体时间点，如 "9点"、"10点30分"、"3点半"、"早上8点"。
+        
+        Returns:
+            (hour, minute) 元组，如果没有匹配则返回 None
+        """
+        # 匹配模式：
+        # - (早上|上午|中午|下午|晚上)? - 可选的时间段前缀
+        # - (\d{1,2}) - 小时数
+        # - [点:：时] - 分隔符
+        # - (?:(\d{1,2})[分]?|半)? - 可选的分钟数或"半"
+        pattern = r'(早上|凌晨|上午|中午|下午|傍晚|晚上)?(\d{1,2})[点:：时](?:(\d{1,2})[分]?|(半))?'
+        match = re.search(pattern, text)
+        
+        if not match:
+            return None
+        
+        period = match.group(1)  # 时间段前缀
+        hour = int(match.group(2))  # 小时
+        minute_str = match.group(3)  # 分钟数字
+        is_half = match.group(4)  # "半"
+        
+        # 计算分钟
+        if is_half:
+            minute = 30
+        elif minute_str:
+            minute = int(minute_str)
+        else:
+            minute = 0
+        
+        # 根据时间段前缀调整小时（12小时制转24小时制）
+        if period in ["下午", "傍晚", "晚上"] and hour < 12:
+            hour += 12
+        elif period == "中午" and hour == 12:
+            pass  # 中午12点保持不变
+        elif period in ["凌晨"] and hour == 12:
+            hour = 0  # 凌晨12点 = 0点
+        elif period in ["早上", "上午", "凌晨"]:
+            # 早上/上午时间保持不变（1-12点）
+            if hour == 12:
+                hour = 0  # 上午12点 = 0点（凌晨）
+        elif period is None and hour <= 6:
+            # 没有时间段前缀且小时数很小时，可能指的是下午
+            # 例如 "3点开会" 通常指下午3点
+            # 但这个规则比较模糊，暂时保守处理，不自动转换
+            pass
+        
+        # 验证时间范围
+        if hour > 23:
+            hour = 23
+        if minute > 59:
+            minute = 59
+        
+        return (hour, minute)
+
     def _adjust_time_of_day(self, dt: datetime, text: str) -> datetime:
-        """根据 上下午/下班前 调整时间"""
+        """根据 早上/上午/下午/晚上/下班前 调整时间。
+        
+        注意：此方法仅在没有具体时间点时调用，用于设置默认时间。
+        """
         if "下班前" in text:
             return dt.replace(hour=18, minute=0)
         if "晚上" in text:
             return dt.replace(hour=20, minute=0)
-        if "下午" in text:
+        if "下午" in text or "傍晚" in text:
             # 如果当前是默认的9点，改为14点
-            # 如果用户没指定具体时间点
             if dt.hour == 9: 
                 return dt.replace(hour=14, minute=0)
-        if "上午" in text:
-            if dt.hour == 9: # 保持9点或微调
+        if "中午" in text:
+            # 中午默认12点
+            if dt.hour == 9:
+                return dt.replace(hour=12, minute=0)
+        if "上午" in text or "早上" in text:
+            # 早上/上午保持9点
+            if dt.hour == 9:
                 pass
+        if "凌晨" in text:
+            # 凌晨默认6点
+            if dt.hour == 9:
+                return dt.replace(hour=6, minute=0)
         
         return dt
 
@@ -161,5 +248,6 @@ class NaturalTimeParser:
         return constraints
 
     def _is_fuzzy_time(self, text: str) -> bool:
-        keywords = ["下午", "上午", "晚上", "可能", "大概", "左右"]
+        """判断时间表达是否模糊。"""
+        keywords = ["下午", "上午", "晚上", "早上", "凌晨", "可能", "大概", "左右"]
         return any(k in text for k in keywords)

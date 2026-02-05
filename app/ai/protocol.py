@@ -12,6 +12,8 @@ from typing import Optional, Dict, Any, Tuple, List, Set
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage
 
+from app.ai.utils.message_factory import create_ai_message
+
 logger = logging.getLogger(__name__)
 
 class AgentProtocol:
@@ -143,12 +145,12 @@ class MessageFilter:
                 if not safe_calls:
                     # 如果没有合法的工具调用，但有文本内容，保留文本
                     if msg.content:
-                        filtered.append(AIMessage(content=msg.content, id=msg.id))
+                        filtered.append(create_ai_message(msg.content, id=msg.id))
                     continue
                 
                 # 如果部分工具调用不合法，仅保留合法的
                 if len(safe_calls) != len(msg.tool_calls):
-                    new_msg = AIMessage(content=msg.content, tool_calls=safe_calls, id=msg.id)
+                    new_msg = create_ai_message(msg.content, id=msg.id, tool_calls=safe_calls)
                     filtered.append(new_msg)
                 else:
                     filtered.append(msg)

@@ -162,7 +162,7 @@ export function DataAdminPanel() {
             return <Badge className="bg-green-100 text-green-800">已训练</Badge>;
         }
         if (log.is_correct === true) {
-            return <Badge className="bg-blue-100 text-blue-800">正确</Badge>;
+            return <Badge className="bg-[#E8F4F4] text-[#2F6868]">正确</Badge>;
         }
         if (log.is_correct === false) {
             return <Badge className="bg-red-100 text-red-800">错误</Badge>;
@@ -230,7 +230,7 @@ export function DataAdminPanel() {
                 <CardContent className="p-0">
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
-                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#A8D4D4] border-t-[#2F6868]" />
                         </div>
                     ) : logs.length === 0 ? (
                         <div className="text-center py-12 text-muted-foreground">

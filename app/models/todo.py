@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import Optional, List
 
-from sqlalchemy import Integer, String, Text, Boolean, DateTime, JSON
+from sqlalchemy import Integer, String, Text, Boolean, DateTime, JSON, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -102,6 +102,20 @@ class Todo(Base):
         DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
     )
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, comment="扩展元数据")
+    
+    # 复合索引定义
+    __table_args__ = (
+        # 按用户+状态查询（排除已删除）
+        Index(
+            "idx_todo_user_status", "user_id", "status",
+            postgresql_where=text("is_deleted = false")
+        ),
+        # 按用户+截止日期查询（排除已删除和已完成）
+        Index(
+            "idx_todo_user_due", "user_id", "due_date",
+            postgresql_where=text("is_deleted = false AND status != 'done'")
+        ),
+    )
     
     def __repr__(self) -> str:
         status_icon = {

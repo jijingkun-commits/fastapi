@@ -645,9 +645,7 @@ export async function listUsers(
   const r = await apiFetch(`/api/v1/users?${params}`);
   if (!r.ok) throw new Error("获取用户列表失败");
   return r.json();
-}
-
-/**
+}/**
  * 创建用户（管理员）
  */
 export async function createUser(data: CreateUserRequest): Promise<UserListItem> {
@@ -680,9 +678,7 @@ export async function updateUserStatus(
     throw new Error(err.detail || "更新状态失败");
   }
   return r.json();
-}
-
-/**
+}/**
  * 用户登出
  */
 export async function logout(): Promise<void> {
@@ -694,4 +690,3 @@ export async function logout(): Promise<void> {
     window.sessionStorage.removeItem("auth:token");
   }
 }
-

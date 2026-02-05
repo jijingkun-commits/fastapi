@@ -37,22 +37,32 @@ DATA_INTENT_ANALYSIS_PROMPT = """你是一个专业的数据分析助手。
 - **指标名称**: 如果匹配到预定义指标
 - **图表类型**: 如"柱状图"、"折线图"、"饼图"（如有）
 
+## 多轮对话规则（重要）
+
+若下方「已有上下文」非空，表示用户已在之前轮次提供过信息。当前轮用户可能在**补充**（如只回复「本月」「总体的」）。
+- 请**合并**已有上下文与当前轮内容，不要丢弃已有信息。
+- **不要**对用户已明确提供过的内容再次要求澄清（如已有指标且用户说「本月」时，只补时间，不要再问「请指定指标」）。
+- 仅当确实缺少**关键**信息（如既无指标也无时间）时，才填写 clarification_needed，且只问**尚未提供**的那一项。
+
 ## 输出格式
 
 返回 JSON:
 ```json
-{
+{{
   "intent": "metric_query" | "free_query" | "visualization" | "clarification",
-  "metric_name": "指标名称（如有）",
-  "time_range": "时间范围描述",
+  "metric_name": "指标名称（如有则填，无则留空）",
+  "time_range": "时间范围描述（如有则填）",
   "filters": ["筛选条件列表"],
-  "dimensions": ["聚合维度列表"],
+  "dimensions": ["聚合维度列表，如用户说「总体」「汇总」则为空"],
   "chart_type": "图表类型（如有）",
-  "clarification_needed": "需要用户澄清的内容（如有）"
-}
+  "clarification_needed": "仅当仍缺关键信息时填写，否则留空"
+}}
 ```
 
-用户问题：{question}
+已有上下文（上一轮或历史已提供）：
+{existing_context}
+
+用户当前轮输入：{question}
 
 可用指标列表：
 {available_metrics}
@@ -137,17 +147,17 @@ SQL:
 
 如果发现问题，返回：
 ```json
-{
+{{
   "safe": false,
   "issues": ["问题描述列表"],
   "recommendation": "修改建议"
-}
+}}
 ```
 
 如果安全，返回：
 ```json
-{
+{{
   "safe": true
-}
+}}
 ```
 """

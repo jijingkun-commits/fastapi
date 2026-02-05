@@ -127,7 +127,7 @@ init_database() {
     cd "$PROJECT_ROOT"
     
     # 1. 基础表结构
-    log_info "  [1/6] 创建基础表结构..."
+    log_info "  [1/7] 创建基础表结构..."
     python3 -c "
 from sqlalchemy import create_engine, text
 from app.core.config import DATABASE_URL
@@ -141,7 +141,7 @@ print('扩展已启用')
 "
     
     # 2. 执行 SQL 迁移
-    log_info "  [2/6] 执行 SQL 迁移..."
+    log_info "  [2/7] 执行 SQL 迁移..."
     for sql_file in install/sql/init_postgres.sql; do
         if [[ -f "$sql_file" ]]; then
             log_info "    执行: $sql_file"
@@ -167,7 +167,7 @@ with engine.begin() as conn:
     done
     
     # 3. 增量迁移
-    log_info "  [3/6] 执行增量迁移..."
+    log_info "  [3/7] 执行增量迁移..."
     for sql_file in install/scripts/init_postgres.sql/*.sql; do
         if [[ -f "$sql_file" ]]; then
             log_info "    执行: $(basename $sql_file)"
@@ -193,16 +193,20 @@ with engine.begin() as conn:
     done
     
     # 4. 初始化 LLM 配置
-    log_info "  [4/6] 初始化 LLM 配置..."
+    log_info "  [4/7] 初始化 LLM 配置..."
     python3 scripts/init_llm_config.py 2>/dev/null || log_warn "LLM 配置初始化跳过"
     
-    # 5. 初始化指标定义
-    log_info "  [5/6] 初始化指标定义..."
+    # 5. 初始化系统配置
+    log_info "  [5/7] 初始化系统配置..."
+    python3 install/scripts/init_system_config.py 2>/dev/null || log_warn "系统配置初始化跳过"
+    
+    # 6. 初始化指标定义
+    log_info "  [6/7] 初始化指标定义..."
     python3 scripts/init_metric_definition.py 2>/dev/null || true
     python3 scripts/expand_metrics.py 2>/dev/null || true
     
-    # 6. 同步元数据
-    log_info "  [6/6] 同步表元数据..."
+    # 7. 同步元数据
+    log_info "  [7/7] 同步表元数据..."
     python3 scripts/schema_sync.py 2>/dev/null || log_warn "元数据同步跳过（可能缺少分析库）"
     
     log_success "数据库初始化完成"

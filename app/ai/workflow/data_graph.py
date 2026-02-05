@@ -11,6 +11,7 @@ import json
 from typing import Dict, List, Optional, Literal
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+from app.ai.utils.message_factory import create_ai_message
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
@@ -28,7 +29,7 @@ from app.ai.prompts.data_prompts import (
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.utils.state_helpers import get_user_id
 from app.ai.utils.schema_router import route_schema
-from app.core.config import ANALYTICS_DEFAULT_SCHEMA
+from app.core.config import ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, LLM_JUDGE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ logger = logging.getLogger(__name__)
 # ==================== 系统提示词 ====================
 
 AVAILABLE_METRICS = """
+- 贷款余额 / 贷款总额: 贷款类指标，同义词：贷款、放款余额
+- 存款余额 / 存款总额: 存款类指标，同义词：存款、储蓄
 - total_gmv: 成交总额 (GMV)，同义词：销售额、收入
 - order_count: 订单数量，同义词：成单量、订单总数
 - avg_order_value: 客单价 (AOV)，同义词：平均订单金额
@@ -68,43 +71,105 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     
     if not last_message:
         return {"clarification_needed": "请输入您的数据查询问题"}
-    
-    # 调用 LLM 分析意图
-    llm = get_llm()
+
+    # 多轮上下文：从 state 取已有信息，避免重复询问
+    existing_metric = (state.get("matched_metric") or "").strip()
+    existing_time = (state.get("time_range") or "").strip()
+    existing_dims = state.get("dimensions") or []
+    existing_filters = state.get("filters") or []
+    if isinstance(existing_dims, list):
+        existing_dims_str = "、".join(existing_dims) if existing_dims else ""
+    else:
+        existing_dims_str = str(existing_dims) if existing_dims else ""
+    if isinstance(existing_filters, list):
+        existing_filters_str = "、".join(existing_filters) if existing_filters else ""
+    else:
+        existing_filters_str = str(existing_filters) if existing_filters else ""
+    parts = []
+    if existing_metric:
+        parts.append(f"指标: {existing_metric}")
+    if existing_time:
+        parts.append(f"时间范围: {existing_time}")
+    if existing_dims_str:
+        parts.append(f"聚合维度: {existing_dims_str}")
+    if existing_filters_str:
+        parts.append(f"筛选: {existing_filters_str}")
+    existing_context = "；".join(parts) if parts else "（无，为首轮或尚未提供）"
+
+    # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
+    llm = get_llm(internal=True)
     prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
         question=last_message,
+        existing_context=existing_context,
         available_metrics=AVAILABLE_METRICS
     )
-    
+
     try:
         response = llm.invoke(prompt)
         content = response.content if hasattr(response, 'content') else str(response)
-        
+
         # 解析 JSON 响应
-        # 尝试提取 JSON
         json_start = content.find('{')
         json_end = content.rfind('}') + 1
         if json_start >= 0 and json_end > json_start:
             analysis = json.loads(content[json_start:json_end])
         else:
             analysis = {"intent": "free_query"}
-        
+
         logger.info(f"意图分析结果: {analysis}")
-        
+
+        # 合并多轮结果：新值为空时保留已有值，避免覆盖用户已提供的信息
+        new_metric = (analysis.get("metric_name") or "").strip()
+        new_time = (analysis.get("time_range") or "").strip()
+        new_dims = analysis.get("dimensions")
+        if not isinstance(new_dims, list):
+            new_dims = []
+        new_filters = analysis.get("filters")
+        if not isinstance(new_filters, list):
+            new_filters = []
+        merged_metric = new_metric or existing_metric
+        merged_time = new_time or existing_time
+        merged_dims = new_dims if new_dims else existing_dims
+        merged_filters = new_filters if new_filters else existing_filters
+        clarification = (analysis.get("clarification_needed") or "").strip()
+        # 若合并后已具备指标+时间，且用户当前轮像是补充（短句），则不再要求澄清
+        if clarification and merged_metric and merged_time:
+            if len(last_message.strip()) <= 20 or any(kw in last_message for kw in ("本月", "总体", "汇总", "全部", "过去")):
+                clarification = ""
+                logger.info("多轮合并后已具备指标与时间，取消重复澄清")
+
+        # 为 SQL 生成构造完整查询描述（多轮合并后的语义），避免仅用当前句「总体的」生成
+        full_question = last_message
+        if merged_metric or merged_time:
+            parts_desc = []
+            if merged_metric:
+                parts_desc.append(f"查询{merged_metric}")
+            if merged_time:
+                parts_desc.append(f"时间范围{merged_time}")
+            if merged_dims:
+                parts_desc.append(f"按{merged_dims}聚合" if isinstance(merged_dims, list) else f"按{merged_dims}聚合")
+            if merged_filters:
+                parts_desc.append(f"筛选{merged_filters}" if isinstance(merged_filters, list) else str(merged_filters))
+            if parts_desc and last_message.strip() not in ("本月", "总体", "总体的", "汇总", "全部"):
+                full_question = "，".join(parts_desc) + "。" + (f" 用户补充：{last_message}" if last_message else "")
+            elif parts_desc:
+                full_question = "，".join(parts_desc)
+
         updates = {
             "data_intent": analysis.get("intent", "free_query"),
-            "matched_metric": analysis.get("metric_name"),
-            "time_range": analysis.get("time_range"),
-            "filters": analysis.get("filters", []),
-            "dimensions": analysis.get("dimensions", []),
+            "matched_metric": merged_metric or None,
+            "time_range": merged_time or None,
+            "filters": merged_filters,
+            "dimensions": merged_dims,
             "viz_type": analysis.get("chart_type"),
-            "clarification_needed": analysis.get("clarification_needed"),
+            "clarification_needed": clarification or None,
             "query_context": {
-                "original_question": last_message,
+                "original_question": full_question,
+                "last_user_message": last_message,
                 "analysis": analysis
             }
         }
-        
+
         return updates
         
     except Exception as e:
@@ -313,13 +378,25 @@ def sql_generate(state: DataAgentState) -> Dict:
 - 如果检索到的 DDL 中已包含 schema 前缀，请直接使用该前缀
 """
         
-        # 构建完整的 prompt（显式注入 RAG 检索结果 + Schema 约束）
+        # 按需加载 SQL 指南（复杂查询时提供更多上下文）
+        sql_guide_section = ""
+        if len(question) > 50 or state.get("data_intent") == "free_query":
+            try:
+                from app.ai.prompts.prompt_loader import load_reference
+                sql_guide = load_reference("sql_guide")
+                if sql_guide:
+                    sql_guide_section = f"\n\n## SQL 编写指南\n\n{sql_guide}"
+                    logger.debug("已加载 sql_guide 参考文档")
+            except Exception as e:
+                logger.debug(f"加载 sql_guide 失败（不影响主流程）: {e}")
+        
+        # 构建完整的 prompt（显式注入 RAG 检索结果 + Schema 约束 + 可选指南）
         full_prompt = SQL_GENERATION_PROMPT.format(
             ddl=ddl_context,
             documentation=doc_context,
             similar_queries=similar_context,
             question=question
-        ) + schema_constraint
+        ) + schema_constraint + sql_guide_section
         
         # 构建消息列表
         messages = [
@@ -352,14 +429,37 @@ def sql_generate(state: DataAgentState) -> Dict:
             # 更新 SQL 历史
             new_history = sql_history + [{"sql": sql, "error": None}]
             
-            return {
+            # LLM Judge 质量评估（可选）
+            judge_feedback = None
+            if ENABLE_LLM_JUDGE:
+                try:
+                    from app.ai.llm_judge import evaluate_sql_response_sync
+                    
+                    judge_result = evaluate_sql_response_sync(
+                        sql, "待执行", LLM_JUDGE_MODEL
+                    )
+                    
+                    if judge_result.score == "fail":
+                        logger.warning(f"SQL 质量评估失败: {judge_result.feedback}")
+                        judge_feedback = judge_result.feedback
+                    else:
+                        logger.info(f"SQL 质量评估通过: {judge_result.score}")
+                except Exception as e:
+                    logger.warning(f"SQL 质量评估异常（不阻塞主流程）: {e}")
+            
+            result = {
                 "generated_sql": sql,
                 "sql_source": "vanna_rag",
                 "pending_sql": sql,
                 "iterations": iterations,
-                "last_error": None,  # 清除错误状态
+                "last_error": None,
                 "sql_history": new_history
             }
+            
+            if judge_feedback:
+                result["judge_feedback"] = judge_feedback
+            
+            return result
         else:
             return {
                 "clarification_needed": "无法理解您的查询需求，请重新描述或提供更多细节",
@@ -526,7 +626,7 @@ def sql_execute(state: DataAgentState) -> Dict:
     
     if not sql:
         emit_error(writer, "没有可执行的 SQL", node="sql_execute")
-        return {"messages": [AIMessage(content="❌ 没有可执行的 SQL")]}
+        return {"messages": [create_ai_message("❌ 没有可执行的 SQL")]}
     
     # === 权限检查与 SQL 重写 ===
     if user_id:
@@ -539,7 +639,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                 logger.warning(f"SQL 权限检查失败: user_id={user_id}, error={perm_error}")
                 emit_error(writer, f"权限不足: {perm_error}", node="sql_execute")
                 return {
-                    "messages": [AIMessage(content=f"❌ 权限不足：{perm_error}")],
+                    "messages": [create_ai_message(f"❌ 权限不足：{perm_error}")],
                     "last_error": perm_error,
                 }
             
@@ -551,7 +651,7 @@ def sql_execute(state: DataAgentState) -> Dict:
             logger.error(f"权限检查异常，拒绝执行: {e}", exc_info=True)
             emit_error(writer, "权限检查失败，请稍后重试", node="sql_execute")
             return {
-                "messages": [AIMessage(content="❌ 权限检查失败，请稍后重试")],
+                "messages": [create_ai_message("❌ 权限检查失败，请稍后重试")],
                 "last_error": f"权限检查异常: {str(e)}",
             }
     
@@ -575,8 +675,8 @@ def sql_execute(state: DataAgentState) -> Dict:
         interpretation = _interpret_result(question, sql, result_data)
         
         # 构建响应消息
-        response_msg = AIMessage(
-            content=interpretation,
+        response_msg = create_ai_message(
+            interpretation,
             additional_kwargs={
                 "data_type": "sql_result",
                 "data": {
@@ -727,7 +827,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                 logger.warning(f"查询日志记录失败: {log_error}")
             
             return {
-                "messages": [AIMessage(content=error_msg)],
+                "messages": [create_ai_message(error_msg)],
                 "last_error": error_str,
                 "sql_history": updated_history,
                 "execution_success": False
@@ -790,7 +890,7 @@ def clarify_node(state: DataAgentState) -> Dict:
     clarification = state.get("clarification_needed", "请提供更多信息")
     
     return {
-        "messages": [AIMessage(content=f"🤔 {clarification}")]
+        "messages": [create_ai_message(f"🤔 {clarification}")]
     }
 
 

@@ -97,6 +97,7 @@ export function CompactApproval() {
             {/* 右侧：操作按钮 */}
             <div className="flex items-center gap-2 shrink-0">
                 <Button
+                    data-testid="reject-button"
                     size="sm"
                     variant="ghost"
                     className="h-8 px-3 text-sm text-zinc-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
@@ -106,6 +107,7 @@ export function CompactApproval() {
                     拒绝
                 </Button>
                 <Button
+                    data-testid="confirm-button"
                     size="sm"
                     className="h-8 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-sm"
                     onClick={handleApprove}

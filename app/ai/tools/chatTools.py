@@ -38,6 +38,8 @@ if ai_config.TAVILY_API_KEY:
         logger.info("TavilySearch 工具已加载")
     except ImportError:
         logger.warning("langchain-tavily 未安装，搜索工具不可用")
+else:
+    logger.info("联网搜索未启用: TAVILY_API_KEY 未配置")
 
 from sqlalchemy import text
 from langgraph.types import interrupt

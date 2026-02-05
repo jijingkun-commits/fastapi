@@ -1,7 +1,7 @@
 """待办Agent增强节点 - 多轮对话能力扩展。
 
 新增节点:
-- clarify_node: 澄清追问
+- clarify_node: 澄清追问（LLM驱动版本）
 - conflict_detection_node: 冲突检测  
 - task_decomposition_node: 任务拆解
 
@@ -9,11 +9,13 @@
 1. 所有节点函数返回 Dict 而非直接修改 state
 2. 使用配置类管理硬编码值
 3. 细化错误处理
+4. LLM驱动：clarify_node 直接使用 analyze_intent 生成的 response_message
 """
 import json
 import logging
 from typing import Dict, List, Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from app.ai.utils.message_factory import create_ai_message, create_human_message
 from langchain_core.runnables.config import RunnableConfig
 
 from app.ai.llm_util import get_llm
@@ -30,16 +32,11 @@ logger = logging.getLogger(__name__)
 config = get_todo_config()
 
 from langchain_core.output_parsers import JsonOutputParser
-from pydantic import BaseModel, Field  # 使用标准 pydantic（LangChain 1.x+ 兼容）
+from pydantic import BaseModel, Field
 
 # ==================== Pydantic 响应模型 ====================
 
-class ClarificationResult(BaseModel):
-    """澄清节点输出模型"""
-    needs_clarification: bool = Field(description="是否需要进一步澄清")
-    missing_info: List[str] = Field(default=[], description="缺失的信息列表")
-    questions: List[str] = Field(default=[], description="需要向用户提问的问题列表")
-    context_summary: Optional[str] = Field(None, description="上下文摘要")
+# 注意：ClarificationResult 已移除，clarify_node 现在直接使用 LLM 生成的 response_message
 
 class SubTask(BaseModel):
     """子任务模型"""
@@ -56,25 +53,25 @@ class DecompositionResult(BaseModel):
 
 # ==================== 澄清节点 ====================
 
-from app.ai.prompts.todo_prompts import TODO_CLARIFY_PROMPT
-
 def clarify_node(state: TodoAgentState) -> Dict:
-    """澄清节点 - 识别信息不完整并生成追问。
+    """澄清节点 - LLM驱动版本。
     
-    支持三种模式:
-    1. 纯澄清: 无待办信息,生成开放式追问
-    2. 确认式澄清: 有部分待办信息,展示待办详情并询问用户确认或补充
-    3. 逐项目追问: 多个项目时依次追问每个项目详情
+    直接使用 analyze_intent 阶段 LLM 生成的 response_message，
+    不再内部重新调用 LLM 或自行生成消息。
+    
+    核心逻辑:
+    1. 优先使用 state.response_message（LLM 已生成的回复）
+    2. 仅在 response_message 为空时使用兜底消息
+    3. 保留多项目追问模式（逐项目循环）
     
     Returns:
         Dict: 需要更新的状态字段（LangGraph 推荐方式）
     """
-    logger.info("=== clarify_node节点 ===")
+    logger.info("=== clarify_node节点 (LLM驱动版) ===")
     
-    # 初始化更新字典
     updates: Dict = {}
     
-    # Check if last message is AI message (e.g. Cancel confirmation)
+    # 检查上一条消息是否是 AI 回复，避免重复
     if state.get("messages") and isinstance(state["messages"][-1], AIMessage):
         logger.info("上一条消息是 AI 回复，跳过澄清生成")
         return updates
@@ -83,10 +80,9 @@ def clarify_node(state: TodoAgentState) -> Dict:
     try:
         writer = get_stream_writer()
     except Exception:
-        # Fallback for testing or when running outside of LangGraph context
         writer = lambda x: None
     
-    # 模式3: 逐项目追问循环
+    # 多项目追问模式（逐项目循环）
     project_queue = state.get("project_queue", [])
     current_idx = state.get("current_project_index", 0)
     
@@ -94,8 +90,7 @@ def clarify_node(state: TodoAgentState) -> Dict:
         current_project = project_queue[current_idx]
         remaining = len(project_queue) - current_idx
         
-        # 生成针对当前项目的追问
-        lines = [f"📋 关于 **{current_project}** (还有 {remaining} 个项目待讨论)：", ""]
+        lines = [f"关于 **{current_project}** (还有 {remaining} 个项目待讨论)：", ""]
         lines.append("请告诉我：")
         lines.append("1. 这个项目的主要任务是什么？")
         lines.append("2. 截止时间是什么时候？")
@@ -104,9 +99,8 @@ def clarify_node(state: TodoAgentState) -> Dict:
         lines.append("*回复后我会继续询问下一个项目*")
         
         clarify_text = "\n".join(lines)
-        updates["messages"] = [AIMessage(content=clarify_text)]
+        updates["messages"] = [create_ai_message(clarify_text)]
         
-        # 发送澄清事件给前端
         emit_clarification(writer, 
                           questions=["1. 这个项目的主要任务是什么？", "2. 截止时间是什么时候？", "3. 您负责哪些部分？"],
                           message=clarify_text,
@@ -117,174 +111,32 @@ def clarify_node(state: TodoAgentState) -> Dict:
         logger.info(f"逐项目追问: {current_project} ({current_idx + 1}/{len(project_queue)})")
         return updates
     
-    # 检查是否有部分待办信息
-    pending_op = state.get("pending_operation")
+    # LLM驱动：直接使用 analyze_intent 生成的 response_message
+    response_message = state.get("response_message")
     
-    if pending_op and pending_op.get("needs_clarification"):
-        # 模式2.5: 重复检测警告 (发现相似任务)
-        if pending_op.get("duplicate_warning"):
-            data = pending_op["data"]
-            new_title = data.get("title", "新待办")
-            duplicates = state.get("duplicate_candidates", [])
-            
-            lines = ["⚠️ **检测到相似任务**", ""]
-            lines.append(f"您要创建的待办：**{new_title}**")
-            lines.append("")
-            lines.append("🔍 已存在以下相似任务：")
-            
-            for i, dup in enumerate(duplicates[:3], 1):
-                due_info = f"，截止 {dup['due_date']}" if dup.get("due_date") else ""
-                sim_pct = int(dup.get("similarity", 0) * 100)
-                lines.append(f"  {i}. `#{dup['id']}` {dup['title']} (相似度 {sim_pct}%{due_info})")
-            
-            lines.append("")
-            lines.append("**请选择：**")
-            lines.append("1. 回复「**仍需新建**」创建新任务")
-            lines.append("2. 回复「**用 #ID**」关联到已有任务")
-            lines.append("3. 回复「**取消**」放弃操作")
-            
-            clarify_text = "\n".join(lines)
-            updates["messages"] = [AIMessage(content=clarify_text)]
-            
-            # 发送澄清事件给前端
-            emit_clarification(writer, 
-                               questions=["1. 仍需新建", "2. 用已有任务", "3. 取消"],
-                               message=clarify_text,
-                               node="clarify_node")
-            
-            logger.info(f"生成重复警告澄清: {new_title}, 相似任务数: {len(duplicates)}")
-            return updates
+    if response_message and response_message.strip():
+        # 使用 LLM 生成的回复消息
+        updates["messages"] = [create_ai_message(response_message)]
         
-        # 模式2: 确认式澄清 (有部分待办信息)
-        data = pending_op["data"]
-        action = pending_op.get("action", "create")
-        
-        # 提取所有可能的字段
-        title = data.get("title") or "未命名待办"
-        time_str = data.get("time") or data.get("due_date") or ""
-        priority = data.get("priority")
-        category = data.get("category") or ""
-        description = data.get("description") or ""
-        location = data.get("location") or ""  # 地点字段
-        is_urgent = data.get("is_urgent", False)
-        affected_tasks = data.get("affected_tasks", [])
-        
-        # 使用配置获取优先级显示
-        priority_str = config.get_priority_display(priority) if priority else "中"
-        
-        # 构建详细的待办信息展示
-        if is_urgent:
-            lines = ["🚨 **紧急任务** 📝", ""]
-        else:
-            lines = ["我可以帮您记录这个待办 📝", ""]
-            
-        lines.append(f"**待办信息：**")
-        lines.append(f"- 📝 标题：{title}")
-        if time_str:
-            lines.append(f"- ⏰ 时间：{time_str}")
-        else:
-            lines.append(f"- ⏰ 时间：未设置")
-        if location:
-            lines.append(f"- 📍 地点：{location}")
-        lines.append(f"- ⭐ 优先级：{priority_str}")
-        if category:
-            lines.append(f"- 🏷️ 分类：{category}")
-        if description:
-            lines.append(f"- 📄 描述：{description}")
-        
-        # Phase 3: 显示受影响的任务
-        if affected_tasks:
-            lines.append("")
-            lines.append("⚠️ **注意：以下同日任务可能需要调整：**")
-            for task in affected_tasks[:5]:  # 最多显示5个
-                lines.append(f"  - {task}")
-            if len(affected_tasks) > 5:
-                lines.append(f"  - ...还有 {len(affected_tasks) - 5} 个任务")
-        
-        # 添加确认提示
-        lines.append("")
-        lines.append("您可以：")
-        lines.append("1. 回复「**确认**」直接创建")
-        lines.append("2. 补充更多信息（如具体时间、地点、提醒等）")
-        
-        clarify_text = "\n".join(lines)
-        updates["messages"] = [AIMessage(content=clarify_text)]
-        
-        # 发送澄清事件给前端
-        emit_clarification(writer, 
-                          questions=["1. 回复「确认」直接创建", "2. 补充更多信息"],
-                          message=clarify_text,
+        # 发送澄清事件
+        pending_clarifications = state.get("pending_clarifications", [])
+        emit_clarification(writer,
+                          questions=pending_clarifications,
+                          message=response_message,
                           node="clarify_node")
         
-        logger.info(f"生成确认式澄清: {title}")
-        
+        logger.info(f"使用 LLM 生成的 response_message: {response_message[:50]}...")
     else:
-        # 模式1: 纯澄清 (无待办信息)
-        messages = state.get("messages", [])
-        last_user_msg = None
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                last_user_msg = msg.content
-                break
+        # 兜底：response_message 为空时的默认消息
+        fallback_msg = "请告诉我您需要完成什么任务？包括具体内容和时间安排。"
+        updates["messages"] = [create_ai_message(fallback_msg)]
         
-        if not last_user_msg:
-            return updates
+        emit_clarification(writer,
+                          questions=[],
+                          message=fallback_msg,
+                          node="clarify_node")
         
-        # 调用LLM评估
-        llm = get_llm()
-        clarify_messages = [
-            SystemMessage(content=TODO_CLARIFY_PROMPT),
-            HumanMessage(content=f"用户消息: {last_user_msg}\n\n当前上下文: {state.get('conversation_context', {})}")
-        ]
-        
-        # 初始化 Parser
-        parser = JsonOutputParser(pydantic_object=ClarificationResult)
-        
-        try:
-            # 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
-            response = llm.invoke(clarify_messages, config={"tags": ["internal_thought"]})
-            
-            # 使用标准 Parser 解析
-            result = parser.parse(response.content)
-            
-            if result.get("needs_clarification"):
-                # 生成追问消息
-                questions = result.get("questions", [])
-                if questions:
-                    clarify_text = "我需要了解更多信息:\n\n" + "\n".join([f"{i+1}. {q}" for i, q in enumerate(questions)])
-                else:
-                    # fallback: 使用 missing_info
-                    missing = result.get("missing_info", [])
-                    if missing:
-                        clarify_text = "请补充以下信息:\n\n" + "\n".join([f"• {m}" for m in missing])
-                    else:
-                        clarify_text = "请告诉我更多细节，以便我更好地帮助你。"
-                
-                updates["pending_clarifications"] = questions
-                updates["messages"] = [AIMessage(content=clarify_text)]
-                
-                # 发送澄清事件给前端
-                emit_clarification(writer, 
-                                  questions=questions,
-                                  message=clarify_text,
-                                  node="clarify_node")
-                
-                logger.info(f"生成澄清追问: {len(questions)}个问题")
-            else:
-                # 不需要澄清，生成友好提示
-                friendly_msg = "好的，请告诉我具体需要完成什么任务？"
-                updates["messages"] = [AIMessage(content=friendly_msg)]
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"澄清节点 JSON 解析失败: {e}")
-            # 降级: 生成友好的提示消息,避免JSON泄漏
-            fallback_msg = "我需要了解更多信息:\n\n请告诉我:\n1. 您希望完成什么任务?\n2. 相关的时间安排是?\n3. 有什么特别要注意的吗?"
-            updates["messages"] = [AIMessage(content=fallback_msg)]
-        except Exception as e:
-            logger.error(f"澄清节点意外错误: {e}")
-            # 降级: 生成友好的提示消息,避免JSON泄漏
-            fallback_msg = "我需要了解更多信息:\n\n请告诉我:\n1. 您希望完成什么任务?\n2. 相关的时间安排是?\n3. 有什么特别要注意的吗?"
-            updates["messages"] = [AIMessage(content=fallback_msg)]
+        logger.warning("response_message 为空，使用兜底消息")
     
     return updates
 
@@ -411,7 +263,7 @@ def conflict_detection_node(state: TodoAgentState) -> Dict:
                 conflict_text += f"   💡 {c['suggestion']}\n"
         conflict_text += "\n是否需要调整任务安排?"
         
-        updates["messages"] = [AIMessage(content=conflict_text)]
+        updates["messages"] = [create_ai_message(conflict_text)]
         logger.info(f"检测到 {len(conflicts)} 个新冲突, 总计 {len(existing_conflicts)} 个")
     
     return updates
@@ -441,19 +293,18 @@ def task_decomposition_node(state: TodoAgentState) -> Dict:
     
     for todo in draft_todos:
         if todo.get("is_complex"):
-            # 调用LLM拆解
-            llm = get_llm()
+            # 调用 LLM 拆解（internal=True 自动禁用流式 + 添加 tag）
+            llm = get_llm(internal=True)
             decompose_messages = [
                 SystemMessage(content=TODO_DECOMPOSE_PROMPT),
-                HumanMessage(content=f"任务: {todo.get('title')}\n描述: {todo.get('description', '')}")
+                create_human_message(f"任务: {todo.get('title')}\n描述: {todo.get('description', '')}")
             ]
             
             # 初始化 Parser
             parser = JsonOutputParser(pydantic_object=DecompositionResult)
 
             try:
-                # 添加 internal_thought tag，防止原始 JSON 被流式发送到前端
-                response = llm.invoke(decompose_messages, config={"tags": ["internal_thought"]})
+                response = llm.invoke(decompose_messages)  # internal=True 自动添加 tag
                 
                 # 使用标准 Parser 解析
                 result = parser.parse(response.content)
@@ -472,8 +323,8 @@ def task_decomposition_node(state: TodoAgentState) -> Dict:
                     
                     # 标记外部依赖
                     if result.get("external_dependencies"):
-                        messages_to_add.append(AIMessage(
-                            content=f"📌 注意: {result['main_task']} 依赖于:\n" + 
+                        messages_to_add.append(create_ai_message(
+                            f"📌 注意: {result['main_task']} 依赖于:\n" + 
                             "\n".join([f"- {dep}" for dep in result["external_dependencies"]])
                         ))
                     

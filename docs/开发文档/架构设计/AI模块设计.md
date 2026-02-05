@@ -277,7 +277,6 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 
 | 特性 | 说明 |
 |-----|------|
-| 重复检测 | Jaccard n-gram 相似度，阈值 0.4 |
 | 渐进式策略 | 多轮对话后自动给默认值 |
 | 快速模式 | 检测关键词跳过确认 |
 | 实体解析 | 模糊匹配用户指定的待办 |
@@ -861,6 +860,8 @@ sequenceDiagram
 | 错误自愈机制 | `data_graph.py` | 执行失败时自动重试（最多 3 次），错误信息反馈给 LLM |
 | 统一安全检查 | `sql_safety.py` (新) | 消除代码重复，集中管理危险关键词和敏感表黑名单 |
 | 向量相似度搜索 | `metric_service.py` | 指标匹配优先使用 embedding 向量搜索 |
+| LLM Judge 评估 | `llm_judge.py` | SQL 生成后可选质量评估，需设置 `ENABLE_LLM_JUDGE=true` |
+| Prompt 渐进披露 | `prompt_loader.py` | 复杂查询按需加载 sql_guide 参考文档，节省 Token |
 
 #### 多数据源架构
 

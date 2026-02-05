@@ -12,7 +12,7 @@ test.describe('用户故事: 聊天系统', () => {
         const message = `你好，简短回复我 ${Date.now()}`;
 
         await test.step('Given: 用户已登录并进入聊天界面', async () => {
-            await loginIfNeeded(page, { username: 'admin', password: '123456' });
+            await loginIfNeeded(page);
             await ensureChatReady(page);
         });
 

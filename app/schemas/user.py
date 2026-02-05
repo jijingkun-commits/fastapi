@@ -52,16 +52,12 @@ class UserListItem(BaseModel):
     dept_name: Optional[str] = None
     is_active: bool = True
     create_time: Optional[datetime] = None
-
-
 class UserListResponse(BaseModel):
     """用户列表分页响应。"""
     items: List[UserListItem]
     total: int
     page: int
     page_size: int
-
-
 class UserStatusUpdate(BaseModel):
     """用户状态更新请求。"""
     is_active: bool = Field(..., description="是否启用")

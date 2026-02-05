@@ -26,35 +26,35 @@ const adminModules = [
         description: "配置问数功能的数据库访问权限、表白名单/黑名单",
         href: "/admin/access",
         icon: Shield,
-        color: "bg-blue-500",
+        color: "bg-[#2F6868]",
     },
     {
         title: "LLM 模型配置",
         description: "管理 AI 模型提供商、模型启用/禁用、默认模型设置",
         href: "/admin/llm",
         icon: Bot,
-        color: "bg-purple-500",
+        color: "bg-[#3D7A7A]",
     },
     {
         title: "技能管理",
         description: "查看和管理 AI 技能列表与向量状态",
         href: "/admin/skills",
         icon: Sparkles,
-        color: "bg-amber-500",
+        color: "bg-[#4B8C8C]",
     },
     {
         title: "系统配置",
         description: "查看和编辑系统运行参数配置",
         href: "/admin/system",
         icon: Settings,
-        color: "bg-slate-500",
+        color: "bg-[#599E9E]",
     },
     {
         title: "用户管理",
         description: "管理系统用户、角色和权限",
         href: "/admin/users",
         icon: Users,
-        color: "bg-green-500",
+        color: "bg-[#67B0B0]",
     },
 ];
 
@@ -83,7 +83,7 @@ export default function AdminPage() {
                             <p className="mt-1 flex-1 text-sm text-slate-500">
                                 {module.description}
                             </p>
-                            <div className="mt-4 flex items-center text-sm font-medium text-indigo-600 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="mt-4 flex items-center text-sm font-medium text-[#2F6868] opacity-0 transition-opacity group-hover:opacity-100">
                                 进入管理
                                 <ChevronRight className="ml-1 h-4 w-4" />
                             </div>
