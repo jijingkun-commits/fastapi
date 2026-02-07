@@ -1,74 +1,92 @@
-# 🤖 AI 协作速查表 (AI Collaboration Cheatsheet)
+# AI 协作速查表
 
-> **一句话原则**: 用 Slash Command (/) 触发流程，用 Artifact (@) 注入上下文。
+> **一句话原则**: 用 Slash Command (/) 触发流程，用 @ 注入上下文。
 
-## 1. 核心工作流 (Core Workflows)
+**本文定位**：一页速查卡，开发时快速查阅"用哪个命令"。如需了解 Skills、Commands、Rules 的详细原理和用法，请阅读 [Vibe Coding 开发技巧](vibe-coding开发技巧.md)。
 
-| 阶段 | 你的动作 (Slash Command) | AI 的产出 (Artifact) | 你的下一步 |
+---
+
+## 1. 核心工作流
+
+```
+想法 → /clarify → /plan → requirements.md → /imp → 代码 → /review → /test → 验收
+```
+
+| 阶段 | 命令 | AI 产出 | 你的下一步 |
 |---|---|---|---|
-| **想点子** | `/vibe-coding` | (无，纯对话) | 明确意图，准备规划 |
-| **做规划** | `/plan` | `docs/需求文档/requirements.md` | **@引用此文件** 进行开发 |
-| **写代码** | (直接对话) + `@requirements.md` | 代码变更 + 文档更新 | 审查代码 (Review) |
-| **测功能** | `/test` | `docs/测试报告/` | 验收通过 (Green) |
-| **修 Bug** | `/vibe-coding` (Review 阶段) | (无) | 针对性修改 |
+| **澄清需求** | `/clarify` | (无，纯对话) | 明确意图，准备规划 |
+| **做规划** | `/plan` | `requirements.md` | @引用此文件进行开发 |
+| **写代码** | `/imp` + `@requirements.md` | 代码变更 + 文档更新 | 审查代码 |
+| **审查** | `/review` | 审查意见 | 修复问题 |
+| **测功能** | `/test` | 测试报告 | 验收通过 |
+| **修 Bug** | `/debug` | 修复 + 测试用例 | 确认修复 |
+| **全流程** | `/feature` | 全部（= plan + imp + review） | 验收 |
 
 ---
 
-## 2. 如何 "引用文档" (@Context)
+## 2. 如何引用上下文 (@Context)
 
-不要把所有文档都扔给 AI。根据当前任务，只 `@` 最相关的那个：
+不要把所有文档都扔给 AI。根据当前任务，只 @ 最相关的那个：
 
-### 场景 A：我要开发新功能
-- 🟢 **必须引用**: `@requirements.md` (需求契约)
-- ⚪ **可选引用**: `@相关代码文件`, `@数据库设计.md`
-
-### 场景 B：我要修复 Bug
-- 🟢 **必须引用**: `@报错日志` (或截图), `@疑似出问题的代码`
-- ⚪ **可选引用**: `@requirements.md` (确认是否符合预期)
-
-### 场景 C：我要写新的 API
-- 🟢 **必须引用**: `@api-doc/SKILL.md` (格式规范), `@requirements.md`
-- ⚪ **可选引用**: `@后端架构.md`
-
-### 场景 D：使用 AI 技能 (Superpowers)
-- 💡 **头脑风暴**: `@brainstorming` (我有想法但没细节)
-- 🐛 **Python 调试**: `@python-debug` (代码报错求救)
-- ⚛️ **前端开发**: `@react-best-practices` + `@tailwind-patterns`
-- 🔒 **安全检查**: `@security-checklist`
-- 🧪 **编写测试**: `@testing-patterns`
-
-> 💡 **Tip**: 这里的 `api-doc/SKILL.md` 指的是物理文件路径。而在 Antigravity IDE 中，你可以直接尝试用自然语言（如 "Use python-expert to debug..."）或尝试 `@skills/python-expert` (取决于 IDE 版本支持)。
+| 场景 | 必须引用 | 可选引用 |
+|------|---------|---------|
+| 开发新功能 | `@requirements.md` | `@相关代码文件`, `@数据库设计.md` |
+| 修复 Bug | `@报错日志`, `@疑似出问题的代码` | `@requirements.md` |
+| 写新 API | `@接口文档.md`, `@requirements.md` | `@后端架构.md` |
+| 前端开发 | `@web/src/components/相关组件` | `@前端架构.md` |
 
 ---
 
-## 3. 常见误区 (Anti-Patterns)
+## 3. 常见误区
 
-- ❌ **误区 1**: "我只要 @文档编写规范.md，AI 就能写出好代码。"
-    - **真相**: 规范只告诉 AI "格式" (Format)，不告诉 AI "内容" (Content)。你需要 `@requirements.md` 告诉它**做什么**。
-- ❌ **误区 2**: "开发完了再补文档。"
-    - **真相**: 遵循 Vibe Coding，**先**生成 `requirements.md`，**再**写代码。文档是 AI 的"导航图"。
-- ❌ **误区 3**: "AI 写的代码不用看。"
-    - **真相**: 你是 Tech Lead。AI 是实习生。**必须 Review**。
+- **"AI 写的代码不用看"** — 你是 Tech Lead，AI 是实习生，必须 Review。
+- **"开发完了再补文档"** — 先 `/plan` 生成需求文档，再写代码。文档是 AI 的导航图。
+- **"只给规范不给需求"** — 规范只告诉 AI "格式"，`@requirements.md` 才告诉它 "做什么"。
 
 ---
 
-## 4. 常用指令速查
+## 4. 全部命令速查（19 个）
 
-### 4.1 核心指令
-- `/feature`: **全流程开发**。一键搞定 Plan + Imp + Review + Test。
-    - *适用场景*: 任务较简单，或不希望手动分步执行时。
-- `/plan` + `/imp` + `/review`: **分步开发模式**。
-    - *适用场景*: 任务复杂，或者希望在每个阶段人工介入（例如：想在 Review 阶段切换模型以节省成本）。
-- `/debug`: **标准排查流**。重现 -> 定位 -> 修复。
+### 核心开发流程
 
-### 4.2 细分指令 (微操)
-- `/plan`: 仅做规划 (生成 requirements.md)。
-- `/implement` (或 `/imp`): 仅做实现 (代码 + 文档同步)。
-- `/test`: 仅跑测试 (生成报告)。
+| 命令 | 说明 |
+|------|------|
+| `/clarify` | 通过问答澄清需求，不产出文档 |
+| `/plan` | 生成 requirements.md 和技术方案 |
+| `/imp` | 根据计划编写代码，自动同步文档 |
+| `/review` | 功能验证 + 质量检查 + 安全审计 |
+| `/test` | 用例生成、执行验证、报告产出 |
+| `/debug` | 重现、定位、修复、预防 |
+| `/feature` | 一站式：plan + imp + review |
 
-> **💡 区别**: `/feature` = `/plan` + `/implement` + `/test`。
-> 想省心用 `/feature`，想微操用细分指令。
+### Git 工作流
 
-### 4.3 其他
-- `/run-dev`: 启动开发服务器
-- `/langchain-agent-protection`: 查看 Agent 开发规范
+| 命令 | 说明 |
+|------|------|
+| `/git-commit` | 自动分析变更并生成规范提交信息 |
+| `/create-pr` | 生成完整 PR 描述，含变更摘要和测试计划 |
+
+### 代码质量
+
+| 命令 | 说明 |
+|------|------|
+| `/lint` | 运行 ruff/eslint 并自动修复 |
+| `/refactor` | 保持功能不变，改善代码结构 |
+| `/deslop` | 移除 AI 生成的不必要复杂性 |
+| `/optimize` | 分析性能瓶颈并提供优化方案 |
+| `/error-handling` | 添加健壮的异常处理和输入验证 |
+| `/security-audit` | 检查注入漏洞、认证问题、数据泄露 |
+
+### 数据库
+
+| 命令 | 说明 |
+|------|------|
+| `/migration` | 创建带回滚脚本的迁移文件 |
+
+### 文档与可视化
+
+| 命令 | 说明 |
+|------|------|
+| `/diagrams` | 生成 Mermaid 图（流程图、时序图、ER 图等） |
+| `/api-docs` | 根据代码自动生成接口文档 |
+| `/doc-check` | 检查代码变更是否有对应文档更新 |

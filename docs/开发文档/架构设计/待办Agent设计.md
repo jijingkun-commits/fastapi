@@ -100,7 +100,7 @@ class Todo(Base):
 | `id` | Integer | 自增 | 主键 |
 | `user_id` | Integer | - | 用户 ID（索引） |
 | `title` | String(255) | - | 待办标题（必填） |
-| `description` | Text | NULL | 详细描述 |
+| `description` | Text | NULL | 详细描述（地点信息当前拼接在 description 中，未单独建字段） |
 | `start_time` | DateTime | NULL | 开始时间 |
 | `due_date` | DateTime | NULL | 截止时间 |
 | `actual_completion_time` | DateTime | NULL | 实际完成时间 |
@@ -111,10 +111,10 @@ class Todo(Base):
 | `category` | String(50) | NULL | 分类标签 |
 | `tags` | JSON | NULL | 标签数组 |
 | `reminder_enabled` | Boolean | False | 是否启用提醒 |
-| `reminder_type` | String(20) | NULL | 提醒方式 |
+| `reminder_type` | String(20) | NULL | 提醒方式（planned：当前仅存储配置，不含通知发送） |
 | `reminder_advance_minutes` | Integer | NULL | 提前提醒分钟数 |
-| `reminder_times` | JSON | NULL | 多次提醒时间点 |
-| `last_reminded_at` | DateTime | NULL | 最后提醒时间 |
+| `reminder_times` | JSON | NULL | 多次提醒时间点（planned：当前仅存储配置，不含通知发送） |
+| `last_reminded_at` | DateTime | NULL | 最后提醒时间（planned：当前仅存储配置，不含通知发送） |
 | `is_deleted` | Boolean | False | 逻辑删除标记 |
 | `is_recurring` | Boolean | False | 是否重复任务 |
 | `recurrence_pattern` | String(50) | NULL | 重复模式 (daily/weekly/monthly) |
@@ -122,12 +122,12 @@ class Todo(Base):
 | `recurrence_days` | JSON | NULL | 重复的星期几 |
 | `recurrence_end_date` | DateTime | NULL | 重复结束日期 |
 | `parent_recurring_id` | Integer | NULL | 关联的重复任务模板 ID |
-| `parent_id` | Integer | NULL | 父任务 ID（子任务支持） |
-| `task_order` | Integer | 0 | 任务排序 |
-| `depth_level` | Integer | 0 | 层级深度 |
+| `parent_id` | Integer | NULL | 父任务 ID（子任务支持，planned） |
+| `task_order` | Integer | 0 | 任务排序（planned） |
+| `depth_level` | Integer | 0 | 层级深度（planned） |
 | `create_time` | DateTime | now() | 创建时间 |
 | `update_time` | DateTime | now() | 更新时间 |
-| `extra_data` | JSON | NULL | 扩展元数据 |
+| `extra_data` | JSON | NULL | 扩展元数据（预留） |
 
 ### 2.2 状态枚举
 
@@ -137,6 +137,8 @@ class Todo(Base):
 | `in_progress` | ◐ | 进行中（progress > 0 且 < 100） |
 | `done` | ✅ | 已完成（progress = 100） |
 | `cancelled` | ✗ | 已取消 |
+
+> **planned**: 规划扩展状态 `on_hold`（挂起/暂停）。当前不作为 `t_todo.status` 的存储值。
 
 ### 2.3 状态流转规则
 
@@ -897,6 +899,8 @@ def get_progressive_strategy(round_count: int, user_confirmed: bool, quick_mode:
 | `update_todo` | 更新待办 | todo_id, title, description, priority, due_date, category, status |
 | `complete_todo` | 标记完成 | todo_id |
 | `delete_todo` | 删除待办 | todo_id |
+
+> `location` 参数当前不单独落库，会在工具层拼接到 `description` 字段中。
 
 **文件**: `app/ai/tools/batch_todo_tools.py`
 

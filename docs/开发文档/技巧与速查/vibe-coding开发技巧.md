@@ -2,6 +2,8 @@
 
 > **核心理念**: 用自然语言描述意图，让 AI 理解并实现。通过 Skills 增强 AI 能力，通过 Rules 规范 AI 行为。
 
+**本文定位**：完整手册，详解 Skills、Commands、Rules 的原理、用法和项目配置。如果只需快速查阅命令列表，请看 [AI 协作速查表](AI协作速查表.md)。
+
 ## 1. Cursor Skills 使用指南
 
 ### 1.1 已安装的 Skills
@@ -419,6 +421,7 @@ description: 命令的简短描述
 |------|------|----------|
 | `/diagrams` | 生成 Mermaid 图 - 支持流程图、时序图、类图、ER 图等 | `/diagrams 画一下聊天系统时序图` |
 | `/api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/api-docs @app/api/v1/endpoints/` |
+| `/doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/doc-check`（建议在 git commit 前执行） |
 
 ---
 
@@ -460,6 +463,7 @@ npx ai-agent-skills update --all    # 更新全部
 # 文档与可视化 - 保持文档同步
 /diagrams      # 生成 Mermaid 图（流程图、时序图、ER 图等）
 /api-docs      # 根据代码自动生成接口文档
+/doc-check     # 检查代码变更是否有对应文档更新
 
 # === 上下文引用 ===
 @文件路径                            # 引用文件
@@ -486,18 +490,23 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（14 个）
+### 9.2 Commands（19 个）
 
 ```
 .cursor/commands/
 ├── api-docs.md        # 生成 API 文档
+├── clarify.md         # 快速澄清需求
 ├── create-pr.md       # 创建 PR
 ├── debug.md           # 调试问题
-├── deslop.md          # 清理 AI 冗余
-├── diagrams.md        # 生成图表
+├── deslop.md          # 清理 AI 冗余代码
+├── diagrams.md        # 生成 Mermaid 图表
+├── doc-check.md       # 文档同步检查
+├── error-handling.md  # 添加错误处理
 ├── feature.md         # 全流程开发
 ├── git-commit.md      # 规范化提交
 ├── imp.md             # 实现代码
+├── lint.md            # 代码规范检查
+├── migration.md       # 数据库迁移
 ├── optimize.md        # 性能优化
 ├── plan.md            # 需求规划
 ├── refactor.md        # 代码重构

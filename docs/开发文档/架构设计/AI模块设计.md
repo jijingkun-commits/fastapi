@@ -255,7 +255,7 @@ Todo Agent 是一个独立的 StateGraph，采用**意图驱动架构**，支持
 
 | 节点 | 职责 |
 |-----|------|
-| `analyze_intent` | LLM 分析用户意图，提取待办信息 |
+| `analyze_intent` | LLM 分析用户意图，提取待办信息；接收 `config` 参数，当前端传入 `current_todo_id` 时注入选中待办上下文辅助意图判断 |
 | `clarify` | 信息不完整时生成追问 |
 | `resolve` | 模糊标识 → 具体 todo_id |
 | `confirm` + `wait_confirm` | 确认流程 (使用 `interrupt()`) |
@@ -280,6 +280,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | 渐进式策略 | 多轮对话后自动给默认值 |
 | 快速模式 | 检测关键词跳过确认 |
 | 实体解析 | 模糊匹配用户指定的待办 |
+| 选中待办上下文 | 前端选中待办后，`analyze_intent` 从 DB 加载该待办完整信息注入 prompt，辅助 LLM 将用户消息关联到具体待办（支持 update/complete/delete），并自动注入 `todo_id` |
 
 ### 工具调用架构 (ADR-001)
 
@@ -376,25 +377,76 @@ writer(event.to_stream_dict())  # {"type": "token", "data": {"content": "你好"
 **文件**: `app/ai/llm_util.py`
 
 ```python
-from app.ai.llm_util import get_llm, get_llm_by_model_id
+from app.ai.llm_util import get_llm
 
 # 获取默认 LLM
 llm = get_llm()
 
-# 获取指定模型
-llm = get_llm_by_model_id("deepseek-chat")
+# 获取用户选择的模型（从 State 读取）
+llm = get_llm(model_id=state.get("model_id"))
+
+# 内部分析（禁用流式 + 添加 tag，跟随用户模型选择）
+llm = get_llm(internal=True, model_id=state.get("model_id"))
 
 # 启用深度思考模式
-llm = get_llm(enable_thinking=True)
+llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 ```
 
-### 支持的模型类型
+### LLM 调用规范
 
-| 提供商 | 模型代码 | 特性 |
-|--------|----------|------|
-| OpenAI | `gpt-4o` | 通用 |
-| DeepSeek | `deepseek-chat` | 支持 reasoning_content |
-| Qwen | `qwen-max` | 支持 thinking 模式 |
+> **2026-02 架构修复**: 统一所有 chat 类 LLM 调用走 `get_llm()`。
+
+**规则**:
+1. **所有 chat 类 LLM 调用必须通过 `get_llm()`**，禁止自建 `OpenAI` 客户端
+2. **model_id 从 State 读取**: `BaseAgentState` 已定义 `model_id` 和 `enable_thinking` 字段，由 `chat_service` 注入，所有节点可通过 `state.get("model_id")` 获取
+3. **内部分析节点传 model_id 不传 thinking**: `get_llm(internal=True, model_id=...)` 确保模型一致但不消耗 thinking token
+4. **合理例外**: embedding 和 vision 等非 chat 模型仍直接创建客户端（`get_llm()` 不支持这些类型）
+
+**数据流**:
+
+```
+前端模型选择 → API enable_thinking / model_id
+→ chat_service 注入 input_state
+→ BaseAgentState.model_id / enable_thinking
+→ 各节点 state.get("model_id") → get_llm()
+```
+
+### 模型分类路由表
+
+> **2026-02 更新**: 不同场景使用不同模型，避免推理模型浪费 reasoning tokens。
+
+#### 按场景分类
+
+| 场景 | 调用点 | 模型来源 | 配置项 | 推荐模型 |
+|------|--------|----------|--------|----------|
+| 主对话 | Supervisor / Agent 回复 | 用户前端选择 | State `model_id` | 用户自选 |
+| SQL 生成 | `vanna_client.submit_prompt` | 用户前端选择 | State `model_id` | 非推理模型（qwen-plus） |
+| 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 跟随用户模型 | State `model_id` | 同主对话 |
+| 意图分类 | `intent_classifier.py` | 固定配置 | `INTENT_CLASSIFIER_MODEL` | qwen-plus |
+| SQL/回复评估 | `llm_judge.py`, `sql_evaluator.py` | 固定配置 | `LLM_JUDGE_MODEL` | qwen-plus |
+| 参数提取 | `parameter_extractor.py` | 固定配置 | `LLM_JUDGE_MODEL` | qwen-plus |
+| Embedding | `embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
+| Vision | `vision_tool.py` | 数据库 `type=vision` | `t_llm_model` | glm-4v-flash |
+
+#### 按模型类型分类
+
+| 模型类型 | 代表模型 | 特点 | 适合场景 | 不适合场景 |
+|----------|----------|------|----------|------------|
+| 非推理通用 | qwen-plus, deepseek-chat, deepseek-v3.2 | 无 reasoning tokens、响应快、成本低 | SQL 生成、意图分类、评估 | 需要深度推理的复杂问题 |
+| 隐式推理 | glm-4.5-air | 自动消耗 reasoning tokens、不可控 | 复杂对话（需用户主动选择） | 内部分析、SQL 生成（浪费 token） |
+| 显式推理 | qwen-flash, deepseek-r1, kimi-k2.5 | 可控的 thinking 模式（enable_thinking 开关） | 用户开启"思考"开关时 | 日常简单查询 |
+| 深度推理 | kimi-k2-thinking | 仅思考模式、256K 上下文、强工具调用 | 复杂推理、编码、多步骤规划 | 简单查询（始终消耗 reasoning tokens） |
+| 嵌入专用 | embedding-3 | 向量生成，非 chat | DDL/指标向量检索 | 不可用于对话 |
+| 视觉专用 | glm-4v-flash, kimi-k2.5 | 图片/视频理解 | 图片分析、多模态任务 | 不可用于 SQL 生成 |
+
+#### 配置项速查
+
+| 配置项 | 文件 | 默认值 | 环境变量覆盖 | 说明 |
+|--------|------|--------|-------------|------|
+| 数据库默认模型 | `t_llm_model.is_default` | `qwen-plus` | - | 用户未选模型时的主力模型 |
+| `INTENT_CLASSIFIER_MODEL` | `config.py` | `qwen-plus` | `INTENT_CLASSIFIER_MODEL=xxx` | 意图分类器 |
+| `LLM_JUDGE_MODEL` | `config.py` | `qwen-plus` | `LLM_JUDGE_MODEL=xxx` | 评估/Judge/参数提取 |
+| `MODEL_NAME` | `config.py` | `glm-4.5-air` | `MODEL_NAME=xxx` | 环境变量回退（数据库不可用时） |
 
 ---
 
@@ -1180,9 +1232,13 @@ LANGFUSE_HOST=https://cloud.langfuse.com  # 可选
 │  get_related_ddl()         → t_meta_tables + t_meta_columns │
 │  get_related_documentation()→ t_metric_definition (指标定义)│
 │  get_related_question_sql() → t_data_query_log (训练数据)   │
-│  submit_prompt()           → LLM 生成 SQL                   │
+│  submit_prompt()           → 通过 get_llm() 生成 SQL        │
+│    接受 model_id / enable_thinking kwargs                    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> **2026-02 修复**: `submit_prompt()` 已从自建 `OpenAI` 客户端改为统一使用 `get_llm()`，
+> 自动跟随用户的模型选择和思考开关，解决推理模型 token 消耗问题。
 
 **三大检索方法**：
 
@@ -1374,24 +1430,32 @@ def get_related_question_sql(self, question: str) -> List[Dict]:
 
 **脚本**: `app/ai/semantic/schema_sync.py`
 
-向量化用于支持 **语义检索 (Semantic Retrieval)**，即当用户提问（如"存款有多少"）时，系统能找到数据库中最相关的指标定义。
+向量化用于支持 **语义检索 (Semantic Retrieval)**，系统通过向量相似度找到最相关的表结构和指标定义。
 
 ```mermaid
 graph LR
-    A[扫描 t_metric_definition] -->|查找 embedding 为空| B[提取文本]
-    B -->|格式: 名称+描述| C[调用 Embedding API]
-    C -->|获得 1024维 向量| D[更新 embedding 字段]
+    A["扫描 t_meta_tables + t_metric_definition"] -->|查找 embedding 为空| B[提取文本]
+    B -->|格式: 名称+描述| C["调用 Embedding API (embedding-3)"]
+    C -->|获得 2048维 向量| D[更新 embedding 字段]
     D -->|存入 pgvector| E[数据库]
 ```
 
 ### 2. 向量化策略
 
-- **源表**: `t_metric_definition` (在 chat_db 中)
-- **目标字段**: `embedding` (VECTOR 类型, 1024维，适配 ZhipuAI/OpenAI)
+- **源表**: `t_meta_tables`（表元数据）+ `t_metric_definition`（指标定义），均在 chat_db 中
+- **目标字段**: `embedding` (VECTOR(2048) 类型, 智谱 embedding-3 模型)
 - **文本构建**:
   ```python
+  # t_meta_tables
+  text_content = f"{row.display_name or row.table_name}: {row.description or ''}"
+  # t_metric_definition
   text_content = f"指标名称: {row.metric_name}\n定义: {row.description}"
   ```
+
+> **重要**: embedding 模型升级时（如 1024维 -> 2048维），需同步执行：
+> 1. ALTER TABLE 修改 embedding 列维度
+> 2. 清空旧向量 (`UPDATE ... SET embedding = NULL`)
+> 3. 重新运行 `python -m app.ai.semantic.schema_sync`
 
 ### 3. 两层漏斗查询策略
 
@@ -1455,7 +1519,10 @@ Data Agent 采用两层漏斗模型处理用户查询：
 ### 5. 维护说明
 
 - **新增指标**: 插入 `t_metric_definition` 时保持 `embedding` 为 NULL。
-- **运行同步**: 执行 `python app/ai/semantic/schema_sync.py` 自动补充向量。
+- **新增表元数据**: 通过 `scripts/schema_sync.py` 从 Analytics DB 导入，或通过管理后台 API。
+- **运行向量同步**: 执行 `python -m app.ai.semantic.schema_sync` 自动补充缺失向量。
+- **更换 Embedding 模型**: 需同步修改列维度 + 清空旧向量 + 重新同步（详见部署文档）。
+- **DDL 检索降级**: 当向量检索不可用时，`vanna_client.py` 会自动降级到关键词匹配。
 ```
 
 ---
