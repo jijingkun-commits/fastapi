@@ -474,6 +474,169 @@ def toggle_model_active(model_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ==================== 模型路由 ====================
+
+class ModelRouteItem(BaseModel):
+    """模型路由项。"""
+    scene: str           # 场景名称
+    call_point: str      # 调用点
+    source: str          # 模型来源：user_select / fixed_config / db_type
+    config_key: Optional[str] = None  # 配置键名
+    current_model: str   # 当前使用的模型代码
+    recommended: str     # 推荐模型
+    editable: bool       # 是否可在此编辑
+
+
+class ModelRoutingUpdateRequest(BaseModel):
+    """更新模型路由请求。"""
+    config_key: str      # 配置键名
+    model_code: str      # 新的模型代码
+
+
+def _get_type_default_model(db: Session, model_type: str) -> str:
+    """获取指定类型的默认模型代码。"""
+    default = db.query(LLMModel).filter(
+        LLMModel.model_type == model_type,
+        LLMModel.is_default == True,
+        LLMModel.is_active == True
+    ).first()
+    if default:
+        return default.model_code
+    first = db.query(LLMModel).filter(
+        LLMModel.model_type == model_type,
+        LLMModel.is_active == True
+    ).first()
+    return first.model_code if first else "未配置"
+
+
+@router.get("/model-routing", response_model=List[ModelRouteItem])
+def get_model_routing(db: Session = Depends(get_db)):
+    """获取模型路由总览表（按能力分层，5 行）。
+    
+    分层策略：
+    1. 主对话：用户在聊天页自选模型
+    2. SQL 生成 / 内部分析：标准模型，需理解 schema 和业务语义
+    3. 轻量任务：意图分类、参数提取、评估，轻量模型即可
+    4. Embedding：向量化专用
+    5. Vision：图像理解专用
+    """
+    from app.core.config import (
+        INTENT_CLASSIFIER_MODEL, SQL_GENERATION_MODEL,
+        MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_SQL_GENERATION,
+        get_routing_model
+    )
+    
+    # 获取固定配置的当前值（优先 t_system_config，回退环境变量）
+    lightweight_model = get_routing_model(MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL)
+    sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+    
+    routes = [
+        ModelRouteItem(
+            scene="主对话",
+            call_point="Supervisor / Agent 回复",
+            source="user_select",
+            config_key=None,
+            current_model="聊天页模型选择器",
+            recommended="用户按需选择",
+            editable=False
+        ),
+        ModelRouteItem(
+            scene="SQL 生成 / 内部分析",
+            call_point="vanna_client, analyze_data_intent, todo analyze_intent",
+            source="fixed_config",
+            config_key=MODEL_ROUTING_SQL_GENERATION,
+            current_model=sql_gen_model,
+            recommended="qwen-plus / deepseek-chat",
+            editable=True
+        ),
+        ModelRouteItem(
+            scene="轻量任务（意图分类 / 参数提取 / 评估）",
+            call_point="intent_classifier, parameter_extractor, llm_judge, sql_evaluator",
+            source="fixed_config",
+            config_key=MODEL_ROUTING_INTENT_CLASSIFIER,
+            current_model=lightweight_model,
+            recommended="glm-4.5-air / qwen-flash",
+            editable=True
+        ),
+        ModelRouteItem(
+            scene="Embedding",
+            call_point="embedding_util.py",
+            source="db_type",
+            config_key="embedding",
+            current_model=_get_type_default_model(db, "embedding"),
+            recommended="embedding-3",
+            editable=False
+        ),
+        ModelRouteItem(
+            scene="Vision",
+            call_point="vision_tool.py",
+            source="db_type",
+            config_key="vision",
+            current_model=_get_type_default_model(db, "vision"),
+            recommended="glm-4v-flash",
+            editable=False
+        ),
+    ]
+    
+    return routes
+
+
+@router.put("/model-routing")
+def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depends(get_db)):
+    """更新模型路由配置。
+    
+    仅支持更新 fixed_config 类型的路由：
+    - model_routing.lightweight：轻量任务（意图分类/参数提取/评估）
+    - model_routing.sql_generation：SQL 生成 / 内部分析
+    
+    配置持久化到 t_system_config 表，无需重启服务。
+    """
+    from app.core.config import MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION
+    from app.repositories import config_repo
+    from app.services.system_config_service import SystemConfigService
+    
+    # 验证 config_key 合法性（INTENT_CLASSIFIER 和 LLM_JUDGE 共享同一配置键 model_routing.lightweight）
+    allowed_keys = {MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION}
+    if request.config_key not in allowed_keys:
+        raise HTTPException(status_code=400, detail=f"不支持修改此配置项: {request.config_key}")
+    
+    # 验证模型代码是否存在且启用
+    model = db.query(LLMModel).filter(
+        LLMModel.model_code == request.model_code,
+        LLMModel.is_active == True
+    ).first()
+    if not model:
+        raise HTTPException(status_code=400, detail=f"模型不存在或未启用: {request.model_code}")
+    
+    # 描述映射
+    desc_map = {
+        MODEL_ROUTING_INTENT_CLASSIFIER: "轻量任务模型（意图分类/参数提取/评估）",
+        MODEL_ROUTING_SQL_GENERATION: "SQL 生成 / 内部分析模型",
+    }
+    
+    # 写入 t_system_config
+    config_repo.upsert_config(
+        db=db,
+        key=request.config_key,
+        value=request.model_code,
+        value_type="string",
+        category="model_routing",
+        description=desc_map.get(request.config_key, "模型路由配置")
+    )
+    db.commit()
+    
+    # 刷新系统配置缓存
+    SystemConfigService.refresh_cache(db)
+    
+    logger.info(f"更新模型路由: {request.config_key} -> {request.model_code}")
+    
+    return {
+        "message": "模型路由已更新",
+        "config_key": request.config_key,
+        "model_code": request.model_code
+    }
+
+
 # ==================== 模型类型 ====================
 
 @router.get("/model-types")

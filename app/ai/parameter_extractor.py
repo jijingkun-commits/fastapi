@@ -76,9 +76,10 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
         >>> print(params.due_date)  # datetime(2026, 1, 15, 15, 0)
     """
     from app.ai.llm_util import get_llm
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
     except Exception:
         llm = get_llm()
     
@@ -109,7 +110,8 @@ async def extract_query_params(message: str, model_id: str = None) -> QueryParam
     from app.ai.llm_util import get_llm
     
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(QueryParams)
         
         result = await structured_llm.ainvoke(
@@ -129,7 +131,8 @@ async def extract_chart_params(message: str, model_id: str = None) -> ChartParam
     from app.ai.llm_util import get_llm
     
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(ChartParams)
         
         result = await structured_llm.ainvoke(

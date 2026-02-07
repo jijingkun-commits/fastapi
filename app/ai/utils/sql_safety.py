@@ -257,6 +257,7 @@ def check_multiple_statements(sql: str) -> Tuple[bool, Optional[str]]:
     """检查 SQL 是否包含多条语句。
     
     通过分号分隔检测，防止 SQL 注入攻击。
+    处理顺序：移除字符串字面量 -> 移除 SQL 注释 -> 按分号分割。
     
     Args:
         sql: SQL 语句
@@ -265,9 +266,12 @@ def check_multiple_statements(sql: str) -> Tuple[bool, Optional[str]]:
         (is_safe, error_message) 元组
     """
     # 移除字符串字面量中的分号（简化处理）
-    # 完整实现应使用 SQL 解析器
     sql_cleaned = re.sub(r"'[^']*'", "''", sql)  # 替换单引号字符串
     sql_cleaned = re.sub(r'"[^"]*"', '""', sql_cleaned)  # 替换双引号字符串
+    
+    # 移除 SQL 注释，避免 "; -- comment" 被误判为多条语句
+    sql_cleaned = re.sub(r'--[^\n]*', '', sql_cleaned)  # 行注释
+    sql_cleaned = re.sub(r'/\*.*?\*/', '', sql_cleaned, flags=re.DOTALL)  # 块注释
     
     # 检查分号
     statements = [s.strip() for s in sql_cleaned.split(';') if s.strip()]
@@ -298,7 +302,8 @@ def add_limit_if_missing(sql: str, limit: int = DEFAULT_LIMIT) -> str:
     
     # 检查是否已有 LIMIT
     if "LIMIT" not in sql_upper:
-        sql = sql.rstrip().rstrip(';')
+        sql = re.sub(r';\s*--[^\n]*$', '', sql).rstrip()
+        sql = sql.rstrip(';').rstrip()
         return f"{sql} LIMIT {limit}"
     
     return sql

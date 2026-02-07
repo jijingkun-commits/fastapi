@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS t_metric_definition (
     unit VARCHAR(50),
     frequency VARCHAR(20),
     sql_template TEXT,
-    embedding VECTOR(1024),
+    embedding VECTOR(2048),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -291,7 +291,7 @@ COMMENT ON COLUMN t_metric_definition.metric_name IS '指标名称';
 COMMENT ON COLUMN t_metric_definition.aliases IS '别名/同义词（逗号分隔）';
 COMMENT ON COLUMN t_metric_definition.description IS '自然语言口径描述（向量化核心字段）';
 COMMENT ON COLUMN t_metric_definition.sql_template IS '完整SQL模板';
-COMMENT ON COLUMN t_metric_definition.embedding IS '语义向量（1024维）';
+COMMENT ON COLUMN t_metric_definition.embedding IS '语义向量（智谱 embedding-3，2048维）';
 
 -- ============================================================
 -- AI 技能与反馈

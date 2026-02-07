@@ -49,14 +49,16 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
         IntentResult 包含意图类型、置信度和路由目标
     """
     from app.ai.llm_util import get_llm
-    from app.core.config import INTENT_CLASSIFIER_MODEL
+    from app.core.config import (
+        INTENT_CLASSIFIER_MODEL, MODEL_ROUTING_INTENT_CLASSIFIER, get_routing_model
+    )
     
     # 使用配置的意图分类器模型，添加降级策略
-    # 优先级：用户指定 model_id → 配置的意图分类器模型 → 默认模型
+    # 优先级：用户指定 model_id → t_system_config 配置 → 环境变量回退 → 默认模型
     llm = None
     
     # 尝试 1: 使用用户指定的模型或配置的意图分类器模型
-    target_model = model_id or INTENT_CLASSIFIER_MODEL
+    target_model = model_id or get_routing_model(MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL)
     if target_model:
         try:
             llm = get_llm(model_id=target_model)

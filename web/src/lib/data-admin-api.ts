@@ -1,10 +1,11 @@
 /**
  * 问数管理 API 客户端（中文注释）
  * 
- * 提供 SQL 修正台相关接口：
+ * 提供：
  * - 查询日志列表与详情
  * - SQL 修正与反馈
  * - 训练数据管理
+ * - 指标管理（CRUD + AI ETL 转换）
  */
 
 import { apiFetch } from '@/lib/backend';
@@ -141,6 +142,194 @@ export async function trainAllPending(): Promise<{
 
   if (!response.ok) {
     throw new Error('训练请求失败');
+  }
+
+  return response.json();
+}
+
+// ==================== 指标管理 ====================
+
+export interface MetricDef {
+  metric_id: string;
+  metric_name: string;
+  aliases: string | null;
+  description: string | null;
+  sql_template: string | null;
+  query_template: string | null;
+  template_source: string | null;
+  category: string | null;
+  sub_category: string | null;
+  unit: string | null;
+  frequency: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MetricStats {
+  total: number;
+  by_template_type: { type: string; count: number; percent: number }[];
+  by_template_source: { source: string; count: number }[];
+  by_category: { category: string; count: number }[];
+  query_ready: number;
+  query_ready_percent: number;
+  embedding_ready: number;
+  embedding_ready_percent: number;
+}
+
+export interface BatchConvertResult {
+  message: string;
+  processed: number;
+  success: number;
+  dry_run?: boolean;
+  errors?: { metric_id: string; error: string }[] | null;
+  preview?: { metric_id: string; metric_name: string; target_type?: string }[];
+}
+
+export interface MetricCreateRequest {
+  metric_id: string;
+  metric_name: string;
+  aliases?: string;
+  description: string;
+  sql_template: string;
+  category?: string;
+  sub_category?: string;
+  unit?: string;
+  frequency?: string;
+}
+
+export interface ETLConvertResult {
+  metric_id: string | null;
+  metric_name: string | null;
+  aliases: string | null;
+  description: string | null;
+  sql_template: string | null;
+  category: string | null;
+  unit: string | null;
+}
+
+/**
+ * 获取指标列表
+ */
+export async function getMetrics(params?: {
+  skip?: number;
+  limit?: number;
+  category?: string;
+  keyword?: string;
+}): Promise<MetricDef[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.skip !== undefined) searchParams.set('skip', String(params.skip));
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params?.category) searchParams.set('category', params.category);
+  if (params?.keyword) searchParams.set('keyword', params.keyword);
+
+  const qs = searchParams.toString();
+  const response = await apiFetch(`${API_BASE}/metrics${qs ? '?' + qs : ''}`);
+
+  if (!response.ok) {
+    throw new Error('获取指标列表失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 创建新指标
+ */
+export async function createMetric(data: MetricCreateRequest): Promise<MetricDef> {
+  const response = await apiFetch(`${API_BASE}/metrics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '创建失败' }));
+    throw new Error(err.detail || '创建失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 更新指标
+ */
+export async function updateMetric(metricId: string, data: MetricCreateRequest): Promise<MetricDef> {
+  const response = await apiFetch(`${API_BASE}/metrics/${encodeURIComponent(metricId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '更新失败' }));
+    throw new Error(err.detail || '更新失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 删除指标
+ */
+export async function deleteMetric(metricId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/metrics/${encodeURIComponent(metricId)}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    throw new Error('删除失败');
+  }
+}
+
+/**
+ * AI 转换：ETL 脚本 -> SELECT 模板
+ */
+export async function convertETL(etlScript: string): Promise<ETLConvertResult> {
+  const response = await apiFetch(`${API_BASE}/metrics/convert-etl`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ etl_script: etlScript }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '转换失败' }));
+    throw new Error(err.detail || '转换失败');
+  }
+
+  return response.json();
+}
+
+// ==================== 指标统计与批量操作 ====================
+
+/**
+ * 获取指标模板统计数据
+ */
+export async function getMetricStats(): Promise<MetricStats> {
+  const response = await apiFetch(`${API_BASE}/metrics/stats`);
+  if (!response.ok) {
+    throw new Error('获取统计数据失败');
+  }
+  return response.json();
+}
+
+/**
+ * 批量转换 ETL 模板
+ */
+export async function batchConvertTemplates(params: {
+  mode: 'result_lookup' | 'ai_extract';
+  limit?: number;
+  dry_run?: boolean;
+}): Promise<BatchConvertResult> {
+  const response = await apiFetch(`${API_BASE}/metrics/batch-convert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '批量转换失败' }));
+    throw new Error(err.detail || '批量转换失败');
   }
 
   return response.json();

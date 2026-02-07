@@ -28,9 +28,11 @@ AGENT_DESCRIPTIONS = {
 - 需要 Python 代码进行复杂计算
 
 **不需要委派的简单任务**（你可以直接处理）：
-- 简单 SQL 查询 → 直接用 sql_inter
 - 简单绘图 → 直接用 fig_inter
 - 知识库搜索 → 直接用 knowledge_search
+
+**必须委派的任务**：
+- 所有 SQL 查询 → 必须委派给 data_expert
 """,
     AgentType.TODO: """将待办事项管理任务分配给待办助手。
 
@@ -54,6 +56,10 @@ class BaseAgentState(TypedDict, total=False):
     user_id: int
     thread_id: str
     
+    # 模型配置（由 chat_service 注入，所有节点可读取）
+    enable_thinking: bool          # 是否启用深度思考模式
+    model_id: str                  # 用户选择的模型标识
+    
     # TodoExpert 共享状态（多轮对话支持）
     pending_operation: Dict       # 待确认的操作
     user_confirmed: bool          # 用户确认状态
@@ -74,9 +80,7 @@ class MultiAgentState(BaseAgentState, total=False):
     - 意图识别（detected_intent, intent_route）
     - 委派控制（pending_handoff）
     """
-    # 运行时状态
-    enable_thinking: bool          # 是否启用深度思考模式
-    model_id: str                  # 模型标识
+    # 运行时状态（enable_thinking / model_id 已提升至 BaseAgentState）
     attachment_analysis: str       # 附件分析结果（由 preprocess 节点填充）
     evaluation: str                # 专家工作评估结果（由 evaluate 节点填充）
     iteration_count: int           # 当前迭代次数（防止无限循环）

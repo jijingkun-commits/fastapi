@@ -20,10 +20,27 @@ logger = logging.getLogger(__name__)
 # 默认可访问的表白名单（只允许查询这些表）
 # 生产环境应从数据库配置读取
 DEFAULT_TABLE_WHITELIST: Set[str] = {
-    "t_orders",
-    "t_products", 
-    "t_customers",
-    "t_sales",
+    # fdmdata schema - 业务中间表
+    "f_mid_ckcp_a038_h",
+    "f_mid_ctcxcp_a036_h",
+    "f_mid_dep_k_tb",
+    "f_mid_dep_tb",
+    "f_mid_dkcp_a008_h",
+    "f_mid_fns_subject",
+    "f_mid_index_result",
+    "f_mid_index_result_derive",
+    "f_mid_index_result_dim",
+    "f_mid_index_result_dim_derive",
+    "f_mid_khfl_a017_h",
+    "f_mid_loan_k_tb",
+    "f_mid_loan_tb",
+    "f_mid_mms_sxyxh",
+    "f_mid_org_tree",
+    "f_mid_org_tree_k",
+    "f_mid_payr_summary",
+    "f_mid_sxqj_a010_h",
+    # public schema - 维度表
+    "t_ods_g_c_dim_date",
 }
 
 # 敏感表黑名单（默认值，生产环境从数据库读取）

@@ -118,6 +118,51 @@ class TestCheckMultipleStatements(unittest.TestCase):
         is_safe, error = check_multiple_statements(sql)
         # 如果实现正确，应该允许
         self.assertIsInstance(is_safe, bool)
+    
+    def test_semicolon_followed_by_line_comment_allowed(self):
+        """分号后跟行注释应视为单条语句（LLM 常见输出格式）。"""
+        sql = (
+            "SELECT SUM(prin_bal) AS loan_balance_total\n"
+            "FROM fdmdata.f_mid_loan_tb\n"
+            "WHERE data_dt >= DATE_TRUNC('month', CURRENT_DATE)\n"
+            "AND data_dt < DATE_TRUNC('month', CURRENT_DATE) "
+            "+ INTERVAL '1 month'; -- 本月最后一天"
+        )
+        is_safe, error = check_multiple_statements(sql)
+        self.assertTrue(is_safe)
+        self.assertIsNone(error)
+    
+    def test_semicolon_followed_by_block_comment_allowed(self):
+        """分号后跟块注释应视为单条语句。"""
+        sql = "SELECT * FROM orders; /* this is a trailing comment */"
+        is_safe, error = check_multiple_statements(sql)
+        self.assertTrue(is_safe)
+        self.assertIsNone(error)
+    
+    def test_inline_comments_allowed(self):
+        """SQL 中间的行注释不影响单条语句判定。"""
+        sql = (
+            "SELECT col1, -- 字段1\n"
+            "       col2  -- 字段2\n"
+            "FROM orders"
+        )
+        is_safe, error = check_multiple_statements(sql)
+        self.assertTrue(is_safe)
+        self.assertIsNone(error)
+    
+    def test_real_multiple_statements_still_blocked(self):
+        """真正的多条语句仍然应被拒绝。"""
+        sql = "SELECT 1; SELECT 2"
+        is_safe, error = check_multiple_statements(sql)
+        self.assertFalse(is_safe)
+        self.assertIn("多条", error)
+    
+    def test_multiple_statements_with_comments_blocked(self):
+        """多条语句即使带注释也应被拒绝。"""
+        sql = "SELECT 1; -- first\nSELECT 2; -- second"
+        is_safe, error = check_multiple_statements(sql)
+        self.assertFalse(is_safe)
+        self.assertIn("多条", error)
 
 
 class TestAddLimitIfMissing(unittest.TestCase):
@@ -139,6 +184,23 @@ class TestAddLimitIfMissing(unittest.TestCase):
         sql = "SELECT * FROM users"
         result = add_limit_if_missing(sql)  # 使用默认值
         self.assertIn("LIMIT", result.upper())
+    
+    def test_add_limit_with_trailing_comment(self):
+        """末尾带 ; -- comment 时，LIMIT 应追加在有效 SQL 之后。"""
+        sql = "SELECT SUM(bal) FROM fdmdata.t_loan; -- 贷款余额"
+        result = add_limit_if_missing(sql, limit=1000)
+        self.assertTrue(result.rstrip().endswith("LIMIT 1000"))
+        self.assertNotIn("--", result)
+    
+    def test_add_limit_with_inline_comments(self):
+        """中间有行注释的多行 SQL，LIMIT 应追加在最后。"""
+        sql = (
+            "SELECT col1, -- 字段1\n"
+            "       col2  -- 字段2\n"
+            "FROM orders"
+        )
+        result = add_limit_if_missing(sql, limit=100)
+        self.assertTrue(result.rstrip().endswith("LIMIT 100"))
 
 
 class TestSanitizeSql(unittest.TestCase):

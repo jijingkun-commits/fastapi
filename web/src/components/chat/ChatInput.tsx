@@ -23,7 +23,12 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Plus, LoaderCircle, Mic, ArrowUp } from "lucide-react";
+import { Plus, LoaderCircle, Mic, ArrowUp, Zap } from "lucide-react";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn, safeParseJson, SelectedTodoSchema } from "@/lib/utils";
 import { CompactApproval } from "./CompactApproval";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
@@ -35,19 +40,20 @@ import { useQueryState } from "nuqs";
 
 /** 快捷提示词配置 */
 export const QUICK_PROMPTS = [
-    { label: "贷款余额", value: "查询贷款余额" },
-    { label: "存款总额", value: "存款总额是多少" },
-    { label: "不良贷款", value: "不良贷款余额" },
-    { label: "分行存款", value: "按分行统计存款" },
-    { label: "t2sql", value: "查询我数据库中一个有几张表" },
-    { label: "天气", value: "查询我嘉兴近一周的天气" },
-    { label: "minio", value: "使用fig_inter工具，生成一个圆形，以图片方式展示。" },
+    { label: "贷款余额(测试)", value: "查询2025年6月30日的贷款余额" },
+    { label: "Top10大户", value: "查询2025年6月30日贷款余额前10名的客户" },
+    { label: "机构分布", value: "查询2025年6月30日各机构的贷款余额分布" },
+    { label: "贷款余额", value: "查询本月贷款余额总额" },
+    { label: "存款总额", value: "查询本月存款总额" },
+    { label: "不良贷款", value: "查询本月不良贷款余额总额" },
+    { label: "分行存款", value: "查询本月各分行存款余额" },
+    { label: "t2sql", value: "查询我数据库中一共有几张表" },
+    { label: "天气", value: "查询嘉兴近一周的天气" },
+    { label: "画图", value: "使用fig_inter工具，生成一个圆形，以图片方式展示。" },
     { label: "知识库", value: "查询知识库，用户已注销无法使用该功能的问题要怎么解决？" },
-    { label: "待办查询", value: "待办查询" },
-    { label: "新渠道有哪些功能", value: "查询知识库，新渠道有哪些功能" },
-    { label: "待办", value: "明天我要去上海" },
-    { label: "待办1", value: "早上9点，和张三一起，去陆家嘴开会" },
-    { label: "待办2", value: "好的" },
+    { label: "待办查询", value: "查询我的待办列表" },
+    { label: "新渠道功能", value: "查询知识库，新渠道有哪些功能" },
+    { label: "创建待办", value: "明天上午9点去陆家嘴和张三开会" },
 ];
 
 export interface ChatInputProps {
@@ -123,6 +129,7 @@ export function ChatInput({
 
     const [mounted, setMounted] = useState(false);
     const [selectedTodo, setSelectedTodo] = useState<{ id: number, title: string } | null>(null);
+    const [popoverOpen, setPopoverOpen] = useState(false);
     const [threadId] = useQueryState("threadId");
 
     useEffect(() => {
@@ -132,12 +139,9 @@ export function ChatInput({
         const handleTodoSelected = () => {
             const stored = sessionStorage.getItem('selectedTodo');
             const parsed = safeParseJson(stored, SelectedTodoSchema, null);
-            // 验证是否属于当前对话
-            if (parsed && parsed.threadId === threadId) {
-                setSelectedTodo(parsed);
-            } else {
-                setSelectedTodo(null);
-            }
+            // 验证是否属于当前对话；threadId 任一方为空时也接受（新建会话等）
+            const threadMatch = threadId == null || parsed?.threadId == null || parsed?.threadId === threadId;
+            setSelectedTodo(parsed && threadMatch ? parsed : null);
         };
 
         const handleTodoDeselected = () => {
@@ -160,20 +164,20 @@ export function ChatInput({
         <div ref={dropRef} className="relative z-10 w-full max-w-4xl mx-auto">
             {/* 选中待办提示 - 仅在非审核状态下显示 */}
             {!hasInterrupt && selectedTodo && (
-                <div className="mb-2">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#E8F4F4] text-[#2F6868] text-xs rounded-lg border border-[#A8D4D4]">
-                        <span className="font-medium">🎯 当前讨论:</span>
-                        <span className="font-semibold">{selectedTodo.title}</span>
-                        <span className="text-gray-400">|</span>
-                        <span className="text-[#2F6868]">ID {selectedTodo.id}</span>
+                <div className="mb-2" data-selected-todo={selectedTodo.id}>
+                    <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 bg-[#E8F4F4] text-[#2F6868] text-sm rounded-lg border border-[#A8D4D4] max-w-full">
+                        <span className="font-medium truncate min-w-0">已选中「{selectedTodo.title}」</span>
+                        <span className="text-gray-400 hidden sm:inline">|</span>
+                        <span className="text-[#5A9A9A] text-xs hidden sm:inline whitespace-nowrap">可补充、修改、完成或删除</span>
                         <button
                             type="button"
-                            className="ml-1 text-[#67B0B0] hover:text-[#2F6868] transition-colors"
+                            className="shrink-0 flex items-center justify-center w-6 h-6 text-[#67B0B0] hover:bg-[#D4ECEC] hover:text-[#2F6868] rounded transition-colors"
                             onClick={() => {
                                 sessionStorage.removeItem('selectedTodo');
                                 setSelectedTodo(null);
                                 window.dispatchEvent(new Event('todoDeselected'));
                             }}
+                            title="取消选中"
                         >
                             ✕
                         </button>
@@ -187,8 +191,8 @@ export function ChatInput({
                 - streaming: AI 正在响应
                 - waiting-confirm: 等待用户确认
             */}
-            <div 
-                className="w-full" 
+            <div
+                className="w-full"
                 data-testid="chat-input-container"
                 data-chat-state={hasInterrupt ? "waiting-confirm" : (isLoading ? "streaming" : "idle")}
             >
@@ -197,7 +201,12 @@ export function ChatInput({
                         <CompactApproval />
                     </div>
                 ) : (
-                    <form onSubmit={onSubmit} className="w-full">
+                    <form onSubmit={(e) => {
+                        if (selectedTodo) {
+                            setSelectedTodo(null);
+                        }
+                        onSubmit(e);
+                    }} className="w-full">
                         {/* 主输入容器 - ChatGPT 风格 */}
                         <div className="relative bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow transition-shadow">
                             {/* 文件预览 - 在输入框内部顶部 */}
@@ -226,7 +235,7 @@ export function ChatInput({
                                         form?.requestSubmit();
                                     }
                                 }}
-                                placeholder={selectedTodo ? `讨论待办: ${selectedTodo.title}...` : "Type your message..."}
+                                placeholder={selectedTodo ? `对「${selectedTodo.title}」说点什么...（补充、修改、完成、删除）` : "Type your message..."}
                                 className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
                                 style={{ fieldSizing: 'content' } as any}
                                 data-testid="chat-input"
@@ -253,7 +262,7 @@ export function ChatInput({
                                         className="hidden"
                                     />
 
-                                    {/* 开关控件 - 折叠到下拉菜单或隐藏 */}
+                                    {/* 快捷指令 - 大屏下拉，小屏 Popover */}
                                     <div className="hidden lg:flex items-center gap-2">
                                         <Select onValueChange={handleQuickPromptSelect}>
                                             <SelectTrigger className="w-[120px] h-7 text-xs bg-transparent border-gray-200 text-gray-600">
@@ -267,6 +276,36 @@ export function ChatInput({
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                    </div>
+                                    <div className="lg:hidden">
+                                        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                                            <PopoverTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors group"
+                                                    title="快捷指令"
+                                                >
+                                                    <Zap className="w-4 h-4 text-gray-600 group-hover:text-gray-900" />
+                                                </button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-48 p-1" align="start">
+                                                <div className="flex flex-col">
+                                                    {QUICK_PROMPTS.map((prompt) => (
+                                                        <button
+                                                            key={prompt.label}
+                                                            type="button"
+                                                            className="text-left px-3 py-2 text-sm hover:bg-gray-100 rounded-md transition-colors"
+                                                            onClick={() => {
+                                                                setPopoverOpen(false);
+                                                                handleQuickPromptSelect(prompt.value);
+                                                            }}
+                                                        >
+                                                            {prompt.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </PopoverContent>
+                                        </Popover>
                                     </div>
                                 </div>
 

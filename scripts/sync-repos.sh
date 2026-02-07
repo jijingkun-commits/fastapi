@@ -1,33 +1,38 @@
 #!/bin/bash
-# GitHub CI 测试推送脚本
+# 双仓库同步脚本
 # 用法: ./scripts/sync-repos.sh [branch]
 # 默认分支: main
-#
-# 说明：只推送到 GitHub 触发 CI 测试，Gitee 需要手动操作
 
 set -e
 
 BRANCH="${1:-main}"
 
-echo "🧪 推送到 GitHub 触发 CI 测试..."
-echo "分支: $BRANCH"
+# 颜色输出
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+
+log_info "开始同步代码到双仓库..."
+log_info "分支: $BRANCH"
 echo ""
 
-# 检查 GitHub remote 是否存在
-if ! git remote | grep -q "github"; then
-    echo "❌ 错误: GitHub remote 未配置"
-    echo ""
-    echo "请先运行以下命令添加 GitHub remote:"
-    echo "  git remote add github https://github.com/你的用户名/fastapi.git"
-    exit 1
+# 1. Gitee (Origin)
+log_info "推送到 Gitee (origin)..."
+git push origin "$BRANCH"
+log_success "Gitee 推送完成"
+echo ""
+
+# 2. GitHub
+if git remote | grep -q "github"; then
+    log_info "推送到 GitHub (触发 CI)..."
+    git push github "$BRANCH"
+    log_success "GitHub 推送完成"
+else
+    echo "⚠️  未检测到 github remote，跳过 GitHub 推送"
 fi
 
-# 推送到 GitHub
-echo "📤 推送到 GitHub..."
-git push github "$BRANCH"
-
 echo ""
-echo "✅ 推送完成! 请到 GitHub Actions 页面查看 CI 状态"
-echo ""
-echo "💡 提示: 如需同时推送到 Gitee，请手动执行:"
-echo "   git push origin $BRANCH"
+log_success "全部同步完成!"

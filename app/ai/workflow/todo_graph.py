@@ -42,7 +42,7 @@ from langgraph.config import get_stream_writer
 from app.ai.events import emit_clarification, emit_token, emit_status, emit_error, emit_result
 
 # 导入统一的状态辅助函数
-from app.ai.utils.state_helpers import get_user_id, get_user_id_optional
+from app.ai.utils.state_helpers import get_user_id, get_user_id_optional, get_current_todo_id
 
 # 导入实体解析节点
 from app.ai.agents.resolve_node import resolve_entity, route_after_resolve
@@ -207,7 +207,8 @@ def _invoke_llm_for_intent(
     recent_messages: List[BaseMessage],
     system_prompt: str,
     heuristic_title: Optional[str] = None,
-    pre_extracted_info: Optional[Dict] = None
+    pre_extracted_info: Optional[Dict] = None,
+    model_id: Optional[str] = None
 ) -> Dict:
     """调用 LLM 分析用户意图并解析响应。
     
@@ -222,6 +223,7 @@ def _invoke_llm_for_intent(
         system_prompt: 系统提示词（应已包含 format_instructions）
         heuristic_title: 启发式提取的标题（可选）
         pre_extracted_info: Handoff 预提取的信息（可选）
+        model_id: 用户选择的模型标识（可选，传递给 get_llm）
         
     Returns:
         Dict: 包含 intent 和 extracted_info 的分析结果
@@ -234,7 +236,7 @@ def _invoke_llm_for_intent(
         >>> intent = analysis["intent"]
         >>> extracted_info = analysis["extracted_info"]
     """
-    llm = get_llm(internal=True)
+    llm = get_llm(internal=True, model_id=model_id)
     parser = JsonOutputParser(pydantic_object=IntentResult)
     
     analysis_messages = [SystemMessage(content=system_prompt)]
@@ -301,7 +303,7 @@ def _invoke_llm_for_intent(
     }
 
 
-def analyze_intent(state: TodoAgentState) -> Dict:
+def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = None) -> Dict:
     """分析用户意图节点（LLM驱动版）。
     
     完全依赖 LLM 判断意图和决定下一步动作，移除硬编码关键词规则。
@@ -310,6 +312,8 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     1. 调用 LLM 分析用户消息
     2. 根据 LLM 返回的 action_state 决定路由
     3. 使用 LLM 生成的 response_message 作为回复
+    
+    当用户已在列表中选中某待办时（current_todo_id），将该待办信息注入上下文，辅助 LLM 识别用户意图（update/complete/delete 等）。
     """
     logger.info("=== analyze_intent 节点 (LLM驱动版) ===")
     
@@ -333,6 +337,36 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     if user_id:
         existing_todos_context = query_existing_todos(user_id)
     
+    # Step 2.1: 用户已选中待办上下文
+    selected_todo_context = ""
+    current_todo_id = get_current_todo_id(state, config) if config else None
+    if current_todo_id and user_id:
+        try:
+            with get_db_context() as db:
+                todo = todo_repo.get_by_id(db, current_todo_id, user_id)
+                if todo:
+                    due_str = todo.due_date.strftime("%Y-%m-%d %H:%M") if todo.due_date else "无"
+                    priority_map = {1: "高", 2: "中", 3: "低"}
+                    selected_todo_context = (
+                        f"\n\n## 用户已选中的待办（重要上下文）\n"
+                        f"用户已在待办列表中选中了以下待办：\n"
+                        f"- ID: {todo.id}\n"
+                        f"- 标题: {todo.title}\n"
+                        f"- 描述: {todo.description or '无'}\n"
+                        f"- 截止: {due_str}\n"
+                        f"- 优先级: {priority_map.get(todo.priority, '中')}\n"
+                        f"- 分类: {todo.category or '无'}\n\n"
+                        f"用户的消息**针对这个待办**，请根据消息内容判断真实意图：\n"
+                        f"- 补充信息（如「跟XX一起」「在YY地方」）→ intent=update，解析到 description/location 等字段\n"
+                        f"- 修改（如「改成明天」「优先级调高」）→ intent=update\n"
+                        f"- 完成（如「完成了」「做好了」）→ intent=complete\n"
+                        f"- 删除（如「删掉」「不要了」）→ intent=delete\n"
+                        f"无论哪种意图，extracted_info 中都应设置 todo_id={todo.id}。"
+                    )
+                    logger.info(f"注入选中待办上下文: todo_id={todo.id}, title={todo.title}")
+        except Exception as e:
+            logger.warning(f"获取选中待办失败: {e}")
+    
     # 清理上一轮的临时状态
     if state.get("pending_clarifications"):
         updates["pending_clarifications"] = []
@@ -340,7 +374,10 @@ def analyze_intent(state: TodoAgentState) -> Dict:
         updates["detected_conflicts"] = []
     
     # Step 3: 调用 LLM 分析（internal=True 自动禁用流式 + 添加 tag）
-    llm = get_llm(internal=True)
+    # 使用 SQL 生成/内部分析路由配置的模型，避免推理模型浪费 thinking tokens
+    from app.core.config import MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL, get_routing_model
+    analysis_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+    llm = get_llm(internal=True, model_id=analysis_model)
     
     # 构建 Parser
     parser = JsonOutputParser(pydantic_object=IntentResult)
@@ -377,8 +414,8 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     if pending_op:
         pending_op_context = f"\n\n## 当前待确认操作\n操作类型: {pending_op.get('action')}\n数据: {pending_op.get('data')}\n用户可能正在对此操作进行确认或取消。"
     
-    # 构建最终 Prompt
-    system_prompt = f"{enhanced_prompt}{progressive_injection}\n{handoff_context}\n{existing_todos_context}{pending_op_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
+    # 构建最终 Prompt（选中待办上下文优先于冲突检测）
+    system_prompt = f"{enhanced_prompt}{progressive_injection}\n{handoff_context}\n{existing_todos_context}{selected_todo_context}{pending_op_context}\n\n## 冲突检测提示\n如果用户新任务与现有任务在同一天或有潜在冲突，设置 `conflict_risk: 'high'`。\n\n{format_instructions}"
     
     analysis_messages = [SystemMessage(content=system_prompt)]
     analysis_messages.extend(recent_messages)
@@ -447,6 +484,11 @@ def analyze_intent(state: TodoAgentState) -> Dict:
                 if value and not extracted_info.get(key):
                     extracted_info[key] = value
                     logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+        
+        # 用户选中待办场景：若 extracted_info 无 todo_id，自动注入选中的待办 ID
+        if current_todo_id and not extracted_info.get("todo_id") and intent in ("update", "complete", "delete"):
+            extracted_info["todo_id"] = current_todo_id
+            logger.info(f"注入选中待办 todo_id={current_todo_id} (intent={intent})")
         
         # Step 5: 时间解析
         extracted_info, time_constraints = parse_time_info(

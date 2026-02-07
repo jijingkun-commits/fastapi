@@ -149,7 +149,7 @@ class NaturalTimeParser:
         # - (\d{1,2}) - 小时数
         # - [点:：时] - 分隔符
         # - (?:(\d{1,2})[分]?|半)? - 可选的分钟数或"半"
-        pattern = r'(早上|凌晨|上午|中午|下午|傍晚|晚上)?(\d{1,2})[点:：时](?:(\d{1,2})[分]?|(半))?'
+        pattern = r'(早上|凌晨|上午|中午|下午|傍晚|晚上|今晚)?(\d{1,2})[点:：时](?:(\d{1,2})[分]?|(半))?'
         match = re.search(pattern, text)
         
         if not match:
@@ -169,7 +169,7 @@ class NaturalTimeParser:
             minute = 0
         
         # 根据时间段前缀调整小时（12小时制转24小时制）
-        if period in ["下午", "傍晚", "晚上"] and hour < 12:
+        if period in ["下午", "傍晚", "晚上", "今晚"] and hour < 12:
             hour += 12
         elif period == "中午" and hour == 12:
             pass  # 中午12点保持不变

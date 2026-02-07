@@ -50,8 +50,9 @@ class TodoUpdateRequest(BaseModel):
     @field_validator('status')
     @classmethod
     def validate_status(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in ["pending", "completed", "cancelled"]:
-            raise ValueError("状态必须为 pending, completed 或 cancelled")
+        # 注意：这里是“写入值”校验，不接受 pending/completed 这类查询别名
+        if v is not None and v not in ["todo", "in_progress", "done", "cancelled"]:
+            raise ValueError("状态必须为 todo, in_progress, done 或 cancelled")
         return v
         
     @field_validator('progress')

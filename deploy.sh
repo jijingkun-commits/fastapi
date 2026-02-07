@@ -206,8 +206,12 @@ with engine.begin() as conn:
     python3 scripts/expand_metrics.py 2>/dev/null || true
     
     # 7. 同步元数据
-    log_info "  [7/7] 同步表元数据..."
+    log_info "  [7/8] 同步表元数据..."
     python3 scripts/schema_sync.py 2>/dev/null || log_warn "元数据同步跳过（可能缺少分析库）"
+    
+    # 8. 生成语义向量（embedding-3, 2048维）
+    log_info "  [8/8] 生成语义向量..."
+    python3 -m app.ai.semantic.schema_sync 2>/dev/null || log_warn "语义向量同步跳过"
     
     log_success "数据库初始化完成"
 }

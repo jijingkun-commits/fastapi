@@ -58,8 +58,8 @@ export default function TodoItemEdit({
                     />
                 </div>
 
-                {/* 属性网格 */}
-                <div className="grid grid-cols-2 gap-4">
+                {/* 属性网格 - 小屏单列，sm 以上双列 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     {/* 优先级 */}
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">

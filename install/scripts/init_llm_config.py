@@ -97,6 +97,39 @@ def init_llm_data(db: Session):
             "thinking_budget": 4096,
             "is_default": (config.MODEL_PROVIDER == "deepseek" and config.MODEL_NAME == "deepseek-reasoner"),
             "extra_config": {"effort": "medium"}
+        },
+        # Kimi (Moonshot AI, via DashScope)
+        {
+            "provider": "qwen",
+            "model_code": "kimi-k2-thinking",
+            "model_name": "Kimi K2 Thinking",
+            "model_type": "reasoning",
+            "supports_thinking": True,
+            "supports_tool_call": True,
+            "supports_streaming": True,
+            "max_output_tokens": 16384,
+            "context_window": 262144,
+            "default_temperature": 1.0,
+            "thinking_budget": 32768,
+            "description": "Kimi K2 Thinking（月之暗面）：深度推理模型，基于 MoE 架构（约 1T 总参数 / 32B 激活参数），仅支持思考模式。在编码、数学推理、逻辑分析和工具调用方面表现卓越，适合需要深度理解和多步骤规划的复杂任务。通过阿里云 DashScope 接入。",
+            "is_default": False,
+            "extra_config": {}
+        },
+        {
+            "provider": "qwen",
+            "model_code": "kimi-k2.5",
+            "model_name": "Kimi K2.5",
+            "model_type": "chat",
+            "supports_thinking": True,
+            "supports_tool_call": True,
+            "supports_streaming": True,
+            "max_output_tokens": 32768,
+            "context_window": 262144,
+            "default_temperature": 0.6,
+            "thinking_budget": 32768,
+            "description": "Kimi K2.5（月之暗面）：迄今最全能的旗舰模型，在 Agent、代码生成、视觉理解及通用智能任务上取得开源 SOTA 表现。支持图像/视频/文本多模态输入，可切换思考与非思考模式。适合需要综合能力的复杂场景。通过阿里云 DashScope 接入。",
+            "is_default": False,
+            "extra_config": {}
         }
     ]
 

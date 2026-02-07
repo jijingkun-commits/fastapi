@@ -7,7 +7,6 @@ export type TodoStatus =
     | 'todo'
     | 'in_progress'
     | 'done'
-    | 'on_hold'
     | 'cancelled'
 
 export type TodoPriority = 1 | 2 | 3
@@ -33,7 +32,8 @@ export interface Todo {
     start_time?: string
     actual_completion_time?: string
     create_time?: string
-    is_completed: boolean
+    /** 前端计算字段，等价于 status === 'done'，后端不返回该字段 */
+    is_completed?: boolean
 
     // 重复任务
     is_recurring?: boolean

@@ -1,17 +1,18 @@
 /**
- * 系统配置管理页面
+ * SQL 修正台管理页面
  * 
- * 管理系统运行参数和配置项：
- * - 配置列表
- * - 配置编辑
- * - 分类筛选
+ * 审核 AI 生成的 SQL，修正错误，持续改进问数能力：
+ * - 查询日志列表展示
+ * - SQL 修正对话框
+ * - 反馈标记（正确/错误）
+ * - 批量训练
  */
 "use client";
 
 import dynamic from "next/dynamic";
 
-const SystemAdminPanel = dynamic(
-    () => import("@/components/admin/SystemAdminPanel").then(mod => mod.SystemAdminPanel),
+const DataAdminPanel = dynamic(
+    () => import("@/components/admin/DataAdminPanel").then(mod => mod.DataAdminPanel),
     {
         ssr: false,
         loading: () => (
@@ -25,6 +26,6 @@ const SystemAdminPanel = dynamic(
     }
 );
 
-export default function SystemAdminPage() {
-    return <SystemAdminPanel />;
+export default function DataAdminPage() {
+    return <DataAdminPanel />;
 }

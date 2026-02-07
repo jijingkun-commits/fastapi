@@ -417,14 +417,17 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 
 #### 按场景分类
 
+> **配置提示**: 
+> 下表中的 `SQL 生成`、`内部分析`、`意图分类`、`参数提取`、`评估` 等场景的模型配置，现在均已支持在 **后台管理 -> LLM 配置 -> 模型路由** 页面进行可视化配置。
+> `Embedding` 和 `Vision` 模型则通过在 **模型列表** 中设置对应类型的默认模型来生效。
+
 | 场景 | 调用点 | 模型来源 | 配置项 | 推荐模型 |
 |------|--------|----------|--------|----------|
 | 主对话 | Supervisor / Agent 回复 | 用户前端选择 | State `model_id` | 用户自选 |
-| SQL 生成 | `vanna_client.submit_prompt` | 用户前端选择 | State `model_id` | 非推理模型（qwen-plus） |
-| 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 跟随用户模型 | State `model_id` | 同主对话 |
-| 意图分类 | `intent_classifier.py` | 固定配置 | `INTENT_CLASSIFIER_MODEL` | qwen-plus |
-| SQL/回复评估 | `llm_judge.py`, `sql_evaluator.py` | 固定配置 | `LLM_JUDGE_MODEL` | qwen-plus |
-| 参数提取 | `parameter_extractor.py` | 固定配置 | `LLM_JUDGE_MODEL` | qwen-plus |
+| SQL 生成 | `vanna_client.submit_prompt` | 固定配置 | `model_routing.sql_generation` | 非推理模型（qwen-plus） |
+| 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 固定配置 | `model_routing.sql_generation` | qwen-plus |
+| 轻量任务（意图分类） | `intent_classifier.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
+| 轻量任务（评估/提取） | `llm_judge.py`, `parameter_extractor.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
 | Embedding | `embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
 | Vision | `vision_tool.py` | 数据库 `type=vision` | `t_llm_model` | glm-4v-flash |
 
@@ -441,12 +444,12 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 
 #### 配置项速查
 
-| 配置项 | 文件 | 默认值 | 环境变量覆盖 | 说明 |
-|--------|------|--------|-------------|------|
-| 数据库默认模型 | `t_llm_model.is_default` | `qwen-plus` | - | 用户未选模型时的主力模型 |
-| `INTENT_CLASSIFIER_MODEL` | `config.py` | `qwen-plus` | `INTENT_CLASSIFIER_MODEL=xxx` | 意图分类器 |
-| `LLM_JUDGE_MODEL` | `config.py` | `qwen-plus` | `LLM_JUDGE_MODEL=xxx` | 评估/Judge/参数提取 |
-| `MODEL_NAME` | `config.py` | `glm-4.5-air` | `MODEL_NAME=xxx` | 环境变量回退（数据库不可用时） |
+| 配置项 | 对应路由 Key | 默认值 (环境变量) | 说明 |
+|--------|------|--------|------|
+| 数据库默认模型 | - | `qwen-plus` | 用户未选模型时的主力模型 |
+| `INTENT_CLASSIFIER_MODEL` | `model_routing.lightweight` | `qwen-plus` | 意图分类/评估/参数提取 (轻量任务) |
+| `SQL_GENERATION_MODEL` | `model_routing.sql_generation` | `qwen-plus` | Vanna SQL 生成 / 复杂意图分析 |
+| `MODEL_NAME` | - | `glm-4.5-air` | 环境变量回退（数据库不可用时） |
 
 ---
 

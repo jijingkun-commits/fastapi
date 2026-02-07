@@ -195,12 +195,16 @@ export function useSSEStream(): StreamContextValue {
             isStreamingRef.current = true;
             const idempotencyKey = uuidv4();
 
-            // 读取当前选中的待办 ID（使用 Zod 校验）
+            // 读取当前选中的待办 ID（使用 Zod 校验），读取后立即清除
             let currentTodoId: number | undefined;
             if (typeof window !== 'undefined') {
                 const stored = sessionStorage.getItem('selectedTodo');
                 const parsed = safeParseJson(stored, SelectedTodoSchema, null);
                 currentTodoId = parsed?.id;
+                if (currentTodoId) {
+                    sessionStorage.removeItem('selectedTodo');
+                    window.dispatchEvent(new Event('todoDeselected'));
+                }
             }
 
             const { stop: stopFn, promise } = startLLMStream(

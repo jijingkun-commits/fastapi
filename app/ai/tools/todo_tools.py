@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain.tools import tool
 from langchain_core.runnables.config import RunnableConfig
 
@@ -31,7 +31,10 @@ class AddTodoInput(BaseModel):
 
 class ListTodosInput(BaseModel):
     """列出待办输入参数。"""
-    status: Optional[str] = Field(default=None, description="状态过滤：todo/in_progress/done/cancelled/pending/completed")
+    status: Optional[str] = Field(
+        default=None,
+        description="状态过滤（写入值：todo/in_progress/done/cancelled；查询别名：pending=未完成、completed=已完成）",
+    )
     category: Optional[str] = Field(default=None, description="分类过滤")
     priority: Optional[int] = Field(default=None, description="优先级过滤：1=高, 2=中, 3=低")
     keyword: Optional[str] = Field(default=None, description="标题关键词搜索,模糊匹配")
@@ -57,7 +60,16 @@ class UpdateTodoInput(BaseModel):
     priority: Optional[int] = Field(default=None, description="新优先级")
     due_date: Optional[str] = Field(default=None, description="新截止日期")
     category: Optional[str] = Field(default=None, description="新分类")
-    status: Optional[str] = Field(default=None, description="新状态")
+    status: Optional[str] = Field(default=None, description="新状态（todo/in_progress/done/cancelled）")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v not in ["todo", "in_progress", "done", "cancelled"]:
+            raise ValueError("status 仅支持 todo/in_progress/done/cancelled")
+        return v
 
 
 # ==================== Helper Functions ====================

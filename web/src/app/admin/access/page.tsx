@@ -9,14 +9,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Toaster } from "@/components/ui/sonner";
 
 const AccessAdminPanel = dynamic(
     () => import("@/components/admin/AccessAdminPanel").then(mod => mod.AccessAdminPanel),
     {
         ssr: false,
         loading: () => (
-            <div className="flex h-screen items-center justify-center bg-background">
+            <div className="flex h-full items-center justify-center">
                 <div className="flex flex-col items-center gap-4">
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#A8D4D4] border-t-[#2F6868]" />
                     <span className="text-sm text-gray-500">加载中...</span>
@@ -27,10 +26,5 @@ const AccessAdminPanel = dynamic(
 );
 
 export default function AccessAdminPage() {
-    return (
-        <div className="min-h-screen w-full bg-background">
-            <Toaster richColors closeButton />
-            <AccessAdminPanel />
-        </div>
-    );
+    return <AccessAdminPanel />;
 }

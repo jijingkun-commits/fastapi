@@ -43,9 +43,12 @@ import {
   LLMProvider,
   LLMModel,
   ModelType,
+  ModelRouteItem,
   getProviders,
   getModels,
   getModelTypes,
+  getModelRouting,
+  updateModelRouting,
   updateProvider,
   updateProviderApiKey,
   setDefaultModel,
@@ -57,6 +60,7 @@ export function LLMAdminPanel() {
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [models, setModels] = useState<LLMModel[]>([]);
   const [modelTypes, setModelTypes] = useState<ModelType[]>([]);
+  const [modelRoutes, setModelRoutes] = useState<ModelRouteItem[]>([]);
   const [loading, setLoading] = useState(true);
   
   // 筛选
@@ -68,18 +72,25 @@ export function LLMAdminPanel() {
   const [newApiKey, setNewApiKey] = useState("");
   const [savingApiKey, setSavingApiKey] = useState(false);
 
+  // 模型路由编辑状态
+  const [editingRoutes, setEditingRoutes] = useState<Record<string, string>>({});
+  const [savingRoute, setSavingRoute] = useState<string | null>(null);
+
   // 加载数据
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [providersData, modelsData, typesData] = await Promise.all([
+      const [providersData, modelsData, typesData, routesData] = await Promise.all([
         getProviders(),
         getModels(),
         getModelTypes(),
+        getModelRouting(),
       ]);
       setProviders(providersData);
       setModels(modelsData);
       setModelTypes(typesData);
+      setModelRoutes(routesData);
+      setEditingRoutes({});
     } catch (e: any) {
       toast.error(e.message || "加载数据失败");
     } finally {
@@ -135,6 +146,30 @@ export function LLMAdminPanel() {
       loadData();
     } catch (e: any) {
       toast.error(e.message);
+    }
+  };
+
+  // 保存模型路由配置
+  const handleSaveRoute = async (configKey: string) => {
+    const modelCode = editingRoutes[configKey];
+    if (!modelCode) return;
+    
+    setSavingRoute(configKey);
+    try {
+      await updateModelRouting({ config_key: configKey, model_code: modelCode });
+      toast.success("模型路由已更新");
+      // 重新加载路由数据
+      const routesData = await getModelRouting();
+      setModelRoutes(routesData);
+      setEditingRoutes(prev => {
+        const next = { ...prev };
+        delete next[configKey];
+        return next;
+      });
+    } catch (e: any) {
+      toast.error(e.message || "更新失败");
+    } finally {
+      setSavingRoute(null);
     }
   };
 
@@ -221,6 +256,7 @@ export function LLMAdminPanel() {
           <TabsTrigger value="providers">提供商</TabsTrigger>
           <TabsTrigger value="models">模型列表</TabsTrigger>
           <TabsTrigger value="types">模型类型</TabsTrigger>
+          <TabsTrigger value="routing">模型路由</TabsTrigger>
         </TabsList>
 
         {/* 提供商 */}
@@ -413,6 +449,101 @@ export function LLMAdminPanel() {
                   </Card>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        {/* 模型路由 */}
+        <TabsContent value="routing">
+          <Card>
+            <CardHeader>
+              <CardTitle>模型分类路由表</CardTitle>
+              <CardDescription>
+                按能力需求分层，不同场景使用不同级别的模型。
+                目标：提高速度、降低 token 消耗、提高回复准确度。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[280px]">场景</TableHead>
+                    <TableHead className="w-[300px]">调用点</TableHead>
+                    <TableHead className="w-[100px]">来源</TableHead>
+                    <TableHead className="w-[200px]">当前模型</TableHead>
+                    <TableHead className="w-[180px]">推荐模型</TableHead>
+                    <TableHead className="w-[80px]">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {modelRoutes.map((route, index) => {
+                    const isEditing = route.editable && route.config_key && editingRoutes[route.config_key] !== undefined;
+                    const isSaving = savingRoute === route.config_key;
+                    
+                    return (
+                      <TableRow key={index} className={!route.editable ? "opacity-75" : ""}>
+                        <TableCell className="font-medium">{route.scene}</TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">
+                          {route.call_point}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={
+                            route.source === "user_select" ? "outline" :
+                            route.source === "fixed_config" ? "default" :
+                            "secondary"
+                          }>
+                            {route.source === "user_select" ? "用户选择" :
+                             route.source === "fixed_config" ? "可配置" :
+                             "专用模型"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {route.editable && route.config_key ? (
+                            <Select
+                              value={editingRoutes[route.config_key] ?? route.current_model}
+                              onValueChange={(value) => {
+                                setEditingRoutes(prev => ({
+                                  ...prev,
+                                  [route.config_key!]: value
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="w-[180px] h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {models
+                                  .filter(m => m.is_active && m.model_type === "chat")
+                                  .map(m => (
+                                    <SelectItem key={m.model_code} value={m.model_code}>
+                                      {m.model_name || m.model_code}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="text-sm">{route.current_model}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground">{route.recommended}</span>
+                        </TableCell>
+                        <TableCell>
+                          {isEditing && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              disabled={isSaving}
+                              onClick={() => handleSaveRoute(route.config_key!)}
+                            >
+                              {isSaving ? "保存中..." : "保存"}
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>

@@ -109,16 +109,15 @@ def _extract_tables_with_schema(sql: str) -> List[Tuple[str, str]]:
         parsed = sqlglot.parse_one(sql, dialect="postgres")
         
         for table in parsed.find_all(exp.Table):
-            schema = table.db or "public"  # 默认 public schema
+            schema = table.db or "public"
             table_name = table.name
             if table_name:
                 tables.append((schema.lower(), table_name.lower()))
                 
     except ParseError:
-        # 降级到正则提取
         tables = _extract_tables_regex(sql)
     
-    return list(set(tables))  # 去重
+    return list(set(tables))
 
 
 def _extract_tables_regex(sql: str) -> List[Tuple[str, str]]:

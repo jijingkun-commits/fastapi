@@ -80,19 +80,22 @@ class DataQueryLog(Base):
 
 
 class Metric(Base):
-    """指标定义（兼容层，映射到 t_metric_definition）"""
+    """指标定义，对齐数据库表 t_metric_definition 真实 schema。"""
     __tablename__ = "t_metric_definition"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True, comment="指标名称")
-    description = Column(Text, comment="指标描述")
-    metric_type = Column(String(50), comment="指标类型：sum/avg/count/formula")
-    model_name = Column(String(100), comment="关联模型/表名")
-    field_name = Column(String(100), comment="关联字段名")
-    formula = Column(Text, comment="计算公式（SQL片段）")
-    filter_condition = Column(Text, comment="过滤条件")
-    synonyms = Column(ARRAY(String), comment="同义词列表")
-    embedding = Column(Vector(2048), comment="向量嵌入")
+    metric_id = Column(String(50), primary_key=True, comment="指标唯一编码")
+    metric_name = Column(String(200), nullable=False, comment="指标名称")
+    aliases = Column(Text, comment="别名/同义词（逗号分隔）")
+    description = Column(Text, nullable=False, comment="自然语言口径描述（向量化核心字段）")
+    category = Column(String(100), comment="指标分类")
+    sub_category = Column(String(100), comment="指标子分类")
+    unit = Column(String(50), comment="单位")
+    frequency = Column(String(20), comment="统计频率")
+    sql_template = Column(Text, comment="原始 SQL 模板（可能是 ETL 脚本）")
+    query_template = Column(Text, comment="可直接执行的 SELECT 查询模板")
+    template_source = Column(String(20), default="none", comment="模板来源: manual|ai_extract|result_lookup|none")
+    embedding = Column(Vector(2048), comment="语义向量（智谱 embedding-3，2048 维）")
+    is_active = Column(Boolean, default=True, comment="是否启用")
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 

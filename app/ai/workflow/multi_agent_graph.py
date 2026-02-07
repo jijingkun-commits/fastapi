@@ -70,46 +70,27 @@ def _get_common_tools():
     return tools
 
 
-async def _get_data_tools():
-    """获取数据分析工具（包含共享工具 + MCP 工具）。"""
-    from app.ai.tools.chatTools import sql_inter, extract_data, python_inter, fig_inter
-    from app.core.config import MCP_CHART_ENABLED
-    
-    tools = _get_common_tools() + [sql_inter, extract_data, python_inter, fig_inter]
-    
-    # 加载 MCP 图表工具（如果启用）
-    if MCP_CHART_ENABLED:
-        try:
-            from app.ai.mcp import load_chart_tools
-            mcp_tools = await load_chart_tools()
-            if mcp_tools:
-                tools.extend(mcp_tools)
-                logger.info("data_expert 已加载 %d 个 MCP 图表工具", len(mcp_tools))
-        except Exception as e:
-            logger.warning("data_expert MCP 图表工具加载失败: %s", e)
-    
-    return tools
-
-
 def _get_supervisor_tools():
     """获取 Supervisor 直接使用的简单工具。
     
     包含：
     - 知识库检索 (knowledge_search)
     - 联网搜索 (tavily_search)
-    - SQL 查询 (sql_inter)
     - 绘图 (fig_inter)
     - 图片分析和文件读取（共享工具）
+    
+    注意：sql_inter 已移除，数据查询统一由 data_expert 处理，
+    避免 Supervisor 直接执行 SQL 导致权限失败和无效重试。
     """
     tools = _get_common_tools()
     
-    # SQL 查询和绘图工具
+    # 绘图工具（sql_inter 已移至 data_expert 专用）
     try:
-        from app.ai.tools.chatTools import sql_inter, fig_inter
-        tools.extend([sql_inter, fig_inter])
-        logger.debug("Supervisor 工具: 已加载 sql_inter, fig_inter")
+        from app.ai.tools.chatTools import fig_inter
+        tools.append(fig_inter)
+        logger.debug("Supervisor 工具: 已加载 fig_inter")
     except Exception as e:
-        logger.warning("Supervisor SQL/绘图工具加载失败: %s", e)
+        logger.warning("Supervisor 绘图工具加载失败: %s", e)
     
     # 知识库搜索工具
     try:
@@ -132,28 +113,6 @@ def _get_supervisor_tools():
             )
     except Exception as e:
         logger.warning("Supervisor 联网搜索工具加载失败: %s", e)
-    
-    return tools
-
-
-def _get_data_expert_tools():
-    """获取数据专家的完整工具集。
-    
-    🔧 修复问题6：补全 Data Expert 工具集
-    - sql_inter: SQL 查询
-    - fig_inter: 绘图
-    - extract_data: 文件数据提取
-    - python_inter: Python 代码执行
-    - 共享工具: 图片分析、文件读取
-    """
-    tools = _get_common_tools()
-    
-    try:
-        from app.ai.tools.chatTools import sql_inter, fig_inter, extract_data, python_inter
-        tools.extend([sql_inter, fig_inter, extract_data, python_inter])
-        logger.debug("data_expert 工具: 已加载完整工具集 (sql_inter, fig_inter, extract_data, python_inter)")
-    except Exception as e:
-        logger.warning("data_expert 工具加载失败: %s", e)
     
     return tools
 

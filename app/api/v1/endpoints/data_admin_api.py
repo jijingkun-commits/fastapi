@@ -9,6 +9,7 @@
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -52,30 +53,72 @@ class TrainRequest(BaseModel):
 
 
 class MetricCreate(BaseModel):
-    """创建指标请求。"""
-    name: str
-    description: Optional[str] = None
-    metric_type: str = "sum"
-    model_name: Optional[str] = None
-    field_name: Optional[str] = None
-    formula: Optional[str] = None
-    filter_condition: Optional[str] = None
-    synonyms: Optional[List[str]] = None
+    """创建/更新指标请求（对齐 t_metric_definition 真实 schema）。"""
+    metric_id: str
+    metric_name: str
+    aliases: Optional[str] = None
+    description: str
+    sql_template: str
+    category: Optional[str] = None
+    sub_category: Optional[str] = None
+    unit: Optional[str] = None
+    frequency: Optional[str] = None
 
 
 class MetricResponse(BaseModel):
     """指标响应。"""
-    id: int
-    name: str
-    description: Optional[str]
-    metric_type: Optional[str]
-    model_name: Optional[str]
-    field_name: Optional[str]
-    formula: Optional[str]
-    synonyms: Optional[List[str]]
-    
+    metric_id: str
+    metric_name: str
+    aliases: Optional[str] = None
+    description: Optional[str] = None
+    sql_template: Optional[str] = None
+    query_template: Optional[str] = None
+    template_source: Optional[str] = None
+    category: Optional[str] = None
+    sub_category: Optional[str] = None
+    unit: Optional[str] = None
+    frequency: Optional[str] = None
+    is_active: Optional[bool] = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
     class Config:
         from_attributes = True
+
+
+class MetricStatsResponse(BaseModel):
+    """指标统计响应。"""
+    total: int
+    by_template_type: list
+    by_template_source: list
+    by_category: list
+    query_ready: int
+    query_ready_percent: float
+    embedding_ready: int
+    embedding_ready_percent: float
+
+
+class BatchConvertRequest(BaseModel):
+    """批量转换请求。"""
+    mode: str = "result_lookup"
+    limit: int = 100
+    dry_run: bool = False
+
+
+class ETLConvertRequest(BaseModel):
+    """ETL 脚本转 SELECT 模板请求。"""
+    etl_script: str
+
+
+class ETLConvertResponse(BaseModel):
+    """ETL 转换结果（供前端预览/编辑）。"""
+    metric_id: Optional[str] = None
+    metric_name: Optional[str] = None
+    aliases: Optional[str] = None
+    description: Optional[str] = None
+    sql_template: Optional[str] = None
+    category: Optional[str] = None
+    unit: Optional[str] = None
 
 
 # ==================== 查询日志管理 ====================
@@ -275,66 +318,279 @@ def train_all_pending(db: Session = Depends(get_db)):
 
 # ==================== 指标管理 ====================
 
+def _metric_to_response(m: Metric) -> MetricResponse:
+    """将 ORM 对象转为响应模型。"""
+    return MetricResponse(
+        metric_id=m.metric_id,
+        metric_name=m.metric_name,
+        aliases=m.aliases,
+        description=m.description,
+        sql_template=m.sql_template,
+        query_template=m.query_template,
+        template_source=m.template_source,
+        category=m.category,
+        sub_category=m.sub_category,
+        unit=m.unit,
+        frequency=m.frequency,
+        is_active=m.is_active,
+        created_at=m.created_at.isoformat() if m.created_at else None,
+        updated_at=m.updated_at.isoformat() if m.updated_at else None,
+    )
+
+
+@router.get("/metrics/stats", response_model=MetricStatsResponse)
+def get_metric_stats(db: Session = Depends(get_db)):
+    """获取指标模板统计数据（支持仪表盘展示）。"""
+    from sqlalchemy import func as sqla_func
+
+    total = db.query(sqla_func.count(Metric.metric_id)).scalar() or 0
+
+    # 按模板类型分组（基于 sql_template 内容判断）
+    type_query = db.execute(text("""
+        SELECT 
+          CASE 
+            WHEN sql_template IS NULL THEN '无模板'
+            WHEN sql_template ~* '^\\s*SELECT' THEN 'SELECT'
+            WHEN UPPER(sql_template) LIKE '%DELETE%' THEN 'ETL(DELETE+INSERT)'
+            WHEN UPPER(sql_template) LIKE '%INSERT INTO%' THEN 'ETL(INSERT)'
+            ELSE '其他'
+          END AS template_type,
+          COUNT(*) AS cnt
+        FROM t_metric_definition
+        GROUP BY template_type
+        ORDER BY cnt DESC
+    """))
+    by_template_type = [
+        {"type": row.template_type, "count": row.cnt,
+         "percent": round(row.cnt * 100.0 / max(total, 1), 1)}
+        for row in type_query
+    ]
+
+    # 按 template_source 分组
+    source_query = db.execute(text("""
+        SELECT COALESCE(template_source, 'none') AS source, COUNT(*) AS cnt
+        FROM t_metric_definition
+        GROUP BY source
+        ORDER BY cnt DESC
+    """))
+    by_template_source = [
+        {"source": row.source, "count": row.cnt} for row in source_query
+    ]
+
+    # 按分类分组
+    cat_query = db.execute(text("""
+        SELECT COALESCE(category, '未分类') AS category, COUNT(*) AS cnt
+        FROM t_metric_definition
+        GROUP BY category
+        ORDER BY cnt DESC
+        LIMIT 10
+    """))
+    by_category = [{"category": row.category, "count": row.cnt} for row in cat_query]
+
+    # 覆盖率统计
+    query_ready = db.execute(text(
+        "SELECT COUNT(*) FROM t_metric_definition WHERE query_template IS NOT NULL"
+    )).scalar() or 0
+    embedding_ready = db.execute(text(
+        "SELECT COUNT(*) FROM t_metric_definition WHERE embedding IS NOT NULL"
+    )).scalar() or 0
+
+    return MetricStatsResponse(
+        total=total,
+        by_template_type=by_template_type,
+        by_template_source=by_template_source,
+        by_category=by_category,
+        query_ready=query_ready,
+        query_ready_percent=round(query_ready * 100.0 / max(total, 1), 1),
+        embedding_ready=embedding_ready,
+        embedding_ready_percent=round(embedding_ready * 100.0 / max(total, 1), 1),
+    )
+
+
 @router.get("/metrics", response_model=List[MetricResponse])
 def list_metrics(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, le=200),
+    category: Optional[str] = None,
+    keyword: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """获取指标列表。"""
-    metrics = db.query(Metric).offset(skip).limit(limit).all()
-    return metrics
+    """获取指标列表，支持分类和关键词筛选。"""
+    query = db.query(Metric)
+    
+    if category:
+        query = query.filter(Metric.category == category)
+    if keyword:
+        like_pattern = f"%{keyword}%"
+        query = query.filter(
+            (Metric.metric_name.ilike(like_pattern))
+            | (Metric.aliases.ilike(like_pattern))
+            | (Metric.description.ilike(like_pattern))
+        )
+    
+    metrics = query.order_by(Metric.metric_id).offset(skip).limit(limit).all()
+    return [_metric_to_response(m) for m in metrics]
 
 
 @router.post("/metrics", response_model=MetricResponse)
 def create_metric(request: MetricCreate, db: Session = Depends(get_db)):
     """创建新指标。"""
-    # 检查重复
-    existing = db.query(Metric).filter(Metric.name == request.name).first()
+    existing = db.query(Metric).filter(Metric.metric_id == request.metric_id).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"指标 {request.name} 已存在")
-    
+        raise HTTPException(status_code=400, detail=f"指标 {request.metric_id} 已存在")
+
     # 生成 embedding
+    embedding = None
     try:
         from app.ai.utils.embedding_util import get_embedding
-        description = request.description or request.name
-        embedding = get_embedding(description)
+        embed_text = request.description or request.metric_name
+        embedding = get_embedding(embed_text)
     except Exception as e:
         logger.warning(f"生成指标 embedding 失败: {e}")
-        embedding = None
-    
+
     metric = Metric(
-        name=request.name,
+        metric_id=request.metric_id,
+        metric_name=request.metric_name,
+        aliases=request.aliases,
         description=request.description,
-        metric_type=request.metric_type,
-        model_name=request.model_name,
-        field_name=request.field_name,
-        formula=request.formula,
-        filter_condition=request.filter_condition,
-        synonyms=request.synonyms,
-        embedding=embedding
+        sql_template=request.sql_template,
+        category=request.category,
+        sub_category=request.sub_category,
+        unit=request.unit,
+        frequency=request.frequency,
+        embedding=embedding,
+        is_active=True,
     )
-    
+
     db.add(metric)
     db.commit()
     db.refresh(metric)
-    
-    logger.info(f"创建指标: {request.name}")
-    
-    return metric
+
+    logger.info(f"创建指标: {request.metric_id} - {request.metric_name}")
+    return _metric_to_response(metric)
+
+
+@router.put("/metrics/{metric_id}", response_model=MetricResponse)
+def update_metric(metric_id: str, request: MetricCreate, db: Session = Depends(get_db)):
+    """更新指标。"""
+    metric = db.query(Metric).filter(Metric.metric_id == metric_id).first()
+    if not metric:
+        raise HTTPException(status_code=404, detail="指标不存在")
+
+    metric.metric_name = request.metric_name
+    metric.aliases = request.aliases
+    metric.description = request.description
+    metric.sql_template = request.sql_template
+    metric.category = request.category
+    metric.sub_category = request.sub_category
+    metric.unit = request.unit
+    metric.frequency = request.frequency
+
+    # 重新生成 embedding
+    try:
+        from app.ai.utils.embedding_util import get_embedding
+        embed_text = request.description or request.metric_name
+        metric.embedding = get_embedding(embed_text)
+    except Exception as e:
+        logger.warning(f"更新 embedding 失败: {e}")
+
+    db.commit()
+    db.refresh(metric)
+
+    logger.info(f"更新指标: {metric_id}")
+    return _metric_to_response(metric)
 
 
 @router.delete("/metrics/{metric_id}")
-def delete_metric(metric_id: int, db: Session = Depends(get_db)):
+def delete_metric(metric_id: str, db: Session = Depends(get_db)):
     """删除指标。"""
-    metric = db.query(Metric).filter(Metric.id == metric_id).first()
+    metric = db.query(Metric).filter(Metric.metric_id == metric_id).first()
     if not metric:
         raise HTTPException(status_code=404, detail="指标不存在")
-    
+
     db.delete(metric)
     db.commit()
-    
+
     return {"message": "删除成功", "metric_id": metric_id}
+
+
+# ==================== AI ETL 转换 ====================
+
+ETL_CONVERT_PROMPT = """你是一个银行数据仓库专家。用户会粘贴一段 ETL 批处理脚本（通常包含 DELETE + INSERT INTO ... SELECT 结构），
+你需要从中提取核心 SELECT 查询逻辑，将其转化为一个问数助手可以直接使用的 SELECT 查询模板。
+
+## 规则
+1. 只保留 SELECT 部分，去掉 DELETE 和 INSERT INTO ... 包装
+2. 去掉写入目标表相关的常量列（如 INDEX_CODE、INDEX_NAME、MONTH_TO_DATE 等固定值列）
+3. 保留有意义的业务列（如机构、金额、户数等），用中文别名
+4. 日期参数统一使用 ${data_dt} 占位符
+5. 如果原 SQL 中有 ETL 调度宏（如 [DATE,0D,YYYY-MM-DD]），替换为 '${data_dt}'
+6. 加上 ORDER BY（如果合理的话）
+7. GROUP BY 去掉常量列，只保留有效分组列
+
+## 输出格式（严格 JSON）
+```json
+{
+    "metric_id": "从脚本注释或 INDEX_CODE 推断，如 AK000119",
+    "metric_name": "从 INDEX_NAME 或脚本注释推断，如 各项贷款户数",
+    "aliases": "逗号分隔的别名，如 贷款户数,贷款客户数",
+    "description": "用自然语言描述这个指标的口径，包含筛选条件、排除条件等",
+    "sql_template": "提取并优化后的 SELECT 查询模板",
+    "category": "贷款/存款/综合/其他",
+    "unit": "元/户/笔/%/其他"
+}
+```
+
+## 用户输入的 ETL 脚本
+"""
+
+
+@router.post("/metrics/convert-etl", response_model=ETLConvertResponse)
+def convert_etl_to_select(request: ETLConvertRequest):
+    """AI 转换：将 ETL 脚本转为 SELECT 查询模板。
+
+    不直接保存，返回结构化结果供前端预览和编辑。
+    """
+    if not request.etl_script or not request.etl_script.strip():
+        raise HTTPException(status_code=400, detail="ETL 脚本不能为空")
+
+    try:
+        from app.ai.llm_util import get_llm
+        from langchain_core.messages import SystemMessage, HumanMessage
+        import json
+
+        llm = get_llm(internal=True)
+        messages = [
+            SystemMessage(content=ETL_CONVERT_PROMPT),
+            HumanMessage(content=request.etl_script),
+        ]
+        response = llm.invoke(messages)
+        content = response.content if hasattr(response, "content") else str(response)
+
+        # 从响应中提取 JSON
+        json_str = content
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0]
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0]
+
+        result = json.loads(json_str.strip())
+
+        return ETLConvertResponse(
+            metric_id=result.get("metric_id"),
+            metric_name=result.get("metric_name"),
+            aliases=result.get("aliases"),
+            description=result.get("description"),
+            sql_template=result.get("sql_template"),
+            category=result.get("category"),
+            unit=result.get("unit"),
+        )
+    except json.JSONDecodeError as e:
+        logger.error(f"AI 响应 JSON 解析失败: {e}")
+        raise HTTPException(status_code=422, detail=f"AI 返回结果解析失败，请重试: {str(e)}")
+    except Exception as e:
+        logger.exception("ETL 转换失败")
+        raise HTTPException(status_code=500, detail=f"转换失败: {str(e)}")
 
 
 # ==================== 表元数据管理 ====================
@@ -379,3 +635,166 @@ def sync_schema(db: Session = Depends(get_db)):
     except Exception as e:
         logger.exception("表结构同步失败")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 批量模板转换 ====================
+
+@router.post("/metrics/batch-convert")
+def batch_convert_templates(request: BatchConvertRequest, db: Session = Depends(get_db)):
+    """批量将 ETL 模板转换为可执行查询模板。
+
+    支持两种模式：
+    - result_lookup: 自动生成结果表查询（无需 LLM，秒级完成）
+    - ai_extract: 使用 AI 从 ETL 脚本提取 SELECT（需 LLM，较慢）
+    """
+    if request.mode == "result_lookup":
+        return _batch_convert_result_lookup(db, request.limit, request.dry_run)
+    elif request.mode == "ai_extract":
+        return _batch_convert_ai_extract(db, request.limit, request.dry_run)
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的模式: {request.mode}")
+
+
+def _batch_convert_result_lookup(db: Session, limit: int, dry_run: bool):
+    """批量生成结果表查询模板（无需 LLM）。"""
+    # 查找尚未转换的 ETL 指标
+    pending = db.execute(text("""
+        SELECT metric_id, metric_name,
+          CASE
+            WHEN UPPER(sql_template) LIKE '%F_MID_INDEX_RESULT_DIM%' THEN 'dim'
+            WHEN UPPER(sql_template) LIKE '%F_MID_INDEX_RESULT_DERIVE%' THEN 'derive'
+            ELSE 'main'
+          END AS target_type
+        FROM t_metric_definition
+        WHERE sql_template IS NOT NULL
+          AND UPPER(sql_template) LIKE '%INSERT INTO%F_MID_INDEX_RESULT%'
+          AND (query_template IS NULL OR template_source = 'none')
+        LIMIT :limit
+    """), {"limit": limit}).fetchall()
+
+    if not pending:
+        return {"message": "没有待转换的 ETL 指标", "processed": 0, "success": 0}
+
+    if dry_run:
+        return {
+            "message": f"预览模式：发现 {len(pending)} 条待转换指标",
+            "processed": len(pending),
+            "success": 0,
+            "dry_run": True,
+            "preview": [{"metric_id": r.metric_id, "metric_name": r.metric_name,
+                         "target_type": r.target_type} for r in pending]
+        }
+
+    # 执行转换
+    success = 0
+    errors = []
+    for row in pending:
+        try:
+            table_map = {
+                "main": "fdmdata.f_mid_index_result",
+                "dim": "fdmdata.f_mid_index_result_dim",
+                "derive": "fdmdata.f_mid_index_result_derive",
+            }
+            target = table_map.get(row.target_type, table_map["main"])
+
+            extra_cols = ", dim_name AS 维度名称, dim_value AS 维度值" if row.target_type == "dim" else ""
+
+            qt = (
+                f"SELECT data_dt, org_no, org_no_map AS 机构名称, ccy AS 币种, "
+                f"index_name AS 指标名称, index_value AS 指标值, "
+                f"year_to_date AS 年累计{extra_cols} "
+                f"FROM {target} "
+                f"WHERE index_code = '{row.metric_id}' AND data_dt = '${{data_dt}}' "
+                f"ORDER BY org_no"
+            )
+
+            db.execute(text("""
+                UPDATE t_metric_definition
+                SET query_template = :qt, template_source = 'result_lookup'
+                WHERE metric_id = :mid
+            """), {"qt": qt, "mid": row.metric_id})
+            success += 1
+        except Exception as e:
+            errors.append({"metric_id": row.metric_id, "error": str(e)})
+
+    db.commit()
+    logger.info(f"批量转换完成: 成功={success}, 失败={len(errors)}")
+
+    return {
+        "message": f"转换完成，成功 {success} 条",
+        "processed": len(pending),
+        "success": success,
+        "errors": errors if errors else None,
+    }
+
+
+def _batch_convert_ai_extract(db: Session, limit: int, dry_run: bool):
+    """批量使用 AI 从 ETL 脚本提取 SELECT（较慢）。"""
+    pending = db.execute(text("""
+        SELECT metric_id, metric_name, sql_template
+        FROM t_metric_definition
+        WHERE sql_template IS NOT NULL
+          AND UPPER(sql_template) LIKE '%INSERT INTO%'
+          AND (query_template IS NULL OR template_source = 'none')
+        LIMIT :limit
+    """), {"limit": limit}).fetchall()
+
+    if not pending:
+        return {"message": "没有待转换的 ETL 指标", "processed": 0, "success": 0}
+
+    if dry_run:
+        return {
+            "message": f"预览模式：发现 {len(pending)} 条待 AI 提取的指标",
+            "processed": len(pending),
+            "success": 0,
+            "dry_run": True,
+            "preview": [{"metric_id": r.metric_id, "metric_name": r.metric_name}
+                         for r in pending[:20]]
+        }
+
+    from app.ai.llm_util import get_llm
+    from langchain_core.messages import SystemMessage, HumanMessage
+    import json
+
+    llm = get_llm(internal=True)
+    success = 0
+    errors = []
+
+    for row in pending:
+        try:
+            messages = [
+                SystemMessage(content=ETL_CONVERT_PROMPT),
+                HumanMessage(content=row.sql_template),
+            ]
+            response = llm.invoke(messages)
+            content = response.content if hasattr(response, "content") else str(response)
+
+            # 提取 JSON
+            json_str = content
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0]
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0]
+
+            result = json.loads(json_str.strip())
+            extracted_sql = result.get("sql_template", "")
+
+            if extracted_sql:
+                db.execute(text("""
+                    UPDATE t_metric_definition
+                    SET query_template = :qt, template_source = 'ai_extract'
+                    WHERE metric_id = :mid
+                """), {"qt": extracted_sql, "mid": row.metric_id})
+                success += 1
+        except Exception as e:
+            errors.append({"metric_id": row.metric_id, "error": str(e)[:100]})
+
+    db.commit()
+    logger.info(f"AI 批量提取完成: 成功={success}, 失败={len(errors)}")
+
+    return {
+        "message": f"AI 提取完成，成功 {success} 条",
+        "processed": len(pending),
+        "success": success,
+        "errors": errors if errors else None,
+    }

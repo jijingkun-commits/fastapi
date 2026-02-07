@@ -112,8 +112,9 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 REASONING_EFFORT = os.getenv("REASONING_EFFORT", "medium")
 
-# 意图分类器模型配置（使用轻量级快速模型）
-INTENT_CLASSIFIER_MODEL = os.getenv("INTENT_CLASSIFIER_MODEL", "glm-4.5-air")
+# 意图分类器模型配置（使用轻量级快速模型，推荐非推理模型如 qwen-plus）
+# 注意：运行时优先从 t_system_config 读取，此处为回退默认值
+INTENT_CLASSIFIER_MODEL = os.getenv("INTENT_CLASSIFIER_MODEL", "qwen-plus")
 
 # 智谱 API Key (用于 Embedding 向量化)
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
@@ -139,7 +140,35 @@ THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
 
 # LLM Judge 输出评估（用于问数助手 SQL 质量评估）
 ENABLE_LLM_JUDGE = os.getenv("ENABLE_LLM_JUDGE", "false").lower() == "true"
-LLM_JUDGE_MODEL = os.getenv("LLM_JUDGE_MODEL", "glm-4.5-air")
+# 注意：运行时优先从 t_system_config 读取，此处为回退默认值
+LLM_JUDGE_MODEL = os.getenv("LLM_JUDGE_MODEL", "qwen-plus")
+
+# SQL 生成 / 内部分析模型配置（标准模型，非推理模型）
+# 注意：运行时优先从 t_system_config 读取，此处为回退默认值
+SQL_GENERATION_MODEL = os.getenv("SQL_GENERATION_MODEL", "qwen-plus")
+
+
+# ==========================================
+# 模型路由配置键（t_system_config 中的 key）
+# ==========================================
+MODEL_ROUTING_INTENT_CLASSIFIER = "model_routing.lightweight"      # 轻量任务：意图分类
+MODEL_ROUTING_LLM_JUDGE = "model_routing.lightweight"              # 轻量任务：评估/参数提取（与意图分类共享同一配置）
+MODEL_ROUTING_SQL_GENERATION = "model_routing.sql_generation"      # SQL 生成 / 内部分析
+
+
+def get_routing_model(config_key: str, env_fallback: str) -> str:
+    """获取模型路由配置（优先 t_system_config，回退环境变量）。
+    
+    Args:
+        config_key: t_system_config 中的配置键
+        env_fallback: 环境变量回退值
+        
+    Returns:
+        模型代码
+    """
+    from app.services.system_config_service import SystemConfigService
+    val = SystemConfigService.get_string(config_key, "")
+    return val if val else env_fallback
 
 # MCP Chart
 MCP_CHART_SERVER_URL = os.getenv("MCP_CHART_SERVER_URL", "http://127.0.0.1:1122/sse")

@@ -29,7 +29,11 @@ from app.ai.prompts.data_prompts import (
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.utils.state_helpers import get_user_id
 from app.ai.utils.schema_router import route_schema
-from app.core.config import ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, LLM_JUDGE_MODEL
+from app.core.config import (
+    ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, LLM_JUDGE_MODEL,
+    SQL_GENERATION_MODEL,
+    MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION, get_routing_model
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +43,10 @@ logger = logging.getLogger(__name__)
 AVAILABLE_METRICS = """
 - 贷款余额 / 贷款总额: 贷款类指标，同义词：贷款、放款余额
 - 存款余额 / 存款总额: 存款类指标，同义词：存款、储蓄
-- total_gmv: 成交总额 (GMV)，同义词：销售额、收入
-- order_count: 订单数量，同义词：成单量、订单总数
-- avg_order_value: 客单价 (AOV)，同义词：平均订单金额
-- new_user_count: 新增用户数，同义词：注册用户
+- 不良贷款率: 风控类指标，同义词：NPL 比率
+- 贷款户数: 贷款类指标，同义词：贷款客户数
+- 存款户数: 存款类指标，同义词：存款客户数
+- 分机构存款余额 / 分行存款: 按机构维度的存款统计
 """
 
 
@@ -97,7 +101,9 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     existing_context = "；".join(parts) if parts else "（无，为首轮或尚未提供）"
 
     # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
-    llm = get_llm(internal=True)
+    # 使用 SQL 生成/内部分析 路由配置的模型，避免推理模型浪费 thinking tokens
+    sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+    llm = get_llm(internal=True, model_id=sql_gen_model)
     prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
         question=last_message,
         existing_context=existing_context,
@@ -181,73 +187,214 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
 
 def metric_resolve(state: DataAgentState) -> Dict:
-    """解析预定义指标，生成模板 SQL。
+    """指标匹配：向量检索 t_metric_definition，命中则直接用 query_template。
     
     职责：
-    1. 从 semantic_model.yaml 或 t_metrics 表加载指标定义
-    2. 根据时间范围和维度生成 SQL
+    1. 根据用户问题向量检索数据库中的指标定义
+    2. 命中且有 query_template 时，直接生成 SQL（跳过 LLM 生成，节省 Token）
+    3. 未命中则回退到 Vanna RAG 路径
+    
+    改造记录：
+    - 2026-02-07: 从硬编码电商模板改为数据库向量匹配 (ADR-011)
     """
     logger.info("=== metric_resolve 节点 ===")
     
+    query_context = state.get("query_context", {})
+    question = query_context.get("original_question", "")
     matched_metric = state.get("matched_metric")
     time_range = state.get("time_range")
-    dimensions = state.get("dimensions", [])
     
-    if not matched_metric:
-        return {"sql_source": "vanna"}  # 回退到 Vanna
-    
-    # 简化版：根据指标名生成 SQL 模板
-    # 生产环境应从数据库或 YAML 加载配置
-    sql_templates = {
-        "total_gmv": """
-            SELECT {dimensions} SUM(amount) AS total_gmv
-            FROM t_orders
-            WHERE status IN ('paid', 'shipped', 'completed')
-            {time_filter}
-            {group_by}
-        """,
-        "order_count": """
-            SELECT {dimensions} COUNT(*) AS order_count
-            FROM t_orders
-            WHERE status != 'cancelled'
-            {time_filter}
-            {group_by}
-        """,
-        "avg_order_value": """
-            SELECT {dimensions}
-                   SUM(amount) / NULLIF(COUNT(*), 0) AS avg_order_value
-            FROM t_orders
-            WHERE status IN ('paid', 'shipped', 'completed')
-            {time_filter}
-            {group_by}
-        """
-    }
-    
-    template = sql_templates.get(matched_metric)
-    if not template:
+    if not question and not matched_metric:
         return {"sql_source": "vanna"}
     
-    # 构建 SQL
-    dim_select = ", ".join(dimensions) + ", " if dimensions else ""
-    group_by = f"GROUP BY {', '.join(dimensions)}" if dimensions else ""
-    time_filter = _build_time_filter(time_range)
+    try:
+        vanna = get_vanna()
+        
+        # 向量检索 query_template 非空的指标
+        candidates = _search_metrics_by_vector(
+            vanna, question or matched_metric, top_k=3
+        )
+        
+        if not candidates:
+            logger.info("指标向量匹配: 无命中，回退到 Vanna")
+            return {"sql_source": "vanna"}
+        
+        best = candidates[0]
+        similarity = best.get("similarity", 0)
+        
+        # 相似度阈值：> 0.5 才使用模板（实测银行指标匹配多在 0.55-0.65 区间）
+        if similarity < 0.5:
+            logger.info(
+                "指标向量匹配: 最佳相似度 %.3f < 0.5，回退到 Vanna (指标: %s)",
+                similarity, best.get("metric_name")
+            )
+            return {"sql_source": "vanna"}
+        
+        query_template = best.get("query_template")
+        if not query_template:
+            logger.info(
+                "指标命中但无 query_template: %s，回退到 Vanna",
+                best.get("metric_id")
+            )
+            return {"sql_source": "vanna"}
+        
+        # 替换 ${data_dt} 参数
+        sql = _replace_data_dt(query_template, time_range)
+        
+        logger.info(
+            "指标命中: %s (%s), 相似度=%.3f, SQL=%s...",
+            best.get("metric_id"), best.get("metric_name"),
+            similarity, sql[:80]
+        )
+        
+        return {
+            "generated_sql": sql,
+            "sql_source": "metric",
+            "pending_sql": sql,
+            "matched_metric": best.get("metric_name"),
+        }
+        
+    except Exception as e:
+        logger.warning("指标向量匹配异常，回退到 Vanna: %s", e)
+        return {"sql_source": "vanna"}
+
+
+def _search_metrics_by_vector(vanna, question: str, top_k: int = 3) -> list:
+    """从 t_metric_definition 向量检索指标。
     
-    sql = template.format(
-        dimensions=dim_select,
-        time_filter=time_filter,
-        group_by=group_by
-    ).strip()
+    只返回有 query_template 的指标，按相似度降序排列。
+    """
+    from sqlalchemy import create_engine, text
     
-    # 清理多余空白
-    sql = " ".join(sql.split())
+    embedding = vanna.generate_embedding(question)
+    if not embedding:
+        return []
     
-    logger.info(f"生成指标 SQL: {sql[:100]}...")
+    embedding_str = str(embedding)
     
-    return {
-        "generated_sql": sql,
-        "sql_source": "metric",
-        "pending_sql": sql  # 待审核
-    }
+    sql = text("""
+        SELECT metric_id, metric_name, description,
+               query_template, template_source,
+               1 - (embedding <=> :embedding) AS similarity
+        FROM t_metric_definition
+        WHERE is_active = TRUE
+          AND embedding IS NOT NULL
+          AND query_template IS NOT NULL
+          AND 1 - (embedding <=> :embedding) > 0.5
+        ORDER BY embedding <=> :embedding
+        LIMIT :top_k
+    """)
+    
+    try:
+        from app.core.config import DATABASE_URL
+        with create_engine(DATABASE_URL).connect() as conn:
+            rows = conn.execute(sql, {
+                "embedding": embedding_str, "top_k": top_k
+            }).fetchall()
+        
+        return [
+            {
+                "metric_id": r.metric_id,
+                "metric_name": r.metric_name,
+                "description": r.description,
+                "query_template": r.query_template,
+                "template_source": r.template_source,
+                "similarity": r.similarity,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning("指标向量检索失败: %s", e)
+        return []
+
+
+def _replace_data_dt(sql: str, time_range: str = None) -> str:
+    """将 query_template 中的 ${data_dt} 替换为实际日期。
+    
+    策略：
+    1. 如果用户指定了时间范围（如"上月""6月"），解析为具体日期
+    2. 否则查询分析库中最新的数据日期
+    3. 兜底使用当天日期
+    """
+    if "${data_dt}" not in sql:
+        return sql
+    
+    date_val = None
+    
+    # 尝试从用户时间范围推断
+    if time_range:
+        date_val = _parse_business_date(time_range)
+    
+    # 查询分析库最新数据日期
+    if not date_val:
+        date_val = _get_latest_data_date()
+    
+    # 兜底
+    if not date_val:
+        from datetime import datetime
+        date_val = datetime.now().strftime("%Y%m%d")
+    
+    logger.info("${data_dt} 替换为: %s (time_range=%s)", date_val, time_range)
+    return sql.replace("${data_dt}", date_val)
+
+
+def _parse_business_date(time_range: str) -> str:
+    """从自然语言时间范围解析业务日期（格式 YYYYMMDD）。"""
+    from datetime import datetime, timedelta
+    import re
+    
+    now = datetime.now()
+    text = time_range.strip()
+    
+    # 直接日期格式: 2025-06-30 或 20250630
+    m = re.search(r'(\d{4})-?(\d{2})-?(\d{2})', text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+    
+    # 月末日期推断
+    if "上月" in text or "上个月" in text:
+        first_of_month = now.replace(day=1)
+        last_of_prev = first_of_month - timedelta(days=1)
+        return last_of_prev.strftime("%Y%m%d")
+    
+    if "本月" in text or "这个月" in text:
+        return now.strftime("%Y%m%d")
+    
+    # 年月: "6月" "2025年6月"
+    m = re.search(r'(\d{4})年?(\d{1,2})月', text)
+    if m:
+        import calendar
+        year, month = int(m.group(1)), int(m.group(2))
+        last_day = calendar.monthrange(year, month)[1]
+        return f"{year}{month:02d}{last_day:02d}"
+    
+    m = re.search(r'(\d{1,2})月', text)
+    if m:
+        import calendar
+        month = int(m.group(1))
+        year = now.year if month <= now.month else now.year - 1
+        last_day = calendar.monthrange(year, month)[1]
+        return f"{year}{month:02d}{last_day:02d}"
+    
+    return None
+
+
+def _get_latest_data_date() -> str:
+    """查询分析库中 f_mid_index_result 最新数据日期。"""
+    try:
+        from app.db.session import analytics_engine
+        from sqlalchemy import text
+        
+        with analytics_engine.connect() as conn:
+            result = conn.execute(text(
+                "SELECT MAX(data_dt) FROM fdmdata.f_mid_index_result"
+            )).scalar()
+            if result:
+                return str(result).replace("-", "")
+    except Exception as e:
+        logger.debug("查询最新数据日期失败: %s", e)
+    
+    return None
 
 
 def schema_retrieve(state: DataAgentState) -> Dict:
@@ -412,7 +559,13 @@ def sql_generate(state: DataAgentState) -> Dict:
             logger.info(f"添加错误反馈到 prompt: {error_feedback[:100]}...")
         
         # 使用 submit_prompt 直接提交，避免 generate_sql 内部的重复检索
-        response = vanna.submit_prompt(messages)
+        # 使用 SQL 生成路由配置的模型（标准模型，非推理），避免浪费 thinking tokens
+        sql_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+        response = vanna.submit_prompt(
+            messages,
+            model_id=sql_model,
+            enable_thinking=state.get("enable_thinking", False),
+        )
         
         if not response:
             return {
@@ -436,7 +589,7 @@ def sql_generate(state: DataAgentState) -> Dict:
                     from app.ai.llm_judge import evaluate_sql_response_sync
                     
                     judge_result = evaluate_sql_response_sync(
-                        sql, "待执行", LLM_JUDGE_MODEL
+                        sql, "待执行", get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL)
                     )
                     
                     if judge_result.score == "fail":
@@ -542,19 +695,23 @@ def _extract_sql_from_response(response: str) -> Optional[str]:
             in_sql = True
         if in_sql:
             sql_lines.append(line)
-            # 简单判断 SQL 结束（遇到分号或空行后有非 SQL 内容）
-            if stripped.endswith(';'):
+            # 判断 SQL 结束：支持 ; 和 ; -- comment 两种结尾
+            stripped_no_comment = re.sub(r'--.*$', '', stripped).rstrip()
+            if stripped_no_comment.endswith(';'):
                 break
     
     if sql_lines:
         sql = '\n'.join(sql_lines).strip()
+        # 移除末尾的 ; 或 ; -- comment
+        sql = re.sub(r';\s*--[^\n]*$', '', sql).rstrip()
         if sql.endswith(';'):
-            sql = sql[:-1].strip()  # 移除末尾分号，后续会统一处理
+            sql = sql[:-1].strip()
         return sql
     
     # 最后尝试：如果整个响应看起来像 SQL
     if response.upper().startswith(("SELECT", "WITH")):
-        return response.rstrip(';').strip()
+        sql = re.sub(r';\s*--[^\n]*$', '', response).rstrip()
+        return sql.rstrip(';').strip()
     
     return None
 
@@ -838,51 +995,6 @@ def sql_execute(state: DataAgentState) -> Dict:
 MAX_RETRY_ITERATIONS = 3
 
 
-def _is_recoverable_error(error_str: str) -> bool:
-    """判断错误是否可以通过重新生成 SQL 来恢复。
-    
-    Args:
-        error_str: 错误信息字符串
-        
-    Returns:
-        是否为可恢复错误
-    """
-    error_lower = error_str.lower()
-    
-    # 可恢复的错误模式
-    recoverable_patterns = [
-        "relation",           # 表不存在: relation "xxx" does not exist
-        "column",             # 列不存在: column "xxx" does not exist
-        "does not exist",     # 通用不存在错误
-        "undefined",          # undefined column/table
-        "syntax error",       # SQL 语法错误
-        "invalid",            # 无效的标识符等
-        "ambiguous",          # 歧义列名
-        "type mismatch",      # 类型不匹配
-        "cannot be converted",  # 类型转换失败
-    ]
-    
-    for pattern in recoverable_patterns:
-        if pattern in error_lower:
-            return True
-    
-    # 不可恢复的错误（连接问题、权限问题等）
-    unrecoverable_patterns = [
-        "connection",
-        "timeout",
-        "permission denied",
-        "authentication",
-        "ssl",
-    ]
-    
-    for pattern in unrecoverable_patterns:
-        if pattern in error_lower:
-            return False
-    
-    # 默认尝试恢复
-    return True
-
-
 def clarify_node(state: DataAgentState) -> Dict:
     """澄清节点：向用户询问更多信息。"""
     logger.info("=== clarify_node 节点 ===")
@@ -923,14 +1035,27 @@ def _build_time_filter(time_range: Optional[str]) -> str:
 def _interpret_result(question: str, sql: str, result: List[Dict]) -> str:
     """生成查询结果的自然语言解释。"""
     if not result:
-        return "查询完成，没有找到符合条件的数据。"
+        return "查询完成，但没有找到符合条件的数据。\n\n💡 **排查建议**：\n1. **日期范围**：请检查查询日期是否与数据库中的数据匹配（当前导入数据日期为 2025-06-30）。\n2. **查询条件**：尝试放宽过滤条件或查询全量数据。"
     
     # 简单解释
     row_count = len(result)
     if row_count == 1:
         # 单值结果，直接展示
         row = result[0]
-        values = ", ".join([f"{k}: {v}" for k, v in row.items()])
+        
+        # 特殊处理：如果只有一列且值为 None (常见于 SUM/AVG 等聚合函数未匹配到数据)
+        if len(row) == 1:
+            key, value = list(row.items())[0]
+            if value is None:
+                return f"查询完成，但计算结果为空 ({key}: None)。\n\n💡 **排查建议**：\n1. **日期范围**：请检查查询日期是否与数据库中的数据匹配。\n   *(当前导入测试数据日期为: 2025-06-30，如果您查询的是'本月'或'今天'，可能会查不到数据)*\n2. **指定日期**：建议尝试指定具体日期查询，例如 `2025-06-30`。"
+        
+        # 格式化 None 值
+        formatted_values = []
+        for k, v in row.items():
+            display_val = "无数据" if v is None else str(v)
+            formatted_values.append(f"{k}: {display_val}")
+            
+        values = ", ".join(formatted_values)
         return f"查询结果：{values}"
     else:
         return f"查询完成，共返回 {row_count} 条记录。"

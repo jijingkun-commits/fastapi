@@ -258,7 +258,7 @@ export default function TodoListCard({
     }
 
     return (
-        <Card className="w-full max-w-2xl bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md py-0 gap-0">
+        <Card className="w-full max-w-full sm:max-w-2xl bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md py-0 gap-0">
             <CardContent className="p-0">
                 {/* Header */}
                 <div className="flex items-center justify-between p-3 border-b bg-muted/20">
@@ -280,9 +280,9 @@ export default function TodoListCard({
 
                 {/* 筛选栏 */}
                 {localTodos.length > 3 && (
-                    <div className="flex items-center gap-2 p-2 border-b bg-muted/10 flex-wrap">
+                    <div className="flex items-center gap-1.5 sm:gap-2 p-2 border-b bg-muted/10 flex-wrap">
                         {/* 搜索框 */}
-                        <div className="relative flex-1 min-w-[120px] max-w-[200px]">
+                        <div className="relative flex-1 min-w-[80px] sm:min-w-[120px] max-w-[200px]">
                             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                             <Input
                                 placeholder="搜索..."
@@ -294,7 +294,7 @@ export default function TodoListCard({
 
                         {/* 状态筛选 */}
                         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-                            <SelectTrigger className="h-7 w-[80px] text-xs">
+                            <SelectTrigger className="h-7 w-[70px] sm:w-[80px] text-xs">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -306,7 +306,7 @@ export default function TodoListCard({
 
                         {/* 优先级筛选 */}
                         <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as typeof priorityFilter)}>
-                            <SelectTrigger className="h-7 w-[80px] text-xs">
+                            <SelectTrigger className="h-7 w-[70px] sm:w-[80px] text-xs">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -322,11 +322,11 @@ export default function TodoListCard({
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-7 px-2 text-xs text-muted-foreground"
+                                className="h-7 px-1.5 sm:px-2 text-xs text-muted-foreground"
                                 onClick={clearFilters}
                             >
-                                <X className="w-3 h-3 mr-1" />
-                                清除
+                                <X className="w-3 h-3 sm:mr-1" />
+                                <span className="hidden sm:inline">清除</span>
                             </Button>
                         )}
                     </div>

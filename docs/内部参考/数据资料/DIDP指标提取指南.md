@@ -66,3 +66,34 @@ python scripts/setup_data.py full-setup
 ### 4.2 向量库检索不到新指标
 原因：元数据更新后未同步。
 解决：执行 `python scripts/setup_data.py sync-vectors`。
+
+## 5. 手动查找指南 (Manual Lookup Guide)
+
+如果你不想运行脚本，也可以通过以下步骤手动找到需要的指标定义和 SQL。
+
+### 步骤 1：查找指标 ID
+
+1. 打开数据文件：`data/dmp_show_ind_info_*.txt`
+2. 搜索指标名称（如 "各项存款"）
+3. 第一列即为 **指标 ID** (如 `A000047`)
+
+### 步骤 2：定位 SQL 文件
+
+SQL 核心逻辑位于 `data/DIDP_PROJECT_WORKSPACE/KJ2023_11/1.0/` 目录下。根据指标类型进入不同子目录：
+
+- **业务指标**: `SCH_FDM_IND_CW_YW/SCH_FDM_IND_CW_YW.F_MID_INDEX_RESULT/` (最常用)
+- **财务指标**: `SCH_FDM_IND_CW_CW/...`
+- **客户指标**: `SCH_FDM_IND_CW_KH/...`
+
+在目录下搜索文件名包含 **指标 ID** 的 `.sql` 文件。
+例如：`*_A000047.sql`
+
+### 步骤 3：提取计算逻辑
+
+1. 打开找到的 SQL 文件。
+2. 找到 `INSERT INTO ... SELECT ...` 语句。
+3. 复制 `SELECT` 部分（不包含 `INSERT`）。
+4. 将 `Sum(column)` 等聚合函数作为提取目标。
+5. 将 `[DATE]` 替换为参数 `:date`。
+
+> **更多详情**：请参阅 [DIDP 数据架构与指标提取](../../开发文档/架构设计/DIDP数据架构与指标提取.md) 获取完整的字段映射和目录结构说明。

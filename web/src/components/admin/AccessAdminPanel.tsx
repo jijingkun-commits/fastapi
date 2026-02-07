@@ -37,6 +37,18 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  X,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  ShieldX,
+  Database,
+  TableProperties,
+  FlaskConical,
+  ListChecks,
+  Info,
+} from "lucide-react";
+import {
   AccessConfig,
   SQLTestResult,
   AvailableTable,
@@ -239,64 +251,105 @@ export function AccessAdminPanel() {
     <div className="container mx-auto py-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">数据访问控制</h1>
-          <p className="text-muted-foreground">管理 AI 问数功能的数据库访问权限</p>
+          <h1 className="text-2xl font-bold tracking-tight">数据访问控制</h1>
+          <p className="text-sm text-muted-foreground mt-1">管理 AI 问数功能的数据库访问权限</p>
         </div>
-        <Button variant="outline" onClick={loadConfig}>
+        <Button variant="outline" size="sm" onClick={loadConfig} className="gap-1.5">
+          <RefreshCw className="h-3.5 w-3.5" />
           刷新
         </Button>
       </div>
 
       <Tabs defaultValue="whitelist" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="whitelist">表白名单</TabsTrigger>
-          <TabsTrigger value="blacklist">表黑名单</TabsTrigger>
-          <TabsTrigger value="schemas">Schema 白名单</TabsTrigger>
-          <TabsTrigger value="test">SQL 测试</TabsTrigger>
-          <TabsTrigger value="tables" onClick={loadAvailableTables}>可用表</TabsTrigger>
+        <TabsList className="h-10">
+          <TabsTrigger value="whitelist" className="gap-1.5 text-sm">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            表白名单
+          </TabsTrigger>
+          <TabsTrigger value="blacklist" className="gap-1.5 text-sm">
+            <ShieldX className="h-3.5 w-3.5" />
+            表黑名单
+          </TabsTrigger>
+          <TabsTrigger value="schemas" className="gap-1.5 text-sm">
+            <Database className="h-3.5 w-3.5" />
+            Schema 白名单
+          </TabsTrigger>
+          <TabsTrigger value="test" className="gap-1.5 text-sm">
+            <FlaskConical className="h-3.5 w-3.5" />
+            SQL 测试
+          </TabsTrigger>
+          <TabsTrigger value="tables" onClick={loadAvailableTables} className="gap-1.5 text-sm">
+            <TableProperties className="h-3.5 w-3.5" />
+            可用表
+          </TabsTrigger>
         </TabsList>
 
         {/* 表白名单 */}
         <TabsContent value="whitelist">
           <Card>
-            <CardHeader>
-              <CardTitle>表白名单</CardTitle>
-              <CardDescription>
-                只允许 AI 查询白名单中的表。
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-lg">表白名单</CardTitle>
                 {config?.whitelist_source === "default" && (
-                  <Badge variant="outline" className="ml-2">使用默认配置</Badge>
+                  <Badge variant="outline" className="text-xs font-normal gap-1">
+                    <Info className="h-3 w-3" />
+                    默认配置
+                  </Badge>
                 )}
+              </div>
+              <CardDescription>
+                只允许 AI 查询白名单中的表
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div className="flex gap-2">
                 <Input
                   placeholder="输入表名（如 t_orders）"
                   value={newWhitelistTable}
                   onChange={(e) => setNewWhitelistTable(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addToWhitelist()}
+                  className="font-mono text-sm"
                 />
-                <Button onClick={addToWhitelist}>添加</Button>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {editedWhitelist.map((table) => (
-                  <Badge
-                    key={table}
-                    variant="secondary"
-                    className="cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                    onClick={() => removeFromWhitelist(table)}
-                  >
-                    {table} ×
-                  </Badge>
-                ))}
-                {editedWhitelist.length === 0 && (
-                  <span className="text-muted-foreground text-sm">暂无白名单表</span>
-                )}
+                <Button onClick={addToWhitelist} size="sm" className="gap-1 shrink-0 px-4">
+                  <Plus className="h-3.5 w-3.5" />
+                  添加
+                </Button>
               </div>
 
-              <div className="flex justify-end">
-                <Button onClick={saveWhitelist} disabled={saving}>
+              {editedWhitelist.length > 0 ? (
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    {editedWhitelist.map((table) => (
+                      <span
+                        key={table}
+                        className="group inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1 text-sm font-mono text-foreground shadow-sm transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                      >
+                        {table}
+                        <button
+                          onClick={() => removeFromWhitelist(table)}
+                          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-xs text-muted-foreground">
+                    共 {editedWhitelist.length} 个表，点击 <X className="inline h-3 w-3" /> 可移除
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-lg border border-dashed py-8">
+                  <div className="text-center">
+                    <ListChecks className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                    <p className="mt-2 text-sm text-muted-foreground">暂无白名单表</p>
+                    <p className="text-xs text-muted-foreground/60">在上方输入表名添加</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2 border-t">
+                <Button onClick={saveWhitelist} disabled={saving} size="sm">
                   {saving ? "保存中..." : "保存白名单"}
                 </Button>
               </div>
@@ -307,38 +360,61 @@ export function AccessAdminPanel() {
         {/* 表黑名单 */}
         <TabsContent value="blacklist">
           <Card>
-            <CardHeader>
-              <CardTitle>表黑名单</CardTitle>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">表黑名单</CardTitle>
               <CardDescription>
                 绝对禁止 AI 访问的表（优先级高于白名单）
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div className="flex gap-2">
                 <Input
                   placeholder="输入表名（如 t_user）"
                   value={newBlacklistTable}
                   onChange={(e) => setNewBlacklistTable(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addToBlacklist()}
+                  className="font-mono text-sm"
                 />
-                <Button onClick={addToBlacklist}>添加</Button>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {editedBlacklist.map((table) => (
-                  <Badge
-                    key={table}
-                    variant="destructive"
-                    className="cursor-pointer"
-                    onClick={() => removeFromBlacklist(table)}
-                  >
-                    {table} ×
-                  </Badge>
-                ))}
+                <Button onClick={addToBlacklist} size="sm" className="gap-1 shrink-0 px-4">
+                  <Plus className="h-3.5 w-3.5" />
+                  添加
+                </Button>
               </div>
 
-              <div className="flex justify-end">
-                <Button onClick={saveBlacklist} disabled={saving}>
+              {editedBlacklist.length > 0 ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    {editedBlacklist.map((table) => (
+                      <span
+                        key={table}
+                        className="group inline-flex items-center gap-1 rounded-md border border-destructive/30 bg-background px-2.5 py-1 text-sm font-mono text-destructive shadow-sm transition-colors hover:bg-destructive/10"
+                      >
+                        {table}
+                        <button
+                          onClick={() => removeFromBlacklist(table)}
+                          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-destructive/50 transition-colors hover:bg-destructive/20 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-xs text-muted-foreground">
+                    共 {editedBlacklist.length} 个表
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-lg border border-dashed py-8">
+                  <div className="text-center">
+                    <ShieldX className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                    <p className="mt-2 text-sm text-muted-foreground">暂无黑名单表</p>
+                    <p className="text-xs text-muted-foreground/60">在上方输入表名添加</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2 border-t">
+                <Button onClick={saveBlacklist} disabled={saving} size="sm">
                   {saving ? "保存中..." : "保存黑名单"}
                 </Button>
               </div>
@@ -349,38 +425,61 @@ export function AccessAdminPanel() {
         {/* Schema 白名单 */}
         <TabsContent value="schemas">
           <Card>
-            <CardHeader>
-              <CardTitle>Schema 白名单</CardTitle>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">Schema 白名单</CardTitle>
               <CardDescription>
                 允许访问整个 Schema 下的所有表（如 information_schema）
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div className="flex gap-2">
                 <Input
                   placeholder="输入 Schema 名（如 public）"
                   value={newSchema}
                   onChange={(e) => setNewSchema(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addSchema()}
+                  className="font-mono text-sm"
                 />
-                <Button onClick={addSchema}>添加</Button>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {editedSchemas.map((schema) => (
-                  <Badge
-                    key={schema}
-                    variant="outline"
-                    className="cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                    onClick={() => removeSchema(schema)}
-                  >
-                    {schema} ×
-                  </Badge>
-                ))}
+                <Button onClick={addSchema} size="sm" className="gap-1 shrink-0 px-4">
+                  <Plus className="h-3.5 w-3.5" />
+                  添加
+                </Button>
               </div>
 
-              <div className="flex justify-end">
-                <Button onClick={saveSchemas} disabled={saving}>
+              {editedSchemas.length > 0 ? (
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    {editedSchemas.map((schema) => (
+                      <span
+                        key={schema}
+                        className="group inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1 text-sm font-mono text-foreground shadow-sm transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                      >
+                        {schema}
+                        <button
+                          onClick={() => removeSchema(schema)}
+                          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-xs text-muted-foreground">
+                    共 {editedSchemas.length} 个 Schema
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-lg border border-dashed py-8">
+                  <div className="text-center">
+                    <Database className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                    <p className="mt-2 text-sm text-muted-foreground">暂无 Schema 白名单</p>
+                    <p className="text-xs text-muted-foreground/60">在上方输入 Schema 名添加</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2 border-t">
+                <Button onClick={saveSchemas} disabled={saving} size="sm">
                   {saving ? "保存中..." : "保存 Schema 白名单"}
                 </Button>
               </div>
@@ -391,46 +490,64 @@ export function AccessAdminPanel() {
         {/* SQL 测试 */}
         <TabsContent value="test">
           <Card>
-            <CardHeader>
-              <CardTitle>SQL 权限测试</CardTitle>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">SQL 权限测试</CardTitle>
               <CardDescription>
                 测试 SQL 语句是否能通过权限检查（不实际执行）
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <Textarea
-                placeholder="输入 SQL 语句..."
+                placeholder="输入 SQL 语句，如 SELECT * FROM t_orders WHERE ..."
                 value={testSQL}
                 onChange={(e) => setTestSQL(e.target.value)}
                 rows={4}
-                className="font-mono text-sm"
+                className="font-mono text-sm resize-none"
               />
-              
-              <Button onClick={handleTestSQL} disabled={testing}>
+
+              <Button onClick={handleTestSQL} disabled={testing} size="sm" className="gap-1.5">
+                <FlaskConical className="h-3.5 w-3.5" />
                 {testing ? "检查中..." : "检查权限"}
               </Button>
 
               {testResult && (
-                <div className="mt-4 p-4 rounded-lg border space-y-3">
+                <div className={`mt-4 rounded-lg border p-4 space-y-3 ${
+                  testResult.is_valid
+                    ? "border-green-200 bg-green-50 dark:border-green-900/50 dark:bg-green-950/20"
+                    : "border-destructive/30 bg-destructive/5"
+                }`}>
                   <div className="flex items-center gap-2">
-                    <Badge variant={testResult.is_valid ? "default" : "destructive"}>
-                      {testResult.is_valid ? "通过" : "拒绝"}
-                    </Badge>
+                    {testResult.is_valid ? (
+                      <ShieldCheck className="h-4.5 w-4.5 text-green-600 dark:text-green-400" />
+                    ) : (
+                      <ShieldX className="h-4.5 w-4.5 text-destructive" />
+                    )}
+                    <span className={`text-sm font-medium ${
+                      testResult.is_valid
+                        ? "text-green-700 dark:text-green-300"
+                        : "text-destructive"
+                    }`}>
+                      {testResult.is_valid ? "权限检查通过" : "权限检查拒绝"}
+                    </span>
                     {testResult.error && (
-                      <span className="text-sm text-destructive">{testResult.error}</span>
+                      <span className="text-sm text-destructive/80">- {testResult.error}</span>
                     )}
                   </div>
-                  
+
                   <div>
-                    <p className="text-sm font-medium mb-1">检测到的表：</p>
-                    <div className="flex flex-wrap gap-1">
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5">检测到的表：</p>
+                    <div className="flex flex-wrap gap-1.5">
                       {testResult.tables_found.map((table) => (
-                        <Badge
+                        <span
                           key={table}
-                          variant={testResult.tables_allowed.includes(table) ? "secondary" : "destructive"}
+                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-mono ${
+                            testResult.tables_allowed.includes(table)
+                              ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                              : "bg-destructive/10 text-destructive"
+                          }`}
                         >
                           {table}
-                        </Badge>
+                        </span>
                       ))}
                     </div>
                   </div>
@@ -443,64 +560,77 @@ export function AccessAdminPanel() {
         {/* 可用表 */}
         <TabsContent value="tables">
           <Card>
-            <CardHeader>
-              <CardTitle>业务数据库可用表</CardTitle>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">业务数据库可用表</CardTitle>
               <CardDescription>
-                点击表名可快速添加到白名单
+                点击"加入白名单"可快速添加（添加后需在白名单 Tab 保存）
               </CardDescription>
             </CardHeader>
             <CardContent>
               {loadingTables ? (
-                <div className="flex justify-center py-8">
+                <div className="flex justify-center py-12">
                   <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#A8D4D4] border-t-[#2F6868]" />
                 </div>
+              ) : availableTables.length > 0 ? (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-[140px]">Schema</TableHead>
+                        <TableHead>表名</TableHead>
+                        <TableHead className="w-[120px]">状态</TableHead>
+                        <TableHead className="w-[120px] text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {availableTables.map((table) => (
+                        <TableRow key={table.full_name} className="group">
+                          <TableCell className="text-muted-foreground text-sm">{table.schema}</TableCell>
+                          <TableCell className="font-mono text-sm">{table.table}</TableCell>
+                          <TableCell>
+                            {editedWhitelist.includes(table.table.toLowerCase()) ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                <ShieldCheck className="h-3 w-3" />
+                                已加白名单
+                              </span>
+                            ) : editedBlacklist.includes(table.table.toLowerCase()) ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+                                <ShieldX className="h-3 w-3" />
+                                黑名单
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                                未配置
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {!editedWhitelist.includes(table.table.toLowerCase()) &&
+                             !editedBlacklist.includes(table.table.toLowerCase()) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => quickAddToWhitelist(table)}
+                              >
+                                <Plus className="h-3 w-3" />
+                                加入白名单
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Schema</TableHead>
-                      <TableHead>表名</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {availableTables.map((table) => (
-                      <TableRow key={table.full_name}>
-                        <TableCell>{table.schema}</TableCell>
-                        <TableCell className="font-mono">{table.table}</TableCell>
-                        <TableCell>
-                          {editedWhitelist.includes(table.table.toLowerCase()) ? (
-                            <Badge variant="default">已加白名单</Badge>
-                          ) : editedBlacklist.includes(table.table.toLowerCase()) ? (
-                            <Badge variant="destructive">黑名单</Badge>
-                          ) : (
-                            <Badge variant="outline">未配置</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {!editedWhitelist.includes(table.table.toLowerCase()) && 
-                           !editedBlacklist.includes(table.table.toLowerCase()) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => quickAddToWhitelist(table)}
-                            >
-                              加入白名单
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {availableTables.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
-                          暂无数据，请先连接业务数据库
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                <div className="flex items-center justify-center rounded-lg border border-dashed py-12">
+                  <div className="text-center">
+                    <Database className="mx-auto h-10 w-10 text-muted-foreground/30" />
+                    <p className="mt-3 text-sm text-muted-foreground">暂无数据</p>
+                    <p className="text-xs text-muted-foreground/60">请先连接业务数据库</p>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>

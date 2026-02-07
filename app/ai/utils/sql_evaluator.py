@@ -227,7 +227,8 @@ async def evaluate_semantic(
 - score="incorrect": 明显错误，需要重新生成"""
 
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(SQLSemanticResult)
         result = await structured_llm.ainvoke(prompt)
         
@@ -457,7 +458,8 @@ async def should_retry(
 }}"""
 
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, 'content') else str(response)
         

@@ -294,7 +294,10 @@ def task_decomposition_node(state: TodoAgentState) -> Dict:
     for todo in draft_todos:
         if todo.get("is_complex"):
             # 调用 LLM 拆解（internal=True 自动禁用流式 + 添加 tag）
-            llm = get_llm(internal=True)
+            # 使用内部分析路由配置的模型
+            from app.core.config import MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL, get_routing_model
+            decompose_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+            llm = get_llm(internal=True, model_id=decompose_model)
             decompose_messages = [
                 SystemMessage(content=TODO_DECOMPOSE_PROMPT),
                 create_human_message(f"任务: {todo.get('title')}\n描述: {todo.get('description', '')}")

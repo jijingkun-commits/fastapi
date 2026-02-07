@@ -58,12 +58,26 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     )
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """参数校验异常处理"""
+    """参数校验异常处理。
+
+    Pydantic v2 的 errors() 中 ctx.error 可能包含原始 ValueError 对象,
+    需要将其转为字符串后再序列化，否则 JSONResponse.render() 会抛出 TypeError。
+    """
+    sanitized_errors = []
+    for err in exc.errors():
+        err_copy = dict(err)
+        ctx = err_copy.get("ctx")
+        if isinstance(ctx, dict) and "error" in ctx:
+            ctx = dict(ctx)
+            ctx["error"] = str(ctx["error"])
+            err_copy["ctx"] = ctx
+        sanitized_errors.append(err_copy)
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "code": 422,
             "message": "Validation Error",
-            "data": exc.errors()
+            "data": sanitized_errors,
         },
     )

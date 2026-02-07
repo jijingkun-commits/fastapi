@@ -227,6 +227,41 @@ export async function toggleModelActive(modelId: number): Promise<{ is_active: b
   return response.json();
 }
 
+// ==================== 模型路由 ====================
+
+export interface ModelRouteItem {
+  scene: string;
+  call_point: string;
+  source: 'user_select' | 'fixed_config' | 'db_type';
+  config_key: string | null;
+  current_model: string;
+  recommended: string;
+  editable: boolean;
+}
+
+export interface ModelRoutingUpdateRequest {
+  config_key: string;
+  model_code: string;
+}
+
+export async function getModelRouting(): Promise<ModelRouteItem[]> {
+  const response = await apiFetch(`${API_BASE}/model-routing`);
+  if (!response.ok) throw new Error('获取模型路由失败');
+  return response.json();
+}
+
+export async function updateModelRouting(data: ModelRoutingUpdateRequest): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/model-routing`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || '更新模型路由失败');
+  }
+}
+
 // ==================== 模型类型 ====================
 
 export async function getModelTypes(): Promise<ModelType[]> {

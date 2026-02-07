@@ -90,6 +90,14 @@ class TestNaturalTimeParser(unittest.TestCase):
         self.assertEqual(parsed.hour, 20)
         self.assertEqual(parsed.minute, 0)
 
+    def test_parse_specific_time_tonight(self):
+        """测试今晚时间点解析"""
+        text = "今晚8点"
+        parsed, _ = self.parser.parse(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 20)
+        self.assertEqual(parsed.minute, 0)
+
     def test_parse_date_with_specific_time(self):
         """测试日期+具体时间组合"""
         text = "明天早上9点"

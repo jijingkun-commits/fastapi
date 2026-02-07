@@ -1,17 +1,14 @@
 /**
- * 系统配置管理页面
- * 
- * 管理系统运行参数和配置项：
- * - 配置列表
- * - 配置编辑
- * - 分类筛选
+ * 指标管理页面
+ *
+ * 管理问数助手的指标定义，支持手动创建和 AI 从 ETL 脚本提取。
  */
 "use client";
 
 import dynamic from "next/dynamic";
 
-const SystemAdminPanel = dynamic(
-    () => import("@/components/admin/SystemAdminPanel").then(mod => mod.SystemAdminPanel),
+const MetricAdminPanel = dynamic(
+    () => import("@/components/admin/MetricAdminPanel").then(mod => mod.MetricAdminPanel),
     {
         ssr: false,
         loading: () => (
@@ -25,6 +22,6 @@ const SystemAdminPanel = dynamic(
     }
 );
 
-export default function SystemAdminPage() {
-    return <SystemAdminPanel />;
+export default function MetricAdminPage() {
+    return <MetricAdminPanel />;
 }

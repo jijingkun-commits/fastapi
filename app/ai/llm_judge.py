@@ -79,9 +79,10 @@ async def evaluate_response(
     """
     from app.ai.llm_util import get_llm
     
-    # 使用快速模型作为 Judge
+    # 使用快速模型作为 Judge（优先从 t_system_config 读取，回退环境变量）
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
     except Exception:
         llm = get_llm()
     
@@ -117,9 +118,10 @@ async def evaluate_response_detailed(
 ) -> DetailedJudgeResult:
     """详细评估 Agent 回复质量。"""
     from app.ai.llm_util import get_llm
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(DetailedJudgeResult)
         
         result = await structured_llm.ainvoke(
@@ -199,6 +201,7 @@ async def iterative_improvement(
 def evaluate_sql_response_sync(sql: str, result: str, model_id: str = None) -> JudgeResult:
     """同步版本的 SQL 评估（供同步节点使用）。"""
     from app.ai.llm_util import get_llm
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     
     prompt = f"""评估 SQL 查询质量:
 
@@ -213,7 +216,7 @@ SQL: {sql}
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
     try:
-        llm = get_llm(model_id=model_id or "glm-4.5-air")
+        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(JudgeResult)
         return structured_llm.invoke(prompt)
     except Exception as e:
@@ -237,8 +240,9 @@ SQL: {sql}
 
 返回 JSON: {{"score": "pass|fail", "feedback": "..."}}"""
     
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     try:
-        llm = get_llm(model_id="glm-4.5-air")
+        llm = get_llm(model_id=get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:
@@ -249,6 +253,7 @@ SQL: {sql}
 async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
     """评估图表生成代码。"""
     from app.ai.llm_util import get_llm
+    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
     
     prompt = f"""评估图表生成代码:
 
@@ -266,7 +271,7 @@ async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
     try:
-        llm = get_llm(model_id="glm-4.5-air")
+        llm = get_llm(model_id=get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:
