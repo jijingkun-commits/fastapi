@@ -8,7 +8,7 @@
  */
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
 import dynamic from "next/dynamic";
 import type { TopLevelSpec } from "vega-lite";
@@ -20,7 +20,11 @@ interface SqlResultChartProps {
 
 interface VegaLiteProps {
   spec: TopLevelSpec;
-  actions?: boolean;
+  options?: {
+    actions?: boolean;
+    renderer?: "svg" | "canvas";
+  };
+  onError?: (error: unknown) => void;
 }
 
 const VegaLiteChart = dynamic(
@@ -142,7 +146,12 @@ function buildVegaSpec(chart: SqlResultChartData): TopLevelSpec {
 }
 
 export function SqlResultChart({ chart }: SqlResultChartProps) {
+  const [renderError, setRenderError] = useState<string | null>(null);
   const spec = useMemo(() => buildVegaSpec(chart), [chart]);
+
+  useEffect(() => {
+    setRenderError(null);
+  }, [chart]);
 
   if (!chart || !Array.isArray(chart.data) || chart.data.length === 0) {
     return null;
@@ -150,7 +159,19 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3" data-testid="sql-result-chart">
-      <VegaLiteChart spec={spec} actions={false} />
+      <VegaLiteChart
+        spec={spec}
+        options={{ actions: false, renderer: "svg" }}
+        onError={(error) => {
+          console.error("[SqlResultChart] 图表渲染失败", error);
+          setRenderError("图表渲染失败，请查看下方表格数据。");
+        }}
+      />
+      {renderError && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          {renderError}
+        </div>
+      )}
       <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
         <span>X 轴：{chart.x_label || chart.x_key}</span>
         <span>Y 轴：{chart.y_label || chart.y_key}</span>
