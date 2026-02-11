@@ -20,6 +20,7 @@ interface SqlResultChartProps {
 
 interface VegaLiteProps {
   spec: TopLevelSpec;
+  actions?: boolean;
 }
 
 const VegaLiteChart = dynamic(
@@ -149,7 +150,7 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3" data-testid="sql-result-chart">
-      <VegaLiteChart spec={spec} />
+      <VegaLiteChart spec={spec} actions={false} />
       <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
         <span>X 轴：{chart.x_label || chart.x_key}</span>
         <span>Y 轴：{chart.y_label || chart.y_key}</span>
