@@ -8,7 +8,7 @@
  */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import dynamic from "next/dynamic";
 import type { TopLevelSpec } from "vega-lite";
@@ -18,13 +18,20 @@ interface SqlResultChartProps {
   chart: SqlResultChartData;
 }
 
+interface VegaChartView {
+  resize: () => void;
+  runAsync: () => Promise<unknown>;
+}
+
 interface VegaLiteProps {
   spec: TopLevelSpec;
   options?: {
     actions?: boolean;
     renderer?: "svg" | "canvas";
   };
+  onEmbed?: (result: { view: VegaChartView }) => void;
   onError?: (error: unknown) => void;
+  className?: string;
 }
 
 const VegaLiteChart = dynamic(
@@ -51,6 +58,65 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+function normalizeDimensionValue(value: unknown): string {
+  if (value === null || value === undefined) return "未知";
+  const text = String(value).trim();
+  return text || "未知";
+}
+
+function coerceChartNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const text = String(value).trim().replace(/,/g, "");
+  if (!text) {
+    return null;
+  }
+
+  const unitMatch = text.match(/^(-?\d+(?:\.\d+)?)(亿|万)?$/);
+  if (unitMatch) {
+    const base = Number(unitMatch[1]);
+    if (!Number.isFinite(base)) {
+      return null;
+    }
+    const unit = unitMatch[2];
+    if (unit === "亿") {
+      return base * 1_0000_0000;
+    }
+    if (unit === "万") {
+      return base * 1_0000;
+    }
+    return base;
+  }
+
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeChartValues(chart: SqlResultChartData): Array<Record<string, string | number>> {
+  const values: Array<Record<string, string | number>> = [];
+
+  for (const item of chart.data) {
+    const yValue = coerceChartNumber(item[chart.y_key]);
+    if (yValue === null) {
+      continue;
+    }
+
+    const nextItem = { ...item } as Record<string, string | number>;
+    nextItem[chart.x_key] = normalizeDimensionValue(item[chart.x_key]);
+    nextItem[chart.y_key] = yValue;
+    nextItem.__formatted_y = formatValue(item[chart.y_key]);
+    values.push(nextItem);
+  }
+
+  return values;
+}
+
 function isDateLike(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const text = value.trim();
@@ -65,24 +131,25 @@ function inferXType(chart: SqlResultChartData): "temporal" | "nominal" {
   return dateLikeCount >= Math.ceil(samples.length * 0.6) ? "temporal" : "nominal";
 }
 
-function buildVegaSpec(chart: SqlResultChartData): TopLevelSpec {
+function buildVegaSpec(
+  chart: SqlResultChartData,
+  values: Array<Record<string, string | number>>,
+): TopLevelSpec {
   const xType = inferXType(chart);
   const xLabel = chart.x_label || chart.x_key;
   const yLabel = chart.y_label || chart.y_key;
   const seriesName = chart.series_name || yLabel;
-
-  const values = chart.data.map((item) => {
-    const nextItem: Record<string, string | number> = { ...item };
-    const rawY = item[chart.y_key];
-    nextItem.__formatted_y = formatValue(rawY);
-    return nextItem;
-  });
 
   const baseSpec = {
     $schema: "https://vega.github.io/schema/vega-lite/v5.json",
     title: chart.title,
     width: "container",
     height: 300,
+    autosize: {
+      type: "fit-x",
+      contains: "padding",
+      resize: true,
+    },
     data: { values },
     config: {
       axis: {
@@ -147,21 +214,72 @@ function buildVegaSpec(chart: SqlResultChartData): TopLevelSpec {
 
 export function SqlResultChart({ chart }: SqlResultChartProps) {
   const [renderError, setRenderError] = useState<string | null>(null);
-  const spec = useMemo(() => buildVegaSpec(chart), [chart]);
+  const chartViewRef = useRef<VegaChartView | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const normalizedValues = useMemo(() => normalizeChartValues(chart), [chart]);
+  const spec = useMemo(() => buildVegaSpec(chart, normalizedValues), [chart, normalizedValues]);
+
+  const refreshChartLayout = useCallback(() => {
+    requestAnimationFrame(() => {
+      const view = chartViewRef.current;
+      if (!view) {
+        return;
+      }
+      view.resize();
+      void view.runAsync();
+    });
+  }, []);
 
   useEffect(() => {
     setRenderError(null);
+    chartViewRef.current = null;
   }, [chart]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          refreshChartLayout();
+          break;
+        }
+      }
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [refreshChartLayout, spec]);
 
   if (!chart || !Array.isArray(chart.data) || chart.data.length === 0) {
     return null;
   }
 
+  if (normalizedValues.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+        图表未渲染：未识别到可用数值列，请查看下方表格数据。
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3" data-testid="sql-result-chart">
+    <div
+      ref={containerRef}
+      className="rounded-lg border border-gray-200 bg-white p-3"
+      data-testid="sql-result-chart"
+    >
       <VegaLiteChart
+        className="w-full"
         spec={spec}
         options={{ actions: false, renderer: "svg" }}
+        onEmbed={(result) => {
+          chartViewRef.current = result.view;
+          refreshChartLayout();
+        }}
         onError={(error) => {
           console.error("[SqlResultChart] 图表渲染失败", error);
           setRenderError("图表渲染失败，请查看下方表格数据。");
