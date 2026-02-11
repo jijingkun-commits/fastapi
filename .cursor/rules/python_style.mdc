@@ -1,0 +1,35 @@
+---
+description: Python 代码风格规范
+globs: ["**/*.py"]
+alwaysApply: false
+---
+
+# Python 代码风格
+
+## 命名规范
+- **文件名**: `snake_case` (chat_service.py)
+- **类名**: `PascalCase` (ChatService)
+- **变量/函数**: `snake_case` (get_user_by_id)
+- **常量**: `UPPER_SNAKE_CASE` (MAX_RETRY_COUNT)
+
+## 注释规范
+- 所有注释使用中文
+- 模块顶部必须有 docstring：`"""模块说明。"""`
+- 禁止"修复/优化"过程注释，禁止 emoji
+
+## 类型安全
+- 完全使用 Type Hints
+- ORM 使用 SQLAlchemy 2.0 `Mapped[...]` 语法
+
+## 数据库规范
+- 表名以 `t_` 开头
+- 字段名 `snake_case`
+
+## 代码位置
+| 类型 | 目录 |
+|-----|------|
+| HTTP 接口 | `app/api/v1/endpoints/` |
+| 业务逻辑 | `app/services/` |
+| 数据库操作 | `app/repositories/` |
+| AI 工具 | `app/ai/tools/` |
+| 智能体 | `app/ai/agents/` |

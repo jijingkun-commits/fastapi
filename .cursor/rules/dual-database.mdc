@@ -1,0 +1,28 @@
+---
+description: 双数据库架构提醒（涉及数据库查询、问数模块、data_db 时自动加载）
+globs: app/db/**, app/ai/semantic/**, app/ai/tools/data_**, app/ai/workflow/data_**, install/scripts/**, .env*, app/models/**
+alwaysApply: false
+---
+
+# 双数据库架构
+
+本项目使用两个独立的 PostgreSQL 数据库：
+
+| 数据库 | 环境变量 | 用途 | 包含的表 |
+|--------|---------|------|---------|
+| `chat_db` | `DATABASE_URL` | 主应用库 | t_user, t_chat_message, t_todo, t_metric_definition, t_meta_tables 等 |
+| `data_db` | `ANALYTICS_DATABASE_URL` | 分析/数仓库（只读） | fdmdata.f_mid_dep_tb, fdmdata.f_mid_index_result, sdmdata.* 等业务数据表 |
+
+## 重要规则
+
+1. **MCP postgres 工具默认连接 `chat_db`**，查不到 `fdmdata.*` 或 `sdmdata.*` 的表
+2. 查询分析库数据时，必须通过 Python 脚本连接 `ANALYTICS_DATABASE_URL`，不能用 MCP postgres 工具
+3. 代码中 `analytics_engine` (见 `app/db/session.py`) 连接的是 `data_db`
+4. `vanna.run_sql()` 执行在 `data_db` 上
+
+## 数据现状（2026-02-07）
+
+- `data_db` 中 fdmdata/sdmdata schema 已有数据（日期 20250630）
+- f_mid_index_result: 172,498 行（1277 个指标）
+- f_mid_dep_tb: 3,969,646 行
+- f_mid_loan_k_tb: 1,579,387 行

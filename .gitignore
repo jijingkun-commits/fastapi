@@ -18,15 +18,30 @@ Thumbs.db
 .kilocodemodes
 .kilocoderules
 
-# 允许 AI 会话通过 @ 引用规则/命令文档（其他文件仍忽略）
+# 允许 AI 会话通过 @ 引用规则/命令/技能文档（其他文件仍忽略）
+!AGENTS.md
+!**/AGENTS.md
+
 !.cursor/
 .cursor/*
+
 !.cursor/commands/
 .cursor/commands/*
 !.cursor/commands/*.md
+
 !.cursor/rules/
 .cursor/rules/*
 !.cursor/rules/*.mdc
+
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/*/
+!.cursor/skills/*/SKILL.md
+!.cursor/skills/*/.skill-meta.json
+
+# Cursor 本地运行态文件（不纳入版本控制）
+.cursor/debug.log
+.cursor/worktrees.json
 
 .agent/*
 
