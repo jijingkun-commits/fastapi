@@ -15,7 +15,7 @@ import type {
  * 设计约定：
  * - `API_BASE` 统一决定后端地址，默认拼接当前主机的 8000 端口，可通过 `NEXT_PUBLIC_API_BASE_URL` 覆盖。
  * - `apiFetch(path, init, options)` 为统一的请求入口：
- *   - 默认自动从 `localStorage` 读取 `auth:token` 并添加 `Authorization` 头；
+ *   - 默认自动从 `sessionStorage` 读取 `auth:token` 并添加 `Authorization` 头；
  *   - 传 `options.auth=false` 可禁用认证注入（如登录接口）。
  *   - 若调用方已手动设置 `Authorization`，则不再覆盖。
  * - 其他具体接口方法（如 `login`/`getMe`/`streamLLM`）均基于 `apiFetch` 构建，避免重复拼接头与地址。
@@ -25,6 +25,16 @@ const DEFAULT_BASE =
     ? `${window.location.protocol}//${window.location.hostname}:8000`
     : "http://localhost:8000";
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE;
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 export async function apiFetch(
   path: string,
@@ -822,9 +832,14 @@ export async function listUsers(
   if (search) params.append("search", search);
   
   const r = await apiFetch(`/api/v1/users?${params}`);
-  if (!r.ok) throw new Error("获取用户列表失败");
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: "获取用户列表失败" }));
+    throw new ApiError(err.detail || "获取用户列表失败", r.status);
+  }
   return r.json();
-}/**
+}
+
+/**
  * 创建用户（管理员）
  */
 export async function createUser(data: CreateUserRequest): Promise<UserListItem> {
@@ -835,7 +850,7 @@ export async function createUser(data: CreateUserRequest): Promise<UserListItem>
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: "创建用户失败" }));
-    throw new Error(err.detail || "创建用户失败");
+    throw new ApiError(err.detail || "创建用户失败", r.status);
   }
   return r.json();
 }
@@ -854,10 +869,12 @@ export async function updateUserStatus(
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: "更新状态失败" }));
-    throw new Error(err.detail || "更新状态失败");
+    throw new ApiError(err.detail || "更新状态失败", r.status);
   }
   return r.json();
-}/**
+}
+
+/**
  * 用户登出
  */
 export async function logout(): Promise<void> {

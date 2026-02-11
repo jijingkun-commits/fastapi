@@ -9,7 +9,39 @@
   --brand: oklch(0.44 0.06 192);
   --brand-light: oklch(0.52 0.08 192);
   --brand-dark: oklch(0.36 0.05 192);
-  
+
+  --color-brand-600: oklch(0.44 0.06 192);
+  --color-brand-700: oklch(0.4 0.06 192);
+  --color-brand-800: oklch(0.36 0.05 192);
+  --color-brand-50: oklch(0.97 0.01 192);
+
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 16px;
+  --ds-space-6: 24px;
+  --ds-space-8: 32px;
+
+  --ds-radius-sm: 8px;
+  --ds-radius-md: 12px;
+  --ds-radius-lg: 16px;
+
+  --ds-shadow-1: 0 1px 2px rgb(15 23 42 / 0.08);
+  --ds-shadow-2: 0 8px 24px rgb(15 23 42 / 0.12);
+
+  --ds-motion-fast: 120ms;
+  --ds-motion-base: 200ms;
+  --ds-motion-slow: 320ms;
+
+  --color-state-loading-surface: oklch(0.95 0.02 192);
+  --color-state-loading-indicator: oklch(0.44 0.06 192);
+  --color-state-empty-surface: oklch(0.97 0.01 192);
+  --color-state-empty-icon: oklch(0.55 0 0);
+  --color-state-error-surface: oklch(0.95 0.02 25);
+  --color-state-error-icon: oklch(0.58 0.2 28);
+  --color-state-forbidden-surface: oklch(0.95 0.01 80);
+  --color-state-forbidden-icon: oklch(0.45 0.02 80);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -50,7 +82,21 @@
   --brand: oklch(0.52 0.08 192);
   --brand-light: oklch(0.60 0.10 192);
   --brand-dark: oklch(0.44 0.06 192);
-  
+
+  --color-brand-600: oklch(0.56 0.09 192);
+  --color-brand-700: oklch(0.52 0.08 192);
+  --color-brand-800: oklch(0.48 0.07 192);
+  --color-brand-50: oklch(0.28 0.02 192);
+
+  --color-state-loading-surface: oklch(0.28 0.02 192);
+  --color-state-loading-indicator: oklch(0.63 0.1 192);
+  --color-state-empty-surface: oklch(0.27 0 0);
+  --color-state-empty-icon: oklch(0.78 0 0);
+  --color-state-error-surface: oklch(0.28 0.02 25);
+  --color-state-error-icon: oklch(0.74 0.17 28);
+  --color-state-forbidden-surface: oklch(0.28 0.01 80);
+  --color-state-forbidden-icon: oklch(0.8 0.04 90);
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
@@ -151,6 +197,10 @@
 }
 
 @layer utilities {
+  .admin-surface {
+    background: linear-gradient(180deg, var(--color-brand-50) 0%, transparent 240px);
+  }
+
   .shadow-inner-right {
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }

@@ -133,7 +133,6 @@
 * [当前需求](内部参考/迭代需求/requirements.md)
 * [实施方案](内部参考/迭代需求/implementation_plan.md)
 * [评估报告](内部参考/迭代需求/evaluation_report.md)
-* [WS-01 附录说明（已并入实施方案）](内部参考/迭代需求/implementation_plan.md)
 
 ### 任务拆解
 
