@@ -8,7 +8,14 @@
 """
 import logging
 import json
-from typing import Dict, List, Optional, Literal
+import time
+import re
+import math
+from collections import Counter
+from dataclasses import dataclass
+from datetime import date, datetime
+from numbers import Number
+from typing import Dict, List, Optional, Literal, Any, Tuple
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from app.ai.utils.message_factory import create_ai_message
@@ -17,7 +24,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.config import get_stream_writer
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_llm, _normalize_text_content
 from app.ai.state import DataAgentState
 from app.ai.semantic import get_vanna
 from app.ai.prompts.data_prompts import (
@@ -26,13 +33,32 @@ from app.ai.prompts.data_prompts import (
     RESULT_INTERPRETATION_PROMPT,
     SQL_SAFETY_CHECK_PROMPT
 )
+from app.ai.workflow.session_intent_kernel import (
+    TURN_ACT_CONFIRM,
+    TURN_ACT_CORRECTION,
+    TURN_ACT_SUPPLEMENT,
+    TURN_ACT_NEW_QUERY,
+    classify_turn_act,
+    reduce_session_frame,
+    advance_clarify_fsm_state,
+)
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.utils.state_helpers import get_user_id
 from app.ai.utils.schema_router import route_schema
+from app.ai.utils.sql_parser import extract_tables_from_sql
+from app.ai.utils.sql_empty_result_recovery import (
+    is_effectively_empty_result,
+    rewrite_sql_for_empty_result,
+)
+from app.db.session import engine
 from app.core.config import (
     ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, LLM_JUDGE_MODEL,
-    SQL_GENERATION_MODEL,
+    SQL_GENERATION_MODEL, ENABLE_RESULT_ENRICHMENT,
     MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION, get_routing_model
+)
+from app.services.result_enrichment_rule_service import (
+    ResultLookupEnrichmentRuleConfig as ResultLookupEnrichmentRule,
+    get_result_enrichment_rule_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +77,1126 @@ AVAILABLE_METRICS = """
 
 
 # ==================== 节点函数 ====================
+
+
+@dataclass
+class MetricTemplatePlan:
+    """指标模板派生计划。"""
+
+    select_items: List[str]
+    from_expr: str
+    where_expr: str
+    measure_expr: str
+    measure_alias: str
+
+
+_DIMENSION_FIELD_MAP = {
+    "客户": ["ecif_cust_no"],
+}
+
+
+_FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES: Tuple[ResultLookupEnrichmentRule, ...] = (
+    ResultLookupEnrichmentRule(
+        name="customer_name",
+        key_column_candidates=("ecif_cust_no",),
+        target_column="客户名称",
+        source_table="fdmdata.f_mid_dep_tb",
+        source_key_column="ecif_cust_no",
+        source_value_column="cust_acct_name",
+        source_date_column="data_dt",
+        result_date_column_candidates=("data_dt",),
+    ),
+)
+
+
+def _normalize_dimension_name(name: str) -> str:
+    """规范化维度名称。"""
+    return re.sub(r"\s+", "", str(name or "")).lower()
+
+
+def _extract_top_n(question: str, default_n: int = 10) -> int:
+    """从问题中提取 TopN，未命中时返回默认值。"""
+    normalized = re.sub(r"\s+", "", question or "")
+    m = re.search(r"前(\d+)", normalized)
+    if not m:
+        m = re.search(r"top(\d+)", normalized, re.IGNORECASE)
+    if not m:
+        return default_n
+
+    try:
+        return max(1, min(int(m.group(1)), 100))
+    except Exception:
+        return default_n
+
+
+def _detect_query_shape(question: str, dimensions: Optional[List[str]] = None) -> str:
+    """识别查询形态：total / dimension / top_n。"""
+    if _is_topn_intent(question):
+        return "top_n"
+
+    dims = dimensions if isinstance(dimensions, list) else []
+    if any(str(dim).strip() for dim in dims):
+        return "dimension"
+
+    return "total"
+
+
+def _resolve_dimension_fields(dimensions: Optional[List[str]]) -> List[str]:
+    """根据维度词解析目标字段。"""
+    dims = dimensions if isinstance(dimensions, list) else []
+    resolved: List[str] = []
+
+    for dim in dims:
+        normalized = _normalize_dimension_name(dim)
+        if not normalized:
+            continue
+
+        for raw_key, fields in _DIMENSION_FIELD_MAP.items():
+            if _normalize_dimension_name(raw_key) == normalized:
+                for field in fields:
+                    if field not in resolved:
+                        resolved.append(field)
+
+    return resolved
+
+
+def _parse_metric_template_plan(sql: str) -> Optional[MetricTemplatePlan]:
+    """解析指标模板 SQL，提取可组合结构。"""
+    if not sql:
+        return None
+
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except Exception as e:
+        logger.warning("sqlglot 不可用，无法解析指标模板: %s", e)
+        return None
+
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="postgres")
+    except Exception as e:
+        logger.warning("指标模板 SQL 解析失败: %s", e)
+        return None
+
+    if not isinstance(parsed, exp.Select):
+        return None
+
+    from_expr = parsed.args.get("from_") or parsed.args.get("from")
+    if from_expr is None:
+        return None
+
+    from_sql = from_expr.sql(dialect="postgres").strip()
+    if not from_sql:
+        return None
+    if from_sql.upper().startswith("FROM "):
+        from_sql = from_sql[5:].strip()
+
+    where_expr = parsed.args.get("where")
+    where_sql = ""
+    if where_expr is not None and getattr(where_expr, "this", None) is not None:
+        where_sql = where_expr.this.sql(dialect="postgres")
+
+    measure_expr = None
+    measure_alias = None
+    other_selects: List[str] = []
+
+    for select_item in parsed.expressions:
+        item_sql = select_item.sql(dialect="postgres")
+
+        if isinstance(select_item, exp.Alias):
+            agg_expr = select_item.this
+            alias_expr = select_item.alias
+            alias_name = alias_expr if isinstance(alias_expr, str) else str(alias_expr or "")
+        else:
+            agg_expr = select_item
+            alias_name = ""
+
+        if isinstance(agg_expr, (exp.Sum, exp.Avg, exp.Count, exp.Max, exp.Min)) and measure_expr is None:
+            measure_expr = agg_expr.sql(dialect="postgres")
+            measure_alias = alias_name or agg_expr.sql(dialect="postgres")
+            continue
+
+        other_selects.append(item_sql)
+
+    if not measure_expr:
+        return None
+
+    return MetricTemplatePlan(
+        select_items=other_selects,
+        from_expr=from_sql,
+        where_expr=where_sql,
+        measure_expr=measure_expr,
+        measure_alias=measure_alias,
+    )
+
+
+def _build_metric_sql_from_plan(
+    plan: MetricTemplatePlan,
+    question: str,
+    dimensions: Optional[List[str]] = None,
+) -> Optional[str]:
+    """根据模板计划和查询语义组装 SQL。"""
+    shape = _detect_query_shape(question, dimensions)
+    dimension_fields = _resolve_dimension_fields(dimensions)
+
+    if shape in ("dimension", "top_n") and not dimension_fields:
+        logger.info("指标模板派生缺少维度字段映射，shape=%s", shape)
+        return None
+
+    select_parts: List[str] = []
+    group_by_fields: List[str] = []
+
+    if shape in ("dimension", "top_n"):
+        for dim_field in dimension_fields:
+            select_parts.append(dim_field)
+            group_by_fields.append(dim_field)
+
+    measure_part = f"{plan.measure_expr} AS {plan.measure_alias}"
+    select_parts.append(measure_part)
+
+    where_sql = f" WHERE {plan.where_expr}" if plan.where_expr else ""
+    sql = f"SELECT {', '.join(select_parts)} FROM {plan.from_expr}{where_sql}"
+
+    if group_by_fields:
+        sql += f" GROUP BY {', '.join(group_by_fields)}"
+
+    if shape == "top_n":
+        top_n = _extract_top_n(question, default_n=10)
+        sql += f" ORDER BY {plan.measure_alias} DESC LIMIT {top_n}"
+
+    return sql
+
+
+def _derive_metric_sql(
+    query_template: str,
+    time_range: Optional[str],
+    question: str,
+    dimensions: Optional[List[str]],
+) -> Optional[str]:
+    """基于指标模板派生 SQL（总量/维度/TopN）。"""
+    sql_template = _replace_data_dt(query_template, time_range)
+    plan = _parse_metric_template_plan(sql_template)
+    if not plan:
+        return sql_template
+
+    derived = _build_metric_sql_from_plan(plan, question, dimensions)
+    if derived:
+        return derived
+
+    return None
+
+
+def _resolve_column(columns: List[str], candidates: Tuple[str, ...]) -> Optional[str]:
+    """根据候选列名解析结果列（大小写/空白不敏感）。"""
+    normalized_map = {str(col).strip().lower(): col for col in columns}
+    for candidate in candidates:
+        actual = normalized_map.get(str(candidate).strip().lower())
+        if actual:
+            return actual
+    return None
+
+
+def _result_has_column(columns: List[str], name: str) -> bool:
+    """判断结果列是否已包含指定列。"""
+    target = str(name).strip().lower()
+    return any(str(col).strip().lower() == target for col in columns)
+
+
+def _extract_single_date_value(
+    rows: List[Dict[str, Any]],
+    date_column_candidates: Tuple[str, ...],
+) -> Optional[str]:
+    """从结果中提取单一日期列值（如存在且唯一）。"""
+    if not rows:
+        return None
+
+    row_columns = list(rows[0].keys())
+    date_col = _resolve_column(row_columns, date_column_candidates)
+    if not date_col:
+        return None
+
+    values = {str(row.get(date_col)) for row in rows if row.get(date_col) is not None}
+    if len(values) != 1:
+        return None
+    return values.pop()
+
+
+def _fetch_lookup_value_map(
+    *,
+    rule: ResultLookupEnrichmentRule,
+    key_values: List[str],
+    date_value: Optional[str],
+) -> Dict[str, str]:
+    """按规则查表补齐映射（优先同日，失败回退全量）。"""
+    if not key_values:
+        return {}
+
+    from app.db.session import analytics_engine
+    from sqlalchemy import text
+
+    unique_keys = list(dict.fromkeys([str(v).strip() for v in key_values if str(v).strip()]))
+    if not unique_keys:
+        return {}
+
+    exact_map: Dict[str, str] = {}
+    if date_value and rule.source_date_column:
+        sql_exact = text(f"""
+            SELECT {rule.source_key_column}, {rule.source_value_column}
+            FROM {rule.source_table}
+            WHERE {rule.source_date_column} = :date_value
+              AND {rule.source_key_column} = ANY(:key_values)
+              AND {rule.source_value_column} IS NOT NULL
+              AND {rule.source_value_column} <> ''
+        """)
+        try:
+            with analytics_engine.connect() as conn:
+                rows = conn.execute(
+                    sql_exact,
+                    {"date_value": date_value, "key_values": unique_keys},
+                ).fetchall()
+            buckets: Dict[str, List[str]] = {}
+            for key_val, display_val in rows:
+                key = str(key_val or "").strip()
+                value = str(display_val or "").strip()
+                if key and value:
+                    buckets.setdefault(key, []).append(value)
+            for key, values in buckets.items():
+                exact_map[key] = Counter(values).most_common(1)[0][0]
+        except Exception as e:
+            logger.warning(
+                "结果补齐规则执行失败(name=%s, date=%s): %s",
+                rule.name,
+                date_value,
+                e,
+            )
+
+    unresolved = [key for key in unique_keys if key not in exact_map]
+    if not unresolved:
+        return exact_map
+
+    sql_fallback = text(f"""
+        SELECT {rule.source_key_column}, {rule.source_value_column}
+        FROM {rule.source_table}
+        WHERE {rule.source_key_column} = ANY(:key_values)
+          AND {rule.source_value_column} IS NOT NULL
+          AND {rule.source_value_column} <> ''
+    """)
+
+    fallback_map: Dict[str, str] = {}
+    try:
+        with analytics_engine.connect() as conn:
+            rows = conn.execute(sql_fallback, {"key_values": unresolved}).fetchall()
+        buckets: Dict[str, List[str]] = {}
+        for key_val, display_val in rows:
+            key = str(key_val or "").strip()
+            value = str(display_val or "").strip()
+            if key and value:
+                buckets.setdefault(key, []).append(value)
+        for key, values in buckets.items():
+            fallback_map[key] = Counter(values).most_common(1)[0][0]
+    except Exception as e:
+        logger.warning("结果补齐规则回退失败(name=%s): %s", rule.name, e)
+
+    merged = dict(exact_map)
+    merged.update(fallback_map)
+    return merged
+
+
+def _apply_lookup_enrichment_rule(
+    rows: List[Dict[str, Any]],
+    columns: List[str],
+    rule: ResultLookupEnrichmentRule,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """对结果应用单条查表补齐规则。"""
+    if not rows or not columns:
+        return rows, columns
+
+    if _result_has_column(columns, rule.target_column):
+        return rows, columns
+
+    key_col = _resolve_column(columns, rule.key_column_candidates)
+    if not key_col:
+        return rows, columns
+
+    key_values = [str(row.get(key_col) or "").strip() for row in rows if row.get(key_col)]
+    if not key_values:
+        return rows, columns
+
+    date_value = _extract_single_date_value(rows, rule.result_date_column_candidates)
+    value_map = _fetch_lookup_value_map(rule=rule, key_values=key_values, date_value=date_value)
+    if not value_map:
+        return rows, columns
+
+    enriched_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        copied = dict(row)
+        key_value = str(copied.get(key_col) or "").strip()
+        copied[rule.target_column] = value_map.get(key_value)
+        enriched_rows.append(copied)
+
+    new_columns = list(columns)
+    insert_at = new_columns.index(key_col) + 1
+    new_columns.insert(insert_at, rule.target_column)
+    return enriched_rows, new_columns
+
+
+def _load_runtime_result_enrichment_rules() -> Tuple[ResultLookupEnrichmentRule, ...]:
+    """加载运行时结果增强规则（DB 优先，常量兜底）。"""
+    service = get_result_enrichment_rule_service()
+    return service.get_active_rules(
+        force_refresh=False,
+        fallback_rules=_FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES,
+    )
+
+
+def _enrich_result_rows_if_needed(
+    rows: List[Dict[str, Any]],
+    columns: List[str],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """按规则链增强结果集（可扩展，不依赖单条查询写死）。"""
+    if not ENABLE_RESULT_ENRICHMENT:
+        return rows, columns
+
+    try:
+        rules = _load_runtime_result_enrichment_rules()
+    except Exception as exc:
+        logger.warning("加载结果增强规则失败，回退内置规则: %s", exc)
+        rules = _FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES
+
+    enriched_rows = rows
+    enriched_columns = columns
+    for rule in rules:
+        enriched_rows, enriched_columns = _apply_lookup_enrichment_rule(
+            enriched_rows,
+            enriched_columns,
+            rule,
+        )
+    return enriched_rows, enriched_columns
+
+
+def _contains_chinese(text: str) -> bool:
+    """判断字符串是否包含中文字符。"""
+    return bool(re.search(r"[\u4e00-\u9fff]", str(text or "")))
+
+
+def _normalize_column_key(column: str) -> str:
+    """规范化列名键值（用于映射查找）。"""
+    return str(column or "").strip().lower()
+
+
+def _pick_most_common_stable(values: List[str]) -> Optional[str]:
+    """稳定地选择高频值（频次相同取先出现）。"""
+    if not values:
+        return None
+
+    counts = Counter(values)
+    max_count = max(counts.values())
+    for value in values:
+        if counts[value] == max_count:
+            return value
+    return values[0]
+
+
+def _load_column_display_name_map(
+    columns: List[str],
+    sql: Optional[str],
+) -> Dict[str, str]:
+    """加载字段中文名映射（优先按 SQL 涉及表过滤，未命中则全局回退）。"""
+    normalized_columns = list(
+        dict.fromkeys(
+            [
+                _normalize_column_key(col)
+                for col in columns
+                if str(col or "").strip() and not _contains_chinese(str(col))
+            ]
+        )
+    )
+    if not normalized_columns:
+        return {}
+
+    sql_tables: List[str] = []
+    if sql:
+        try:
+            sql_tables = sorted(extract_tables_from_sql(sql))
+        except Exception as e:
+            logger.debug("提取 SQL 涉及表失败，跳过表过滤: %s", e)
+
+    from sqlalchemy import text
+
+    def _query_candidates(table_filter: Optional[List[str]]) -> List[Tuple[str, str]]:
+        table_clause = ""
+        params: Dict[str, Any] = {"column_names": normalized_columns}
+        if table_filter:
+            table_clause = (
+                " AND LOWER(COALESCE(t.schema_name, 'public') || '.' || t.table_name) = ANY(:table_names)"
+            )
+            params["table_names"] = table_filter
+
+        query = text(
+            """
+            SELECT c.column_name, c.display_name
+            FROM t_meta_columns c
+            JOIN t_meta_tables t ON t.id = c.table_id
+            WHERE c.display_name IS NOT NULL
+              AND c.display_name <> ''
+              AND LOWER(c.column_name) = ANY(:column_names)
+            """
+            + table_clause
+        )
+
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(query, params).fetchall()
+        except Exception as e:
+            logger.warning("加载字段中文名映射失败(table_filter=%s): %s", bool(table_filter), e)
+            return []
+
+        return [
+            (str(row.column_name or "").strip(), str(row.display_name or "").strip())
+            for row in rows
+            if str(row.column_name or "").strip() and str(row.display_name or "").strip()
+        ]
+
+    filtered_candidates = _query_candidates(sql_tables if sql_tables else None)
+    all_candidates = filtered_candidates if filtered_candidates else _query_candidates(None)
+
+    if not all_candidates:
+        return {}
+
+    grouped: Dict[str, List[str]] = {}
+    for column_name, display_name in all_candidates:
+        key = _normalize_column_key(column_name)
+        if key in normalized_columns:
+            grouped.setdefault(key, []).append(display_name)
+
+    mapping: Dict[str, str] = {}
+    for column_key, display_names in grouped.items():
+        picked = _pick_most_common_stable(display_names)
+        if picked:
+            mapping[column_key] = picked
+
+    return mapping
+
+
+def _build_column_display_names(columns: List[str], display_map: Dict[str, str]) -> List[str]:
+    """构建结果表头显示名列表（索引与 columns 一一对应）。"""
+    display_names: List[str] = []
+    for column in columns:
+        raw = str(column)
+        if _contains_chinese(raw):
+            display_names.append(raw)
+            continue
+
+        mapped = display_map.get(_normalize_column_key(raw))
+        display_names.append(mapped or raw)
+    return display_names
+
+
+def _build_display_sql(sql: str, display_map: Dict[str, str]) -> str:
+    """构建展示用 SQL（仅给未起别名的直出列补中文别名）。"""
+    if not sql or not display_map:
+        return sql
+
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except Exception:
+        return sql
+
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="postgres")
+        target_select = parsed if isinstance(parsed, exp.Select) else parsed.find(exp.Select)
+        if not target_select:
+            return sql
+
+        rewritten_expressions: List[Any] = []
+        for expression in list(target_select.expressions or []):
+            # 已存在别名保持不变（稳定优先）
+            if isinstance(expression, exp.Alias):
+                rewritten_expressions.append(expression)
+                continue
+
+            # 仅对未起别名的直出列补中文别名
+            if isinstance(expression, exp.Column):
+                column_name = str(expression.name or "").strip()
+                mapped_alias = display_map.get(_normalize_column_key(column_name))
+                if mapped_alias and not _contains_chinese(column_name) and mapped_alias != column_name:
+                    rewritten_expressions.append(
+                        exp.alias_(expression.copy(), mapped_alias, quoted=True)
+                    )
+                    continue
+
+            rewritten_expressions.append(expression)
+
+        target_select.set("expressions", rewritten_expressions)
+        return parsed.sql(dialect="postgres")
+    except Exception as e:
+        logger.debug("构建展示 SQL 失败，回退原 SQL: %s", e)
+        return sql
+
+
+def _requires_detail_query(question: str, dimensions: Optional[List[str]] = None) -> bool:
+    """判断用户问题是否要求明细/分组语义。"""
+    dims = dimensions if isinstance(dimensions, list) else []
+    if any(str(dim).strip() for dim in dims):
+        return True
+
+    normalized = re.sub(r"\s+", "", question or "")
+    if not normalized:
+        return False
+
+    detail_patterns = [
+        r"前\d+",                      # 前10、前20
+        r"top\d+",                    # Top10
+        r"排名|排行",                  # 排名/排行
+        r"明细|列表",                  # 明细/列表
+        r"按.+?(客户|机构|分行|支行|产品|条线|行业|地区|部门)",
+        r"(各|每个).+?(客户|机构|分行|支行|产品|条线|行业|地区|部门)",
+    ]
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in detail_patterns)
+
+
+def _is_topn_intent(question: str) -> bool:
+    """判断是否为 TopN/排名意图。"""
+    normalized = re.sub(r"\s+", "", question or "")
+    return bool(re.search(r"前\d+|top\d+|排名|排行", normalized, re.IGNORECASE))
+
+
+def _is_total_aggregate_sql(sql: str) -> bool:
+    """判断 SQL 是否为“总量聚合”模板。"""
+    lowered = f" {sql.lower()} "
+    has_aggregate = bool(re.search(r"\b(sum|count|avg|min|max)\s*\(", lowered))
+    has_group_by = " group by " in lowered
+    has_order_by = " order by " in lowered
+    has_limit = " limit " in lowered
+    has_window = " over(" in lowered or " over (" in lowered
+
+    return has_aggregate and not (has_group_by or has_order_by or has_limit or has_window)
+
+
+def _is_sql_semantically_compatible(
+    sql: str,
+    question: str,
+    dimensions: Optional[List[str]] = None,
+) -> bool:
+    """判断候选 SQL 是否满足当前问题语义。"""
+    if not sql:
+        return False
+
+    if not _requires_detail_query(question, dimensions):
+        return True
+
+    lowered = f" {sql.lower()} "
+
+    # 明细/分组场景下，拒绝仅总量聚合 SQL（避免“第二问复用第一问结果”）
+    if _is_total_aggregate_sql(sql):
+        return False
+
+    # TopN/排名问题要求具备 ORDER BY + LIMIT
+    if _is_topn_intent(question):
+        if " order by " not in lowered or " limit " not in lowered:
+            return False
+
+    return True
+
+
+_DATA_GRAPH_INTENT_POLICY_KEY = "data_graph.intent_policy"
+_DATA_GRAPH_INTENT_POLICY_CACHE_TTL_SECONDS = 60
+_DATA_GRAPH_INTENT_POLICY_CACHE: Dict[str, Any] = {
+    "payload": {},
+    "loaded_at": 0.0,
+    "source": "cold_start",
+    "cache_hit": False,
+}
+
+
+def _get_data_graph_intent_policy_cache_meta() -> Dict[str, Any]:
+    """返回当前策略缓存元信息（用于日志排障）。"""
+    loaded_at = float(_DATA_GRAPH_INTENT_POLICY_CACHE.get("loaded_at") or 0.0)
+    cache_age = time.time() - loaded_at if loaded_at > 0 else None
+    return {
+        "source": _DATA_GRAPH_INTENT_POLICY_CACHE.get("source", "unknown"),
+        "cache_hit": bool(_DATA_GRAPH_INTENT_POLICY_CACHE.get("cache_hit", False)),
+        "cache_age_sec": round(cache_age, 3) if cache_age is not None else None,
+    }
+
+
+def _load_data_graph_intent_policy(force_refresh: bool = False) -> Dict[str, Any]:
+    """加载问数意图策略配置（数据库配置优先，带本地缓存）。"""
+    now = time.time()
+    loaded_at = float(_DATA_GRAPH_INTENT_POLICY_CACHE.get("loaded_at") or 0.0)
+    if (
+        not force_refresh
+        and loaded_at > 0
+        and now - loaded_at <= _DATA_GRAPH_INTENT_POLICY_CACHE_TTL_SECONDS
+    ):
+        cached_payload = _DATA_GRAPH_INTENT_POLICY_CACHE.get("payload")
+        if isinstance(cached_payload, dict):
+            _DATA_GRAPH_INTENT_POLICY_CACHE["cache_hit"] = True
+            return cached_payload
+
+    configured: Any = {}
+    source = "default"
+    try:
+        from app.services.system_config_service import SystemConfigService
+
+        configured = SystemConfigService.get(_DATA_GRAPH_INTENT_POLICY_KEY, {})
+        source = "system_config"
+    except Exception as error:
+        logger.debug("读取 data_graph 意图策略配置失败: %s", error)
+        configured = {}
+        source = "system_config_error"
+
+    if isinstance(configured, str):
+        try:
+            parsed = json.loads(configured)
+            if isinstance(parsed, dict):
+                configured = parsed
+                source = "system_config_json"
+            else:
+                configured = {}
+                source = "system_config_non_dict"
+        except Exception:
+            configured = {}
+            source = "system_config_invalid_json"
+
+    if not isinstance(configured, dict):
+        configured = {}
+        source = "default"
+
+    _DATA_GRAPH_INTENT_POLICY_CACHE["payload"] = configured
+    _DATA_GRAPH_INTENT_POLICY_CACHE["loaded_at"] = now
+    _DATA_GRAPH_INTENT_POLICY_CACHE["source"] = source
+    _DATA_GRAPH_INTENT_POLICY_CACHE["cache_hit"] = False
+    return configured
+
+
+def _extract_metric_alias_map_from_available_metrics() -> Dict[str, Tuple[str, ...]]:
+    """从 AVAILABLE_METRICS 文本解析指标及同义词映射。"""
+    alias_map: Dict[str, Tuple[str, ...]] = {}
+
+    for line in AVAILABLE_METRICS.splitlines():
+        raw_line = line.strip()
+        if not raw_line.startswith("-"):
+            continue
+
+        item = raw_line.lstrip("-").strip()
+        if not item:
+            continue
+
+        title, _, detail = item.partition(":")
+        head_aliases = [segment.strip() for segment in re.split(r"/", title) if segment.strip()]
+        if not head_aliases:
+            continue
+
+        canonical = head_aliases[0]
+        synonyms = list(head_aliases)
+
+        synonym_match = re.search(r"同义词[:：]([^；;。]+)", detail)
+        if synonym_match:
+            synonyms.extend(
+                value.strip()
+                for value in re.split(r"[、,，/]", synonym_match.group(1))
+                if value.strip()
+            )
+
+        deduplicated: List[str] = []
+        for synonym in synonyms:
+            if synonym not in deduplicated:
+                deduplicated.append(synonym)
+
+        alias_map[canonical] = tuple(deduplicated)
+
+    return alias_map
+
+
+def _load_metric_synonym_groups() -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    """加载指标同义词组（配置优先，未配置时回退 AVAILABLE_METRICS）。"""
+    policy = _load_data_graph_intent_policy()
+    configured = policy.get("metric_synonyms")
+
+    pairs: List[Tuple[str, Tuple[str, ...]]] = []
+    if isinstance(configured, dict):
+        for canonical, synonyms in configured.items():
+            canonical_name = str(canonical or "").strip()
+            if not canonical_name:
+                continue
+            synonym_list = _ensure_text_list(synonyms)
+            if canonical_name not in synonym_list:
+                synonym_list.insert(0, canonical_name)
+            if synonym_list:
+                pairs.append((canonical_name, tuple(synonym_list)))
+
+    if pairs:
+        return tuple(pairs)
+
+    return tuple(_extract_metric_alias_map_from_available_metrics().items())
+
+
+def _normalize_user_message_for_intent(text: str) -> str:
+    """归一化用户文本，提升多轮识别稳定性。"""
+    normalized = str(text or "")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    policy = _load_data_graph_intent_policy()
+    normalization_map = policy.get("text_normalization_map")
+    if isinstance(normalization_map, dict):
+        for source, target in normalization_map.items():
+            source_text = str(source or "")
+            target_text = str(target or "")
+            if source_text:
+                normalized = normalized.replace(source_text, target_text)
+
+    return normalized.strip()
+
+
+def _ensure_text_list(value: Any) -> List[str]:
+    """将输入统一为去重后的字符串列表。"""
+    if isinstance(value, list):
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+    elif isinstance(value, str):
+        cleaned = [value.strip()] if value.strip() else []
+    else:
+        cleaned = []
+
+    deduplicated: List[str] = []
+    for item in cleaned:
+        if item not in deduplicated:
+            deduplicated.append(item)
+    return deduplicated
+
+
+def _pick_first_non_empty_str(*values: Optional[str]) -> str:
+    """按优先级取首个非空字符串。"""
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _pick_first_non_empty_list(*values: Optional[List[str]]) -> List[str]:
+    """按优先级取首个非空列表。"""
+    for value in values:
+        cleaned = _ensure_text_list(value)
+        if cleaned:
+            return cleaned
+    return []
+
+
+def _extract_metric_from_text(text: str) -> str:
+    """从文本中抽取指标名称（配置/元数据驱动）。"""
+    lowered = text.lower()
+    best_metric = ""
+    best_match_len = 0
+
+    for canonical, synonyms in _load_metric_synonym_groups():
+        for synonym in synonyms:
+            normalized_synonym = str(synonym or "").strip().lower()
+            if not normalized_synonym:
+                continue
+            if normalized_synonym in lowered and len(normalized_synonym) > best_match_len:
+                best_metric = canonical
+                best_match_len = len(normalized_synonym)
+
+    return best_metric
+
+
+def _extract_time_from_text(text: str) -> str:
+    """从文本中抽取时间表达。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return ""
+
+    date_match = re.search(r"(\d{4})[-年/.](\d{1,2})[-月/.](\d{1,2})日?", compact)
+    if date_match:
+        year, month, day = date_match.groups()
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+    yyyymmdd_match = re.search(r"(?<!\d)(\d{8})(?!\d)", compact)
+    if yyyymmdd_match:
+        raw = yyyymmdd_match.group(1)
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+
+    relative_match = re.search(
+        r"(今(?:天|日)|昨天|昨日|本周|上周|本月|上月|本季度|上季度|今年|去年|(?:近|最近|过去)\d+(?:天|周|月|季度|年))",
+        compact,
+    )
+    if relative_match:
+        return relative_match.group(1)
+
+    return ""
+
+
+def _extract_chart_type_from_text(text: str) -> str:
+    """从文本中抽取图表类型（配置优先）。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return ""
+
+    policy = _load_data_graph_intent_policy()
+    chart_alias_map = policy.get("chart_alias_map")
+    if isinstance(chart_alias_map, dict):
+        for alias, canonical in chart_alias_map.items():
+            alias_text = str(alias or "").strip()
+            canonical_text = str(canonical or "").strip()
+            if alias_text and canonical_text and alias_text in compact:
+                return canonical_text
+
+    chart_type_match = re.search(r"(柱状图|柱形图|条形图|饼图|折线图)", compact)
+    if chart_type_match:
+        detected = chart_type_match.group(1)
+        if detected in {"柱形图", "条形图"}:
+            return "柱状图"
+        return detected
+
+    if re.search(r"(图|可视化|画图|出图)", compact) and len(compact) <= 12:
+        return "图表"
+
+    return ""
+
+
+def _extract_dimensions_from_text(text: str) -> List[str]:
+    """从文本中抽取聚合维度（轻量规则）。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return []
+
+    if "总体" in compact or "汇总" in compact:
+        return []
+
+    dimensions: List[str] = []
+    if "机构" in compact:
+        dimensions.append("机构")
+    if "客户" in compact:
+        dimensions.append("客户")
+    if any(token in compact for token in ("日期", "按天", "按月", "趋势")):
+        dimensions.append("日期")
+    if "分行" in compact:
+        dimensions.append("分行")
+    if "支行" in compact:
+        dimensions.append("支行")
+
+    return _ensure_text_list(dimensions)
+
+
+def _extract_org_level_from_text(text: str) -> str:
+    """从文本中抽取机构层级。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if "支行" in compact:
+        return "支行"
+    if "分行" in compact:
+        return "分行"
+    if "总行" in compact:
+        return "总行"
+    return ""
+
+
+def _extract_context_from_text(text: str) -> Dict[str, Any]:
+    """从自由文本提取可复用上下文。"""
+    normalized = _normalize_user_message_for_intent(text)
+    return {
+        "metric_name": _extract_metric_from_text(normalized),
+        "time_range": _extract_time_from_text(normalized),
+        "dimensions": _extract_dimensions_from_text(normalized),
+        "chart_type": _extract_chart_type_from_text(normalized),
+        "org_level": _extract_org_level_from_text(normalized),
+    }
+
+
+def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
+    """从 pending_handoff 提取结构化上下文（frame 优先，文本兜底）。"""
+    default_context = {
+        "task_description": "",
+        "metric_name": "",
+        "time_range": "",
+        "dimensions": [],
+        "chart_type": "",
+        "org_level": "",
+        "filters": [],
+        "turn_act_hint": "",
+    }
+
+    pending_handoff = state.get("pending_handoff")
+    if not isinstance(pending_handoff, dict):
+        return default_context
+
+    task_description = str(pending_handoff.get("task_description") or "").strip()
+    text_parsed = _extract_context_from_text(task_description) if task_description else {}
+
+    context = dict(default_context)
+    context["task_description"] = task_description
+
+    handoff_frame = pending_handoff.get("frame")
+    if isinstance(handoff_frame, dict):
+        context["metric_name"] = _pick_first_non_empty_str(
+            handoff_frame.get("metric"),
+            handoff_frame.get("metric_name"),
+            text_parsed.get("metric_name"),
+        )
+        context["time_range"] = _pick_first_non_empty_str(
+            handoff_frame.get("time_range"),
+            text_parsed.get("time_range"),
+        )
+        context["dimensions"] = _pick_first_non_empty_list(
+            _ensure_text_list(handoff_frame.get("dimensions")),
+            _ensure_text_list(text_parsed.get("dimensions")),
+        )
+        context["chart_type"] = _pick_first_non_empty_str(
+            handoff_frame.get("chart_type"),
+            text_parsed.get("chart_type"),
+        )
+        context["org_level"] = _pick_first_non_empty_str(
+            handoff_frame.get("org_level"),
+            text_parsed.get("org_level"),
+        )
+        context["filters"] = _pick_first_non_empty_list(
+            _ensure_text_list(handoff_frame.get("filters")),
+            _ensure_text_list(text_parsed.get("filters")),
+        )
+        context["turn_act_hint"] = str(
+            pending_handoff.get("turn_act_hint")
+            or handoff_frame.get("turn_act_hint")
+            or ""
+        ).strip()
+        return context
+
+    if task_description:
+        context["metric_name"] = str(text_parsed.get("metric_name") or "").strip()
+        context["time_range"] = str(text_parsed.get("time_range") or "").strip()
+        context["dimensions"] = _ensure_text_list(text_parsed.get("dimensions"))
+        context["chart_type"] = str(text_parsed.get("chart_type") or "").strip()
+        context["org_level"] = str(text_parsed.get("org_level") or "").strip()
+
+    return context
+
+
+def _is_continuation_reply(
+    text: str,
+    *,
+    has_prior_context: bool = False,
+    existing_metric: str = "",
+    handoff_metric: str = "",
+    existing_time: str = "",
+    handoff_time: str = "",
+    existing_dims: Optional[List[str]] = None,
+    handoff_dims: Optional[List[str]] = None,
+) -> Tuple[bool, str]:
+    """判断当前轮是否是补充型短回复，并返回判定原因。"""
+    compact = re.sub(r"\s+", "", _normalize_user_message_for_intent(text))
+    if not compact:
+        return False, "empty_input"
+    if not has_prior_context:
+        return False, "no_prior_context"
+    if len(compact) > 50:
+        return False, "too_long"
+
+    policy = _load_data_graph_intent_policy()
+    current_context = _extract_context_from_text(compact)
+
+    baseline_frame = {
+        "metric": _pick_first_non_empty_str(existing_metric, handoff_metric),
+        "time_range": _pick_first_non_empty_str(existing_time, handoff_time),
+        "dimensions": _pick_first_non_empty_list(existing_dims, handoff_dims),
+    }
+    current_frame = {
+        "metric": str(current_context.get("metric_name") or "").strip(),
+        "time_range": str(current_context.get("time_range") or "").strip(),
+        "dimensions": _ensure_text_list(current_context.get("dimensions")),
+        "chart_type": str(current_context.get("chart_type") or "").strip(),
+        "org_level": str(current_context.get("org_level") or "").strip(),
+    }
+
+    turn_act, reason = classify_turn_act(
+        compact,
+        has_prior_context=has_prior_context,
+        baseline_frame=baseline_frame,
+        current_frame=current_frame,
+        policy=policy,
+    )
+
+    if turn_act in {TURN_ACT_SUPPLEMENT, TURN_ACT_CONFIRM}:
+        return True, reason
+    return False, reason
+
+
+def _infer_clarify_slot(clarification: str) -> str:
+    """根据澄清文案推断澄清槽位。"""
+    compact = re.sub(r"\s+", "", clarification or "")
+    if not compact:
+        return ""
+    if any(keyword in compact for keyword in ("图表", "展示", "明细", "占比")):
+        return "display_mode"
+    if "指标" in compact and "时间" in compact:
+        return "metric_time"
+    if "指标" in compact:
+        return "metric"
+    if "时间" in compact:
+        return "time_range"
+    if any(keyword in compact for keyword in ("层级", "分行", "支行")):
+        return "org_level"
+    return "general"
+
+
+def _build_clarification_message(missing_slots: List[str]) -> str:
+    """按缺失槽位生成最小化澄清问题。"""
+    missing = set(missing_slots)
+    if "metric" in missing and "time_range" in missing:
+        return "请补充查询指标和时间范围（例如：查询2025-06-30贷款余额）。"
+    if "metric" in missing:
+        return "请补充要查询的指标（例如：贷款余额、存款余额）。"
+    if "time_range" in missing:
+        return "请补充时间范围（例如：2025-06-30、本月、过去30天）。"
+    if "org_level" in missing:
+        return "请确认机构层级（分行或支行）；未指定时默认按分行。"
+    return "请补充查询所需的关键信息。"
+
+
+def _resolve_clarification(
+    *,
+    analysis_clarification: str,
+    merged_metric: str,
+    merged_time: str,
+    need_org_level: bool,
+    merged_org_level: str,
+    continuation_mode: bool,
+    last_clarify_slot: str,
+    clarify_count: int,
+) -> Tuple[Optional[str], Optional[str], int, str]:
+    """按缺项驱动澄清，并做重复澄清保护。"""
+    missing_slots: List[str] = []
+    if not merged_metric:
+        missing_slots.append("metric")
+    if not merged_time:
+        missing_slots.append("time_range")
+    if need_org_level and not merged_org_level:
+        missing_slots.append("org_level")
+
+    if missing_slots:
+        slot = "metric_time" if {"metric", "time_range"}.issubset(set(missing_slots)) else missing_slots[0]
+        message = _build_clarification_message(missing_slots)
+        reason = f"missing_slots:{','.join(missing_slots)}"
+        return message, slot, max(clarify_count, 0) + 1, reason
+
+    clarification = str(analysis_clarification or "").strip()
+    if not clarification:
+        return None, None, 0, "no_clarification_needed"
+
+    analysis_slot = _infer_clarify_slot(clarification)
+
+    # 重复澄清保护：上一轮已问展示方式，本轮补充后不再追问指标/时间
+    if continuation_mode and last_clarify_slot == "display_mode":
+        if analysis_slot in {"metric", "time_range", "metric_time", "general"}:
+            return None, None, 0, "skip_redundant_clarify_after_display_mode"
+
+    # 已具备关键槽位时，拒绝模型回退成全量追问
+    if analysis_slot in {"metric", "time_range", "metric_time"} and merged_metric and merged_time:
+        return None, None, 0, "skip_redundant_metric_time_clarify"
+
+    if analysis_slot == "org_level" and merged_org_level:
+        return None, None, 0, "skip_redundant_org_level_clarify"
+
+    return clarification, analysis_slot or "general", max(clarify_count, 0) + 1, f"analysis:{analysis_slot or 'general'}"
 
 def analyze_data_intent(state: DataAgentState) -> Dict:
     """分析用户数据查询意图。
@@ -76,28 +1222,90 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     if not last_message:
         return {"clarification_needed": "请输入您的数据查询问题"}
 
-    # 多轮上下文：从 state 取已有信息，避免重复询问
+    normalized_last_message = _normalize_user_message_for_intent(str(last_message))
+    continuation_mode = False
+    turn_act = TURN_ACT_NEW_QUERY
+
+    # 多轮上下文：state + handoff 融合
     existing_metric = (state.get("matched_metric") or "").strip()
     existing_time = (state.get("time_range") or "").strip()
-    existing_dims = state.get("dimensions") or []
-    existing_filters = state.get("filters") or []
-    if isinstance(existing_dims, list):
-        existing_dims_str = "、".join(existing_dims) if existing_dims else ""
+    existing_dims = _ensure_text_list(state.get("dimensions"))
+    existing_filters = _ensure_text_list(state.get("filters"))
+    existing_viz_type = (state.get("viz_type") or "").strip()
+    query_context = state.get("query_context") or {}
+    existing_org_level = ""
+    if isinstance(query_context, dict):
+        existing_org_level = str(query_context.get("org_level") or "").strip()
+
+    handoff_context = _extract_handoff_context(state)
+    handoff_metric = str(handoff_context.get("metric_name") or "").strip()
+    handoff_time = str(handoff_context.get("time_range") or "").strip()
+    handoff_dims = _ensure_text_list(handoff_context.get("dimensions"))
+    handoff_filters = _ensure_text_list(handoff_context.get("filters"))
+    handoff_chart_type = str(handoff_context.get("chart_type") or "").strip()
+    handoff_org_level = str(handoff_context.get("org_level") or "").strip()
+    handoff_task_description = str(handoff_context.get("task_description") or "").strip()
+    handoff_turn_act_hint = str(handoff_context.get("turn_act_hint") or "").strip()
+
+    has_prior_context = any([
+        existing_metric,
+        existing_time,
+        existing_dims,
+        existing_filters,
+        handoff_metric,
+        handoff_time,
+        handoff_dims,
+        handoff_task_description,
+        str(query_context.get("original_question") or "").strip() if isinstance(query_context, dict) else "",
+    ])
+    continuation_mode, continuation_reason = _is_continuation_reply(
+        normalized_last_message,
+        has_prior_context=bool(has_prior_context),
+        existing_metric=existing_metric,
+        handoff_metric=handoff_metric,
+        existing_time=existing_time,
+        handoff_time=handoff_time,
+        existing_dims=existing_dims,
+        handoff_dims=handoff_dims,
+    )
+
+    if continuation_mode:
+        turn_act = TURN_ACT_CONFIRM if continuation_reason in {"policy_confirm_pattern", "short_confirm"} else TURN_ACT_SUPPLEMENT
+    elif continuation_reason in {"metric_switched", "time_switched"}:
+        turn_act = TURN_ACT_CORRECTION
     else:
-        existing_dims_str = str(existing_dims) if existing_dims else ""
-    if isinstance(existing_filters, list):
-        existing_filters_str = "、".join(existing_filters) if existing_filters else ""
-    else:
-        existing_filters_str = str(existing_filters) if existing_filters else ""
+        turn_act = TURN_ACT_NEW_QUERY
+
+    if (
+        not continuation_mode
+        and turn_act == TURN_ACT_NEW_QUERY
+        and continuation_reason in {"insufficient_signal", "short_reply_with_context"}
+        and handoff_turn_act_hint == TURN_ACT_SUPPLEMENT
+        and has_prior_context
+    ):
+        turn_act = TURN_ACT_SUPPLEMENT
+        continuation_mode = True
+        continuation_reason = "handoff_turn_act_hint"
+
+    policy_meta = _get_data_graph_intent_policy_cache_meta()
+
+    existing_dims_str = "、".join(existing_dims) if existing_dims else ""
+    existing_filters_str = "、".join(existing_filters) if existing_filters else ""
     parts = []
-    if existing_metric:
-        parts.append(f"指标: {existing_metric}")
-    if existing_time:
-        parts.append(f"时间范围: {existing_time}")
-    if existing_dims_str:
-        parts.append(f"聚合维度: {existing_dims_str}")
+    baseline_metric = _pick_first_non_empty_str(existing_metric, handoff_metric)
+    baseline_time = _pick_first_non_empty_str(existing_time, handoff_time)
+    baseline_dims = _pick_first_non_empty_list(existing_dims, handoff_dims)
+    if baseline_metric:
+        parts.append(f"指标: {baseline_metric}")
+    if baseline_time:
+        parts.append(f"时间范围: {baseline_time}")
+    if baseline_dims:
+        parts.append(f"聚合维度: {'、'.join(baseline_dims)}")
     if existing_filters_str:
         parts.append(f"筛选: {existing_filters_str}")
+    if handoff_task_description:
+        handoff_summary = handoff_task_description.replace("\n", " ")[:180]
+        parts.append(f"handoff: {handoff_summary}")
     existing_context = "；".join(parts) if parts else "（无，为首轮或尚未提供）"
 
     # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
@@ -105,14 +1313,16 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
     llm = get_llm(internal=True, model_id=sql_gen_model)
     prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
-        question=last_message,
+        question=normalized_last_message,
         existing_context=existing_context,
         available_metrics=AVAILABLE_METRICS
     )
 
     try:
         response = llm.invoke(prompt)
-        content = response.content if hasattr(response, 'content') else str(response)
+        content = _normalize_text_content(
+            response.content if hasattr(response, "content") else response
+        )
 
         # 解析 JSON 响应
         json_start = content.find('{')
@@ -124,55 +1334,258 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
         logger.info(f"意图分析结果: {analysis}")
 
-        # 合并多轮结果：新值为空时保留已有值，避免覆盖用户已提供的信息
-        new_metric = (analysis.get("metric_name") or "").strip()
-        new_time = (analysis.get("time_range") or "").strip()
-        new_dims = analysis.get("dimensions")
-        if not isinstance(new_dims, list):
-            new_dims = []
-        new_filters = analysis.get("filters")
-        if not isinstance(new_filters, list):
-            new_filters = []
-        merged_metric = new_metric or existing_metric
-        merged_time = new_time or existing_time
-        merged_dims = new_dims if new_dims else existing_dims
-        merged_filters = new_filters if new_filters else existing_filters
-        clarification = (analysis.get("clarification_needed") or "").strip()
-        # 若合并后已具备指标+时间，且用户当前轮像是补充（短句），则不再要求澄清
-        if clarification and merged_metric and merged_time:
-            if len(last_message.strip()) <= 20 or any(kw in last_message for kw in ("本月", "总体", "汇总", "全部", "过去")):
-                clarification = ""
-                logger.info("多轮合并后已具备指标与时间，取消重复澄清")
+        current_context = _extract_context_from_text(normalized_last_message)
 
-        # 为 SQL 生成构造完整查询描述（多轮合并后的语义），避免仅用当前句「总体的」生成
-        full_question = last_message
-        if merged_metric or merged_time:
-            parts_desc = []
-            if merged_metric:
-                parts_desc.append(f"查询{merged_metric}")
-            if merged_time:
-                parts_desc.append(f"时间范围{merged_time}")
-            if merged_dims:
-                parts_desc.append(f"按{merged_dims}聚合" if isinstance(merged_dims, list) else f"按{merged_dims}聚合")
-            if merged_filters:
-                parts_desc.append(f"筛选{merged_filters}" if isinstance(merged_filters, list) else str(merged_filters))
-            if parts_desc and last_message.strip() not in ("本月", "总体", "总体的", "汇总", "全部"):
-                full_question = "，".join(parts_desc) + "。" + (f" 用户补充：{last_message}" if last_message else "")
-            elif parts_desc:
-                full_question = "，".join(parts_desc)
+        # 当前轮解析结果（优先使用 LLM；无值时由规则补齐）
+        current_metric = _pick_first_non_empty_str(
+            analysis.get("metric_name"),
+            current_context.get("metric_name"),
+        )
+        current_time = _pick_first_non_empty_str(
+            analysis.get("time_range"),
+            current_context.get("time_range"),
+        )
+        current_dims = _pick_first_non_empty_list(
+            _ensure_text_list(analysis.get("dimensions")),
+            _ensure_text_list(current_context.get("dimensions")),
+        )
+        current_filters = _ensure_text_list(analysis.get("filters"))
+        current_chart_type = _pick_first_non_empty_str(
+            analysis.get("chart_type"),
+            current_context.get("chart_type"),
+        )
+        current_org_level = _pick_first_non_empty_str(current_context.get("org_level"))
+
+        # 会话帧归并：当前轮 > handoff > 历史 state
+        current_frame = {
+            "metric": current_metric,
+            "time_range": current_time,
+            "dimensions": current_dims,
+            "filters": current_filters,
+            "chart_type": current_chart_type,
+            "org_level": current_org_level,
+        }
+        handoff_frame = {
+            "metric": handoff_metric,
+            "time_range": handoff_time,
+            "dimensions": handoff_dims,
+            "filters": handoff_filters,
+            "chart_type": handoff_chart_type,
+            "org_level": handoff_org_level,
+        }
+        state_frame = {
+            "metric": existing_metric,
+            "time_range": existing_time,
+            "dimensions": existing_dims,
+            "filters": existing_filters,
+            "chart_type": existing_viz_type,
+            "org_level": existing_org_level,
+        }
+
+        merged_frame, frame_source_map = reduce_session_frame(
+            current_frame=current_frame,
+            handoff_frame=handoff_frame,
+            state_frame=state_frame,
+        )
+        merged_metric = str(merged_frame.get("metric") or "").strip()
+        merged_time = str(merged_frame.get("time_range") or "").strip()
+        merged_dims = _ensure_text_list(merged_frame.get("dimensions"))
+        merged_filters = _ensure_text_list(merged_frame.get("filters"))
+        merged_chart_type = str(merged_frame.get("chart_type") or "").strip()
+        merged_org_level = str(merged_frame.get("org_level") or "").strip()
+
+        # 新问题保护：识别到指标切换且非补充模式时，避免继承旧上下文
+        baseline_metric_for_switch = _pick_first_non_empty_str(existing_metric, handoff_metric)
+        context_reset_for_new_query = bool(
+            current_metric
+            and baseline_metric_for_switch
+            and current_metric != baseline_metric_for_switch
+            and turn_act in {TURN_ACT_NEW_QUERY, TURN_ACT_CORRECTION}
+            and not continuation_mode
+        )
+        if context_reset_for_new_query:
+            merged_metric = current_metric
+            merged_time = current_time
+            merged_dims = current_dims
+            merged_filters = current_filters
+            merged_chart_type = current_chart_type
+            merged_org_level = current_org_level
+            frame_source_map.update(
+                {
+                    "metric": "current",
+                    "time_range": "current",
+                    "dimensions": "current",
+                    "filters": "current",
+                    "chart_type": "current",
+                    "org_level": "current",
+                }
+            )
+            logger.info(
+                "意图融合: 识别为新问题，重置历史继承(metric=%s->%s)",
+                baseline_metric_for_switch,
+                current_metric,
+            )
+
+        combined_text_parts = [normalized_last_message, " ".join(merged_dims)]
+        if not context_reset_for_new_query:
+            combined_text_parts.insert(1, handoff_task_description)
+        combined_text = " ".join([part for part in combined_text_parts if part])
+        compact_combined_text = re.sub(r"\s+", "", combined_text)
+        org_dimension_requested = any(
+            keyword in compact_combined_text for keyword in ("机构", "分行", "支行")
+        )
+        has_chart_request = bool(merged_chart_type) or any(
+            keyword in compact_combined_text for keyword in ("图表", "柱状图", "饼图", "折线图", "可视化", "出图")
+        )
+
+        # 默认值策略：图表场景未指定层级时默认分行
+        used_default_org_level = False
+        if has_chart_request and org_dimension_requested and not merged_org_level:
+            merged_org_level = "分行"
+            used_default_org_level = True
+
+        previous_clarify_slot = str(state.get("last_clarify_slot") or "").strip()
+        previous_clarify_count = int(state.get("clarify_count") or 0)
+        previous_clarify_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
+        previous_clarify_round = int(state.get("clarify_round") or previous_clarify_count or 0)
+        clarification, clarify_slot, clarified_count, clarify_reason = _resolve_clarification(
+            analysis_clarification=str(analysis.get("clarification_needed") or ""),
+            merged_metric=merged_metric,
+            merged_time=merged_time,
+            need_org_level=has_chart_request and org_dimension_requested and not bool(merged_org_level),
+            merged_org_level=merged_org_level,
+            continuation_mode=continuation_mode,
+            last_clarify_slot=previous_clarify_slot,
+            clarify_count=previous_clarify_count,
+        )
+
+        missing_slots_for_fsm: List[str] = []
+        if not merged_metric:
+            missing_slots_for_fsm.append("metric")
+        if not merged_time:
+            missing_slots_for_fsm.append("time_range")
+        if has_chart_request and org_dimension_requested and not bool(merged_org_level):
+            missing_slots_for_fsm.append("org_level")
+
+        if clarification:
+            next_clarify_slot = clarify_slot
+            next_clarify_count = clarified_count
+            next_clarify_fsm_state = advance_clarify_fsm_state(previous_clarify_fsm_state, missing_slots_for_fsm)
+            next_clarify_round = max(previous_clarify_round, 0) + 1
+        else:
+            next_clarify_slot = None
+            next_clarify_count = 0
+            next_clarify_fsm_state = "done"
+            next_clarify_round = 0
+
+        # 是否实际消费了 handoff 上下文（用于日志和排障）
+        used_handoff_context = False
+        if handoff_task_description and not context_reset_for_new_query:
+            if (not current_metric and handoff_metric) or (not current_time and handoff_time):
+                used_handoff_context = True
+            elif not current_dims and handoff_dims:
+                used_handoff_context = True
+            elif not current_chart_type and handoff_chart_type:
+                used_handoff_context = True
+            elif not current_org_level and handoff_org_level:
+                used_handoff_context = True
+
+        # 为 SQL 生成构造完整查询描述（多轮合并后的语义）
+        full_question = normalized_last_message
+        parts_desc = []
+        if merged_metric:
+            parts_desc.append(f"查询{merged_metric}")
+        if merged_time:
+            parts_desc.append(f"时间范围{merged_time}")
+        if merged_dims:
+            parts_desc.append(f"按{'、'.join(merged_dims)}聚合")
+        if merged_org_level and org_dimension_requested and merged_org_level not in merged_dims:
+            parts_desc.append(f"机构层级{merged_org_level}")
+        if merged_chart_type:
+            parts_desc.append(f"展示方式{merged_chart_type}")
+        if merged_filters:
+            parts_desc.append(f"筛选{'、'.join(merged_filters)}")
+
+        if parts_desc:
+            merged_desc = "，".join(parts_desc)
+            if continuation_mode:
+                full_question = merged_desc
+            else:
+                full_question = f"{merged_desc}。用户补充：{normalized_last_message}"
+
+        analysis_intent = str(analysis.get("intent") or "free_query").strip() or "free_query"
+        resolved_intent = analysis_intent
+        if clarification:
+            resolved_intent = "clarification"
+        elif merged_metric:
+            resolved_intent = "metric_query"
+        elif has_chart_request or analysis_intent == "visualization":
+            resolved_intent = "visualization"
+        elif analysis_intent == "clarification":
+            resolved_intent = "free_query"
+
+        resolved_session_frame = {
+            "metric": merged_metric,
+            "time_range": merged_time,
+            "dimensions": merged_dims,
+            "filters": merged_filters,
+            "chart_type": merged_chart_type,
+            "org_level": merged_org_level,
+        }
+
+        logger.info(
+            "意图融合: turn_act=%s, continuation=%s(reason=%s), used_handoff_context=%s, "
+            "used_default_org_level=%s, clarify_reason=%s, clarify_fsm=%s, reset_for_new_query=%s, "
+            "policy_source=%s, policy_cache_hit=%s, policy_cache_age_sec=%s",
+            turn_act,
+            continuation_mode,
+            continuation_reason,
+            used_handoff_context,
+            used_default_org_level,
+            clarify_reason,
+            next_clarify_fsm_state,
+            context_reset_for_new_query,
+            policy_meta.get("source"),
+            policy_meta.get("cache_hit"),
+            policy_meta.get("cache_age_sec"),
+        )
 
         updates = {
-            "data_intent": analysis.get("intent", "free_query"),
+            "data_intent": resolved_intent,
             "matched_metric": merged_metric or None,
             "time_range": merged_time or None,
             "filters": merged_filters,
             "dimensions": merged_dims,
-            "viz_type": analysis.get("chart_type"),
+            "viz_type": merged_chart_type or None,
             "clarification_needed": clarification or None,
+            "last_clarify_slot": next_clarify_slot,
+            "clarify_count": next_clarify_count,
+            "continuation_mode": continuation_mode,
+            "turn_act": turn_act,
+            "session_frame": resolved_session_frame,
+            "frame_source_map": frame_source_map,
+            "clarify_fsm_state": next_clarify_fsm_state,
+            "clarify_round": next_clarify_round,
             "query_context": {
                 "original_question": full_question,
-                "last_user_message": last_message,
-                "analysis": analysis
+                "last_user_message": normalized_last_message,
+                "analysis": analysis,
+                "org_level": merged_org_level or None,
+                "continuation_mode": continuation_mode,
+                "continuation_reason": continuation_reason,
+                "turn_act": turn_act,
+                "frame_source_map": frame_source_map,
+                "used_handoff_context": used_handoff_context,
+                "used_default_org_level": used_default_org_level,
+                "clarify_reason": clarify_reason,
+                "clarify_fsm_state": next_clarify_fsm_state,
+                "clarify_round": next_clarify_round,
+                "context_reset_for_new_query": context_reset_for_new_query,
+                "intent_policy_source": policy_meta.get("source"),
+                "intent_policy_cache_hit": policy_meta.get("cache_hit"),
+                "intent_policy_cache_age_sec": policy_meta.get("cache_age_sec"),
+                "handoff_task_description": handoff_task_description or None,
+                "handoff_turn_act_hint": handoff_turn_act_hint or None,
             }
         }
 
@@ -187,15 +1600,17 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
 
 def metric_resolve(state: DataAgentState) -> Dict:
-    """指标匹配：向量检索 t_metric_definition，命中则直接用 query_template。
+    """指标匹配：精确名称匹配 + 向量检索 t_metric_definition，命中则直接用 query_template。
     
     职责：
-    1. 根据用户问题向量检索数据库中的指标定义
-    2. 命中且有 query_template 时，直接生成 SQL（跳过 LLM 生成，节省 Token）
-    3. 未命中则回退到 Vanna RAG 路径
+    1. 优先精确名称匹配（避免语义漂移，如"贷款余额"不应匹配"个人贷款"）
+    2. 精确匹配未命中时，向量检索数据库中的指标定义
+    3. 命中且有 query_template 时，直接生成 SQL（跳过 LLM 生成，节省 Token）
+    4. 未命中则回退到 Vanna RAG 路径
     
     改造记录：
     - 2026-02-07: 从硬编码电商模板改为数据库向量匹配 (ADR-011)
+    - 2026-02-07: 增加精确名称匹配优先步骤 + 空结果降级机制
     """
     logger.info("=== metric_resolve 节点 ===")
     
@@ -203,14 +1618,56 @@ def metric_resolve(state: DataAgentState) -> Dict:
     question = query_context.get("original_question", "")
     matched_metric = state.get("matched_metric")
     time_range = state.get("time_range")
+    dimensions = state.get("dimensions")
+    if not isinstance(dimensions, list):
+        dimensions = []
     
     if not question and not matched_metric:
         return {"sql_source": "vanna"}
     
     try:
-        vanna = get_vanna()
+        # 第1步：精确名称匹配（优先于向量检索，避免语义漂移）
+        if matched_metric:
+            exact_candidates = _search_metrics_exact_name(matched_metric)
+            if exact_candidates:
+                for best in exact_candidates:
+                    query_template = best.get("query_template")
+                    if not query_template:
+                        logger.info(
+                            "指标精确匹配命中但无 query_template: %s",
+                            best.get("metric_id")
+                        )
+                        continue
+
+                    sql = _derive_metric_sql(query_template, time_range, question, dimensions)
+                    if not sql:
+                        logger.info(
+                            "指标精确模板无法派生当前语义，跳过: %s (%s)",
+                            best.get("metric_id"), best.get("metric_name")
+                        )
+                        continue
+                    if not _is_sql_semantically_compatible(sql, question, dimensions):
+                        logger.info(
+                            "指标精确模板语义不匹配，跳过: %s (%s)",
+                            best.get("metric_id"), best.get("metric_name")
+                        )
+                        continue
+
+                    logger.info(
+                        "指标精确匹配命中: %s (%s), SQL=%s...",
+                        best.get("metric_id"), best.get("metric_name"), sql[:80]
+                    )
+                    return {
+                        "generated_sql": sql,
+                        "sql_source": "metric",
+                        "pending_sql": sql,
+                        "matched_metric": best.get("metric_name"),
+                    }
+
+                logger.info("指标精确匹配存在候选，但均不满足当前语义，继续向量检索")
         
-        # 向量检索 query_template 非空的指标
+        # 第2步：向量检索 query_template 非空的指标
+        vanna = get_vanna()
         candidates = _search_metrics_by_vector(
             vanna, question or matched_metric, top_k=3
         )
@@ -218,45 +1675,101 @@ def metric_resolve(state: DataAgentState) -> Dict:
         if not candidates:
             logger.info("指标向量匹配: 无命中，回退到 Vanna")
             return {"sql_source": "vanna"}
-        
-        best = candidates[0]
-        similarity = best.get("similarity", 0)
-        
+
         # 相似度阈值：> 0.5 才使用模板（实测银行指标匹配多在 0.55-0.65 区间）
-        if similarity < 0.5:
+        for best in candidates:
+            similarity = best.get("similarity", 0)
+            if similarity < 0.5:
+                continue
+
+            query_template = best.get("query_template")
+            if not query_template:
+                logger.info(
+                    "指标命中但无 query_template: %s，跳过",
+                    best.get("metric_id")
+                )
+                continue
+
+            sql = _derive_metric_sql(query_template, time_range, question, dimensions)
+            if not sql:
+                logger.info(
+                    "指标向量模板无法派生当前语义，跳过: %s (%s), 相似度=%.3f",
+                    best.get("metric_id"), best.get("metric_name"), similarity
+                )
+                continue
+            if not _is_sql_semantically_compatible(sql, question, dimensions):
+                logger.info(
+                    "指标向量模板语义不匹配，跳过: %s (%s), 相似度=%.3f",
+                    best.get("metric_id"), best.get("metric_name"), similarity
+                )
+                continue
+
             logger.info(
-                "指标向量匹配: 最佳相似度 %.3f < 0.5，回退到 Vanna (指标: %s)",
-                similarity, best.get("metric_name")
+                "指标向量匹配命中: %s (%s), 相似度=%.3f, SQL=%s...",
+                best.get("metric_id"), best.get("metric_name"),
+                similarity, sql[:80]
             )
-            return {"sql_source": "vanna"}
-        
-        query_template = best.get("query_template")
-        if not query_template:
-            logger.info(
-                "指标命中但无 query_template: %s，回退到 Vanna",
-                best.get("metric_id")
-            )
-            return {"sql_source": "vanna"}
-        
-        # 替换 ${data_dt} 参数
-        sql = _replace_data_dt(query_template, time_range)
-        
-        logger.info(
-            "指标命中: %s (%s), 相似度=%.3f, SQL=%s...",
-            best.get("metric_id"), best.get("metric_name"),
-            similarity, sql[:80]
-        )
-        
-        return {
-            "generated_sql": sql,
-            "sql_source": "metric",
-            "pending_sql": sql,
-            "matched_metric": best.get("metric_name"),
-        }
+
+            return {
+                "generated_sql": sql,
+                "sql_source": "metric",
+                "pending_sql": sql,
+                "matched_metric": best.get("metric_name"),
+            }
+
+        logger.info("指标向量命中但无语义匹配模板，回退到 Vanna")
+        return {"sql_source": "vanna"}
         
     except Exception as e:
-        logger.warning("指标向量匹配异常，回退到 Vanna: %s", e)
+        logger.warning("指标匹配异常，回退到 Vanna: %s", e)
         return {"sql_source": "vanna"}
+
+
+def _search_metrics_exact_name(metric_name: str) -> list:
+    """精确名称匹配指标（优先于向量检索，避免语义漂移）。
+    
+    匹配策略（按优先级）：
+    1. 完全匹配 metric_name（如"贷款余额"精确匹配 LOAN_001）
+    2. 用户关键词被 metric_name 包含（如"贷款余额"匹配"全行贷款余额"）
+    
+    排序规则：精确匹配优先 → 名称更短的优先（更具体）
+    """
+    from sqlalchemy import create_engine, text
+    
+    sql = text("""
+        SELECT metric_id, metric_name, description,
+               query_template, template_source,
+               CASE 
+                   WHEN metric_name = :name THEN 1.0
+                   WHEN metric_name LIKE '%' || :name || '%' THEN 0.9
+               END AS match_score
+        FROM t_metric_definition
+        WHERE is_active = TRUE
+          AND query_template IS NOT NULL
+          AND (metric_name = :name OR metric_name LIKE '%' || :name || '%')
+        ORDER BY match_score DESC, LENGTH(metric_name) ASC
+        LIMIT 5
+    """)
+    
+    try:
+        from app.core.config import DATABASE_URL
+        with create_engine(DATABASE_URL).connect() as conn:
+            rows = conn.execute(sql, {"name": metric_name}).fetchall()
+        
+        return [
+            {
+                "metric_id": r.metric_id,
+                "metric_name": r.metric_name,
+                "description": r.description,
+                "query_template": r.query_template,
+                "template_source": r.template_source,
+                "similarity": r.match_score,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning("指标精确匹配查询失败: %s", e)
+        return []
 
 
 def _search_metrics_by_vector(vanna, question: str, top_k: int = 3) -> list:
@@ -344,31 +1857,31 @@ def _parse_business_date(time_range: str) -> str:
     import re
     
     now = datetime.now()
-    text = time_range.strip()
+    raw = time_range.strip()
     
     # 直接日期格式: 2025-06-30 或 20250630
-    m = re.search(r'(\d{4})-?(\d{2})-?(\d{2})', text)
+    m = re.search(r'(\d{4})-?(\d{2})-?(\d{2})', raw)
     if m:
         return f"{m.group(1)}{m.group(2)}{m.group(3)}"
     
     # 月末日期推断
-    if "上月" in text or "上个月" in text:
+    if "上月" in raw or "上个月" in raw:
         first_of_month = now.replace(day=1)
         last_of_prev = first_of_month - timedelta(days=1)
         return last_of_prev.strftime("%Y%m%d")
     
-    if "本月" in text or "这个月" in text:
+    if "本月" in raw or "这个月" in raw:
         return now.strftime("%Y%m%d")
     
     # 年月: "6月" "2025年6月"
-    m = re.search(r'(\d{4})年?(\d{1,2})月', text)
+    m = re.search(r'(\d{4})年?(\d{1,2})月', raw)
     if m:
         import calendar
         year, month = int(m.group(1)), int(m.group(2))
         last_day = calendar.monthrange(year, month)[1]
         return f"{year}{month:02d}{last_day:02d}"
     
-    m = re.search(r'(\d{1,2})月', text)
+    m = re.search(r'(\d{1,2})月', raw)
     if m:
         import calendar
         month = int(m.group(1))
@@ -397,10 +1910,125 @@ def _get_latest_data_date() -> str:
     return None
 
 
+def training_sql_resolve(state: DataAgentState) -> Dict:
+    """训练集 SQL 匹配：从 t_data_query_log 向量检索已训练的 SQL，直接执行。
+    
+    三级降级链中的第2级：
+    1. 向量检索 t_data_query_log 中 trained=true 的记录
+    2. 相似度 > 0.7 时直接使用训练集 SQL（跳过 LLM 生成）
+    3. 替换日期参数后进入安全检查
+    4. 未命中则回退到第3级（通用 RAG 路径）
+    """
+    logger.info("=== training_sql_resolve 节点 ===")
+    
+    query_context = state.get("query_context", {})
+    question = query_context.get("original_question", "")
+    time_range = state.get("time_range")
+    dimensions = state.get("dimensions")
+    if not isinstance(dimensions, list):
+        dimensions = []
+    
+    # 清除上一级的降级标志，防止循环
+    base_result = {"fallback_target": None}
+    
+    if not question:
+        return {**base_result, "sql_source": "vanna"}
+    
+    try:
+        vanna = get_vanna()
+        candidates = _search_training_sql(vanna, question, top_k=3)
+        
+        if not candidates:
+            logger.info("训练集 SQL 匹配: 无命中，回退到通用查询")
+            return {**base_result, "sql_source": "vanna"}
+
+        # 相似度阈值 0.7（训练集 SQL 需要更高置信度才能直接执行）
+        for best in candidates:
+            similarity = best.get("similarity", 0)
+            if similarity < 0.7:
+                continue
+
+            training_sql = best.get("generated_sql")
+            if not training_sql:
+                continue
+
+            # 替换日期参数
+            sql = _replace_data_dt(training_sql, time_range)
+            if not _is_sql_semantically_compatible(sql, question, dimensions):
+                logger.info(
+                    "训练集 SQL 语义不匹配，跳过: sim=%.3f, 样本问题='%s'",
+                    similarity, best.get("question", "")[:50]
+                )
+                continue
+
+            logger.info(
+                "训练集 SQL 命中: 原始问题='%s', 相似度=%.3f, SQL=%s...",
+                best.get("question", "")[:50], similarity, sql[:80]
+            )
+
+            return {
+                **base_result,
+                "generated_sql": sql,
+                "sql_source": "training",
+                "pending_sql": sql,
+            }
+
+        logger.info("训练集 SQL 命中但无语义匹配候选，回退到通用查询")
+        return {**base_result, "sql_source": "vanna"}
+        
+    except Exception as e:
+        logger.warning("训练集 SQL 匹配异常，回退到通用查询: %s", e)
+        return {**base_result, "sql_source": "vanna"}
+
+
+def _search_training_sql(vanna, question: str, top_k: int = 3) -> list:
+    """从 t_data_query_log 向量检索已训练的 SQL。
+    
+    只返回 trained=true 且有 embedding 的记录，按相似度降序排列。
+    """
+    from sqlalchemy import create_engine, text
+    
+    embedding = vanna.generate_embedding(question)
+    if not embedding:
+        return []
+    
+    embedding_str = str(embedding)
+    
+    sql = text("""
+        SELECT question, generated_sql,
+               1 - (question_embedding <=> :embedding) AS similarity
+        FROM t_data_query_log
+        WHERE trained = true
+          AND question_embedding IS NOT NULL
+          AND generated_sql IS NOT NULL
+        ORDER BY question_embedding <=> :embedding
+        LIMIT :top_k
+    """)
+    
+    try:
+        from app.core.config import DATABASE_URL
+        with create_engine(DATABASE_URL).connect() as conn:
+            rows = conn.execute(sql, {
+                "embedding": embedding_str, "top_k": top_k
+            }).fetchall()
+        
+        return [
+            {
+                "question": r.question,
+                "generated_sql": r.generated_sql,
+                "similarity": r.similarity,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning("训练集 SQL 检索失败: %s", e)
+        return []
+
+
 def schema_retrieve(state: DataAgentState) -> Dict:
     """检索相关表结构（Vanna RAG）。
     
-    职责：
+    三级降级链中的第3级：
     1. 使用 schema 路由确定目标 schema
     2. 使用 Vanna 检索相关 DDL（限定 schema 范围）
     3. 检索相关指标文档
@@ -441,9 +2069,11 @@ def schema_retrieve(state: DataAgentState) -> Dict:
         logger.info(f"检索到 {len(retrieved_schema)} 条相关信息")
         
         # 返回检索结果和目标 schema，供后续节点使用
+        # 清除降级标志，防止循环
         return {
             "retrieved_schema": retrieved_schema,
-            "target_schema": target_schema
+            "target_schema": target_schema,
+            "fallback_target": None
         }
         
     except Exception as e:
@@ -756,6 +2386,227 @@ def sql_safety_check(state: DataAgentState) -> Dict:
     return {"sql_approved": True}
 
 
+def _is_chart_requested(state: DataAgentState) -> bool:
+    """判断当前查询是否包含图表诉求。"""
+    intent = str(state.get("data_intent") or "").strip().lower()
+    viz_type = str(state.get("viz_type") or "").strip()
+    return intent == "visualization" or bool(viz_type)
+
+
+def _resolve_chart_type(viz_type: str, columns: List[str], rows: List[Dict[str, Any]]) -> str:
+    """将图表类型归一化为前端可识别枚举。"""
+    normalized_viz = re.sub(r"\s+", "", str(viz_type or "")).lower()
+
+    alias_map = {
+        "柱状图": "bar",
+        "柱形图": "bar",
+        "条形图": "bar",
+        "bar": "bar",
+        "饼图": "pie",
+        "pie": "pie",
+        "折线图": "line",
+        "line": "line",
+    }
+    for alias, canonical in alias_map.items():
+        if alias and alias in normalized_viz:
+            return canonical
+
+    if normalized_viz in {"pie", "bar", "line"}:
+        return normalized_viz
+
+    # v1 默认值：未指定图表类型时统一降级为柱状图
+    _ = (columns, rows)  # 保留签名中的上下文参数，便于后续扩展推断策略
+    return "bar"
+
+
+def _coerce_chart_number(value: Any) -> Optional[float]:
+    """将值转换为图表数值，无法转换时返回 None。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, Number):
+        numeric = float(value)
+        if math.isfinite(numeric):
+            return numeric
+        return None
+
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+
+    try:
+        numeric = float(text)
+        if math.isfinite(numeric):
+            return numeric
+    except Exception:
+        return None
+    return None
+
+
+def _is_numeric_column(rows: List[Dict[str, Any]], column: str) -> bool:
+    """判断列是否可作为数值轴。"""
+    sample_rows = rows[:50]
+    numeric_count = 0
+    non_null_count = 0
+
+    for row in sample_rows:
+        if not isinstance(row, dict):
+            continue
+        if column not in row:
+            continue
+
+        raw_value = row.get(column)
+        if raw_value is None:
+            continue
+
+        non_null_count += 1
+        if _coerce_chart_number(raw_value) is not None:
+            numeric_count += 1
+
+    if non_null_count == 0:
+        return False
+
+    # 只要有 80% 以上非空值可解析为数值，即视为数值列
+    return numeric_count / non_null_count >= 0.8
+
+
+def _is_date_like_column(column: str) -> bool:
+    """根据列名判断是否为时间维度列。"""
+    lowered = str(column or "").strip().lower()
+    if not lowered:
+        return False
+
+    keywords = ("date", "dt", "time", "day", "month", "year", "日期", "时间", "月份", "年度")
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _pick_preferred_y_column(numeric_columns: List[str]) -> str:
+    """在多个数值列中挑选更可能的指标列。"""
+    if not numeric_columns:
+        return ""
+
+    preferred_tokens = (
+        "余额", "金额", "金额", "占比", "比率", "率", "数量", "笔数",
+        "balance", "amount", "amt", "sum", "total", "count", "avg", "ratio", "pct",
+    )
+
+    for column in numeric_columns:
+        lowered = str(column or "").strip().lower()
+        if any(token in lowered for token in preferred_tokens):
+            return column
+
+    return numeric_columns[0]
+
+
+def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[str, str]:
+    """选择图表 x/y 轴字段（优先维度列 + 数值列）。"""
+    if not columns:
+        return "", ""
+    if not rows:
+        return "", ""
+
+    numeric_columns = [column for column in columns if _is_numeric_column(rows, column)]
+    if not numeric_columns:
+        return "", ""
+
+    y_key = _pick_preferred_y_column(numeric_columns)
+    if not y_key:
+        return "", ""
+
+    dimension_columns = [
+        column for column in columns
+        if column != y_key and not _is_numeric_column(rows, column)
+    ]
+
+    if dimension_columns:
+        date_like_columns = [column for column in dimension_columns if _is_date_like_column(column)]
+        if date_like_columns:
+            return date_like_columns[0], y_key
+        return dimension_columns[0], y_key
+
+    fallback_columns = [column for column in columns if column != y_key]
+    if fallback_columns:
+        return fallback_columns[0], y_key
+
+    return "", ""
+
+
+def _serialize_chart_dimension_value(value: Any) -> str:
+    """序列化图表维度值。"""
+    if value is None:
+        return "未知"
+
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+
+    text = str(value).strip()
+    return text or "未知"
+
+
+def _build_sql_result_chart_payload(
+    state: DataAgentState,
+    question: str,
+    columns: List[str],
+    column_display_names: List[str],
+    rows: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """根据 SQL 结果构造图表载荷（可选）。"""
+    if not _is_chart_requested(state):
+        return None
+    if not rows:
+        return None
+    if not columns:
+        return None
+
+    chart_type = _resolve_chart_type(str(state.get("viz_type") or ""), columns, rows)
+    x_key, y_key = _pick_chart_axes(columns, rows)
+    if not x_key or not y_key:
+        return None
+
+    display_name_map: Dict[str, str] = {
+        column: (column_display_names[idx] if idx < len(column_display_names) else column)
+        for idx, column in enumerate(columns)
+    }
+
+    chart_rows: List[Dict[str, Any]] = []
+    for row in rows[:50]:
+        if not isinstance(row, dict):
+            continue
+
+        y_value = _coerce_chart_number(row.get(y_key))
+        if y_value is None:
+            continue
+
+        chart_rows.append(
+            {
+                x_key: _serialize_chart_dimension_value(row.get(x_key)),
+                y_key: y_value,
+            }
+        )
+
+    if not chart_rows:
+        return None
+
+    title = str(question or "").strip()
+    if title:
+        title = title[:80]
+    else:
+        title = f"{display_name_map.get(y_key, y_key)}图表"
+
+    return {
+        "type": chart_type,
+        "title": title,
+        "x_key": x_key,
+        "x_label": display_name_map.get(x_key, x_key),
+        "y_key": y_key,
+        "y_label": display_name_map.get(y_key, y_key),
+        "series_name": display_name_map.get(y_key, y_key),
+        "data": chart_rows,
+    }
+
+
 def sql_execute(state: DataAgentState) -> Dict:
     """执行 SQL 并返回结果（支持错误自愈）。
     
@@ -812,24 +2663,92 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "last_error": f"权限检查异常: {str(e)}",
             }
     
+    rewrite_note = None
+
     try:
         vanna = get_vanna()
         
         # 执行 SQL（可能已被权限重写）
         emit_status(writer, "正在执行查询...", node="sql_execute")
         df = vanna.run_sql(sql)
+
+        # 空结果时，做一次轻量 SQL 自愈重写（表切换）
+        if is_effectively_empty_result(df.to_dict(orient="records")):
+            rewritten_sql, reason = rewrite_sql_for_empty_result(sql)
+            if reason and rewritten_sql != sql:
+                logger.info("空结果 SQL 自愈重写触发: %s", reason)
+                emit_status(writer, f"检测到空结果，正在自动重试：{reason}", node="sql_execute")
+                df_retry = vanna.run_sql(rewritten_sql)
+                if not is_effectively_empty_result(df_retry.to_dict(orient="records")):
+                    sql = rewritten_sql
+                    df = df_retry
+                    rewrite_note = reason
+                    logger.info("空结果 SQL 自愈重写成功")
         
         # 转换为可序列化格式
         result_data = df.to_dict(orient="records")
         columns = list(df.columns)
+
+        # 结果增强：按规则链补齐展示字段（仅补展示，不改 SQL）
+        result_data, columns = _enrich_result_rows_if_needed(result_data, columns)
+
+        # 列名展示增强：优先映射中文显示名（仅展示，不改 rows 键）
+        column_display_map = _load_column_display_name_map(columns, sql)
+        column_display_names = _build_column_display_names(columns, column_display_map)
+
+        # SQL 展示增强：仅用于折叠区展示，保持 sql 字段可执行语义
+        display_sql = _build_display_sql(sql, column_display_map)
         
         logger.info(f"查询返回 {len(result_data)} 行数据")
+        
+        # 空结果降级链：metric → training → schema(通用)
+        sql_source = state.get("sql_source", "unknown")
+        is_empty = not result_data
+        # 聚合函数返回 NULL 的情况（如 SUM(...) 无匹配行时返回 None）
+        if not is_empty and len(result_data) == 1:
+            row = result_data[0]
+            if all(v is None for v in row.values()):
+                is_empty = True
+        
+        # 三级降级：metric 空结果 → 训练集，训练集空结果 → 通用 RAG
+        if is_empty and sql_source in ("metric", "training"):
+            if sql_source == "metric":
+                next_target = "training"
+                hint = "指标模板未查到数据，正在尝试训练集SQL..."
+            else:
+                next_target = "schema"
+                hint = "训练集SQL未查到数据，正在尝试通过表结构生成查询..."
+            
+            logger.info(
+                "空结果降级: sql_source=%s → fallback_target=%s",
+                sql_source, next_target
+            )
+            emit_status(writer, hint, node="sql_execute")
+            
+            return {
+                "fallback_target": next_target,
+                "generated_sql": None,
+                "pending_sql": None,
+                "sql_source": None,
+                "execution_success": True,
+            }
         
         # 生成结果解释
         query_context = state.get("query_context", {})
         question = query_context.get("original_question", "")
+
+        # 可视化增强：在 sql_result 中附带前端可直接消费的 chart 规格（可选）
+        chart_payload = _build_sql_result_chart_payload(
+            state=state,
+            question=question,
+            columns=columns,
+            column_display_names=column_display_names,
+            rows=result_data,
+        )
         
         interpretation = _interpret_result(question, sql, result_data)
+        if rewrite_note:
+            interpretation = f"ℹ️ 已自动调整查询策略：{rewrite_note}。\n\n{interpretation}"
         
         # 构建响应消息
         response_msg = create_ai_message(
@@ -838,11 +2757,14 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "data_type": "sql_result",
                 "data": {
                     "sql": sql,
+                    "display_sql": display_sql,
                     "columns": columns,
+                    "column_display_names": column_display_names,
                     "rows": result_data[:100],  # 限制返回行数
                     "total_rows": len(result_data),
                     "sql_source": state.get("sql_source", "unknown"),
-                    "iterations": iterations  # 记录重试次数
+                    "iterations": iterations,  # 记录重试次数
+                    "chart": chart_payload,
                 }
             }
         )
@@ -850,7 +2772,13 @@ def sql_execute(state: DataAgentState) -> Dict:
         emit_result(
             writer,
             data_type="sql_result",
-            data={"rows": result_data[:20], "columns": columns},
+            data={
+                "rows": result_data[:20],
+                "columns": columns,
+                "column_display_names": column_display_names,
+                "display_sql": display_sql,
+                "chart": chart_payload,
+            },
             message=interpretation,
             node="sql_execute"
         )
@@ -890,20 +2818,6 @@ def sql_execute(state: DataAgentState) -> Dict:
         # 附加评估结果（如果有）
         if evaluation_result:
             result_data_dict["sql_evaluation"] = evaluation_result
-        
-        # 记录查询日志（用于 SQL 修正台）
-        try:
-            from app.ai.semantic.data_access_control import get_access_control
-            thread_id = state.get("thread_id")
-            dac = get_access_control(user_id=user_id)
-            dac.log_query(
-                question=question,
-                sql=sql,
-                success=True,
-                thread_id=thread_id
-            )
-        except Exception as log_error:
-            logger.warning(f"查询日志记录失败（不影响主流程）: {log_error}")
         
         return result_data_dict
         
@@ -967,22 +2881,6 @@ def sql_execute(state: DataAgentState) -> Dict:
             
             emit_error(writer, error_msg, node="sql_execute")
             
-            # 记录失败的查询日志（用于 SQL 修正台）
-            try:
-                from app.ai.semantic.data_access_control import get_access_control
-                query_context = state.get("query_context", {})
-                question = query_context.get("original_question", "")
-                thread_id = state.get("thread_id")
-                dac = get_access_control(user_id=user_id)
-                dac.log_query(
-                    question=question,
-                    sql=sql,
-                    success=False,
-                    thread_id=thread_id
-                )
-            except Exception as log_error:
-                logger.warning(f"查询日志记录失败: {log_error}")
-            
             return {
                 "messages": [create_ai_message(error_msg)],
                 "last_error": error_str,
@@ -1008,57 +2906,114 @@ def clarify_node(state: DataAgentState) -> Dict:
 
 # ==================== 辅助函数 ====================
 
-def _build_time_filter(time_range: Optional[str]) -> str:
-    """根据时间范围描述生成 SQL WHERE 子句。"""
-    if not time_range:
-        return ""
-    
-    time_range_lower = time_range.lower()
-    
-    # 简单匹配
-    if "本月" in time_range or "这个月" in time_range:
-        return "AND created_at >= DATE_TRUNC('month', CURRENT_DATE)"
-    elif "上月" in time_range or "上个月" in time_range:
-        return "AND created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)"
-    elif "今天" in time_range:
-        return "AND DATE(created_at) = CURRENT_DATE"
-    elif "昨天" in time_range:
-        return "AND DATE(created_at) = CURRENT_DATE - 1"
-    elif "过去7天" in time_range or "最近7天" in time_range:
-        return "AND created_at >= CURRENT_DATE - INTERVAL '7 days'"
-    elif "过去30天" in time_range or "最近30天" in time_range:
-        return "AND created_at >= CURRENT_DATE - INTERVAL '30 days'"
-    else:
-        return ""
-
 
 def _interpret_result(question: str, sql: str, result: List[Dict]) -> str:
-    """生成查询结果的自然语言解释。"""
-    if not result:
-        return "查询完成，但没有找到符合条件的数据。\n\n💡 **排查建议**：\n1. **日期范围**：请检查查询日期是否与数据库中的数据匹配（当前导入数据日期为 2025-06-30）。\n2. **查询条件**：尝试放宽过滤条件或查询全量数据。"
+    """生成查询结果的自然语言解释。
     
-    # 简单解释
+    格式化规则：
+    - 大数字自动转换为亿/万单位
+    - 聚合函数列名（sum/avg/count 等）替换为更友好的标签
+    - 单值结果直接展示，多行结果汇总行数
+    """
+    if not result:
+        return (
+            "查询完成，但没有找到符合条件的数据。\n\n"
+            "💡 **排查建议**：\n"
+            "1. **日期范围**：请检查查询日期是否与数据库中的数据匹配"
+            "（当前导入数据日期为 2025-06-30）。\n"
+            "2. **查询条件**：尝试放宽过滤条件或查询全量数据。"
+        )
+    
     row_count = len(result)
+    
     if row_count == 1:
-        # 单值结果，直接展示
         row = result[0]
         
-        # 特殊处理：如果只有一列且值为 None (常见于 SUM/AVG 等聚合函数未匹配到数据)
+        # 单列 + 值为 None：聚合无匹配
         if len(row) == 1:
             key, value = list(row.items())[0]
             if value is None:
-                return f"查询完成，但计算结果为空 ({key}: None)。\n\n💡 **排查建议**：\n1. **日期范围**：请检查查询日期是否与数据库中的数据匹配。\n   *(当前导入测试数据日期为: 2025-06-30，如果您查询的是'本月'或'今天'，可能会查不到数据)*\n2. **指定日期**：建议尝试指定具体日期查询，例如 `2025-06-30`。"
+                return (
+                    f"查询完成，但计算结果为空（{_friendly_col(key)}: 无数据）。\n\n"
+                    "💡 **排查建议**：\n"
+                    "1. 请检查查询日期是否与数据库中的数据匹配。\n"
+                    "2. 当前导入测试数据日期为 2025-06-30，"
+                    "建议尝试指定该日期查询。"
+                )
         
-        # 格式化 None 值
-        formatted_values = []
+        # 格式化所有字段
+        formatted_parts = []
         for k, v in row.items():
-            display_val = "无数据" if v is None else str(v)
-            formatted_values.append(f"{k}: {display_val}")
-            
-        values = ", ".join(formatted_values)
-        return f"查询结果：{values}"
-    else:
+            label = _friendly_col(k)
+            display_val = _format_value(v)
+            formatted_parts.append(f"- **{label}**：{display_val}")
+        
+        # 提取问题中的关键词作为标题
+        title = question[:30] if question else "查询结果"
+        
+        if len(row) <= 3:
+            # 少量字段：紧凑展示
+            inline = "，".join(
+                f"**{_friendly_col(k)}** {_format_value(v)}"
+                for k, v in row.items()
+            )
+            return f"{inline}"
+        else:
+            return f"查询结果：\n\n" + "\n".join(formatted_parts)
+    
+    elif row_count <= 5:
         return f"查询完成，共返回 {row_count} 条记录。"
+    else:
+        return f"查询完成，共返回 {row_count} 条记录（已展示前 100 条）。"
+
+
+# 聚合函数列名 → 友好标签的映射
+_AGG_COL_MAP = {
+    "sum": "合计",
+    "count": "数量",
+    "avg": "平均值",
+    "min": "最小值",
+    "max": "最大值",
+}
+
+
+def _friendly_col(col_name: str) -> str:
+    """将列名转换为友好标签。
+    
+    - 聚合函数名（sum/count/avg）→ 中文标签
+    - 已有中文别名的保持不变
+    """
+    lower = col_name.strip().lower()
+    if lower in _AGG_COL_MAP:
+        return _AGG_COL_MAP[lower]
+    # 带括号的聚合函数: sum(prin_bal) → 合计
+    for agg in _AGG_COL_MAP:
+        if lower.startswith(f"{agg}("):
+            return _AGG_COL_MAP[agg]
+    return col_name
+
+
+def _format_value(value) -> str:
+    """格式化数值，大数字自动转换为亿/万单位。"""
+    if value is None:
+        return "无数据"
+    
+    # 数值格式化
+    if isinstance(value, (int, float)):
+        abs_val = abs(value)
+        if abs_val >= 1_0000_0000:
+            # 亿级别
+            formatted = f"{value / 1_0000_0000:,.2f} 亿"
+        elif abs_val >= 1_0000:
+            # 万级别
+            formatted = f"{value / 1_0000:,.2f} 万"
+        elif isinstance(value, float):
+            formatted = f"{value:,.2f}"
+        else:
+            formatted = f"{value:,}"
+        return formatted
+    
+    return str(value)
 
 
 # ==================== 路由函数 ====================
@@ -1083,12 +3038,20 @@ def route_data_intent(state: DataAgentState) -> Literal["clarify", "metric", "sc
         return "schema"  # 默认走 Vanna
 
 
-def route_after_metric(state: DataAgentState) -> Literal["safety", "schema"]:
-    """指标解析后路由。"""
+def route_after_metric(state: DataAgentState) -> Literal["safety", "training"]:
+    """指标解析后路由（第1级 → 第2级）。"""
     if state.get("generated_sql"):
         return "safety"
     else:
-        return "schema"  # 回退到 Vanna
+        return "training"  # 未命中指标，尝试训练集
+
+
+def route_after_training(state: DataAgentState) -> Literal["safety", "schema"]:
+    """训练集解析后路由（第2级 → 第3级）。"""
+    if state.get("generated_sql"):
+        return "safety"
+    else:
+        return "schema"  # 未命中训练集，回退到通用 RAG
 
 
 def route_after_safety(state: DataAgentState) -> Literal["execute", "clarify"]:
@@ -1098,14 +3061,23 @@ def route_after_safety(state: DataAgentState) -> Literal["execute", "clarify"]:
     return "execute"
 
 
-def route_after_execute(state: DataAgentState) -> Literal["end", "retry"]:
-    """执行后路由（错误自愈机制）。
+def route_after_execute(state: DataAgentState) -> Literal[
+    "end", "retry", "fallback_training", "fallback_schema"
+]:
+    """执行后路由（错误自愈 + 三级降级链）。
     
-    根据执行结果决定是否重试：
-    - 成功：结束
-    - 失败且可重试：回到 generate 节点重新生成 SQL
-    - 失败且不可重试/已达上限：结束
+    降级链：metric 空结果 → training → training 空结果 → schema(通用RAG)
+    错误自愈：执行报错 → 重新生成 SQL（最多 3 次）
     """
+    # 三级降级链
+    fallback = state.get("fallback_target")
+    if fallback == "training":
+        logger.info("空结果降级: metric → training")
+        return "fallback_training"
+    elif fallback == "schema":
+        logger.info("空结果降级: training → schema(通用RAG)")
+        return "fallback_schema"
+    
     execution_success = state.get("execution_success", True)
     iterations = state.get("iterations", 1)
     last_error = state.get("last_error")
@@ -1126,30 +3098,22 @@ def route_after_execute(state: DataAgentState) -> Literal["end", "retry"]:
 # ==================== 图构建 ====================
 
 def create_data_graph(model=None, enable_thinking: bool = False, model_id: str = None, checkpointer=None):
-    """创建问数 Agent LangGraph（含错误自愈机制）。
+    """创建问数 Agent LangGraph（三级降级链 + 错误自愈）。
     
-    工作流程：
-    1. analyze: 分析用户意图
-    2. metric/schema: 指标匹配或 Schema 检索
-    3. generate: SQL 生成
-    4. safety: 安全检查
-    5. execute: 执行 SQL
-    6. 如果执行失败且可重试，回到 generate 重新生成（最多 3 次）
+    三级降级链：
+    1. metric: 指标模板匹配（精确名称 + 向量检索）→ 直接执行
+    2. training: 训练集 SQL 匹配（t_data_query_log）→ 直接执行
+    3. schema + generate: DDL/文档/历史 RAG → LLM 生成 SQL → 执行
     
-    Args:
-        model: LLM 实例（可选，未使用但保留以保持接口一致）
-        enable_thinking: 是否启用深度思考（可选）
-        model_id: 模型 ID（可选）
-        checkpointer: 检查点保存器（可选）
-        
-    Returns:
-        编译后的 Graph 实例
+    每级执行后如空结果，自动降级到下一级。
+    错误自愈：generate 路径执行报错可自动重试（最多 3 次）。
     """
     workflow = StateGraph(DataAgentState)
     
     # === 添加节点 ===
     workflow.add_node("analyze", analyze_data_intent)
     workflow.add_node("metric", metric_resolve)
+    workflow.add_node("training", training_sql_resolve)
     workflow.add_node("schema", schema_retrieve)
     workflow.add_node("generate", sql_generate)
     workflow.add_node("safety", sql_safety_check)
@@ -1174,13 +3138,23 @@ def create_data_graph(model=None, enable_thinking: bool = False, model_id: str =
         }
     )
     
-    # metric → 条件路由
+    # metric → 条件路由（第1级 → 第2级）
     workflow.add_conditional_edges(
         "metric",
         route_after_metric,
         {
             "safety": "safety",
-            "schema": "schema"
+            "training": "training"     # 未命中指标 → 尝试训练集
+        }
+    )
+    
+    # training → 条件路由（第2级 → 第3级）
+    workflow.add_conditional_edges(
+        "training",
+        route_after_training,
+        {
+            "safety": "safety",
+            "schema": "schema"         # 未命中训练集 → 通用 RAG
         }
     )
     
@@ -1200,13 +3174,15 @@ def create_data_graph(model=None, enable_thinking: bool = False, model_id: str =
         }
     )
     
-    # execute → 条件路由（错误自愈机制）
+    # execute → 条件路由（错误自愈 + 三级降级链）
     workflow.add_conditional_edges(
         "execute",
         route_after_execute,
         {
             "end": END,
-            "retry": "generate"  # 重试时回到 generate 节点
+            "retry": "generate",             # 执行报错 → 重新生成
+            "fallback_training": "training",  # metric 空结果 → 训练集
+            "fallback_schema": "schema"       # training 空结果 → 通用 RAG
         }
     )
     

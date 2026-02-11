@@ -16,6 +16,7 @@
   get_progressive_strategy, apply_goal_defaults, determine_confirmation_need, extract_heuristic_title
 """
 import logging
+import re
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 
@@ -27,6 +28,164 @@ logger = logging.getLogger(__name__)
 
 # 获取配置实例
 todo_config = get_todo_config()
+
+
+# ==================== 指代归一化（Canonicalization） ====================
+
+_REFERENCE_PREFIXES = ("这个", "那个", "这", "那")
+
+_REFERENCE_SUFFIXES = (
+    "这个任务", "那个任务", "这个待办", "那个待办", "这个项目", "那个项目",
+    "这个事情", "那个事情", "这个", "那个", "该任务", "该待办", "该项目"
+)
+
+_GENERIC_REFERENCE_WORDS = {
+    "这个", "那个", "这", "那", "它", "任务", "待办", "项目", "事情",
+    "这个任务", "那个任务", "这个待办", "那个待办", "这个项目", "那个项目",
+    "该任务", "该待办", "该项目"
+}
+
+_EXPLICIT_ACTION_HINTS = (
+    "创建", "新建", "新增", "记录", "记一下", "查询", "查看", "列出",
+    "完成", "做完", "标记", "删除", "删掉", "取消", "修改", "更新", "改到", "改成", "推迟"
+)
+
+
+def clean_reference_text(text: Optional[str]) -> str:
+    """清洗待办指代文本。
+
+    目标：将“项目汇报那个/这个任务”归一为“项目汇报”，
+    同时过滤“这个/那个”这类纯指代词。
+    """
+    if not isinstance(text, str):
+        return ""
+
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+
+    # 去掉句尾标点
+    cleaned = re.sub(r"[，。！？,.!?]+$", "", cleaned).strip()
+
+    # 去掉常见前缀（如“这个报告” -> “报告”）
+    for prefix in _REFERENCE_PREFIXES:
+        if cleaned.startswith(prefix) and len(cleaned) > len(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+            break
+
+    # 去掉常见后缀（如“项目汇报那个” -> “项目汇报”）
+    for suffix in sorted(_REFERENCE_SUFFIXES, key=len, reverse=True):
+        if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+            cleaned = cleaned[:-len(suffix)].strip()
+            break
+
+    if cleaned in _GENERIC_REFERENCE_WORDS:
+        return ""
+
+    return cleaned
+
+
+def canonicalize_extracted_info(extracted_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """将 LLM 提取结果归一化为执行链路的 canonical 字段。
+
+    说明：
+    - 保留原始别名字段用于兼容和排障
+    - 优先填充 canonical 字段（title/due_date/priority/category/description）
+    """
+    if isinstance(extracted_info, dict):
+        result = dict(extracted_info)
+    else:
+        result = {}
+
+    alias_mapping = {
+        "title": ["target_title", "target_ref"],
+        "due_date": ["new_due_date"],
+        "priority": ["new_priority"],
+        "category": ["new_category"],
+        "description": ["new_description"],
+    }
+
+    # 先用别名补齐 canonical 字段
+    for canonical_key, alias_keys in alias_mapping.items():
+        if result.get(canonical_key):
+            continue
+        for alias_key in alias_keys:
+            alias_value = result.get(alias_key)
+            if alias_value:
+                result[canonical_key] = alias_value
+                break
+
+    # 对目标类文本字段做指代清洗
+    for key in ("title", "target_title", "target_ref", "keyword"):
+        value = result.get(key)
+        if not isinstance(value, str):
+            continue
+
+        value = value.strip()
+        if not value:
+            continue
+
+        normalized = clean_reference_text(value)
+        # 纯指代词清洗后为空时，显式置空，避免误匹配
+        if value in _GENERIC_REFERENCE_WORDS and not normalized:
+            result[key] = ""
+        elif normalized:
+            result[key] = normalized
+
+    return result
+
+
+def extract_reference_keyword(
+    extracted_info: Optional[Dict[str, Any]],
+    fallback_message: str = ""
+) -> str:
+    """从 extracted_info 或消息中提取可用于实体解析的目标关键词。"""
+    info = canonicalize_extracted_info(extracted_info)
+
+    for key in ("title", "target_title", "target_ref", "keyword"):
+        value = info.get(key)
+        if isinstance(value, str):
+            normalized = clean_reference_text(value)
+            if normalized:
+                return normalized
+
+    normalized_message = clean_reference_text(fallback_message)
+    if normalized_message and not any(hint in fallback_message for hint in _EXPLICIT_ACTION_HINTS):
+        return normalized_message
+
+    return ""
+
+
+def is_implicit_reference_message(user_message: str, extracted_info: Optional[Dict[str, Any]] = None) -> bool:
+    """判断用户是否在使用“无动作指代”表达。
+
+    例如："项目汇报那个"、"这个任务"、"刚才那个"。
+    """
+    if not isinstance(user_message, str):
+        return False
+
+    text = user_message.strip()
+    if not text:
+        return False
+
+    # 出现显式动作词时，不视为“无动作指代”
+    if any(hint in text for hint in _EXPLICIT_ACTION_HINTS):
+        return False
+
+    info = canonicalize_extracted_info(extracted_info)
+    if info.get("todo_id"):
+        return False
+
+    # 具备指代特征 + 能提取到有效目标关键词
+    has_reference_pattern = (
+        text.endswith(("这个", "那个", "这个任务", "那个任务", "这个待办", "那个待办", "这个项目", "那个项目"))
+        or text.startswith(("这个", "那个"))
+        or "刚才那个" in text
+        or "之前那个" in text
+    )
+
+    keyword = extract_reference_keyword(info, text)
+    return has_reference_pattern and bool(keyword)
 
 
 # ==================== 消息过滤 ====================
@@ -58,35 +217,48 @@ def filter_messages_for_todo(
     
     if pending_handoff:
         task_desc = pending_handoff.get("task_description", "")
+        handoff_frame = pending_handoff.get("frame")
+
         if task_desc:
             handoff_context = f"\n\n## 任务来源 (Supervisor Handoff)\n用户意图已由 Supervisor 预识别：{task_desc}\n请基于此描述进行操作。"
-            
-            # 从 task_description 中解析结构化信息
-            pre_extracted_info = {}
-            
-            # 解析标题
+
+        pre_extracted_info = {}
+
+        # 优先消费结构化 frame（会话意图内核 V2）
+        if isinstance(handoff_frame, dict):
+            todo_fields = handoff_frame.get("todo_fields") if isinstance(handoff_frame.get("todo_fields"), dict) else {}
+            for key in ("title", "time", "due_date", "priority", "category", "description", "progress_notes", "todo_id"):
+                value = todo_fields.get(key) if key in todo_fields else handoff_frame.get(key)
+                if value not in (None, "", [], {}):
+                    pre_extracted_info[key] = value
+
+            todo_action = str(handoff_frame.get("todo_action") or "").strip()
+            if todo_action:
+                pre_extracted_info["action"] = todo_action
+
+        # 回退：从 task_description 中做轻量结构化解析
+        if task_desc:
             title_match = re.search(r'标题[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if title_match:
+            if title_match and not pre_extracted_info.get("title"):
                 pre_extracted_info["title"] = title_match.group(1).strip()
-            
-            # 解析时间
+
             time_match = re.search(r'时间[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if time_match:
+            if time_match and not pre_extracted_info.get("time"):
                 pre_extracted_info["time"] = time_match.group(1).strip()
-            
-            # 解析地点
+
             location_match = re.search(r'地点[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if location_match:
+            if location_match and not pre_extracted_info.get("location"):
                 pre_extracted_info["location"] = location_match.group(1).strip()
-            
-            # 解析参与人员
+
             participants_match = re.search(r'参与人员[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if participants_match:
+            if participants_match and not pre_extracted_info.get("participants"):
                 pre_extracted_info["participants"] = [p.strip() for p in participants_match.group(1).split('、')]
-            
-            if pre_extracted_info:
-                logger.info(f"从 Handoff 预提取信息: {pre_extracted_info}")
-    
+
+        if pre_extracted_info:
+            logger.info(f"从 Handoff 预提取信息: {pre_extracted_info}")
+        else:
+            pre_extracted_info = None
+
     return filtered_messages, handoff_context, pre_extracted_info
 
 

@@ -41,6 +41,10 @@ DEFAULT_TABLE_WHITELIST: Set[str] = {
     "f_mid_sxqj_a010_h",
     # public schema - 维度表
     "t_ods_g_c_dim_date",
+    # 测试/演示业务表
+    "t_orders",
+    "t_products",
+    "t_customers",
 }
 
 # 敏感表黑名单（默认值，生产环境从数据库读取）
@@ -291,7 +295,8 @@ class DataAccessControl:
         question: str, 
         sql: str, 
         success: bool, 
-        thread_id: Optional[str] = None
+        thread_id: Optional[str] = None,
+        sql_source: str = "vanna"
     ):
         """记录查询日志到 t_data_query_log。
         
@@ -300,10 +305,22 @@ class DataAccessControl:
             sql: 生成的 SQL
             success: 是否执行成功
             thread_id: 会话 ID
+            sql_source: SQL 来源（metric/training/vanna_rag）
         """
+        if not question or not question.strip():
+            logger.debug("log_query 跳过: question 为空")
+            return
+        
+        # embedding 生成独立于日志写入，失败不阻塞
+        embedding = None
+        try:
+            from app.ai.utils.embedding_util import get_embedding
+            embedding = get_embedding(question)
+        except Exception as emb_err:
+            logger.debug(f"查询日志 embedding 生成失败（不影响日志写入）: {emb_err}")
+        
         try:
             from app.models.data_agent_metadata import DataQueryLog
-            from app.ai.utils.embedding_util import get_embedding
             
             with get_db_context() as db:
                 log = DataQueryLog(
@@ -311,15 +328,15 @@ class DataAccessControl:
                     thread_id=thread_id,
                     question=question,
                     generated_sql=sql,
-                    sql_source="vanna",
+                    sql_source=sql_source,
                     is_correct=success,
-                    question_embedding=get_embedding(question)
+                    question_embedding=embedding
                 )
                 db.add(log)
                 db.commit()
-                logger.debug(f"查询日志已记录: question={question[:50]}...")
+                logger.info(f"查询日志已记录: question={question[:50]}..., source={sql_source}")
         except Exception as e:
-            logger.warning(f"查询日志记录失败: {e}")
+            logger.error(f"查询日志记录失败: {e}", exc_info=True)
 
 
 # 全局访问控制实例工厂

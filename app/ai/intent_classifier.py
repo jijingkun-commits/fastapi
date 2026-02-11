@@ -48,7 +48,7 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
     Returns:
         IntentResult 包含意图类型、置信度和路由目标
     """
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_llm, _normalize_text_content
     from app.core.config import (
         INTENT_CLASSIFIER_MODEL, MODEL_ROUTING_INTENT_CLASSIFIER, get_routing_model
     )
@@ -81,7 +81,9 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
             INTENT_CLASSIFY_PROMPT.format(message=message[:500])  # 截断过长消息
         )
         
-        content = response.content.strip()
+        content = _normalize_text_content(
+            response.content if hasattr(response, "content") else response
+        ).strip()
         
         # 提取 JSON（处理可能的 markdown 代码块）
         if "```" in content:

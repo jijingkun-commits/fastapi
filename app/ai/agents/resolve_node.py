@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 import logging
+import re
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 from langchain_core.messages import AIMessage
@@ -14,8 +15,66 @@ from app.db.session import get_db_context
 from app.repositories.todo_repository import todo_repo
 from app.ai.utils.state_helpers import get_user_id_optional
 from app.ai.state import TodoAgentState
+from app.ai.workflow.todo_intent_helpers import clean_reference_text
 
 logger = logging.getLogger(__name__)
+
+
+def _format_disambiguation_message(keyword: str, matches: List[Dict], prefix: Optional[str] = None) -> str:
+    """格式化多候选消歧文案。"""
+    options_text = "\n".join([
+        f"  {i+1}. [{m['id']}] {m['title']}"
+        for i, m in enumerate(matches[:5])
+    ])
+
+    lead = prefix or f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个："
+    return (
+        f"{lead}\n\n{options_text}\n\n"
+        "请说「第 X 个」或「ID 为 XX 的」，也可以直接补充标题关键词。"
+    )
+
+
+def _extract_selection_from_message(
+    state: TodoAgentState,
+    options: List[Dict],
+) -> Optional[Dict]:
+    """从最新用户消息中解析消歧选择（第X个/ID/标题片段）。"""
+    if not options:
+        return None
+
+    latest_human_text = ""
+    for message in reversed(state.get("messages", [])):
+        if getattr(message, "type", "") == "human":
+            latest_human_text = str(getattr(message, "content", "") or "").strip()
+            break
+
+    if not latest_human_text:
+        return None
+
+    # 1) 第 X 个
+    index_match = re.search(r"第\s*(\d+)\s*个", latest_human_text)
+    if index_match:
+        idx = int(index_match.group(1)) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+
+    # 2) ID 为 XX
+    id_match = re.search(r"(?:ID|id)\s*(?:为|是|=)?\s*(\d+)", latest_human_text)
+    if id_match:
+        target_id = int(id_match.group(1))
+        for option in options:
+            if int(option.get("id", -1)) == target_id:
+                return option
+
+    # 3) 直接用标题片段匹配
+    normalized_text = clean_reference_text(latest_human_text)
+    if normalized_text:
+        for option in options:
+            title = str(option.get("title", ""))
+            if normalized_text in title or title in normalized_text:
+                return option
+
+    return None
 
 
 def resolve_entity(state: TodoAgentState) -> Dict:
@@ -71,8 +130,36 @@ def resolve_entity(state: TodoAgentState) -> Dict:
         logger.warning("无法获取 user_id，跳过实体解析")
         return {}
     
-    # 提取搜索关键词
-    keyword = data.get("target_title") or data.get("title") or data.get("keyword")
+    # 若已存在消歧候选，优先尝试解析用户本轮选择（第X个 / ID / 标题片段）
+    existing_options = pending_op.get("disambiguation_options") or []
+    if existing_options:
+        selected = _extract_selection_from_message(state, existing_options)
+        if selected:
+            logger.info("消歧选择命中: %s", selected)
+            data["todo_id"] = selected["id"]
+            data["resolved_title"] = selected["title"]
+            pending_op["data"] = data
+            pending_op["needs_clarification"] = False
+            pending_op.pop("disambiguation_options", None)
+            return {"pending_operation": pending_op}
+
+        # 未命中时保留候选并给出更明确输入范式（避免重复空泛追问）
+        pending_op["needs_clarification"] = True
+        return {
+            "pending_operation": pending_op,
+            "pending_clarifications": ["请按编号或 ID 选择目标待办"],
+            "messages": [create_ai_message(
+                _format_disambiguation_message(
+                    keyword="候选任务",
+                    matches=existing_options,
+                    prefix="我还没识别到您选择的是哪一个，请按下面方式再选一次：",
+                )
+            )],
+        }
+
+    # 提取搜索关键词（优先级：todo_id > title > target_ref > keyword）
+    keyword = data.get("title") or data.get("target_ref") or data.get("target_title") or data.get("keyword")
+    keyword = clean_reference_text(str(keyword)) if keyword is not None else ""
     
     if not keyword:
         # 无关键词，无法搜索
@@ -115,11 +202,6 @@ def resolve_entity(state: TodoAgentState) -> Dict:
         # 匹配多个：列出选项供选择
         logger.info(f"找到 {len(matches)} 个匹配 '{keyword}' 的待办，需要用户选择")
         
-        options_text = "\n".join([
-            f"  {i+1}. [{m['id']}] {m['title']}" 
-            for i, m in enumerate(matches[:5])
-        ])
-        
         pending_op["needs_clarification"] = True
         pending_op["disambiguation_options"] = matches[:5]
         
@@ -127,7 +209,7 @@ def resolve_entity(state: TodoAgentState) -> Dict:
             "pending_operation": pending_op,
             "pending_clarifications": ["请选择具体是哪一个待办"],
             "messages": [create_ai_message(
-                f"找到 {len(matches)} 个包含「{keyword}」的待办，请选择具体是哪一个：\n\n{options_text}\n\n请说「第 X 个」或「ID 为 XX 的」。"
+                _format_disambiguation_message(keyword=keyword, matches=matches)
             )]
         }
 

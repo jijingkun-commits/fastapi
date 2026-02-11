@@ -6,7 +6,7 @@
 3. wait_for_confirmation - 确认等待节点（返回类型检查）
 """
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from typing import Dict
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -157,6 +157,50 @@ class TestResolveEntity:
         assert result["pending_operation"]["data"]["todo_id"] == 42
         assert result["pending_operation"]["data"]["resolved_title"] == "买菜"
         assert result["pending_operation"]["needs_clarification"] is False
+
+    @patch('app.ai.agents.resolve_node._find_matching_todos')
+    @patch('app.ai.agents.resolve_node.get_user_id_optional')
+    def test_target_ref_keyword_can_resolve(self, mock_get_user_id, mock_find_todos, mock_state_base):
+        """target_ref 字段应可作为实体解析关键词。"""
+        from app.ai.agents.resolve_node import resolve_entity
+
+        mock_get_user_id.return_value = 1
+        mock_find_todos.return_value = [{"id": 88, "title": "项目汇报"}]
+
+        state = {
+            **mock_state_base,
+            "pending_operation": {
+                "action": "update",
+                "data": {"target_ref": "项目汇报"}
+            }
+        }
+        result = resolve_entity(state)
+
+        assert result["pending_operation"]["data"]["todo_id"] == 88
+        assert result["pending_operation"]["data"]["resolved_title"] == "项目汇报"
+        assert result["pending_operation"]["needs_clarification"] is False
+
+    @patch('app.ai.agents.resolve_node._find_matching_todos')
+    @patch('app.ai.agents.resolve_node.get_user_id_optional')
+    def test_reference_suffix_cleaned_before_resolve(self, mock_get_user_id, mock_find_todos, mock_state_base):
+        """“项目汇报那个”应先清洗为“项目汇报”再匹配。"""
+        from app.ai.agents.resolve_node import resolve_entity
+
+        mock_get_user_id.return_value = 1
+        mock_find_todos.return_value = [{"id": 99, "title": "项目汇报"}]
+
+        state = {
+            **mock_state_base,
+            "pending_operation": {
+                "action": "update",
+                "data": {"title": "项目汇报那个"}
+            }
+        }
+        result = resolve_entity(state)
+
+        assert result["pending_operation"]["data"]["todo_id"] == 99
+        assert result["pending_operation"]["data"]["resolved_title"] == "项目汇报"
+        assert result["pending_operation"]["needs_clarification"] is False
     
     @patch('app.ai.agents.resolve_node._find_matching_todos')
     @patch('app.ai.agents.resolve_node.get_user_id_optional')
@@ -184,6 +228,58 @@ class TestResolveEntity:
         assert "disambiguation_options" in result["pending_operation"]
         assert len(result["pending_operation"]["disambiguation_options"]) == 2
         assert "messages" in result
+
+    @patch('app.ai.agents.resolve_node.get_user_id_optional')
+    def test_disambiguation_select_by_index(self, mock_get_user_id, mock_state_base):
+        """已有候选时输入“第2个”应选中对应待办。"""
+        from app.ai.agents.resolve_node import resolve_entity
+
+        mock_get_user_id.return_value = 1
+        state = {
+            **mock_state_base,
+            "messages": [HumanMessage(content="第2个")],
+            "pending_operation": {
+                "action": "update",
+                "data": {"keyword": "报告"},
+                "needs_clarification": True,
+                "disambiguation_options": [
+                    {"id": 10, "title": "项目汇报"},
+                    {"id": 20, "title": "周报提交"},
+                ],
+            }
+        }
+
+        result = resolve_entity(state)
+
+        assert result["pending_operation"]["data"]["todo_id"] == 20
+        assert result["pending_operation"]["data"]["resolved_title"] == "周报提交"
+        assert result["pending_operation"]["needs_clarification"] is False
+
+    @patch('app.ai.agents.resolve_node.get_user_id_optional')
+    def test_disambiguation_select_by_id(self, mock_get_user_id, mock_state_base):
+        """已有候选时输入“ID为XX”应选中对应待办。"""
+        from app.ai.agents.resolve_node import resolve_entity
+
+        mock_get_user_id.return_value = 1
+        state = {
+            **mock_state_base,
+            "messages": [HumanMessage(content="ID 为 10 的那个")],
+            "pending_operation": {
+                "action": "delete",
+                "data": {"keyword": "报告"},
+                "needs_clarification": True,
+                "disambiguation_options": [
+                    {"id": 10, "title": "项目汇报"},
+                    {"id": 20, "title": "周报提交"},
+                ],
+            }
+        }
+
+        result = resolve_entity(state)
+
+        assert result["pending_operation"]["data"]["todo_id"] == 10
+        assert result["pending_operation"]["data"]["resolved_title"] == "项目汇报"
+        assert result["pending_operation"]["needs_clarification"] is False
 
 
 # ==================== _dispatch_execute 测试 ====================
@@ -299,6 +395,317 @@ class TestInvokeLLMForIntent:
         assert result["extracted_info"]["title"] == "测试"  # 保留 LLM 结果
         assert result["extracted_info"]["priority"] == "高"  # 合并预提取
         assert result["extracted_info"]["category"] == "工作"
+
+
+# ==================== 能力边界兜底测试 ====================
+
+class TestOutOfScopeGuard:
+    """超出待办能力范围输入兜底测试。"""
+
+    def test_out_of_scope_weather_returns_clarification(self):
+        """天气请求应被识别为超范围，不进入待办查询。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        state = {
+            "messages": [HumanMessage(content="今天上海天气怎么样")],
+            "user_id": 1,
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "pending_clarifications": None,
+            "response_message": None,
+        }
+
+        result = analyze_intent(state)
+
+        assert isinstance(result, dict)
+        assert result.get("pending_operation", {}).get("action") == "out_of_scope"
+        assert result.get("pending_operation", {}).get("needs_clarification") is True
+        assert "能力范围" in (result.get("response_message") or "")
+
+    def test_in_scope_todo_query_not_blocked(self):
+        """包含待办语义的查询不应被超范围兜底误拦截。"""
+        from app.ai.workflow.todo_graph import _is_out_of_scope_for_todo
+
+        assert _is_out_of_scope_for_todo("查询我的待办列表") is False
+
+    def test_banking_data_query_is_out_of_scope(self):
+        """银行问数请求在待办助手中应识别为超范围。"""
+        from app.ai.workflow.todo_graph import _is_out_of_scope_for_todo
+
+        assert _is_out_of_scope_for_todo("查询上月分行贷款余额") is True
+
+
+class TestTodoCanonicalizationAndClarifyFallback:
+    """待办字段归一化与澄清兜底测试。"""
+
+    def test_canonicalize_alias_fields(self):
+        """target_ref/new_* 字段应归一到 canonical 字段。"""
+        from app.ai.workflow.todo_intent_helpers import canonicalize_extracted_info
+
+        payload = {
+            "target_ref": "项目汇报那个",
+            "new_due_date": "下周一",
+            "new_priority": "高",
+            "new_category": "工作",
+            "new_description": "补充材料",
+        }
+
+        result = canonicalize_extracted_info(payload)
+
+        assert result["title"] == "项目汇报"
+        assert result["due_date"] == "下周一"
+        assert result["priority"] == "高"
+        assert result["category"] == "工作"
+        assert result["description"] == "补充材料"
+        # 兼容保留原始字段
+        assert result["target_ref"] == "项目汇报"
+        assert result["new_due_date"] == "下周一"
+
+    def test_clarify_fallback_should_be_contextual(self):
+        """response_message 缺失时，clarify_node 应输出上下文化追问。"""
+        from app.ai.agents.todo_enhanced_nodes import clarify_node
+
+        state = {
+            "messages": [HumanMessage(content="项目汇报那个")],
+            "response_message": "",
+            "pending_clarifications": ["请选择目标待办"],
+            "pending_operation": {
+                "action": "update",
+                "data": {"title": "项目汇报"},
+                "needs_clarification": True,
+            },
+        }
+
+        result = clarify_node(state)
+        assert "messages" in result
+        content = result["messages"][0].content
+        assert "项目汇报" in content
+        assert "请选择目标待办" in content
+
+
+class TestImplicitReferenceRouting:
+    """无动作指代的自适应判定测试。"""
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph._find_todo_candidates_by_keyword")
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_llm")
+    def test_analyze_intent_implicit_reference_single_match_defaults_update(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        mock_candidates,
+        _mock_parse_time,
+    ):
+        """“项目汇报那个”且唯一命中时，应默认 update 并进入确认。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"clarify","action_state":"need_clarify","response_message":"",'
+            '"extracted_info":{"target_ref":"项目汇报那个"},"missing_info":[]}'
+        )
+        mock_get_llm.return_value = mock_llm
+        mock_candidates.return_value = [{"id": 101, "title": "项目汇报"}]
+
+        state = {
+            "messages": [HumanMessage(content="项目汇报那个")],
+            "user_id": 1,
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "pending_clarifications": None,
+            "response_message": None,
+        }
+
+        result = analyze_intent(state)
+
+        assert result["pending_operation"]["action"] == "update"
+        assert result["pending_operation"]["data"]["todo_id"] == 101
+        assert result["pending_operation"]["data"]["resolved_title"] == "项目汇报"
+        assert result["pending_operation"]["needs_clarification"] is False
+
+
+class TestTodoSupplementConvergence:
+    """补充轮应优先合并已有 pending_operation，避免重复澄清。"""
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_llm")
+    def test_supplement_time_should_promote_to_need_confirm(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"clarify","action_state":"need_clarify",'
+            '"response_message":"",'
+            '"extracted_info":{"time":"明天下午3点"},'
+            '"missing_info":["时间"]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="改到明天下午3点")],
+            "user_id": 1,
+            "pending_operation": {
+                "action": "update",
+                "data": {"title": "项目汇报"},
+                "needs_clarification": True,
+            },
+            "pending_clarifications": ["时间"],
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": {"title": "项目汇报"},
+            "response_message": None,
+        }
+
+        result = analyze_intent(state)
+
+        assert result["turn_act"] in {"SUPPLEMENT", "CORRECTION"}
+        assert result["pending_operation"]["action"] == "update"
+        assert result["pending_operation"]["needs_clarification"] is False
+        assert result["pending_operation"]["data"].get("time") == "明天下午3点"
+        assert result.get("clarify_fsm_state") == "done"
+
+
+class TestTodoWorkflowStateSemantics:
+    """WS-01 状态字段语义收敛回归。"""
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.is_implicit_reference_message", return_value=False)
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_llm")
+    def test_need_clarify_should_set_action_clarify_state_and_round(
+        self,
+        mock_get_llm,
+        _mock_implicit,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """缺少动作信息时应进入 asked_action 且轮次递增。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"clarify","action_state":"need_clarify",'
+            '"response_message":"",'
+            '"extracted_info":{"title":"项目汇报"},'
+            '"missing_info":["操作动作","操作动作",""]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="项目汇报这个")],
+            "user_id": 1,
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "pending_clarifications": None,
+            "response_message": None,
+            "clarify_fsm_state": "idle",
+            "clarify_round": 0,
+        }
+
+        result = analyze_intent(state)
+
+        assert result.get("clarify_fsm_state") == "asked_action"
+        assert result.get("clarify_round") == 1
+        assert result.get("pending_clarifications") == ["操作动作"]
+        assert result.get("pending_operation", {}).get("needs_clarification") is True
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_llm")
+    def test_need_confirm_should_reset_clarify_state_and_round(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """进入确认路径时应清理澄清态。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"update","action_state":"need_confirm",'
+            '"response_message":"",'
+            '"extracted_info":{"title":"项目汇报","time":"明天10点"},'
+            '"missing_info":[]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="把项目汇报改到明天10点")],
+            "user_id": 1,
+            "pending_operation": {
+                "action": "update",
+                "data": {"title": "项目汇报"},
+                "needs_clarification": True,
+            },
+            "pending_clarifications": ["时间"],
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": {"title": "项目汇报"},
+            "response_message": None,
+            "clarify_fsm_state": "asked_time",
+            "clarify_round": 2,
+        }
+
+        result = analyze_intent(state)
+
+        assert result.get("clarify_fsm_state") == "done"
+        assert result.get("clarify_round") == 0
+        assert result.get("pending_operation", {}).get("action") == "update"
+        assert result.get("pending_operation", {}).get("needs_clarification") is False
 
 
 if __name__ == "__main__":

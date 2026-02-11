@@ -6,34 +6,14 @@
  * @see docs/开发文档/测试管理/待办助手测试案例.md
  */
 const { test, expect } = require("@playwright/test");
+const { loginIfNeeded, waitForChatReady } = require('./helpers/auth-helper');
 
 test.describe("待办助手多轮对话测试", () => {
     test.use({ storageState: ".auth/user.json" });
 
     test.beforeEach(async ({ page }) => {
-        // 访问聊天页面
-        await page.goto("/auth");
-        
-        // 等待页面稳定
-        await page.waitForLoadState('networkidle');
-        
-        // 处理登录
-        const identifierInput = page.locator('input#identifier');
-        if (await identifierInput.isVisible().catch(() => false)) {
-            await identifierInput.fill('jjk');
-            await page.getByRole('button', { name: '登录' }).click();
-            try {
-                await page.waitForURL('**/', { timeout: 15000 });
-            } catch (e) {
-                console.log('Wait for / timeout, current URL:', page.url());
-            }
-        }
-        
-        console.log("Current URL:", page.url());
-
-        // 等待聊天输入框加载完成（使用 data-testid 选择器）
-        await page.waitForSelector('[data-testid="chat-input"]', { timeout: 30000 });
-        await page.waitForTimeout(1000);
+        await loginIfNeeded(page);
+        await waitForChatReady(page, 60000);
     });
 
     test("多轮对话：创建→查询→完成待办", async ({ page }) => {

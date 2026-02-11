@@ -396,7 +396,7 @@ class VannaPGVector(VannaBase):
                 model_id: 用户选择的模型标识（可选，默认使用系统默认模型）
                 enable_thinking: 是否启用深度思考（可选，默认 False）
         """
-        from app.ai.llm_util import get_llm
+        from app.ai.llm_util import get_llm, _normalize_text_content
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
         
         model_id = kwargs.get("model_id")
@@ -426,7 +426,8 @@ class VannaPGVector(VannaBase):
                         model_id or "default", enable_thinking, len(messages))
             
             response = llm.invoke(messages)
-            content = response.content if hasattr(response, 'content') else str(response)
+            raw_content = response.content if hasattr(response, 'content') else response
+            content = _normalize_text_content(raw_content)
             
             logger.info("LLM 响应: content_len=%d", len(content) if content else 0)
             

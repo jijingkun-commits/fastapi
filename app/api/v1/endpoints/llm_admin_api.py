@@ -34,6 +34,7 @@ class ProviderResponse(BaseModel):
     is_active: bool
     sort_order: int
     model_count: int
+    extra_config: Optional[dict] = None
     
     class Config:
         from_attributes = True
@@ -47,6 +48,7 @@ class ProviderCreateRequest(BaseModel):
     api_key: Optional[str] = None
     is_active: bool = True
     sort_order: int = 0
+    extra_config: Optional[dict] = None
 
 
 class ProviderUpdateRequest(BaseModel):
@@ -56,6 +58,7 @@ class ProviderUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+    extra_config: Optional[dict] = None
 
 
 class ModelResponse(BaseModel):
@@ -77,6 +80,7 @@ class ModelResponse(BaseModel):
     is_active: bool
     sort_order: int
     description: Optional[str]
+    extra_config: Optional[dict] = None
     
     class Config:
         from_attributes = True
@@ -99,6 +103,7 @@ class ModelCreateRequest(BaseModel):
     is_active: bool = True
     sort_order: int = 0
     description: Optional[str] = None
+    extra_config: Optional[dict] = None
 
 
 class ModelUpdateRequest(BaseModel):
@@ -116,6 +121,7 @@ class ModelUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     description: Optional[str] = None
+    extra_config: Optional[dict] = None
 
 
 # ==================== 辅助函数 ====================
@@ -139,7 +145,8 @@ def _provider_to_response(provider: LLMProvider) -> ProviderResponse:
         api_key_masked=_mask_api_key(provider.api_key),
         is_active=provider.is_active,
         sort_order=provider.sort_order,
-        model_count=len(provider.models) if provider.models else 0
+        model_count=len(provider.models) if provider.models else 0,
+        extra_config=provider.extra_config
     )
 
 
@@ -162,7 +169,8 @@ def _model_to_response(model: LLMModel) -> ModelResponse:
         is_default=model.is_default,
         is_active=model.is_active,
         sort_order=model.sort_order,
-        description=model.description
+        description=model.description,
+        extra_config=model.extra_config
     )
 
 
@@ -198,7 +206,9 @@ def create_provider(request: ProviderCreateRequest, db: Session = Depends(get_db
         base_url=request.base_url,
         api_key=request.api_key,
         is_active=request.is_active,
-        sort_order=request.sort_order
+        sort_order=request.sort_order,
+        # 透传扩展配置，供实验型 provider/model 使用。
+        extra_config=request.extra_config
     )
     
     db.add(provider)
@@ -230,6 +240,9 @@ def update_provider(provider_id: int, request: ProviderUpdateRequest, db: Sessio
         provider.is_active = request.is_active
     if request.sort_order is not None:
         provider.sort_order = request.sort_order
+    if request.extra_config is not None:
+        # 更新时允许直接覆盖扩展配置。
+        provider.extra_config = request.extra_config
     
     db.commit()
     db.refresh(provider)
@@ -352,7 +365,9 @@ def create_model(request: ModelCreateRequest, db: Session = Depends(get_db)):
         is_default=request.is_default,
         is_active=request.is_active,
         sort_order=request.sort_order,
-        description=request.description
+        description=request.description,
+        # 透传扩展配置，供运行时按 provider 特性注入参数。
+        extra_config=request.extra_config
     )
     
     db.add(model)
@@ -387,7 +402,7 @@ def update_model(model_id: int, request: ModelUpdateRequest, db: Session = Depen
     for field in ["model_name", "model_type", "supports_thinking", "supports_tool_call",
                   "supports_streaming", "max_output_tokens", "context_window",
                   "default_temperature", "thinking_budget", "is_default", "is_active",
-                  "sort_order", "description"]:
+                  "sort_order", "description", "extra_config"]:
         value = getattr(request, field)
         if value is not None:
             setattr(model, field, value)

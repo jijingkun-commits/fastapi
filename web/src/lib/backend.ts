@@ -1,3 +1,14 @@
+import type {
+  ClarificationEventData,
+  DoneEventData,
+  InitEventData,
+  KbImagesEventData,
+  ResultEventData,
+  SqlResultData,
+  StatusEventData,
+  TokenEventData,
+} from "@/types/message";
+
 /**
  * 后端请求封装（中文注释）。
  *
@@ -142,23 +153,23 @@ export interface StreamCallbacks {
   /** 收到思考内容（Qwen Think 模式） */
   onThinking?: (content: string) => void;
   /** 工具开始调用 */
-  onToolStart?: (name: string, input: any) => void;
+  onToolStart?: (name: string, input: Record<string, unknown>) => void;
   /** 工具调用结束 */
-  onToolEnd?: (name: string, output: string) => void;
+  onToolEnd?: (name: string, output: unknown) => void;
   /** 流初始化（返回 thread_id） */
   onInit?: (threadId: string) => void;
   /** 流结束 */
-  onDone?: (threadId?: string, additionalKwargs?: Record<string, unknown>) => void;
+  onDone?: (threadId?: string, messageId?: number) => void;
   /** 错误 */
   onError?: (message: string) => void;
   /** 需要人工审核（interrupt） */
   onInterrupt?: (data: InterruptData) => void;
   /** 结构化结果（待办列表、图片等） */
-  onResult?: (data: { data_type: string; data: any; message?: string }) => void;
+  onResult?: (data: ResultEventData) => void;
   /** 状态更新 */
   onStatus?: (message: string) => void;
   /** 澄清问题 */
-  onClarification?: (data: { questions: string[]; message?: string }) => void;
+  onClarification?: (data: ClarificationEventData) => void;
   /** 知识库图片映射（用于替换占位符） */
   onKbImages?: (images: Record<string, string>) => void;
 }
@@ -191,6 +202,264 @@ export type DecisionType =
   | { type: "reject"; message?: string }
   | { type: "edit"; args: Record<string, unknown> };
 
+interface SSEEvent {
+  type: string;
+  data: unknown;
+}
+
+function isObjectRecord(data: unknown): data is Record<string, unknown> {
+  return typeof data === "object" && data !== null;
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function toOptionalMessageId(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+function normalizeResultEventData(data: unknown): ResultEventData | null {
+  if (!isObjectRecord(data)) return null;
+  const dataType = toOptionalString(data.data_type);
+  if (!dataType) return null;
+  return {
+    data_type: dataType,
+    // 约定：`data_type=sql_result` 时，data 可选携带 `chart` 字段
+    data: data.data as SqlResultData,
+    message: toOptionalString(data.message),
+  };
+}
+
+function normalizeDoneEventData(
+  data: unknown,
+  fallbackThreadId?: string,
+): { threadId?: string; messageId?: number; finalContent?: string } {
+  const doneData = (isObjectRecord(data) ? data : {}) as Partial<DoneEventData>;
+  const threadId =
+    toOptionalString(doneData.thread_id) ?? toOptionalString(fallbackThreadId);
+  const messageId = toOptionalMessageId(doneData.message_id);
+  const finalContent = toOptionalString(doneData.final_content);
+  return { threadId, messageId, finalContent };
+}
+
+function normalizeInterruptData(data: unknown): InterruptData | null {
+  if (!isObjectRecord(data)) return null;
+  const threadId = toOptionalString(data.thread_id);
+  const interruptId = toOptionalString(data.interrupt_id);
+  const value = isObjectRecord(data.value) ? data.value : null;
+  if (!threadId || !interruptId || !value) return null;
+  return {
+    thread_id: threadId,
+    interrupt_id: interruptId,
+    value: {
+      action_requests: Array.isArray(value.action_requests)
+        ? value.action_requests
+            .filter(isObjectRecord)
+            .map((req) => ({
+              name: toOptionalString(req.name) ?? "",
+              args: isObjectRecord(req.args) ? req.args : {},
+              description: toOptionalString(req.description),
+            }))
+        : undefined,
+      review_configs: Array.isArray(value.review_configs)
+        ? value.review_configs
+            .filter(isObjectRecord)
+            .map((config) => ({
+              action_name: toOptionalString(config.action_name) ?? "",
+              allowed_decisions: Array.isArray(config.allowed_decisions)
+                ? config.allowed_decisions
+                    .filter((decision): decision is string => typeof decision === "string")
+                : [],
+            }))
+        : undefined,
+      message: toOptionalString(value.message),
+    },
+  };
+}
+
+function parseSSEEventsFromBuffer(buffer: string): {
+  events: SSEEvent[];
+  restBuffer: string;
+} {
+  const chunks = buffer.split("\n\n");
+  const restBuffer = chunks.pop() ?? "";
+  const events: SSEEvent[] = [];
+
+  for (const chunk of chunks) {
+    const lines = chunk.split("\n");
+    let eventType: string | null = null;
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+
+    if (!eventType || dataLines.length === 0) {
+      continue;
+    }
+
+    try {
+      events.push({
+        type: eventType,
+        data: JSON.parse(dataLines.join("\n")),
+      });
+    } catch (error) {
+      console.error("SSE JSON parse error", error);
+    }
+  }
+
+  return { events, restBuffer };
+}
+
+function dispatchSSEEvent(
+  event: SSEEvent,
+  callbacks: StreamCallbacks,
+  doneControl?: { doneCalled: boolean },
+  fallbackThreadId?: string,
+): void {
+  const {
+    onInit,
+    onToken,
+    onThinking,
+    onToolStart,
+    onToolEnd,
+    onInterrupt,
+    onResult,
+    onStatus,
+    onClarification,
+    onKbImages,
+    onDone,
+    onError,
+  } = callbacks;
+
+  switch (event.type) {
+    case "init": {
+      const data = event.data as InitEventData;
+      const threadId = toOptionalString(data?.thread_id);
+      if (threadId) {
+        onInit?.(threadId);
+      }
+      return;
+    }
+    case "token": {
+      const data = event.data as TokenEventData;
+      if (data?.reasoning_content) {
+        onThinking?.(data.reasoning_content);
+      }
+      if (data?.content) {
+        onToken?.(data.content);
+      }
+      return;
+    }
+    case "thinking": {
+      if (isObjectRecord(event.data)) {
+        const content = toOptionalString(event.data.content);
+        if (content) {
+          onThinking?.(content);
+        }
+      }
+      return;
+    }
+    case "tool_start": {
+      if (!isObjectRecord(event.data)) return;
+      const name = toOptionalString(event.data.name);
+      if (!name) return;
+      const input = isObjectRecord(event.data.input) ? event.data.input : {};
+      onToolStart?.(name, input);
+      return;
+    }
+    case "tool_end": {
+      if (!isObjectRecord(event.data)) return;
+      const name = toOptionalString(event.data.name);
+      if (!name) return;
+      onToolEnd?.(name, event.data.output);
+      return;
+    }
+    case "interrupt": {
+      const interruptData = normalizeInterruptData(event.data);
+      if (interruptData) {
+        onInterrupt?.(interruptData);
+      }
+      return;
+    }
+    case "result": {
+      const resultData = normalizeResultEventData(event.data);
+      if (resultData) {
+        onResult?.(resultData);
+      }
+      return;
+    }
+    case "status": {
+      const statusData = event.data as StatusEventData;
+      const message = toOptionalString(statusData?.message);
+      if (message) {
+        onStatus?.(message);
+      }
+      return;
+    }
+    case "clarification": {
+      if (!isObjectRecord(event.data)) return;
+      const questions = Array.isArray(event.data.questions)
+        ? event.data.questions.filter((question): question is string => typeof question === "string")
+        : [];
+      if (questions.length === 0) return;
+      const clarificationData: ClarificationEventData = {
+        questions,
+        message: toOptionalString(event.data.message),
+      };
+      onClarification?.(clarificationData);
+      return;
+    }
+    case "kb_images": {
+      const data = event.data as KbImagesEventData;
+      if (data?.images && isObjectRecord(data.images)) {
+        const images: Record<string, string> = {};
+        for (const [key, value] of Object.entries(data.images)) {
+          if (typeof value === "string") {
+            images[key] = value;
+          }
+        }
+        onKbImages?.(images);
+      }
+      return;
+    }
+    case "done": {
+      if (doneControl?.doneCalled) return;
+      if (doneControl) {
+        doneControl.doneCalled = true;
+      }
+      const doneData = normalizeDoneEventData(event.data, fallbackThreadId);
+      onDone?.(doneData.threadId, doneData.messageId);
+      return;
+    }
+    case "error": {
+      if (isObjectRecord(event.data)) {
+        const message = toOptionalString(event.data.message);
+        if (message) {
+          onError?.(message);
+          return;
+        }
+      }
+      onError?.("Stream error");
+      return;
+    }
+    default:
+      return;
+  }
+}
+
 /**
  * SSE 流式接口（升级版）：支持多种事件类型
  * 
@@ -219,7 +488,6 @@ export async function streamLLM(
 ) {
   const cb =
     typeof callbacks === "function" ? { onToken: callbacks } : callbacks;
-  const { onToken, onThinking, onToolStart, onToolEnd, onInit, onDone, onError, onInterrupt, onResult, onStatus, onClarification, onKbImages } = cb;
 
   // 构建请求头：幂等键通过 Header 传递
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -249,13 +517,13 @@ export async function streamLLM(
   // ... (Stream processing logic)
   const reader = response.body?.getReader();
   if (!reader) {
-    onDone?.(options?.threadId);
+    cb.onDone?.(options?.threadId);
     return;
   }
 
   const decoder = new TextDecoder();
   let buffer = "";
-  let doneCalled = false;
+  const doneControl = { doneCalled: false };
 
   try {
     while (true) {
@@ -263,86 +531,25 @@ export async function streamLLM(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n\n");
-      // Keep the last partial line in the buffer
-      buffer = lines.pop() || "";
+      const { events, restBuffer } = parseSSEEventsFromBuffer(buffer);
+      buffer = restBuffer;
 
-      for (const line of lines) {
-        if (!line.startsWith("event: ")) continue;
-
-        const typeMatch = line.match(/^event: (.+)$/m);
-        if (!typeMatch) continue;
-        const type = typeMatch[1].trim();
-
-        const parts = line.split("\n");
-        let dataStr = "";
-        for (const part of parts) {
-          if (part.startsWith("data: ")) {
-            dataStr = part.substring(6);
-            break;
-          }
-        }
-
-        if (!dataStr) continue;
-
-        try {
-          const data = JSON.parse(dataStr);
-
-          // ... (event handling)
-          if (type === "init") {
-            onInit?.(data.thread_id);
-          } else if (type === "token") {
-            if (data.reasoning_content && onThinking) {
-              onThinking(data.reasoning_content);
-            }
-            if (data.content && onToken) {
-              onToken(data.content);
-            }
-          } else if (type === "thinking") { // Added thinking event handling
-            onThinking?.(data.content);
-          } else if (type === "tool_start") {
-            onToolStart?.(data.name, data.input);
-          } else if (type === "tool_end") {
-            onToolEnd?.(data.name, data.output);
-          } else if (type === "interrupt") {
-            onInterrupt?.(data as InterruptData);
-          } else if (type === "result") {
-            // 结构化结果事件
-            onResult?.(data);
-          } else if (type === "status") {
-            // 状态更新事件
-            onStatus?.(data.message);
-          } else if (type === "clarification") {
-            // 澄清问题事件
-            onClarification?.(data);
-          } else if (type === "kb_images") {
-            // 知识库图片映射事件
-            onKbImages?.(data.images);
-          } else if (type === "done") {
-            if (!doneCalled) {
-              doneCalled = true;
-              onDone?.(data.thread_id, data.additional_kwargs);
-            }
-          } else if (type === "error") {
-            onError?.(data.message);
-          }
-        } catch (e) {
-          console.error("JSON parse error", e);
-        }
+      for (const event of events) {
+        dispatchSSEEvent(event, cb, doneControl, options?.threadId);
       }
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
       // aborted
     } else {
-      onError?.(err.message || "Stream error");
+      cb.onError?.(err.message || "Stream error");
     }
   } finally {
     // 确保在正常结束或异常时调用 onDone，避免状态卡死
     // 使用 doneCalled 标记防止重复调用
-    if (!doneCalled) {
-      doneCalled = true;
-      onDone?.(options?.threadId);
+    if (!doneControl.doneCalled) {
+      doneControl.doneCalled = true;
+      cb.onDone?.(options?.threadId);
     }
   }
 }
@@ -422,47 +629,11 @@ export async function resumeChat(
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+    const { events, restBuffer } = parseSSEEventsFromBuffer(buffer);
+    buffer = restBuffer;
 
-    let currentEvent = "";
-    for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        const data = line.slice(6);
-        try {
-          const obj = JSON.parse(data);
-
-          switch (currentEvent) {
-            case "token":
-              callbacks.onToken?.(obj.content);
-              break;
-            case "thinking":
-              callbacks.onThinking?.(obj.content);
-              break;
-            case "tool_start":
-              callbacks.onToolStart?.(obj.name, obj.input);
-              break;
-            case "tool_end":
-              callbacks.onToolEnd?.(obj.name, obj.output);
-              break;
-
-            case "done":
-              callbacks.onDone?.(obj.thread_id);
-              break;
-            case "error":
-              callbacks.onError?.(obj.message);
-              break;
-            case "interrupt":
-              callbacks.onInterrupt?.(obj as InterruptData);
-              break;
-          }
-        } catch {
-          // 忽略解析错误
-        }
-        currentEvent = "";
-      }
+    for (const event of events) {
+      dispatchSSEEvent(event, callbacks, undefined, threadId);
     }
   }
 }
@@ -507,6 +678,7 @@ export interface ConversationMessage {
   content: string | ContentBlock[];
   metadata?: Record<string, any>;
   created_at?: string;
+  feedback_score?: number | null;
 }
 
 export interface ContentBlock {
@@ -553,11 +725,18 @@ export async function submitFeedback(
   score: number, // 1: Like, -1: Dislike, 0: Cancel
   reason?: string
 ): Promise<void> {
+  // message_id 必须是整数（数据库 ID），跳过 LangGraph 运行时字符串 ID
+  const numericId = typeof messageId === "number" ? messageId : parseInt(String(messageId), 10);
+  if (isNaN(numericId)) {
+    console.warn("submitFeedback: 无效的 messageId，跳过:", messageId);
+    return;
+  }
+
   const r = await apiFetch(`/api/v1/chat/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      message_id: messageId,
+      message_id: numericId,
       score,
       reason,
     }),
@@ -682,7 +861,7 @@ export async function updateUserStatus(
  * 用户登出
  */
 export async function logout(): Promise<void> {
-  const r = await apiFetch(`/api/v1/logout`, {
+  await apiFetch(`/api/v1/logout`, {
     method: "POST",
   }, { handle401: false });
   // 不论服务端是否成功，都清除本地 token

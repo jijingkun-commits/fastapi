@@ -188,7 +188,7 @@ async def evaluate_semantic(
     
     检查 SQL 是否准确回答了用户问题。
     """
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_llm, _normalize_text_content
     
     ddl_str = "\n".join(ddl_context[:3]) if ddl_context else "无可用 DDL"
     
@@ -438,7 +438,7 @@ async def should_retry(
     Returns:
         (should_retry: bool, feedback: str)
     """
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_llm, _normalize_text_content
     
     prompt = f"""分析以下 SQL 生成失败的原因，判断是否应该重试。
 
@@ -461,7 +461,9 @@ async def should_retry(
         from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
         llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
         response = await llm.ainvoke(prompt)
-        content = response.content if hasattr(response, 'content') else str(response)
+        content = _normalize_text_content(
+            response.content if hasattr(response, "content") else response
+        )
         
         import json
         result = json.loads(content)

@@ -54,6 +54,10 @@ async def lifespan(app: FastAPI):
             LLMConfigService.load_from_db(db)
             LLMConfigService.load_from_db(db)
             SystemConfigService.load_from_db(db)
+
+            from app.services.result_enrichment_rule_service import get_result_enrichment_rule_service
+            rule_service = get_result_enrichment_rule_service()
+            rule_service.refresh_rules()
             
             # 启动时自动同步技能文件到数据库
             from app.services.skill_service import SkillService

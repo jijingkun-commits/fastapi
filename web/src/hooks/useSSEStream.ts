@@ -30,8 +30,42 @@ import { useThreads } from "@/providers/Thread";
 import { StateType, StreamContextValue, MessageMetadata } from "@/providers/StreamContext";
 import { useMessageUpdater } from "@/hooks/use-message-updater";
 import { useModelConfig } from "@/hooks/use-model-config";
-import { replaceImagePlaceholders, type KbImages } from "@/components/chat/utils";
+import type { KbImages } from "@/components/chat/utils";
 import { safeParseJson, SelectedTodoSchema } from "@/lib/utils";
+import type { ClarificationEventData, ResultEventData } from "@/types/message";
+
+type MessageWithAdditionalKwargs = Message & {
+    additional_kwargs?: Record<string, unknown>;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function getErrorMessageFromResult(data: ResultEventData): string {
+    if (typeof data.message === "string" && data.message.trim().length > 0) {
+        return data.message;
+    }
+    if (isRecord(data.data) && typeof data.data.message === "string" && data.data.message.trim().length > 0) {
+        return data.data.message;
+    }
+    return "未知错误";
+}
+
+function getToolOutputPreview(output: unknown): string {
+    if (typeof output === "string") {
+        return output.slice(0, 100);
+    }
+    try {
+        const serialized = JSON.stringify(output);
+        if (typeof serialized === "string") {
+            return serialized.slice(0, 100);
+        }
+        return String(output).slice(0, 100);
+    } catch {
+        return String(output).slice(0, 100);
+    }
+}
 
 /**
  * SSE 流消息处理 Hook
@@ -88,6 +122,74 @@ export function useSSEStream(): StreamContextValue {
     const [threadId, setThreadId] = useQueryState("threadId");
     const { refreshThreads } = useThreads();
 
+    const bindMessageIdToAiMessage = useCallback((aiId: string, messageId?: number) => {
+        if (!messageId) return;
+        setMessages((prev) => {
+            const updated = [...prev];
+            const idx = updated.findIndex((m) => m.id === aiId);
+            if (idx !== -1) {
+                updated[idx] = {
+                    ...updated[idx],
+                    id: String(messageId),
+                };
+            }
+            return updated;
+        });
+    }, []);
+
+    const storeStructuredResultToMessage = useCallback((
+        aiId: string,
+        data: ResultEventData,
+    ) => {
+        if (data.data_type === "error") {
+            toast.error("操作失败", { description: getErrorMessageFromResult(data) });
+            return;
+        }
+
+        setMessages((prev) => {
+            const updated = [...prev];
+            const idx = updated.findIndex((m) => m.id === aiId);
+            if (idx === -1) {
+                return updated;
+            }
+
+            const message = updated[idx] as MessageWithAdditionalKwargs;
+            const existingKwargs = message.additional_kwargs ?? {};
+            updated[idx] = {
+                ...updated[idx],
+                additional_kwargs: {
+                    ...existingKwargs,
+                    data_type: data.data_type,
+                    data: data.data,
+                },
+            } as Message;
+            return updated;
+        });
+
+        if (data.message) {
+            appendToAiMessage(aiId, data.message);
+        }
+    }, [appendToAiMessage]);
+
+    const completeStreamLifecycle = useCallback((aiId: string, messageId?: number) => {
+        bindMessageIdToAiMessage(aiId, messageId);
+        setCurrentStatus(null);
+        setIsLoading(false);
+        stopRef.current = null;
+        currentAiIdRef.current = null;
+        isStreamingRef.current = false;
+        refreshThreads();
+    }, [bindMessageIdToAiMessage, refreshThreads]);
+
+    const handleStructuredResultEvent = useCallback((aiId: string, data: ResultEventData, isResume: boolean) => {
+        storeStructuredResultToMessage(aiId, data);
+        if (isResume) {
+            console.log(`恢复流收到结构化结果: ${data.data_type}`);
+            return;
+        }
+        console.log(`收到结构化结果: ${data.data_type}`);
+    }, [storeStructuredResultToMessage]);
+
     /**
      * 加载历史消息
      */
@@ -101,7 +203,8 @@ export function useSSEStream(): StreamContextValue {
                 type: m.role,
                 content: m.content,
                 ...(m.toolCalls && { tool_calls: m.toolCalls }),
-                ...(m.additionalKwargs && { additional_kwargs: m.additionalKwargs }), // 保留 additionalKwargs
+                ...(m.additionalKwargs && { additional_kwargs: m.additionalKwargs }),
+                ...(m.feedbackScore !== undefined && { feedback_score: m.feedbackScore }),
                 ...(m.thinkingContent && {
                     content: `<think>\n${m.thinkingContent}\n</think>\n\n${typeof m.content === 'string' ? m.content : ''}`
                 }),
@@ -155,12 +258,24 @@ export function useSSEStream(): StreamContextValue {
         if (typeof m === "string") return m;
         const msg = Array.isArray(m) ? m[m.length - 1] : m;
         if (!msg) return "";
-        const c = (msg as Message).content as any;
+        const c = msg.content;
         if (typeof c === "string") return c;
         if (Array.isArray(c)) {
             return c
-                .filter((b: any) => b && b.type === "text" && typeof b.text === "string")
-                .map((b: any) => b.text)
+                .map((b) => {
+                    if (
+                        typeof b === "object"
+                        && b !== null
+                        && "type" in b
+                        && "text" in b
+                        && (b as { type?: unknown }).type === "text"
+                        && typeof (b as { text?: unknown }).text === "string"
+                    ) {
+                        return (b as { text: string }).text;
+                    }
+                    return "";
+                })
+                .filter((text) => text.length > 0)
                 .join("\n");
         }
         return "";
@@ -195,16 +310,13 @@ export function useSSEStream(): StreamContextValue {
             isStreamingRef.current = true;
             const idempotencyKey = uuidv4();
 
-            // 读取当前选中的待办 ID（使用 Zod 校验），读取后立即清除
+            // 读取当前选中的待办 ID（使用 Zod 校验）
+            // 注意：不要在发送前清除，避免 current_todo_id 丢失
             let currentTodoId: number | undefined;
             if (typeof window !== 'undefined') {
                 const stored = sessionStorage.getItem('selectedTodo');
                 const parsed = safeParseJson(stored, SelectedTodoSchema, null);
                 currentTodoId = parsed?.id;
-                if (currentTodoId) {
-                    sessionStorage.removeItem('selectedTodo');
-                    window.dispatchEvent(new Event('todoDeselected'));
-                }
             }
 
             const { stop: stopFn, promise } = startLLMStream(
@@ -212,34 +324,16 @@ export function useSSEStream(): StreamContextValue {
                 {
                     onToken: (token: string) => appendToAiMessage(aiId, token),
                     onThinking: (content: string) => handleThinking(aiId, content),
-                    onToolStart: (name: string, input: any) => addToolCallToMessage(aiId, name, input),
-                    onToolEnd: (name: string, output: any) => {
-                        console.debug(`工具 ${name} 执行完成:`, output?.slice?.(0, 100));
+                    onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
+                    onToolEnd: (name: string, output: unknown) => {
+                        console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                     },
                     onInit: (id: string) => setThreadId(id),
-                    onDone: (_tid?: string, additionalKwargs?: Record<string, unknown>) => {
-                        // 如果有 additional_kwargs，更新最后一条 AI 消息
-                        if (additionalKwargs && Object.keys(additionalKwargs).length > 0) {
-                            setMessages((prev) => {
-                                const updated = [...prev];
-                                // 找到当前正在流式输出的 AI 消息
-                                const idx = updated.findIndex(m => m.id === aiId);
-                                if (idx !== -1) {
-                                    updated[idx] = {
-                                        ...updated[idx],
-                                        additional_kwargs: additionalKwargs,
-                                    };
-                                    console.log("已更新消息 additional_kwargs:", Object.keys(additionalKwargs));
-                                }
-                                return updated;
-                            });
+                    onDone: (_tid?: string, messageId?: number) => {
+                        completeStreamLifecycle(aiId, messageId);
+                        if (messageId) {
+                            console.log("已更新消息数据库ID:", messageId);
                         }
-                        setCurrentStatus(null); // 清除状态消息
-                        setIsLoading(false);
-                        stopRef.current = null;
-                        currentAiIdRef.current = null;
-                        isStreamingRef.current = false;
-                        refreshThreads();
                     },
                     onError: (message: string) => {
                         setError(new Error(message));
@@ -247,35 +341,8 @@ export function useSSEStream(): StreamContextValue {
                     },
                     // 处理结构化结果事件（待办列表等）
                     // 图片完全依赖 LLM 在回复中保留 Markdown 语法
-                    onResult: (data: { data_type: string; data: any; message?: string }) => {
-                        // 处理错误类型：显示 toast 提示
-                        if (data.data_type === "error") {
-                            toast.error("操作失败", { description: data.message || data.data?.message || "未知错误" });
-                            return;
-                        }
-
-                        setMessages((prev) => {
-                            const updated = [...prev];
-                            const idx = updated.findIndex(m => m.id === aiId);
-                            if (idx !== -1) {
-                                // 将结构化数据存入 additional_kwargs
-                                const existingKwargs = (updated[idx] as any).additional_kwargs || {};
-                                updated[idx] = {
-                                    ...updated[idx],
-                                    additional_kwargs: {
-                                        ...existingKwargs,
-                                        data_type: data.data_type,  // 注意：使用 snake_case 以匹配 ai.tsx
-                                        data: data.data,
-                                    },
-                                };
-                                console.log(`收到结构化结果: ${data.data_type}`);
-                            }
-                            return updated;
-                        });
-                        // 如果有文本消息，追加到内容
-                        if (data.message) {
-                            appendToAiMessage(aiId, data.message);
-                        }
+                    onResult: (data: ResultEventData) => {
+                        handleStructuredResultEvent(aiId, data, false);
                     },
                     // 处理状态更新事件
                     onStatus: (statusMsg: string) => {
@@ -284,7 +351,7 @@ export function useSSEStream(): StreamContextValue {
                         setCurrentStatus(statusMsg);
                     },
                     // 处理澄清问题事件
-                    onClarification: (data: { questions: string[]; message?: string }) => {
+                    onClarification: (data: ClarificationEventData) => {
                         console.log(`❓ 澄清问题:`, data.questions);
                         // 澄清问题通常由 AI 消息内容展示，这里只是日志
                     },
@@ -292,6 +359,7 @@ export function useSSEStream(): StreamContextValue {
                         setInterrupt(data);
                         setIsLoading(false);
                         stopRef.current = null;
+                        isStreamingRef.current = false;
                     },
                     // 处理知识库图片映射事件
                     onKbImages: (images: Record<string, string>) => {
@@ -307,6 +375,12 @@ export function useSSEStream(): StreamContextValue {
                 currentTodoId,
                 idempotencyKey,
             );
+
+            // 请求已发起后再清理选中态，确保 current_todo_id 已携带进请求
+            if (typeof window !== 'undefined' && currentTodoId) {
+                sessionStorage.removeItem('selectedTodo');
+                window.dispatchEvent(new Event('todoDeselected'));
+            }
 
             stopRef.current = stopFn;
             promise.catch(() => undefined).finally(() => {
@@ -324,11 +398,12 @@ export function useSSEStream(): StreamContextValue {
         enableThinking,
         selectedModel,
         extractText,
-        appendToAiMessage,
         handleThinking,
         addToolCallToMessage,
         setThreadId,
-        refreshThreads,
+        appendToAiMessage,
+        handleStructuredResultEvent,
+        completeStreamLifecycle,
     ]);
 
     /**
@@ -360,15 +435,26 @@ export function useSSEStream(): StreamContextValue {
             decision,
             {
                 onToken: (token: string) => appendToAiMessage(aiId, token),
-                onToolStart: (name: string, input: any) => addToolCallToMessage(aiId, name, input),
-                onToolEnd: (name: string, output: any) => {
-                    console.debug(`工具 ${name} 执行完成:`, output?.slice?.(0, 100));
+                onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
+                onToolEnd: (name: string, output: unknown) => {
+                    console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                 },
-                onDone: (_tid?: string) => {
-                    setIsLoading(false);
-                    stopRef.current = null;
-                    currentAiIdRef.current = null;
-                    refreshThreads();
+                onResult: (data: ResultEventData) => {
+                    handleStructuredResultEvent(aiId, data, true);
+                },
+                onStatus: (statusMsg: string) => {
+                    console.log(`📊 恢复流状态更新: ${statusMsg}`);
+                    setCurrentStatus(statusMsg);
+                },
+                onClarification: (data: ClarificationEventData) => {
+                    console.log(`❓ 恢复流澄清问题:`, data.questions);
+                },
+                onKbImages: (images: Record<string, string>) => {
+                    console.log(`🖼️ 恢复流收到 kb_images 映射: ${Object.keys(images).length} 张图片`);
+                    setKbImages(prev => ({ ...prev, ...images }));
+                },
+                onDone: (_tid?: string, messageId?: number) => {
+                    completeStreamLifecycle(aiId, messageId);
                 },
                 onError: (message: string) => {
                     setError(new Error(message));
@@ -378,6 +464,7 @@ export function useSSEStream(): StreamContextValue {
                     setInterrupt(data);
                     setIsLoading(false);
                     stopRef.current = null;
+                    isStreamingRef.current = false;
                 },
             },
             50,
@@ -389,7 +476,7 @@ export function useSSEStream(): StreamContextValue {
             stopRef.current = null;
             currentAiIdRef.current = null;
         });
-    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, refreshThreads]);
+    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, completeStreamLifecycle]);
 
     const values: StateType = { messages, ui: [] };
 

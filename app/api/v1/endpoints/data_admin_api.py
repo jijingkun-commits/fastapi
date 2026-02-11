@@ -7,16 +7,28 @@
 - 指标管理
 """
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.session import get_db
 from app.models.data_agent_metadata import DataQueryLog, Metric, MetaTable
+from app.models.result_enrichment_rule import ResultEnrichmentRule
+from app.models.user import User
+from app.repositories.result_enrichment_rule_repo import ResultEnrichmentRuleRepo
+from app.services.result_enrichment_rule_service import (
+    ResultLookupEnrichmentRuleConfig,
+    apply_lookup_enrichment_rule,
+    get_result_enrichment_rule_service,
+)
+from app.api.deps import get_admin_user
 
 logger = logging.getLogger(__name__)
+
+_rule_repo = ResultEnrichmentRuleRepo()
+_rule_service = get_result_enrichment_rule_service()
 
 router = APIRouter(prefix="/data-admin", tags=["问数管理"])
 
@@ -34,6 +46,7 @@ class QueryLogResponse(BaseModel):
     is_correct: Optional[bool]
     corrected_sql: Optional[str]
     trained: bool
+    is_ignored: bool
     created_at: str
     
     class Config:
@@ -49,6 +62,11 @@ class SQLCorrectionRequest(BaseModel):
 
 class TrainRequest(BaseModel):
     """训练请求。"""
+    log_ids: List[int]
+
+
+class IgnoreLogsRequest(BaseModel):
+    """忽略日志请求。"""
     log_ids: List[int]
 
 
@@ -129,6 +147,7 @@ def list_query_logs(
     limit: int = Query(20, le=100),
     is_correct: Optional[bool] = None,
     trained: Optional[bool] = None,
+    include_ignored: bool = False,
     db: Session = Depends(get_db)
 ):
     """获取查询日志列表。
@@ -136,8 +155,12 @@ def list_query_logs(
     支持筛选：
     - is_correct: 是否正确
     - trained: 是否已训练
+    - include_ignored: 是否包含已忽略日志
     """
     query = db.query(DataQueryLog)
+
+    if not include_ignored:
+        query = query.filter(DataQueryLog.is_ignored == False)
     
     if is_correct is not None:
         query = query.filter(DataQueryLog.is_correct == is_correct)
@@ -157,6 +180,7 @@ def list_query_logs(
             is_correct=log.is_correct,
             corrected_sql=log.corrected_sql,
             trained=log.trained or False,
+            is_ignored=log.is_ignored or False,
             created_at=log.created_at.isoformat() if log.created_at else ""
         )
         for log in logs
@@ -180,8 +204,46 @@ def get_query_log(log_id: int, db: Session = Depends(get_db)):
         is_correct=log.is_correct,
         corrected_sql=log.corrected_sql,
         trained=log.trained or False,
+        is_ignored=log.is_ignored or False,
         created_at=log.created_at.isoformat() if log.created_at else ""
     )
+
+
+@router.post("/query-logs/ignore")
+def ignore_query_logs(request: IgnoreLogsRequest, db: Session = Depends(get_db)):
+    """批量忽略查询日志（软隐藏）。"""
+    if not request.log_ids:
+        raise HTTPException(status_code=400, detail="log_ids 不能为空")
+
+    ignored_count = 0
+    skipped_count = 0
+    errors: List[str] = []
+
+    for log_id in request.log_ids:
+        log = db.query(DataQueryLog).filter(DataQueryLog.id == log_id).first()
+        if not log:
+            errors.append(f"日志 {log_id} 不存在")
+            continue
+
+        if log.trained:
+            errors.append(f"日志 {log_id} 已训练，不能忽略")
+            continue
+
+        if log.is_ignored:
+            skipped_count += 1
+            continue
+
+        log.is_ignored = True
+        ignored_count += 1
+
+    db.commit()
+
+    return {
+        "message": f"忽略完成，成功 {ignored_count} 条",
+        "ignored_count": ignored_count,
+        "skipped_count": skipped_count,
+        "errors": errors if errors else None,
+    }
 
 
 # ==================== SQL 修正 ====================
@@ -284,7 +346,8 @@ def train_all_pending(db: Session = Depends(get_db)):
     # 查询待训练的日志
     pending_logs = db.query(DataQueryLog).filter(
         DataQueryLog.is_correct == True,
-        DataQueryLog.trained == False
+        DataQueryLog.trained == False,
+        DataQueryLog.is_ignored == False
     ).all()
     
     if not pending_logs:
@@ -555,7 +618,7 @@ def convert_etl_to_select(request: ETLConvertRequest):
         raise HTTPException(status_code=400, detail="ETL 脚本不能为空")
 
     try:
-        from app.ai.llm_util import get_llm
+        from app.ai.llm_util import get_llm, _normalize_text_content
         from langchain_core.messages import SystemMessage, HumanMessage
         import json
 
@@ -565,7 +628,9 @@ def convert_etl_to_select(request: ETLConvertRequest):
             HumanMessage(content=request.etl_script),
         ]
         response = llm.invoke(messages)
-        content = response.content if hasattr(response, "content") else str(response)
+        content = _normalize_text_content(
+            response.content if hasattr(response, "content") else response
+        )
 
         # 从响应中提取 JSON
         json_str = content
@@ -752,7 +817,7 @@ def _batch_convert_ai_extract(db: Session, limit: int, dry_run: bool):
                          for r in pending[:20]]
         }
 
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_llm, _normalize_text_content
     from langchain_core.messages import SystemMessage, HumanMessage
     import json
 
@@ -767,7 +832,9 @@ def _batch_convert_ai_extract(db: Session, limit: int, dry_run: bool):
                 HumanMessage(content=row.sql_template),
             ]
             response = llm.invoke(messages)
-            content = response.content if hasattr(response, "content") else str(response)
+            content = _normalize_text_content(
+                response.content if hasattr(response, "content") else response
+            )
 
             # 提取 JSON
             json_str = content
@@ -798,3 +865,335 @@ def _batch_convert_ai_extract(db: Session, limit: int, dry_run: bool):
         "success": success,
         "errors": errors if errors else None,
     }
+
+# ==================== 结果增强规则管理 ====================
+
+
+class EnrichmentRuleResponse(BaseModel):
+    """结果增强规则响应。"""
+
+    id: int
+    rule_code: str
+    rule_name: str
+    enabled: bool
+    priority: int
+    key_column_candidates: List[str]
+    target_column: str
+    source_table: str
+    source_key_column: str
+    source_value_column: str
+    source_date_column: Optional[str]
+    result_date_column_candidates: List[str]
+    description: Optional[str]
+    created_by: Optional[str]
+    updated_by: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class EnrichmentRuleCreateRequest(BaseModel):
+    """创建结果增强规则请求。"""
+
+    rule_code: str
+    rule_name: str
+    enabled: bool = True
+    priority: int = Field(default=100, ge=0)
+    key_column_candidates: List[str]
+    target_column: str
+    source_table: str
+    source_key_column: str
+    source_value_column: str
+    source_date_column: Optional[str] = None
+    result_date_column_candidates: List[str] = Field(default_factory=lambda: ["data_dt"])
+    description: Optional[str] = None
+
+
+class EnrichmentRuleUpdateRequest(BaseModel):
+    """更新结果增强规则请求。"""
+
+    rule_code: str
+    rule_name: str
+    enabled: bool
+    priority: int = Field(ge=0)
+    key_column_candidates: List[str]
+    target_column: str
+    source_table: str
+    source_key_column: str
+    source_value_column: str
+    source_date_column: Optional[str] = None
+    result_date_column_candidates: List[str]
+    description: Optional[str] = None
+
+
+class EnrichmentRuleEnableRequest(BaseModel):
+    """规则启停请求。"""
+
+    enabled: bool
+
+
+class EnrichmentRulePriorityRequest(BaseModel):
+    """规则优先级请求。"""
+
+    priority: int = Field(ge=0)
+
+
+class EnrichmentRuleTestRequest(BaseModel):
+    """规则测试请求。"""
+
+    rows: List[Dict[str, Any]]
+    columns: List[str]
+    rule_id: Optional[int] = None
+
+
+class EnrichmentRuleTestResponse(BaseModel):
+    """规则测试响应。"""
+
+    rows: List[Dict[str, Any]]
+    columns: List[str]
+    applied_rule_codes: List[str]
+
+
+class EnrichmentRuleRefreshResponse(BaseModel):
+    """规则缓存刷新响应。"""
+
+    message: str
+    rule_count: int
+    ttl_seconds: int
+
+
+def _rule_to_response(rule: ResultEnrichmentRule) -> EnrichmentRuleResponse:
+    """规则 ORM 转响应模型。"""
+    return EnrichmentRuleResponse(
+        id=rule.id,
+        rule_code=rule.rule_code,
+        rule_name=rule.rule_name,
+        enabled=rule.enabled,
+        priority=rule.priority,
+        key_column_candidates=list(rule.key_column_candidates or []),
+        target_column=rule.target_column,
+        source_table=rule.source_table,
+        source_key_column=rule.source_key_column,
+        source_value_column=rule.source_value_column,
+        source_date_column=rule.source_date_column,
+        result_date_column_candidates=list(rule.result_date_column_candidates or []),
+        description=rule.description,
+        created_by=rule.created_by,
+        updated_by=rule.updated_by,
+        created_at=rule.created_at.isoformat() if rule.created_at else None,
+        updated_at=rule.updated_at.isoformat() if rule.updated_at else None,
+    )
+
+
+def _rule_payload_from_request(data: Dict[str, Any]) -> Dict[str, Any]:
+    """从请求生成规则 payload。"""
+    return {
+        "rule_code": data.get("rule_code"),
+        "rule_name": data.get("rule_name"),
+        "enabled": data.get("enabled", True),
+        "priority": data.get("priority", 100),
+        "key_column_candidates": data.get("key_column_candidates"),
+        "target_column": data.get("target_column"),
+        "source_table": data.get("source_table"),
+        "source_key_column": data.get("source_key_column"),
+        "source_value_column": data.get("source_value_column"),
+        "source_date_column": data.get("source_date_column"),
+        "result_date_column_candidates": data.get("result_date_column_candidates"),
+        "description": data.get("description"),
+    }
+
+
+def _get_operator(admin_user: User) -> str:
+    """生成操作人标识。"""
+    if admin_user.username:
+        return str(admin_user.username)
+    return str(admin_user.id)
+
+
+@router.get("/enrichment-rules", response_model=List[EnrichmentRuleResponse])
+def list_enrichment_rules(db: Session = Depends(get_db)):
+    """获取结果增强规则列表。"""
+    rules = _rule_repo.list_rules(db, include_disabled=True)
+    return [_rule_to_response(rule) for rule in rules]
+
+
+@router.post("/enrichment-rules", response_model=EnrichmentRuleResponse)
+def create_enrichment_rule(
+    request: EnrichmentRuleCreateRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """创建结果增强规则。"""
+    payload = _rule_payload_from_request(request.model_dump())
+    try:
+        normalized = _rule_service.validate_rule_payload(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing = _rule_repo.get_rule_by_code(db, normalized["rule_code"])
+    if existing:
+        raise HTTPException(status_code=400, detail=f"规则编码已存在: {normalized['rule_code']}")
+
+    operator = _get_operator(admin_user)
+    normalized["created_by"] = operator
+    normalized["updated_by"] = operator
+
+    rule = _rule_repo.create_rule(db, normalized, operator_id=operator)
+    db.commit()
+    db.refresh(rule)
+
+    _rule_service.invalidate_cache()
+    return _rule_to_response(rule)
+
+
+@router.put("/enrichment-rules/{rule_id}", response_model=EnrichmentRuleResponse)
+def update_enrichment_rule(
+    rule_id: int,
+    request: EnrichmentRuleUpdateRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """更新结果增强规则。"""
+    rule = _rule_repo.get_rule_by_id(db, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    payload = _rule_payload_from_request(request.model_dump())
+    try:
+        normalized = _rule_service.validate_rule_payload(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if normalized["rule_code"] != rule.rule_code:
+        duplicate = _rule_repo.get_rule_by_code(db, normalized["rule_code"])
+        if duplicate and duplicate.id != rule.id:
+            raise HTTPException(status_code=400, detail=f"规则编码已存在: {normalized['rule_code']}")
+
+    operator = _get_operator(admin_user)
+    normalized["updated_by"] = operator
+
+    _rule_repo.update_rule(db, rule, normalized, operator_id=operator)
+    db.commit()
+    db.refresh(rule)
+
+    _rule_service.invalidate_cache()
+    return _rule_to_response(rule)
+
+
+@router.patch("/enrichment-rules/{rule_id}/enable", response_model=EnrichmentRuleResponse)
+def set_enrichment_rule_enabled(
+    rule_id: int,
+    request: EnrichmentRuleEnableRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """启停结果增强规则。"""
+    rule = _rule_repo.get_rule_by_id(db, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    operator = _get_operator(admin_user)
+    rule.updated_by = operator
+    _rule_repo.set_rule_enabled(db, rule, request.enabled, operator_id=operator)
+    db.commit()
+    db.refresh(rule)
+
+    _rule_service.invalidate_cache()
+    return _rule_to_response(rule)
+
+
+@router.patch("/enrichment-rules/{rule_id}/priority", response_model=EnrichmentRuleResponse)
+def update_enrichment_rule_priority(
+    rule_id: int,
+    request: EnrichmentRulePriorityRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """更新结果增强规则优先级。"""
+    rule = _rule_repo.get_rule_by_id(db, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    operator = _get_operator(admin_user)
+    rule.updated_by = operator
+    _rule_repo.update_rule_priority(db, rule, request.priority, operator_id=operator)
+    db.commit()
+    db.refresh(rule)
+
+    _rule_service.invalidate_cache()
+    return _rule_to_response(rule)
+
+
+@router.post("/enrichment-rules/test", response_model=EnrichmentRuleTestResponse)
+def test_enrichment_rules(
+    request: EnrichmentRuleTestRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """测试规则增强效果（仅预览，不写主链路结果）。"""
+    rows = list(request.rows or [])
+    columns = list(request.columns or [])
+    if not columns:
+        raise HTTPException(status_code=400, detail="columns 不能为空")
+
+    rules: Tuple[ResultLookupEnrichmentRuleConfig, ...]
+    selected_rule: Optional[ResultEnrichmentRule] = None
+
+    if request.rule_id is not None:
+        selected_rule = _rule_repo.get_rule_by_id(db, request.rule_id)
+        if not selected_rule:
+            raise HTTPException(status_code=404, detail="规则不存在")
+
+        runtime_rule = _rule_service._validate_and_convert_rule(selected_rule)
+        if not runtime_rule:
+            raise HTTPException(status_code=400, detail="规则配置非法，无法测试")
+        rules = (runtime_rule,)
+    else:
+        rules = _rule_service.get_active_rules(force_refresh=False, fallback_rules=())
+
+    applied_rule_codes: List[str] = []
+    enriched_rows = rows
+    enriched_columns = columns
+    for runtime_rule in rules:
+        before_columns = list(enriched_columns)
+        before_rows = list(enriched_rows)
+        enriched_rows, enriched_columns = apply_lookup_enrichment_rule(
+            enriched_rows,
+            enriched_columns,
+            runtime_rule,
+        )
+        if enriched_columns != before_columns or enriched_rows != before_rows:
+            applied_rule_codes.append(runtime_rule.name)
+
+    if selected_rule is not None:
+        _rule_repo.add_audit(
+            db,
+            rule_id=selected_rule.id,
+            op_type="test",
+            before_json={"rows": rows, "columns": columns},
+            after_json={"rows": enriched_rows, "columns": enriched_columns, "applied_rule_codes": applied_rule_codes},
+            operator_id=_get_operator(admin_user),
+        )
+        db.commit()
+
+    return EnrichmentRuleTestResponse(
+        rows=enriched_rows,
+        columns=enriched_columns,
+        applied_rule_codes=applied_rule_codes,
+    )
+
+
+@router.post("/enrichment-rules/refresh-cache", response_model=EnrichmentRuleRefreshResponse)
+def refresh_enrichment_rule_cache(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """手动刷新结果增强规则缓存。"""
+    _ = db
+    _ = admin_user
+    rules = _rule_service.get_active_rules(force_refresh=True, fallback_rules=())
+
+    return EnrichmentRuleRefreshResponse(
+        message="规则缓存刷新成功",
+        rule_count=len(rules),
+        ttl_seconds=_rule_service.ttl_seconds,
+    )

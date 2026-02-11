@@ -51,6 +51,29 @@ class LLMConfigService:
                 continue
                 
             provider_config = cls._providers_cache[m.provider.code]
+
+            provider_extra = provider_config.get("extra_config")
+            model_extra = m.extra_config
+            # 合并优先级：provider 级默认值 < model 级覆盖值。
+            merged_extra_config = {}
+
+            if isinstance(provider_extra, dict):
+                merged_extra_config.update(provider_extra)
+            elif provider_extra is not None:
+                logger.warning(
+                    "Provider extra_config 不是 dict，忽略: provider=%s, type=%s",
+                    m.provider.code,
+                    type(provider_extra).__name__,
+                )
+
+            if isinstance(model_extra, dict):
+                merged_extra_config.update(model_extra)
+            elif model_extra is not None:
+                logger.warning(
+                    "Model extra_config 不是 dict，忽略: model=%s, type=%s",
+                    m.model_code,
+                    type(model_extra).__name__,
+                )
             
             # 构建配置对象
             model_type = m.model_type or "chat"
@@ -66,7 +89,8 @@ class LLMConfigService:
                 thinking_budget=m.thinking_budget,
                 max_output_tokens=m.max_output_tokens,
                 context_window=m.context_window,
-                extra_config=m.extra_config
+                # 无扩展配置时统一置 None，减少下游判空分支。
+                extra_config=merged_extra_config or None,
             )
             cls._models_cache[m.model_code] = cfg
             

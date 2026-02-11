@@ -1,0 +1,574 @@
+{
+  "report_meta": {
+    "report_id": "maintainability-full-review-20260208",
+    "report_name": "代码可维护性测试报告（全量审查）",
+    "generated_at": "2026-02-08 05:25:13 +0800",
+    "workspace": "当前工作区（含未提交改动）",
+    "scope": [
+      "app/**",
+      "tests/**",
+      "scripts/**",
+      "web/src/**",
+      "docs/**"
+    ],
+    "exclude": [
+      "venv/**",
+      "venv_test/**",
+      "venv_fix/**",
+      "lib_tests/**",
+      "web/node_modules/**",
+      "web/.next/**",
+      "htmlcov/**",
+      ".pytest_cache/**",
+      "logs/**",
+      "data/**",
+      "ragflow/**"
+    ]
+  },
+  "environment": {
+    "python": "3.11.12",
+    "node": "v24.13.0",
+    "npm": "11.6.2",
+    "pytest": "9.0.2",
+    "branch": "master"
+  },
+  "baseline": [
+    {
+      "command": "venv/bin/python -m compileall -q app scripts tests",
+      "exit_code": 0,
+      "summary": "语法编译通过"
+    },
+    {
+      "command": "venv/bin/python -m pytest --collect-only -q",
+      "exit_code": 0,
+      "summary": "收集 36 个测试模块，343 条测试用例"
+    },
+    {
+      "command": "venv/bin/python -m pytest -q --maxfail=20",
+      "exit_code": 1,
+      "summary": "失败 12 条"
+    },
+    {
+      "command": "cd web && npm run -s lint",
+      "exit_code": 0,
+      "summary": "41 条 warning"
+    },
+    {
+      "command": "cd web && npx tsc --noEmit",
+      "exit_code": 2,
+      "summary": "4 条 TypeScript error"
+    },
+    {
+      "command": "venv/bin/python scripts/docs_guard.py --strict",
+      "exit_code": 0,
+      "summary": "0 error，4 warning"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F-P0-001",
+      "severity": "P0",
+      "category": "frontend_type_contract",
+      "location": [
+        "web/src/hooks/useSSEStream.ts:105",
+        "web/src/hooks/useSSEStream.ts:231",
+        "web/src/hooks/useSSEStream.ts:416",
+        "web/src/types/message.ts:72"
+      ],
+      "evidence": [
+        "npx tsc --noEmit 报 TS2322：feedback_score 不属于 SDK Message",
+        "UnifiedMessage 与 SDK Message 双轨映射缺少收敛层"
+      ],
+      "impact": "阻断前端类型构建，消息协议演进风险高",
+      "recommendation": "增加统一转换函数，禁止在 SDK Message 直挂扩展字段",
+      "effort": "M",
+      "related_tests": [
+        "cd web && npx tsc --noEmit"
+      ]
+    },
+    {
+      "id": "F-P0-002",
+      "severity": "P0",
+      "category": "frontend_unsafe_assertion",
+      "location": [
+        "web/src/components/todo/ConfirmationCard.tsx:43",
+        "web/src/components/todo/ConfirmationCard.tsx:67",
+        "web/src/components/todo/ConfirmationCard.tsx:79"
+      ],
+      "evidence": [
+        "npx tsc --noEmit 报 TS2352 / TS2345",
+        "Record<string, unknown> 与 TodoItem 互转无类型守卫"
+      ],
+      "impact": "阻断类型构建，编辑卡片后续字段扩展不安全",
+      "recommendation": "用判别联合替代宽类型，或先 runtime 校验再收敛类型",
+      "effort": "S",
+      "related_tests": [
+        "cd web && npx tsc --noEmit"
+      ]
+    },
+    {
+      "id": "F-P0-003",
+      "severity": "P0",
+      "category": "data_access_contract_drift",
+      "location": [
+        "app/ai/semantic/data_access_control.py:22",
+        "app/ai/semantic/data_access_control.py:156",
+        "app/ai/semantic/data_access_control.py:209",
+        "app/tests/test_data_agent.py:135",
+        "tests/api/test_data_chat.py:211"
+      ],
+      "evidence": [
+        "pytest 失败：t_orders 断言应允许，但命中“不在白名单”",
+        "运行日志显示读取 data_access.table_whitelist 配置"
+      ],
+      "impact": "权限策略与测试基线不一致，回归结果不稳定",
+      "recommendation": "建立测试白名单注入机制并明确优先级策略",
+      "effort": "M",
+      "related_tests": [
+        "venv/bin/python -m pytest -q app/tests/test_data_agent.py::TestDataAccessControl::test_check_table_access_whitelist",
+        "venv/bin/python -m pytest -q tests/api/test_data_chat.py::TestDataAccessControlDirect::test_business_table_access"
+      ]
+    },
+    {
+      "id": "F-P0-004",
+      "severity": "P0",
+      "category": "llm_config_test_fixture",
+      "location": [
+        "app/services/llm_config_service.py:57",
+        "app/tests/test_llm_config.py:14"
+      ],
+      "evidence": [
+        "ValidationError: model_type 需要 string，实际为 MagicMock",
+        "测试夹具未对强类型字段赋值"
+      ],
+      "impact": "LLM 配置能力测试易失真，阻断基础回归",
+      "recommendation": "使用强类型 fixture，避免裸 MagicMock 作为领域模型",
+      "effort": "S",
+      "related_tests": [
+        "venv/bin/python -m pytest -q app/tests/test_llm_config.py::test_config_service_initialization"
+      ]
+    },
+    {
+      "id": "F-P0-005",
+      "severity": "P0",
+      "category": "llm_routing_seam_drift",
+      "location": [
+        "app/ai/llm_util.py:258",
+        "app/ai/llm_util.py:286",
+        "app/ai/llm_util.py:186",
+        "app/tests/test_model_switch.py:74",
+        "app/tests/test_model_switch.py:131"
+      ],
+      "evidence": [
+        "deepseek 用例期望 init_chat_model 被调用一次，但实际走 CustomChatDeepSeek",
+        "force_thinking 用例期望 extra_body 总存在，但实现受 supports_thinking 门控"
+      ],
+      "impact": "模型路由策略变更后，测试 seam 仍绑定旧实现细节",
+      "recommendation": "测试改为行为契约断言（能力与参数），弱化对内部函数调用次数依赖",
+      "effort": "M",
+      "related_tests": [
+        "venv/bin/python -m pytest -q app/tests/test_model_switch.py"
+      ]
+    },
+    {
+      "id": "F-P0-006",
+      "severity": "P0",
+      "category": "todo_test_migration_residue",
+      "location": [
+        "app/tests/test_todo_graph_integration.py:20",
+        "app/tests/test_todo_multiround.py:278",
+        "app/tests/test_todo_multiround.py:305",
+        "app/tests/test_todo_multiround.py:330",
+        "pyproject.toml:62"
+      ],
+      "evidence": [
+        "AttributeError: app.ai.agents.todo_graph 不存在",
+        "async def functions are not natively supported"
+      ],
+      "impact": "待办链路测试噪声高，无法作为可靠回归门",
+      "recommendation": "修正 patch 路径到 workflow 模块并统一 asyncio 测试策略",
+      "effort": "S",
+      "related_tests": [
+        "venv/bin/python -m pytest -q app/tests/test_todo_graph_integration.py",
+        "venv/bin/python -m pytest -q app/tests/test_todo_multiround.py"
+      ]
+    },
+    {
+      "id": "F-P1-001",
+      "severity": "P1",
+      "category": "api_layering_blur",
+      "location": [
+        "app/api/v1/endpoints/todo_api.py:14",
+        "app/api/v1/endpoints/chat_api.py:19",
+        "app/api/v1/endpoints/assets_api.py:19",
+        "app/api/v1/endpoints/user.py:8",
+        "app/api/v1/endpoints/llm_admin_api.py:174",
+        "app/api/v1/endpoints/data_admin_api.py:400"
+      ],
+      "evidence": [
+        "endpoint 直接 import repository 共 4 处",
+        "endpoint 直接 db.query 57 处，db.execute 11 处"
+      ],
+      "impact": "业务逻辑散落 API 层，复用与测试成本偏高",
+      "recommendation": "引入 admin 领域 service，endpoint 只做鉴权与编排",
+      "effort": "L",
+      "related_tests": [
+        "venv/bin/python -m pytest -q tests/api"
+      ]
+    },
+    {
+      "id": "F-P1-002",
+      "severity": "P1",
+      "category": "hotspot_large_files_low_coverage",
+      "location": [
+        "app/ai/workflow/todo_graph.py:1",
+        "app/ai/workflow/data_graph.py:1",
+        "app/ai/workflow/multi_agent_graph.py:1",
+        "app/services/chat_service.py:1",
+        "app/repositories/chat_repo.py:1",
+        "web/src/lib/backend.ts:1",
+        "web/src/components/admin/MetricAdminPanel.tsx:1"
+      ],
+      "evidence": [
+        "Python >600 LOC 文件 7 个，TS/TSX >350 LOC 文件 15 个",
+        "热点覆盖偏低：todo_graph 21%，multi_agent_graph 6%，chat_service 11%，chat_repo 14%"
+      ],
+      "impact": "大文件多职责导致回归风险和协作冲突概率上升",
+      "recommendation": "按职责拆分核心热点模块并补关键路径测试",
+      "effort": "L",
+      "related_tests": [
+        "venv/bin/python -m pytest -q --maxfail=1"
+      ]
+    },
+    {
+      "id": "F-P1-003",
+      "severity": "P1",
+      "category": "pydantic_v2_migration_debt",
+      "location": [
+        "app/api/v1/endpoints/chat_api.py:51",
+        "app/api/v1/endpoints/data_admin_api.py:40",
+        "app/api/v1/endpoints/data_admin_api.py:91",
+        "app/api/v1/endpoints/llm_admin_api.py:38",
+        "app/api/v1/endpoints/llm_admin_api.py:81",
+        "app/api/v1/endpoints/skill_admin_api.py:40",
+        "app/api/v1/endpoints/system_admin_api.py:36"
+      ],
+      "evidence": [
+        "pytest 警告出现 7 次 PydanticDeprecatedSince20",
+        "均为 class Config 旧写法"
+      ],
+      "impact": "依赖升级时存在集中失败风险",
+      "recommendation": "统一迁移到 ConfigDict，并补模型序列化回归测试",
+      "effort": "M",
+      "related_tests": [
+        "venv/bin/python -m pytest -q"
+      ]
+    },
+    {
+      "id": "F-P1-004",
+      "severity": "P1",
+      "category": "frontend_lint_debt_cluster",
+      "location": [
+        "web/src/components/admin/AccessAdminPanel.tsx:1",
+        "web/src/components/chat/index.tsx:1",
+        "web/src/components/chat/messages/ai.tsx:1",
+        "web/src/components/chat/ChatInput.tsx:1"
+      ],
+      "evidence": [
+        "lint warning 41 条",
+        "规则分布：unused-vars 28，only-export-components 12，exhaustive-deps 1"
+      ],
+      "impact": "死代码与边界不清晰，影响可读性和重构安全性",
+      "recommendation": "先做无行为变更清理，再设定 lint 门禁阈值",
+      "effort": "M",
+      "related_tests": [
+        "cd web && npm run -s lint"
+      ]
+    },
+    {
+      "id": "F-P2-001",
+      "severity": "P2",
+      "category": "docs_report_naming_compat",
+      "location": [
+        "docs/开发文档/测试管理/测试报告"
+      ],
+      "evidence": [
+        "docs_guard --strict: 0 error / 4 warning",
+        "均为测试报告兼容命名"
+      ],
+      "impact": "后续自动归档与检索一致性略受影响",
+      "recommendation": "分批统一归档命名并补 README 索引",
+      "effort": "S",
+      "related_tests": [
+        "venv/bin/python scripts/docs_guard.py --strict"
+      ]
+    },
+    {
+      "id": "F-P2-002",
+      "severity": "P2",
+      "category": "toolchain_version_drift",
+      "location": [
+        "requirements.txt:9"
+      ],
+      "evidence": [
+        "requirements 声明 pytest==8.3.4",
+        "本次执行环境 pytest=9.0.2"
+      ],
+      "impact": "本地与 CI 行为一致性风险增加",
+      "recommendation": "统一锁版本与安装入口，补环境一致性校验",
+      "effort": "S",
+      "related_tests": [
+        "venv/bin/python -m pytest --version"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "T-P0-01",
+      "priority": "P0",
+      "scope": [
+        "web/src/hooks/useSSEStream.ts",
+        "web/src/components/todo/ConfirmationCard.tsx",
+        "web/src/types/message.ts"
+      ],
+      "depends_on": [],
+      "changes": [
+        "建立 UnifiedMessage 到 SDK Message 映射函数",
+        "去除 SDK Message 扩展字段直挂",
+        "ConfirmationCard 使用判别联合/校验收敛"
+      ],
+      "validation_cmds": [
+        "cd web && npx tsc --noEmit",
+        "cd web && npm run -s lint"
+      ],
+      "dod": "TypeScript 零错误且 lint warning 不回升",
+      "risk": "Medium"
+    },
+    {
+      "task_id": "T-P0-02",
+      "priority": "P0",
+      "scope": [
+        "app/ai/semantic/data_access_control.py",
+        "app/tests/test_data_agent.py",
+        "tests/api/test_data_chat.py"
+      ],
+      "depends_on": [],
+      "changes": [
+        "明确测试白名单来源",
+        "统一白名单加载优先级",
+        "补稳定 fixture"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q app/tests/test_data_agent.py::TestDataAccessControl::test_check_table_access_whitelist",
+        "venv/bin/python -m pytest -q app/tests/test_data_agent.py::TestDataAccessControl::test_validate_sql_valid",
+        "venv/bin/python -m pytest -q tests/api/test_data_chat.py::TestDataAccessControlDirect::test_business_table_access"
+      ],
+      "dod": "3 条权限基线用例通过，日志与预期一致",
+      "risk": "Medium"
+    },
+    {
+      "task_id": "T-P0-03",
+      "priority": "P0",
+      "scope": [
+        "app/tests/test_llm_config.py"
+      ],
+      "depends_on": [],
+      "changes": [
+        "将 MagicMock 模型替换为强类型 fixture",
+        "补全必填字段 model_type"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q app/tests/test_llm_config.py::test_config_service_initialization"
+      ],
+      "dod": "配置初始化用例稳定通过",
+      "risk": "Low"
+    },
+    {
+      "task_id": "T-P0-04",
+      "priority": "P0",
+      "scope": [
+        "app/tests/test_model_switch.py",
+        "app/ai/llm_util.py"
+      ],
+      "depends_on": [
+        "T-P0-03"
+      ],
+      "changes": [
+        "改造 deepseek/qwen 路由测试为行为契约",
+        "force_thinking 测试与 supports_thinking 策略对齐"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q app/tests/test_model_switch.py"
+      ],
+      "dod": "模型切换失败用例清零且契约断言清晰",
+      "risk": "Medium"
+    },
+    {
+      "task_id": "T-P0-05",
+      "priority": "P0",
+      "scope": [
+        "app/tests/test_todo_graph_integration.py",
+        "app/tests/test_todo_multiround.py",
+        "pyproject.toml"
+      ],
+      "depends_on": [],
+      "changes": [
+        "修复 patch 目标路径",
+        "统一 async 测试执行策略"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q app/tests/test_todo_graph_integration.py",
+        "venv/bin/python -m pytest -q app/tests/test_todo_multiround.py"
+      ],
+      "dod": "待办链路 5 条失败用例清零",
+      "risk": "Low"
+    },
+    {
+      "task_id": "T-P1-01",
+      "priority": "P1",
+      "scope": [
+        "app/api/v1/endpoints/*admin*.py",
+        "app/services/*"
+      ],
+      "depends_on": [
+        "T-P0-01",
+        "T-P0-02",
+        "T-P0-03",
+        "T-P0-04",
+        "T-P0-05"
+      ],
+      "changes": [
+        "将 endpoint 中 query/execute 下沉到 service",
+        "统一事务与错误处理边界"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q tests/api"
+      ],
+      "dod": "endpoint 层仅保留鉴权、参数校验、响应编排",
+      "risk": "High"
+    },
+    {
+      "task_id": "T-P1-02",
+      "priority": "P1",
+      "scope": [
+        "app/ai/workflow/todo_graph.py",
+        "app/ai/workflow/multi_agent_graph.py",
+        "app/services/chat_service.py"
+      ],
+      "depends_on": [
+        "T-P1-01"
+      ],
+      "changes": [
+        "按职责拆分大文件",
+        "隔离协议转换与外部调用"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m compileall -q app",
+        "venv/bin/python -m pytest -q --maxfail=1"
+      ],
+      "dod": "热点模块职责收敛且回归通过",
+      "risk": "High"
+    },
+    {
+      "task_id": "T-P1-03",
+      "priority": "P1",
+      "scope": [
+        "app/ai/workflow/*",
+        "app/services/chat_service.py",
+        "app/repositories/chat_repo.py"
+      ],
+      "depends_on": [
+        "T-P1-02"
+      ],
+      "changes": [
+        "补关键路径回归测试",
+        "提升热点覆盖"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q --maxfail=1"
+      ],
+      "dod": "核心热点覆盖提升并稳定",
+      "risk": "Medium"
+    },
+    {
+      "task_id": "T-P1-04",
+      "priority": "P1",
+      "scope": [
+        "app/api/v1/endpoints/chat_api.py",
+        "app/api/v1/endpoints/data_admin_api.py",
+        "app/api/v1/endpoints/llm_admin_api.py",
+        "app/api/v1/endpoints/skill_admin_api.py",
+        "app/api/v1/endpoints/system_admin_api.py"
+      ],
+      "depends_on": [],
+      "changes": [
+        "class Config 迁移为 ConfigDict",
+        "补模型序列化行为测试"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest -q"
+      ],
+      "dod": "PydanticDeprecatedSince20 警告清零",
+      "risk": "Medium"
+    },
+    {
+      "task_id": "T-P1-05",
+      "priority": "P1",
+      "scope": [
+        "web/src/components/admin/AccessAdminPanel.tsx",
+        "web/src/components/chat/index.tsx",
+        "web/src/components/chat/messages/ai.tsx",
+        "web/src/components/chat/ChatInput.tsx"
+      ],
+      "depends_on": [
+        "T-P0-01"
+      ],
+      "changes": [
+        "清理 unused 变量与导入",
+        "拆分非组件导出",
+        "修复 hook 依赖"
+      ],
+      "validation_cmds": [
+        "cd web && npm run -s lint"
+      ],
+      "dod": "lint warning 明显下降并可设门禁",
+      "risk": "Low"
+    },
+    {
+      "task_id": "T-P2-01",
+      "priority": "P2",
+      "scope": [
+        "docs/开发文档/测试管理/测试报告"
+      ],
+      "depends_on": [],
+      "changes": [
+        "统一历史测试报告命名",
+        "补索引说明"
+      ],
+      "validation_cmds": [
+        "venv/bin/python scripts/docs_guard.py --strict"
+      ],
+      "dod": "报告命名 warning 清零",
+      "risk": "Low"
+    },
+    {
+      "task_id": "T-P2-02",
+      "priority": "P2",
+      "scope": [
+        "requirements.txt",
+        "pyproject.toml",
+        "CI 环境初始化"
+      ],
+      "depends_on": [],
+      "changes": [
+        "统一 pytest 与插件版本",
+        "增加环境一致性校验"
+      ],
+      "validation_cmds": [
+        "venv/bin/python -m pytest --version"
+      ],
+      "dod": "本地与 CI 版本基线一致",
+      "risk": "Low"
+    }
+  ]
+}

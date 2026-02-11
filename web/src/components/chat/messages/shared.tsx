@@ -183,8 +183,8 @@ export function CommandBar({
   handleRegenerate,
   isLoading,
   messageId,
+  feedbackScore,
 }: {
-
   content: string;
   isHumanMessage?: boolean;
   isAiMessage?: boolean;
@@ -193,7 +193,7 @@ export function CommandBar({
   handleSubmitEdit?: () => void;
   handleRegenerate?: () => void;
   messageId?: number | string;
-  initialScore?: number;
+  feedbackScore?: number;
   isLoading: boolean;
 }) {
   if (isHumanMessage && isAiMessage) {
@@ -269,7 +269,7 @@ export function CommandBar({
       {isAiMessage && messageId && (
         <FeedbackButtons
           messageId={messageId}
-          initialScore={0}
+          initialScore={feedbackScore ?? 0}
           disabled={isLoading}
         />
       )}

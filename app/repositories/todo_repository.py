@@ -218,6 +218,42 @@ class TodoRepository:
         result = self.update_fields(db, todo_id, user_id, **updates)
         return result is not None
     
+    def append_progress_notes(
+        self,
+        db: Session,
+        todo_id: int,
+        user_id: int,
+        note: str
+    ) -> bool:
+        """追加进展记录到 progress_notes（倒序，新记录在最前面，附带日期时间）。"""
+        todo = self.get_by_id(db, todo_id, user_id)
+        if not todo:
+            return False
+
+        old_notes = todo.progress_notes or ""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        new_line = f"[{timestamp}] {note}"
+
+        if old_notes:
+            todo.progress_notes = new_line + "\n" + old_notes
+        else:
+            todo.progress_notes = new_line
+
+        todo.update_time = datetime.now()
+        db.commit()
+
+        self._log_history(
+            db=db,
+            todo_id=todo_id,
+            user_id=user_id,
+            action="update",
+            changed_fields=["progress_notes"],
+            old_values={"progress_notes": old_notes},
+            new_values={"progress_notes": todo.progress_notes}
+        )
+
+        return True
+
     def complete(self, db: Session, todo_id: int, user_id: int) -> bool:
         """标记待办事项为已完成。"""
         updates = {

@@ -17,7 +17,7 @@ class MockLLMResponse:
 
 class TestAnalyzeIntentIntegration(unittest.TestCase):
     
-    @patch("app.ai.agents.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_llm")
     def test_next_tuesday_integration(self, mock_get_llm):
         # 1. 模拟 LLM 返回 "下周二"
         mock_response = MockLLMResponse(json.dumps({
@@ -33,6 +33,7 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
         # 2. 构造初始 State
         state = {
             "messages": [],
+            "user_id": 1,
             "pending_operation": None,
             "time_constraints": {}
         }
@@ -62,7 +63,7 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
         
         # 验证 constraints
     
-    @patch("app.ai.agents.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_llm")
     def test_constraint_extraction(self, mock_get_llm):
         # 模拟 LLM 返回包含约束的文本
         mock_response = MockLLMResponse(json.dumps({
@@ -74,7 +75,7 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
         }))
         mock_get_llm.return_value.invoke.return_value = mock_response
         
-        state = {"messages": [], "time_constraints": {}}
+        state = {"messages": [], "user_id": 1, "time_constraints": {}}
         new_state = analyze_intent(state)
         
         # 验证 constraints 是否被提取到 state

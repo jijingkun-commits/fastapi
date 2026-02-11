@@ -46,6 +46,7 @@ class MessageOut(BaseModel):
     additional_kwargs: Optional[dict] = None  # 用于前端组件渲染
     title: Optional[str] = None
     created_at: Optional[str] = None
+    feedback_score: Optional[int] = None  # 用户反馈: 1(赞) / -1(踩) / None(无)
 
     class Config:
         from_attributes = True
@@ -165,6 +166,17 @@ def get_thread_messages(
     """
     messages = chat_repo.get_messages_by_thread(db, thread_id, limit)
     
+    # 批量查询该用户对这些消息的反馈状态
+    message_ids = [m.id for m in messages]
+    feedback_map = {}
+    if message_ids:
+        try:
+            feedback_map = chat_repo.get_feedback_scores_batch(
+                db, user_id=current_user.id, message_ids=message_ids
+            )
+        except Exception as e:
+            logger.debug("批量查询反馈状态失败（不影响主流程）: %s", e)
+    
     result = []
     for m in messages:
         content = m.content
@@ -185,9 +197,10 @@ def get_thread_messages(
             content_type=m.content_type,
             content=content,
             metadata=m.extra_data,
-            additional_kwargs=m.extra_data,  # 映射 extra_data 到 additional_kwargs
+            additional_kwargs=m.extra_data,
             title=m.title,
             created_at=m.create_time.isoformat() if m.create_time else None,
+            feedback_score=feedback_map.get(m.id),
         ))
     
     return result
@@ -267,7 +280,11 @@ def submit_feedback(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """提交消息反馈（点赞/点踩）。"""
+    """提交消息反馈（点赞/点踩）。
+    
+    点踩数据查询类消息时，自动将该查询记录到 SQL 修正台（t_data_query_log），
+    供管理员审核和修正。
+    """
     try:
         feedback = chat_repo.save_feedback(
             db,
@@ -276,8 +293,91 @@ def submit_feedback(
             score=payload.score,
             reason=payload.reason,
         )
+        
+        # 点踩时：如果是数据查询类消息，自动记录到 SQL 修正台
+        if payload.score == -1:
+            _log_disliked_sql_query(db, payload.message_id, current_user.id)
+        
         return {"message": "反馈已提交", "data": feedback}
     except Exception as e:
         logger.error("提交反馈失败: %s", e)
         raise HTTPException(status_code=500, detail="提交反馈失败")
+
+
+def _log_disliked_sql_query(db: Session, message_id: int, user_id: int):
+    """点踩时将数据查询记录到 SQL 修正台。
+    
+    从消息的 metadata 中提取 SQL 信息，写入 t_data_query_log。
+    仅处理 data_type='sql_result' 的消息，其他类型跳过。
+    """
+    try:
+        from app.models.chat_message import ChatMessage
+        from app.models.data_agent_metadata import DataQueryLog
+        
+        # 查找被点踩的消息
+        msg = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+        if not msg or not msg.extra_data:
+            return
+        
+        extra = msg.extra_data
+        if not isinstance(extra, dict) or extra.get("data_type") != "sql_result":
+            return
+        
+        data = extra.get("data", {})
+        sql = data.get("sql")
+        if not sql:
+            return
+        
+        # 查找同一线程中最近的用户问题
+        question = ""
+        if msg.thread_id:
+            human_msg = (
+                db.query(ChatMessage)
+                .filter(
+                    ChatMessage.thread_id == msg.thread_id,
+                    ChatMessage.role == "human",
+                    ChatMessage.id < message_id
+                )
+                .order_by(ChatMessage.id.desc())
+                .first()
+            )
+            if human_msg:
+                question = human_msg.content or ""
+        
+        if not question:
+            question = "(未找到原始问题)"
+        
+        # 避免重复写入（同一消息只记录一次）
+        existing = (
+            db.query(DataQueryLog)
+            .filter(DataQueryLog.generated_sql == sql, DataQueryLog.user_id == user_id)
+            .first()
+        )
+        if existing:
+            logger.debug("SQL 修正台已存在相同记录，跳过: message_id=%d", message_id)
+            return
+        
+        # 异步生成 embedding（失败不阻塞）
+        embedding = None
+        try:
+            from app.ai.utils.embedding_util import get_embedding
+            embedding = get_embedding(question)
+        except Exception:
+            pass
+        
+        log = DataQueryLog(
+            user_id=user_id,
+            thread_id=msg.thread_id,
+            question=question,
+            generated_sql=sql,
+            sql_source=data.get("sql_source", "unknown"),
+            is_correct=False,
+            question_embedding=embedding,
+        )
+        db.add(log)
+        db.commit()
+        logger.info("点踩触发 SQL 修正台记录: message_id=%d, question=%s", message_id, question[:50])
+        
+    except Exception as e:
+        logger.warning("SQL 修正台记录失败（不影响反馈流程）: %s", e)
 

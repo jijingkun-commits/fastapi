@@ -293,6 +293,38 @@ COMMENT ON COLUMN t_metric_definition.description IS '自然语言口径描述�
 COMMENT ON COLUMN t_metric_definition.sql_template IS '完整SQL模板';
 COMMENT ON COLUMN t_metric_definition.embedding IS '语义向量（智谱 embedding-3，2048维）';
 
+-- 问数查询日志表
+CREATE TABLE IF NOT EXISTS t_data_query_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    thread_id VARCHAR(100),
+    question TEXT NOT NULL,
+    generated_sql TEXT,
+    sql_source VARCHAR(20),
+    execution_result JSONB,
+    is_correct BOOLEAN,
+    corrected_sql TEXT,
+    trained BOOLEAN DEFAULT FALSE,
+    is_ignored BOOLEAN NOT NULL DEFAULT FALSE,
+    question_embedding VECTOR(2048),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_query_log_user_id ON t_data_query_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_query_log_thread_id ON t_data_query_log(thread_id);
+
+COMMENT ON TABLE t_data_query_log IS '问数查询日志表';
+COMMENT ON COLUMN t_data_query_log.user_id IS '用户ID';
+COMMENT ON COLUMN t_data_query_log.thread_id IS '会话ID';
+COMMENT ON COLUMN t_data_query_log.question IS '用户原始问题';
+COMMENT ON COLUMN t_data_query_log.generated_sql IS '生成的SQL';
+COMMENT ON COLUMN t_data_query_log.sql_source IS '来源: metric/vanna/template';
+COMMENT ON COLUMN t_data_query_log.is_correct IS '是否正确（用户反馈）';
+COMMENT ON COLUMN t_data_query_log.corrected_sql IS '人工修正后的SQL';
+COMMENT ON COLUMN t_data_query_log.trained IS '是否已训练进向量库';
+COMMENT ON COLUMN t_data_query_log.is_ignored IS '是否已忽略（软隐藏）';
+COMMENT ON COLUMN t_data_query_log.question_embedding IS '问题向量（智谱 embedding-3，2048维）';
+
 -- ============================================================
 -- AI 技能与反馈
 -- ============================================================
@@ -417,6 +449,13 @@ COMMENT ON TABLE t_system_config IS '系统配置表';
 COMMENT ON COLUMN t_system_config.config_key IS '配置键: ai.message_max_tokens';
 COMMENT ON COLUMN t_system_config.value_type IS '类型: string/number/boolean/json';
 COMMENT ON COLUMN t_system_config.is_secret IS '是否敏感（UI掩码显示）';
+
+-- 默认系统配置（关键特性开关）
+INSERT INTO t_system_config (config_key, config_value, value_type, category, description, is_secret, is_readonly)
+VALUES
+    ('feature.proxy_experiment_enabled', 'false', 'boolean', 'feature', '中转供应商实验总开关（建议仅开发/测试开启）', false, false),
+    ('feature.proxy_experiment_providers', 'openai_proxy_trial', 'string', 'feature', '中转实验 provider 白名单（逗号分隔）', false, false)
+ON CONFLICT (config_key) DO NOTHING;
 
 -- 更新时间触发器
 CREATE OR REPLACE FUNCTION update_timestamp()

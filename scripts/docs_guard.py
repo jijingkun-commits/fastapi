@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""docs 文档治理校验脚本。
+
+检查项：
+1. 相对链接存在性（忽略 fenced code / inline code）
+2. docs/SUMMARY.md 链接目标存在性
+3. 非归档文档是否被 SUMMARY 收录
+4. 测试报告命名与主/归档规则
+5. 双库变量名黑名单（DATA_DATABASE_URL）
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS_DIR = ROOT / "docs"
+SUMMARY_FILE = DOCS_DIR / "SUMMARY.md"
+REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
+
+
+FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
+INLINE_CODE_RE = re.compile(r"`[^`]*`")
+MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+
+MAIN_REPORT_RE = re.compile(r"^[^/]+测试报告\.md$")
+ARCHIVE_REPORT_RE = re.compile(r"^[^/]+测试报告_\d{8}_.+\.md$")
+ARCHIVE_REPORT_DASH_RE = re.compile(r"^[^/]+测试报告_\d{4}-\d{2}-\d{2}_.+\.md$")
+COMPAT_SCENE_REPORT_RE = re.compile(r"^测试报告_[^_]+_\d{8}\.md$")
+COMPAT_MODULE_DATED_RE = re.compile(r"^[^/]+测试报告_\d{4}-\d{2}-\d{2}\.md$")
+
+
+@dataclass
+class Finding:
+    category: str
+    level: str
+    file: str
+    detail: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "category": self.category,
+            "level": self.level,
+            "file": self.file,
+            "detail": self.detail,
+        }
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def strip_code_blocks(text: str) -> str:
+    text = FENCED_CODE_RE.sub("", text)
+    text = INLINE_CODE_RE.sub("", text)
+    return text
+
+
+def iter_markdown_files() -> Iterable[Path]:
+    return sorted(DOCS_DIR.rglob("*.md"))
+
+
+def is_placeholder_link(link: str) -> bool:
+    placeholders = {"url", "...", "{url}", "${url}", "{image_url}", "./..."}
+    if link in placeholders:
+        return True
+    if any(token in link for token in ("{", "}", "$")):
+        return True
+    return False
+
+
+def resolve_relative_link(src: Path, raw_link: str) -> Path | None:
+    link = raw_link.strip()
+    if not link:
+        return None
+    if link.startswith(("http://", "https://", "mailto:")):
+        return None
+
+    path_part = link.split("#", 1)[0].strip()
+    if not path_part or path_part.startswith("/"):
+        return None
+    if is_placeholder_link(path_part):
+        return None
+
+    return (src.parent / path_part).resolve()
+
+
+def parse_summary_links() -> list[str]:
+    text = read_text(SUMMARY_FILE)
+    links: list[str] = []
+    for match in MARKDOWN_LINK_RE.finditer(text):
+        link = match.group(1).strip()
+        if link.startswith(("http://", "https://", "mailto:")):
+            continue
+        path = link.split("#", 1)[0].strip()
+        if path:
+            links.append(path)
+    return links
+
+
+def check_broken_links(findings: list[Finding]) -> int:
+    count = 0
+    for md_file in iter_markdown_files():
+        text = strip_code_blocks(read_text(md_file))
+        for match in MARKDOWN_LINK_RE.finditer(text):
+            raw = match.group(1)
+            target = resolve_relative_link(md_file, raw)
+            if target is None:
+                continue
+            if not target.exists():
+                count += 1
+                findings.append(
+                    Finding(
+                        category="broken_link",
+                        level="error",
+                        file=str(md_file.relative_to(ROOT)),
+                        detail=f"{raw} -> {target.relative_to(ROOT)}",
+                    )
+                )
+    return count
+
+
+def check_summary_targets(findings: list[Finding]) -> int:
+    count = 0
+    for link in parse_summary_links():
+        target = (DOCS_DIR / link).resolve()
+        if not target.exists():
+            count += 1
+            findings.append(
+                Finding(
+                    category="summary_broken_target",
+                    level="error",
+                    file=str(SUMMARY_FILE.relative_to(ROOT)),
+                    detail=f"{link}",
+                )
+            )
+    return count
+
+
+def is_archived_doc(path: Path) -> bool:
+    rel = path.relative_to(DOCS_DIR)
+    parts = rel.parts
+    if "归档备份" in parts:
+        return True
+    if "测试报告" in parts and path.name != "README.md":
+        return True
+    return False
+
+
+def check_summary_coverage(findings: list[Finding]) -> tuple[int, int]:
+    links = parse_summary_links()
+    linked_targets = {(DOCS_DIR / link).resolve() for link in links}
+
+    required_docs = []
+    for md_file in iter_markdown_files():
+        if md_file in {DOCS_DIR / "README.md", DOCS_DIR / "SUMMARY.md"}:
+            continue
+        if is_archived_doc(md_file):
+            continue
+        required_docs.append(md_file.resolve())
+
+    missing = [doc for doc in required_docs if doc not in linked_targets]
+    for doc in missing:
+        findings.append(
+            Finding(
+                category="summary_missing_doc",
+                level="error",
+                file=str(doc.relative_to(ROOT)),
+                detail="未被 docs/SUMMARY.md 收录",
+            )
+        )
+
+    total = len(required_docs)
+    covered = total - len(missing)
+    return covered, total
+
+
+def check_report_naming(findings: list[Finding]) -> int:
+    count = 0
+    if not REPORT_DIR.exists():
+        findings.append(
+            Finding(
+                category="report_naming",
+                level="error",
+                file=str(REPORT_DIR.relative_to(ROOT)),
+                detail="目录不存在",
+            )
+        )
+        return 1
+
+    for md_file in sorted(REPORT_DIR.glob("*.md")):
+        name = md_file.name
+        if name == "README.md":
+            continue
+        if MAIN_REPORT_RE.match(name):
+            continue
+        if ARCHIVE_REPORT_RE.match(name):
+            continue
+        if ARCHIVE_REPORT_DASH_RE.match(name):
+            continue
+        if COMPAT_SCENE_REPORT_RE.match(name) or COMPAT_MODULE_DATED_RE.match(name):
+            findings.append(
+                Finding(
+                    category="report_naming",
+                    level="warning",
+                    file=str(md_file.relative_to(ROOT)),
+                    detail="兼容命名（建议后续统一）",
+                )
+            )
+            continue
+
+        count += 1
+        findings.append(
+            Finding(
+                category="report_naming",
+                level="error",
+                file=str(md_file.relative_to(ROOT)),
+                detail="不符合主报告/归档命名规范",
+            )
+        )
+
+    return count
+
+
+def check_blacklist_vars(findings: list[Finding]) -> int:
+    count = 0
+    pattern = re.compile(r"\bDATA_DATABASE_URL\b")
+    for md_file in iter_markdown_files():
+        text = read_text(md_file)
+        for idx, line in enumerate(text.splitlines(), start=1):
+            if pattern.search(line):
+                count += 1
+                findings.append(
+                    Finding(
+                        category="blacklist_var",
+                        level="error",
+                        file=f"{md_file.relative_to(ROOT)}:{idx}",
+                        detail="发现黑名单变量 DATA_DATABASE_URL",
+                    )
+                )
+    return count
+
+
+def summarize(findings: list[Finding], covered: int, total: int, stats: dict[str, int]) -> dict:
+    errors = sum(1 for finding in findings if finding.level == "error")
+    warnings = sum(1 for finding in findings if finding.level == "warning")
+    coverage_ratio = 0.0 if total == 0 else covered / total
+
+    return {
+        "strict_pass": errors == 0,
+        "stats": {
+            **stats,
+            "summary_covered_docs": covered,
+            "summary_total_required_docs": total,
+            "summary_coverage_ratio": round(coverage_ratio, 4),
+            "errors": errors,
+            "warnings": warnings,
+        },
+        "findings": [finding.to_dict() for finding in findings],
+    }
+
+
+def print_human_report(report: dict) -> None:
+    stats = report["stats"]
+    print("=" * 48)
+    print("docs_guard 检查报告")
+    print("=" * 48)
+    print(f"broken_links: {stats['broken_links']}")
+    print(f"summary_broken_targets: {stats['summary_broken_targets']}")
+    print(
+        "summary_coverage: "
+        f"{stats['summary_covered_docs']}/{stats['summary_total_required_docs']}"
+        f" ({stats['summary_coverage_ratio'] * 100:.2f}%)"
+    )
+    print(f"report_naming_errors: {stats['report_naming_errors']}")
+    print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
+    print(f"errors: {stats['errors']} | warnings: {stats['warnings']}")
+
+    if report["findings"]:
+        print("\n详细问题:")
+        for finding in report["findings"]:
+            print(
+                f"- [{finding['level']}] {finding['category']} "
+                f"{finding['file']} -> {finding['detail']}"
+            )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="docs 文档治理检查")
+    parser.add_argument("--strict", action="store_true", help="发现 error 时返回非零退出码")
+    parser.add_argument("--json-out", type=str, default="", help="输出 JSON 报告路径")
+    args = parser.parse_args()
+
+    findings: list[Finding] = []
+
+    stats = {
+        "broken_links": check_broken_links(findings),
+        "summary_broken_targets": check_summary_targets(findings),
+        "report_naming_errors": check_report_naming(findings),
+        "blacklist_var_hits": check_blacklist_vars(findings),
+    }
+    covered, total = check_summary_coverage(findings)
+
+    report = summarize(findings, covered, total, stats)
+    print_human_report(report)
+
+    if args.json_out:
+        out_path = Path(args.json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nJSON 已输出: {out_path}")
+
+    if args.strict and not report["strict_pass"]:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

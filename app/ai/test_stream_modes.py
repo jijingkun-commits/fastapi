@@ -1,6 +1,7 @@
 """对比 LangChain stream_mode 下 tool_calls 的差异。
 
 运行方法：
+    export DEEPSEEK_API_KEY=your_key
     python app/ai/test_stream_modes.py
 """
 import asyncio
@@ -35,12 +36,19 @@ def weather_search(city: str, date: str = "今天") -> str:
 
 async def test_stream_modes():
     """测试不同 stream_mode 下 tool_calls 的数据结构。"""
-    
+    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("MODEL_API_KEY")
+    if not api_key:
+        raise ValueError("未配置 DEEPSEEK_API_KEY 或 MODEL_API_KEY，无法运行测试脚本")
+
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+
     # 直接使用 DeepSeek API
     llm = ChatOpenAI(
         model="deepseek-chat",
-        api_key="sk-07b7fae4b8dc4d1fb4c9539e59def338",
-        base_url="https://api.deepseek.com/v1",
+        api_key=api_key,
+        base_url=base_url,
         streaming=True,
     )
     print("✅ 使用 DeepSeek Chat")

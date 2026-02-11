@@ -138,6 +138,25 @@ SQL_REQUIRE_APPROVAL = os.getenv("SQL_REQUIRE_APPROVAL", "true").lower() == "tru
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
 
+# 结果增强规则开关与缓存 TTL
+ENABLE_RESULT_ENRICHMENT = os.getenv("ENABLE_RESULT_ENRICHMENT", "true").lower() == "true"
+RESULT_ENRICHMENT_RULE_TTL_SECONDS = int(os.getenv("RESULT_ENRICHMENT_RULE_TTL_SECONDS", "120"))
+
+# 中转供应商实验适配环境变量兜底（优先读取 t_system_config 中的 feature.* 开关）
+# 仅当数据库未配置对应键时才使用以下环境变量
+ENABLE_PROXY_EXPERIMENT = os.getenv("ENABLE_PROXY_EXPERIMENT", "false").lower() == "true"
+_proxy_provider_codes = os.getenv("PROXY_EXPERIMENT_PROVIDERS", "openai_proxy_trial")
+PROXY_EXPERIMENT_PROVIDERS = {
+    code.strip() for code in _proxy_provider_codes.split(",") if code.strip()
+}
+
+# internal 消息内容清洗开关（用于兼容 Responses 风格 content block）
+# 默认值：非 prod 为 true，prod 为 false（可通过环境变量覆盖）
+ENABLE_INTERNAL_CONTENT_SANITIZE = os.getenv(
+    "ENABLE_INTERNAL_CONTENT_SANITIZE",
+    "true" if ENV != "prod" else "false",
+).lower() == "true"
+
 # LLM Judge 输出评估（用于问数助手 SQL 质量评估）
 ENABLE_LLM_JUDGE = os.getenv("ENABLE_LLM_JUDGE", "false").lower() == "true"
 # 注意：运行时优先从 t_system_config 读取，此处为回退默认值

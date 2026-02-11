@@ -38,6 +38,41 @@ interface TodoItem {
     description?: string
 }
 
+function getStringValue(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+function getNumberValue(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : undefined
+    }
+    return undefined
+}
+
+function normalizeTodoData(data: Record<string, unknown>): TodoItem {
+    return {
+        title: getStringValue(data.title) || '',
+        time: getStringValue(data.time),
+        priority: getNumberValue(data.priority),
+        category: getStringValue(data.category),
+        description: getStringValue(data.description),
+    }
+}
+
+function todoItemToRecord(todo: TodoItem): Record<string, unknown> {
+    return {
+        title: todo.title,
+        ...(todo.time && { time: todo.time }),
+        ...(todo.priority !== undefined && { priority: todo.priority }),
+        ...(todo.category && { category: todo.category }),
+        ...(todo.description && { description: todo.description }),
+    }
+}
+
 interface ConfirmationData {
     action: 'create' | 'update' | 'delete' | 'complete'
     data: Record<string, unknown>
@@ -64,7 +99,7 @@ export default function ConfirmationCard({
 
     // 获取待办数据
     const getTodoData = (): TodoItem => {
-        return (operation.data as TodoItem) || { title: '' }
+        return normalizeTodoData(operation.data)
     }
 
     const todo = editedData || getTodoData()
@@ -76,7 +111,7 @@ export default function ConfirmationCard({
 
     // 确认操作
     const handleConfirm = () => {
-        onConfirm(editedData || operation.data)
+        onConfirm(editedData ? todoItemToRecord(editedData) : operation.data)
     }
 
     const priorityNames: Record<number, string> = { 1: '高', 2: '中', 3: '低' }

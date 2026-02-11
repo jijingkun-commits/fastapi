@@ -41,6 +41,14 @@ class TestQueryLogAPI:
             headers=auth_headers
         )
         assert response.status_code in [200, 401, 403]
+
+    def test_list_query_logs_with_include_ignored(self, client: TestClient, auth_headers: dict):
+        """测试查询日志包含已忽略参数。"""
+        response = client.get(
+            "/api/v1/data-admin/query-logs?include_ignored=true",
+            headers=auth_headers
+        )
+        assert response.status_code in [200, 401, 403]
     
     def test_get_query_log_not_found(self, client: TestClient, auth_headers: dict):
         """测试获取不存在的查询日志。"""
@@ -72,6 +80,15 @@ class TestSQLCorrectionAPI:
         """测试未授权的 SQL 反馈。"""
         response = client.post(
             "/api/v1/data-admin/query-logs/feedback/1?is_correct=true"
+        )
+        assert response.status_code in [401, 403, 422]
+
+    def test_ignore_logs_unauthorized(self, client: TestClient):
+        """测试未授权的日志忽略。"""
+        payload = {"log_ids": [1, 2]}
+        response = client.post(
+            "/api/v1/data-admin/query-logs/ignore",
+            json=payload
         )
         assert response.status_code in [401, 403, 422]
 
@@ -168,8 +185,11 @@ class TestAdminAPIPermission:
             ("GET", "/api/v1/data-admin/query-logs"),
             ("GET", "/api/v1/data-admin/metrics"),
             ("GET", "/api/v1/data-admin/tables"),
+            ("GET", "/api/v1/data-admin/enrichment-rules"),
+            ("POST", "/api/v1/data-admin/query-logs/ignore"),
             ("POST", "/api/v1/data-admin/train/all-pending"),
             ("POST", "/api/v1/data-admin/sync-schema"),
+            ("POST", "/api/v1/data-admin/enrichment-rules/refresh-cache"),
         ]
         
         for method, endpoint in endpoints:
@@ -181,3 +201,41 @@ class TestAdminAPIPermission:
             # 所有未认证请求应该被拒绝
             assert response.status_code in [401, 403, 422], \
                 f"{method} {endpoint} 应该需要认证，实际返回 {response.status_code}"
+
+
+class TestEnrichmentRuleAPI:
+    """结果增强规则 API 测试。"""
+
+    def test_list_enrichment_rules_unauthorized(self, client: TestClient):
+        response = client.get("/api/v1/data-admin/enrichment-rules")
+        assert response.status_code in [401, 403, 422]
+
+    def test_create_enrichment_rule_unauthorized(self, client: TestClient):
+        payload = {
+            "rule_code": "customer_name",
+            "rule_name": "客户名称补齐",
+            "enabled": True,
+            "priority": 10,
+            "key_column_candidates": ["ecif_cust_no"],
+            "target_column": "客户名称",
+            "source_table": "fdmdata.f_mid_dep_tb",
+            "source_key_column": "ecif_cust_no",
+            "source_value_column": "cust_acct_name",
+            "source_date_column": "data_dt",
+            "result_date_column_candidates": ["data_dt"],
+            "description": "test",
+        }
+        response = client.post("/api/v1/data-admin/enrichment-rules", json=payload)
+        assert response.status_code in [401, 403, 422]
+
+    def test_test_enrichment_rules_unauthorized(self, client: TestClient):
+        payload = {
+            "rows": [{"ecif_cust_no": "1001", "贷款余额": 100.0}],
+            "columns": ["ecif_cust_no", "贷款余额"],
+        }
+        response = client.post("/api/v1/data-admin/enrichment-rules/test", json=payload)
+        assert response.status_code in [401, 403, 422]
+
+    def test_refresh_enrichment_rule_cache_unauthorized(self, client: TestClient):
+        response = client.post("/api/v1/data-admin/enrichment-rules/refresh-cache")
+        assert response.status_code in [401, 403, 422]

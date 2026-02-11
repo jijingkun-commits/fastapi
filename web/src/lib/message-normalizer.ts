@@ -39,9 +39,14 @@ export function fromBackendMessage(msg: ConversationMessage): UnifiedMessage {
         }
     }
 
-    // 从 metadata 恢复 additionalKwargs (用于 TodoList 等卡片渲染)
+    // 从 metadata 恢复 additionalKwargs (用于 TodoList/SqlResult 等卡片渲染)
     if (msg.metadata && Object.keys(msg.metadata).length > 0) {
         normalized.additionalKwargs = msg.metadata;
+    }
+
+    // 恢复用户反馈状态
+    if (msg.feedback_score !== undefined && msg.feedback_score !== null) {
+        normalized.feedbackScore = msg.feedback_score;
     }
 
     return normalized;

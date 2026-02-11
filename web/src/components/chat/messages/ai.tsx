@@ -20,6 +20,9 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import ConfirmationCard from "@/components/todo/ConfirmationCard";
 import TodoListCard from "@/components/todo/TodoListCard";
 import { Todo } from "@/types/todo";
+import { SqlResultTable } from "@/components/chat/messages/sql-result-table";
+import { SqlResultChart } from "@/components/chat/messages/sql-result-chart";
+import type { SqlResultChartData } from "@/types/message";
 
 /**
  * 解析 Anthropic 流式工具调用
@@ -102,6 +105,10 @@ export function AssistantMessage({
 
   // 获取 todos 数据
   const todoData = responseData?.todos as Todo[] | undefined;
+
+  // 获取 SQL 查询结果数据
+  const sqlResultData = dataType === "sql_result" ? responseData : undefined;
+  const sqlChartData = sqlResultData?.chart as SqlResultChartData | undefined;
 
   // 确认操作处理
   const handleConfirm = async (data?: Record<string, any>) => {
@@ -194,6 +201,19 @@ export function AssistantMessage({
               </div>
             )}
 
+            {sqlResultData && (
+              <>
+                {sqlChartData && <SqlResultChart chart={sqlChartData} />}
+                <SqlResultTable
+                  columns={sqlResultData.columns as string[]}
+                  columnDisplayNames={sqlResultData.column_display_names as string[] | undefined}
+                  rows={sqlResultData.rows as Record<string, any>[]}
+                  totalRows={sqlResultData.total_rows as number}
+                  sql={(sqlResultData.display_sql as string) || (sqlResultData.sql as string)}
+                />
+              </>
+            )}
+
             {!hideToolCalls && (
               <>
                 {hasToolCalls && <ToolCalls toolCalls={message.tool_calls} isComplete={!isLoading} />}
@@ -223,6 +243,7 @@ export function AssistantMessage({
                   isAiMessage={true}
                   handleRegenerate={() => handleRegenerate(parentCheckpoint)}
                   messageId={message?.id}
+                  feedbackScore={(message as any)?.feedback_score}
                 />
 
               </div>

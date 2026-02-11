@@ -4,13 +4,17 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.llm_config_service import LLMConfigService
+from app.core.config import ENV
 
 router = APIRouter()
 
 
 @router.get("/models", response_model=list[dict])
-async def list_models():
+async def list_models(db: Session = Depends(get_db)):
     """获取所有可用模型列表。"""
+    # 开发/测试环境下，便于后台改模型后立即生效（无需重启服务）
+    if ENV != "prod":
+        LLMConfigService.refresh_cache(db)
     return LLMConfigService.list_available_models()
 
 

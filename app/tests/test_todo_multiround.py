@@ -12,6 +12,7 @@
 """
 import asyncio
 import logging
+import pytest
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -275,6 +276,7 @@ class TodoAgentTester:
 
 # ==================== 简化测试（不需要完整服务） ====================
 
+@pytest.mark.asyncio
 async def test_intent_analysis():
     """测试意图分析能力（不需要完整服务）。"""
     from app.ai.intent_classifier import classify_intent
@@ -302,6 +304,7 @@ async def test_intent_analysis():
     return all(results)
 
 
+@pytest.mark.asyncio
 async def test_parameter_extraction():
     """测试参数提取能力。"""
     from app.ai.parameter_extractor import extract_todo_params
@@ -327,6 +330,7 @@ async def test_parameter_extraction():
             logger.error(f"❌ '{message[:30]}...' -> {e}")
 
 
+@pytest.mark.asyncio
 async def test_guardrails():
     """测试护栏系统。"""
     from app.ai.guardrails import guardrail_runner

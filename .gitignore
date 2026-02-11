@@ -13,6 +13,22 @@ Thumbs.db
 .agent/
 .cursor/
 .trae/
+.cline/
+.clinerules/
+.kilocodemodes
+.kilocoderules
+
+# 允许 AI 会话通过 @ 引用规则/命令文档（其他文件仍忽略）
+!.cursor/
+.cursor/*
+!.cursor/commands/
+.cursor/commands/*
+!.cursor/commands/*.md
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/*.mdc
+
+.agent/*
 
 # 通用日志与构建输出
 *.log

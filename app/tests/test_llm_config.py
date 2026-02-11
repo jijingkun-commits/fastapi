@@ -14,6 +14,7 @@ def test_config_service_initialization():
     mock_model = MagicMock()
     mock_model.model_code = "test_model"
     mock_model.model_name = "Test Model"
+    mock_model.model_type = "chat"
     mock_model.provider = mock_provider
     mock_model.default_temperature = 0.5
     mock_model.extra_config = {}

@@ -1506,11 +1506,19 @@ export const DEFAULT_MODEL_ID: string | undefined = undefined;
 
 ---
 
+## 2026-02 实现状态（会话意图内核 V2）
+
+- `todo_graph.analyze_intent` 已接入统一会话意图内核，输出 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`。
+- `todo_intent_helpers` 已实现提取字段归一化（`target_ref/new_* -> canonical`），并优先消费 `pending_handoff.frame`。
+- `resolve_entity` 已支持多候选二次消歧选择（`第 X 个 / ID 为 XX / 标题片段`），降低重复追问。
+- 待办链路已加入超范围输入能力边界兜底（天气/新闻/问数/绘图等场景返回能力提示，不触发待办查询）。
+- 回滚口径：Todo 侧当前默认启用 V2 内核（无独立运行时开关）；故障时优先降级 handoff 为纯文本，再视情况回退发布版本。
+
 ## 相关文档
 
 | 文档 | 说明 |
 |-----|------|
-| [产品文档/待办助手](../../产品文档/待办助手.md) | 面向用户的功能介绍 |
+| [产品文档/待办助手需求](../../产品文档/待办助手需求.md) | 面向用户的功能介绍 |
 | [AI模块设计](./AI模块设计.md) | AI 模块全局概览 |
 | [测试管理/待办助手测试案例](../测试管理/待办助手测试案例.md) | 测试用例与已知问题 |
 | [代码解读/多智能体工作流](../代码解读/多智能体工作流.md) | Todo Agent 与主图的集成 |

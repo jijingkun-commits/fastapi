@@ -27,6 +27,10 @@ CONFIGS = [
     ("ai.request_timeout", "120", "number", "ai", "请求超时时间（秒）"),
     ("ai.max_retries", "2", "number", "ai", "最大重试次数"),
     ("ai.sql_require_approval", "true", "boolean", "ai", "SQL 查询是否需要人工审核"),
+
+    # 实验开关（统一总开关）
+    ("feature.proxy_experiment_enabled", "false", "boolean", "feature", "中转供应商实验总开关（建议仅开发/测试开启）"),
+    ("feature.proxy_experiment_providers", "openai_proxy_trial", "string", "feature", "中转实验 provider 白名单（逗号分隔）"),
     
     # MCP 配置
     ("mcp.chart_server_url", "http://localhost:1122/sse", "string", "mcp", "MCP 图表服务器 URL"),

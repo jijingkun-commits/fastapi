@@ -56,6 +56,8 @@ api_router.include_router(skill_admin_router, dependencies=[Depends(get_admin_us
 # 系统配置管理路由：仅管理员
 from app.api.v1.endpoints.system_admin_api import router as system_admin_router
 api_router.include_router(system_admin_router, dependencies=[Depends(get_admin_user)])
+from app.api.v1.endpoints.dev_codex_api import router as dev_codex_router
+api_router.include_router(dev_codex_router, dependencies=[Depends(get_admin_user)])
 
 
 

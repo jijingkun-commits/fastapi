@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_ai_message, create_human_message
 from langchain_core.runnables.config import RunnableConfig
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_llm, _normalize_text_content
 from app.ai.state import TodoAgentState
 from app.ai.config.todo_config import get_todo_config
 
@@ -127,12 +127,40 @@ def clarify_node(state: TodoAgentState) -> Dict:
         
         logger.info(f"使用 LLM 生成的 response_message: {response_message[:50]}...")
     else:
-        # 兜底：response_message 为空时的默认消息
-        fallback_msg = "请告诉我您需要完成什么任务？包括具体内容和时间安排。"
+        # 兜底：response_message 为空时，优先使用上下文生成追问
+        pending_op = state.get("pending_operation") or {}
+        op_data = pending_op.get("data") or {}
+        pending_questions = state.get("pending_clarifications") or []
+
+        action = pending_op.get("action")
+        target_title = (
+            op_data.get("resolved_title")
+            or op_data.get("title")
+            or op_data.get("target_ref")
+            or op_data.get("keyword")
+            or "该待办"
+        )
+
+        if action in ("update", "complete", "delete"):
+            if pending_questions:
+                fallback_msg = (
+                    f"我正在帮您处理 **{target_title}**。"
+                    f"还需要您补充：{'; '.join(pending_questions)}。"
+                )
+            else:
+                fallback_msg = (
+                    f"我正在处理 **{target_title}**，"
+                    "请告诉我您想执行的动作：修改、完成，还是删除？"
+                )
+        elif pending_questions:
+            fallback_msg = f"为了继续处理，请补充：{'; '.join(pending_questions)}。"
+        else:
+            fallback_msg = "请告诉我您需要完成什么任务？包括具体内容和时间安排。"
+
         updates["messages"] = [create_ai_message(fallback_msg)]
         
         emit_clarification(writer,
-                          questions=[],
+                          questions=pending_questions,
                           message=fallback_msg,
                           node="clarify_node")
         
@@ -308,9 +336,12 @@ def task_decomposition_node(state: TodoAgentState) -> Dict:
 
             try:
                 response = llm.invoke(decompose_messages)  # internal=True 自动添加 tag
+                normalized_content = _normalize_text_content(
+                    response.content if hasattr(response, "content") else response
+                )
                 
                 # 使用标准 Parser 解析
-                result = parser.parse(response.content)
+                result = parser.parse(normalized_content)
                 
                 if result.get("subtasks"):
                     # 添加子任务

@@ -67,6 +67,9 @@ export interface UnifiedMessage {
 
     /** 附加参数（用于传递自定义数据如 TodoList） */
     additionalKwargs?: Record<string, unknown>;
+
+    /** 用户反馈分数：1(赞) / -1(踩) / undefined(无) */
+    feedbackScore?: number;
 }
 
 /**
@@ -110,17 +113,69 @@ export type StreamEventType =
  */
 export interface StreamEvent {
     type: StreamEventType;
-    data: any;
+    data: unknown;
     node?: string;  // 来源节点名称
+}
+
+/**
+ * 流初始化事件数据
+ */
+export interface InitEventData {
+    thread_id: string;
+}
+
+/**
+ * Token 事件数据
+ */
+export interface TokenEventData {
+    content?: string;
+    reasoning_content?: string;
 }
 
 /**
  * 结构化结果事件数据
  */
 export interface ResultEventData {
-    data_type: string;  // "todo_list" | "image" | "chart" 等
-    data: any;
+    data_type: string;  // "todo_list" | "image" | "chart" | "sql_result" 等
+    data: unknown;
     message?: string;
+}
+
+/**
+ * 问数 SQL 结果中的可选图表载荷
+ */
+export interface SqlResultChartData {
+    type: "bar" | "line" | "pie";
+    title?: string;
+    x_key: string;
+    x_label?: string;
+    y_key: string;
+    y_label?: string;
+    series_name?: string;
+    data: Array<Record<string, string | number>>;
+}
+
+/**
+ * 问数 SQL 结果结构（`data_type=sql_result`）
+ */
+export interface SqlResultData {
+    rows: Record<string, unknown>[];
+    columns: string[];
+    total_rows?: number;
+    sql?: string;
+    display_sql?: string;
+    column_display_names?: string[];
+    chart?: SqlResultChartData;
+}
+
+/**
+ * 完成事件数据
+ */
+export interface DoneEventData {
+    thread_id: string;
+    message_id?: number;
+    final_content?: string;
+    meta?: Record<string, unknown>;
 }
 
 /**
@@ -136,4 +191,11 @@ export interface ClarificationEventData {
  */
 export interface StatusEventData {
     message: string;
+}
+
+/**
+ * 知识库图片映射事件数据
+ */
+export interface KbImagesEventData {
+    images: Record<string, string>;
 }

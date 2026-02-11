@@ -8,9 +8,19 @@
  * 4. 历史消息加载后与流式展示一致
  */
 const { test, expect, request } = require('@playwright/test');
+const { loginIfNeeded, waitForChatReady, waitForAIResponse } = require('./helpers/auth-helper');
 
 // 后端 API 基础 URL
 const API_BASE = 'http://localhost:8000/api/v1';
+
+function extractThreadId(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.searchParams.get('threadId') || (parsed.pathname.match(/\/chat\/([^\/?]+)/)?.[1] ?? null);
+    } catch {
+        return null;
+    }
+}
 
 // 测试用例
 test.describe('对话同步测试', () => {
@@ -25,8 +35,8 @@ test.describe('对话同步测试', () => {
         });
 
         // 登录获取 token
-        const loginResp = await apiContext.post('/auth/login', {
-            data: { identifier: 'jjk', password: '' }
+        const loginResp = await apiContext.post('http://localhost:8000/api/v1/login', {
+            data: { username: 'jjk', password: '' }
         });
         
         if (loginResp.ok()) {
@@ -39,31 +49,12 @@ test.describe('对话同步测试', () => {
     });
 
     test.beforeEach(async ({ page }) => {
-        // 导航到首页
-        await page.goto('/');
-        
-        // 等待页面加载
-        await page.waitForLoadState('networkidle');
-        
-        // 检查是否在登录页面，如果是则执行登录
-        if (page.url().includes('/auth')) {
-            console.log('需要登录...');
-            const usernameInput = page.locator('input#identifier, input[placeholder*="用户名"]');
-            if (await usernameInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-                await usernameInput.fill('jjk');
-                await page.getByRole('button', { name: '登录' }).click();
-                await page.waitForURL('**/chat**', { timeout: 30000 });
-            }
-        }
-        
-        // 等待聊天界面加载
-        await expect(page.locator('textarea')).toBeVisible({ timeout: 30000 });
-        
+        await loginIfNeeded(page);
+        await waitForChatReady(page, 60000);
+
         // 获取当前 thread_id
-        await page.waitForTimeout(2000);
-        const url = page.url();
-        const match = url.match(/\/chat\/([^\/\?]+)/);
-        threadId = match ? match[1] : null;
+        await page.waitForTimeout(500);
+        threadId = extractThreadId(page.url());
         console.log('当前 thread_id:', threadId);
     });
 
@@ -79,7 +70,7 @@ test.describe('对话同步测试', () => {
         const testMessage = `测试同步 ${Date.now()}`;
         
         // 发送消息
-        await page.fill('textarea', testMessage);
+        await page.fill('[data-testid="chat-input"]', testMessage);
         await page.keyboard.press('Enter');
 
         // 等待 AI 响应完成
@@ -96,9 +87,7 @@ test.describe('对话同步测试', () => {
         console.log('前端展示内容 (前100字符):', frontendContent.substring(0, 100));
 
         // 从 URL 获取最新 thread_id
-        const currentUrl = page.url();
-        const urlMatch = currentUrl.match(/\/chat\/([^\/\?]+)/);
-        const currentThreadId = urlMatch ? urlMatch[1] : threadId;
+        const currentThreadId = extractThreadId(page.url()) || threadId;
 
         // 通过 API 获取后端保存的消息
         if (authToken && currentThreadId) {
@@ -136,7 +125,7 @@ test.describe('对话同步测试', () => {
         const testMessage = `刷新测试 ${Date.now()}`;
         
         // 发送消息
-        await page.fill('textarea', testMessage);
+        await page.fill('[data-testid="chat-input"]', testMessage);
         await page.keyboard.press('Enter');
 
         // 等待响应
@@ -188,40 +177,23 @@ test.describe('对话同步测试', () => {
         const countBefore = await userMessagesBefore.count().catch(() => 0);
         console.log('发送前用户消息数量:', countBefore);
 
-        // 快速连续发送，但等待输入框可用
+        // 连续发送（每条消息都等待上一条收口，避免 loading 状态丢消息）
         for (const msg of messages) {
-            // 等待 textarea 可用（非 disabled 状态）
-            await page.waitForSelector('textarea:not([disabled])', { timeout: 30000 });
-            await page.fill('textarea', msg);
+            await waitForChatReady(page, 60000);
+            await page.fill('[data-testid="chat-input"]', msg);
             await page.keyboard.press('Enter');
-            // 等待消息出现在列表中
-            await page.waitForTimeout(1000);
+            await waitForAIResponse(page, 90000, true);
         }
 
-        // 等待所有响应完成（使用轮询策略）
-        let retries = 0;
-        const maxRetries = 30;
-        while (retries < maxRetries) {
-            await page.waitForTimeout(2000);
-            // 检查是否还在加载中
-            const loadingIndicator = page.locator('[data-loading="true"], .animate-pulse');
-            const isLoading = await loadingIndicator.count() > 0;
-            if (!isLoading) {
-                console.log('响应完成，等待 2 秒后验证');
-                await page.waitForTimeout(2000);
-                break;
-            }
-            retries++;
-        }
+        console.log('连续发送完成，等待渲染稳定');
+        await page.waitForTimeout(2000);
 
         // 验证消息数量
         const userMessages = page.locator('[data-testid="human-message"]');
-        // 使用 waitFor 确保元素渲染完成
         await page.waitForTimeout(3000);
         const count = await userMessages.count();
         console.log('用户消息数量:', count, '(预期至少:', countBefore + messages.length, ')');
-        
-        // 至少应该有发送的消息数量
+
         expect(count).toBeGreaterThanOrEqual(countBefore + messages.length);
     });
 
@@ -231,7 +203,7 @@ test.describe('对话同步测试', () => {
         // 请求生成较长的响应
         const testMessage = '请详细解释一下人工智能的发展历史，包括主要里程碑事件。';
         
-        await page.fill('textarea', testMessage);
+        await page.fill('[data-testid="chat-input"]', testMessage);
         await page.keyboard.press('Enter');
 
         // 等待长响应生成
@@ -258,28 +230,31 @@ test.describe('对话同步测试', () => {
         console.log('发送前用户消息数量:', countBefore);
 
         // 包含特殊字符的消息
-        const testMessage = '测试特殊字符: <script>alert(1)</script> & "引号" \'单引号\' `反引号`';
-        
-        // 确保 textarea 可用
-        await page.waitForSelector('textarea:not([disabled])', { timeout: 30000 });
-        await page.fill('textarea', testMessage);
+        const testMessage = "测试特殊字符: <script>alert(1)</script> & \"引号\" '单引号' `反引号`";
+
+        let dialogTriggered = false;
+        page.on('dialog', async (dialog) => {
+            dialogTriggered = true;
+            await dialog.dismiss();
+        });
+
+        await waitForChatReady(page, 60000);
+        await page.fill('[data-testid="chat-input"]', testMessage);
         await page.keyboard.press('Enter');
 
         // 等待消息出现，使用轮询策略
-        let messageAppeared = false;
         for (let i = 0; i < 20; i++) {
             await page.waitForTimeout(1000);
             const userMessages = page.locator('[data-testid="human-message"]');
             const count = await userMessages.count();
             if (count > countBefore) {
-                messageAppeared = true;
                 console.log('消息已出现，当前数量:', count);
                 break;
             }
         }
 
         // 额外等待 AI 响应
-        await page.waitForTimeout(10000);
+        await page.waitForTimeout(5000);
 
         // 验证消息发送成功
         const userMessages = page.locator('[data-testid="human-message"]');
@@ -287,12 +262,12 @@ test.describe('对话同步测试', () => {
         console.log('最终用户消息数量:', count);
         expect(count).toBeGreaterThan(countBefore);
 
-        // 验证特殊字符被正确转义（XSS 防护）
+        // 验证特殊字符按文本展示，并确认未触发脚本执行
         const lastMessage = userMessages.last();
         const content = await lastMessage.innerText();
         console.log('消息内容:', content);
-        // 不应该执行 script 标签
-        expect(content).not.toContain('<script>');
+        expect(content).toContain('<script>alert(1)</script>');
+        expect(dialogTriggered).toBe(false);
     });
 });
 

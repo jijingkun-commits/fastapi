@@ -201,12 +201,7 @@ export function ChatInput({
                         <CompactApproval />
                     </div>
                 ) : (
-                    <form onSubmit={(e) => {
-                        if (selectedTodo) {
-                            setSelectedTodo(null);
-                        }
-                        onSubmit(e);
-                    }} className="w-full">
+                    <form onSubmit={onSubmit} className="w-full">
                         {/* 主输入容器 - ChatGPT 风格 */}
                         <div className="relative bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow transition-shadow">
                             {/* 文件预览 - 在输入框内部顶部 */}

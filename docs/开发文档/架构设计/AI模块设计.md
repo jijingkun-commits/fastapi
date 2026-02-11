@@ -97,28 +97,32 @@ graph LR
 
 ### 状态定义
 
-**文件**: `app/ai/workflow/multi_agent_graph.py`
+**文件**: `app/ai/state.py`
 
 ```python
-class MultiAgentState(TypedDict):
-    """多智能体状态定义。"""
+class BaseAgentState(TypedDict, total=False):
+    """所有 Agent 共享状态。"""
     messages: Annotated[list, add_messages]  # 对话消息列表
     user_id: Optional[int]                    # 用户 ID
     thread_id: Optional[str]                  # 对话线程 ID
     enable_thinking: Optional[bool]           # 是否启用深度思考
     model_id: Optional[str]                   # 模型标识
+    pending_handoff: Optional[Dict]           # 当前轮委派上下文（供专家子图消费）
+
+
+class MultiAgentState(BaseAgentState, total=False):
+    """多智能体 Supervisor 扩展状态。"""
     attachment_analysis: Optional[str]        # 附件分析结果
     evaluation: Optional[str]                 # 评估结果
     iteration_count: Optional[int]            # 迭代计数
     thinking_content: Optional[str]           # 思考内容
-    # 🆕 意图识别字段（借鉴 Flock Intent Recognition）
     detected_intent: Optional[str]            # 识别到的意图类型
     intent_route: Optional[str]               # 意图路由目标
-    pending_handoff: Optional[Dict]           # 待处理的委派指令
-    # 🆕 Skills RAG 与系统上下文
     skill_context: Optional[str]              # 检索到的相关技能上下文
     system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
 ```
+
+说明：`pending_handoff` 放在 `BaseAgentState`，确保 `DataAgentState` / `TodoAgentState` 子图都能读取同一份委派上下文，避免补充轮次丢失历史语义。
 
 ### 状态生命周期管理 (2026-02)
 
@@ -255,7 +259,7 @@ Todo Agent 是一个独立的 StateGraph，采用**意图驱动架构**，支持
 
 | 节点 | 职责 |
 |-----|------|
-| `analyze_intent` | LLM 分析用户意图，提取待办信息；接收 `config` 参数，当前端传入 `current_todo_id` 时注入选中待办上下文辅助意图判断 |
+| `analyze_intent` | LLM 分析用户意图，提取待办信息；接收 `config` 参数，当前端传入 `current_todo_id` 时注入选中待办上下文辅助意图判断；对超出待办能力范围的输入返回能力边界提示 |
 | `clarify` | 信息不完整时生成追问 |
 | `resolve` | 模糊标识 → 具体 todo_id |
 | `confirm` + `wait_confirm` | 确认流程 (使用 `interrupt()`) |
@@ -273,6 +277,49 @@ analyze → route_next → [clarify|conflict|resolve|execute]
                         wait_confirm → execute → END
 ```
 
+### 节点函数 -> 事件契约（2026-02 严格切换）
+
+#### Todo Graph（含增强节点与解析节点）
+
+| 节点函数 | 应发事件（目标） | 说明 |
+|-----|----------------|------|
+| `analyze_intent` | 无（状态内决策） | 超范围输入只设置状态，不发送结构化事件 |
+| `clarify_node` | `clarification` | 使用 `emit_clarification` 主动引导用户补充信息 |
+| `conflict_detection_node` | 无（文本消息） | 冲突提示通过 AI 文本消息表达 |
+| `resolve_entity` | 无（状态更新） | 仅做实体解析与路由状态变更 |
+| `ask_confirmation` | 不发 `confirmation` | 沿用 `additional_kwargs.operation + interrupt` 的 HITL 流程 |
+| `wait_for_confirmation` | `interrupt`（LangGraph 内建） | 通过 `interrupt()` 暂停并等待用户决策 |
+| `execute_operation` | `result`（由 Supervisor 包装器统一发） | 节点返回 `AIMessage.additional_kwargs(data_type,data)`，由上层转为 `result` |
+
+#### Data Graph
+
+| 节点函数 | 应发事件（目标） | 说明 |
+|-----|----------------|------|
+| `analyze_data_intent` | 无 | 意图分析，非 UI 事件节点 |
+| `metric_resolve` | 无 | 模板匹配，不直接发事件；若用户请求 TopN/排名/维度而模板仅支持总量聚合，自动降级到下一层 |
+| `training_sql_resolve` | 无 | 检索训练 SQL；若命中 SQL 不满足 TopN/维度语义，跳过该候选并回退通用 RAG |
+| `schema_retrieve` | 无 | 检索 schema |
+| `sql_generate` | 无 | 生成 SQL |
+| `sql_safety_check` | 无 | 安全校验 |
+| `sql_execute` | `status` / `result` / `error` | 查询执行阶段负责结构化输出和状态反馈，`sql_result.data` 可选携带 `chart` 规格（前端图+表并存） |
+| `clarify_node` | 无（文本消息） | 保持轻量，不扩展事件协议面 |
+
+#### Supervisor（多智能体主图）
+
+| 节点函数 | 应发事件（目标） | 说明 |
+|-----|----------------|------|
+| `_preprocess_multimodal` | `status` | 护栏、技能加载、图片分析状态 |
+| `streaming_wrapper` | `token` / `thinking` / `tool_start` / `tool_end` / `result` / `kb_images` | 核心统一事件出口 |
+| `_evaluate_expert_work` | `status` | 协调继续执行时的提示 |
+| `_postprocess` | 无 | 仅负责持久化与清理 |
+| `ChatService done` | `done`（仅生命周期） | 严禁携带结构化数据 |
+
+#### Supervisor 模型异常降级策略（2026-02）
+
+- 当 `supervisor` 在 `streaming_wrapper` 中遇到模型配额/订阅/权限类错误（如 `403`、`SUBSCRIPTION_NOT_FOUND`、`Insufficient Balance`）时，不再向用户透传 `[System Error: ...]`。
+- 若最新用户输入命中待办语义（如“查询我的待办列表”），系统会构造 `pending_handoff` 并降级路由到 `todo_expert` 继续执行，优先保障待办链路可用性。
+- 若不满足待办降级条件，则返回稳定的用户友好提示（如“模型服务当前不可用……”），避免暴露底层异常细节。
+
 ### 智能特性
 
 | 特性 | 说明 |
@@ -280,7 +327,28 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | 渐进式策略 | 多轮对话后自动给默认值 |
 | 快速模式 | 检测关键词跳过确认 |
 | 实体解析 | 模糊匹配用户指定的待办 |
+| 指代消歧 | 用户仅输入"项目汇报那个"等无动作指代表达时，优先结合上下文自动判定；简单场景一次确认，复杂场景多轮消歧 |
+| 提取字段归一化 | 统一将 `target_ref/target_title/new_due_date/new_priority/new_category/new_description` 映射为执行链路可消费的 canonical 字段 |
 | 选中待办上下文 | 前端选中待办后，`analyze_intent` 从 DB 加载该待办完整信息注入 prompt，辅助 LLM 将用户消息关联到具体待办（支持 update/complete/delete），并自动注入 `todo_id` |
+| 能力边界兜底 | 当输入明显属于天气/新闻/问数/知识库/绘图等非待办请求时，不触发待办查询，统一返回“超出待办能力范围”的引导文案 |
+
+#### 指代消歧与自适应确认规则
+
+- **无动作指代默认策略**：当输入只包含目标（如"项目汇报那个"）但未出现明确动作词时，系统先尝试匹配目标待办；唯一命中默认按 `update` 进入确认流程（用户可改口为完成/删除）。
+- **多候选场景**：若命中多个待办，`resolve_entity` 返回候选列表，支持用户使用"第 X 个"、"ID 为 XX"或直接补充标题片段继续消歧。
+- **不可判定场景**：若无法命中目标，进入澄清分支并要求补充动作或更完整标题，避免重复固定追问文案。
+
+#### 提取字段归一化（Canonicalization）
+
+`analyze_intent` 在路由前执行字段归一化，确保 `pending_operation.data` 稳定使用以下字段：
+
+- `title`
+- `due_date`
+- `priority`
+- `category`
+- `description`
+
+同时保留原始别名字段用于兼容历史日志与排障。
 
 ### 工具调用架构 (ADR-001)
 
@@ -340,6 +408,9 @@ def my_node(state):
 ```
 
 ### 事件函数一览
+
+> [!IMPORTANT]
+> 事件定义与载荷字段请以 `docs/开发文档/代码解读/SSE事件协议.md` 为准。本节只保留快速索引。
 
 | 函数 | 事件类型 | 用途 |
 |------|----------|------|
@@ -401,6 +472,62 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 2. **model_id 从 State 读取**: `BaseAgentState` 已定义 `model_id` 和 `enable_thinking` 字段，由 `chat_service` 注入，所有节点可通过 `state.get("model_id")` 获取
 3. **内部分析节点传 model_id 不传 thinking**: `get_llm(internal=True, model_id=...)` 确保模型一致但不消耗 thinking token
 4. **合理例外**: embedding 和 vision 等非 chat 模型仍直接创建客户端（`get_llm()` 不支持这些类型）
+
+### 中转供应商实验适配（仅开发/测试环境）
+
+> **目标**：支持 OpenAI 兼容但实现不完全一致的中转供应商，同时保证生产链路性能和逻辑不受影响。
+
+**启用条件（全部满足才生效）**：
+1. `ENV != prod`
+2. `feature.proxy_experiment_enabled=true`（数据库 `t_system_config`）
+3. 当前模型 `provider_code` 命中 `feature.proxy_experiment_providers`（数据库白名单）
+
+> 若数据库未配置上述配置项，分别回退 `ENABLE_PROXY_EXPERIMENT` / `PROXY_EXPERIMENT_PROVIDERS` 环境变量。
+
+**配置入口**：
+- `t_llm_model.extra_config`（模型级）
+- `t_llm_provider.extra_config`（提供商级，可选）
+
+**推荐配置键（示例）**：
+
+```json
+{
+  "use_responses_api": true,
+  "actual_model": "gpt-5.2",
+  "send_x_api_key": true,
+  "default_headers": {
+    "User-Agent": "codex-cli/0.98.0"
+  },
+  "store": false,
+  "reasoning_effort": "medium",
+  "verbosity": "low"
+}
+```
+
+**不影响生产的约束**：
+- 生产环境默认不启用实验适配分支。
+- 非实验 provider 继续走既有 `get_llm()` 逻辑，无额外协议分支。
+- 实验逻辑仅在命中条件时读取 `extra_config` 并注入参数，避免全量路径开销。
+
+### internal 调用输入兼容（2026-02-08）
+
+> **背景**：中转链路接入 `gpt-5.2` 后，历史 `AIMessage.content` 可能为 Responses 风格的 block 列表，包含 `function_call` 块。
+> 内部分析节点（`internal=True`）若将该列表直接透传给 Chat Completions 兼容端，可能触发 `400 invalid_value`。
+
+**当前策略**：
+- 在 `InternalLLMWrapper.invoke/ainvoke` 内统一执行 `_sanitize_internal_invoke_input`。
+- 仅对 `content` 为列表的消息做兼容清洗：
+  - 保留 `text` / `content` 文本块
+  - 跳过 `function_call` / `tool_call` / `function_result` 块
+- 清洗后仅用于本次 internal 调用，不修改原始消息对象。
+
+**作用边界**：
+- 仅作用于 `get_llm(internal=True, ...)` 的内部分析链路（意图分析、参数抽取等）。
+- 不影响主对话流式输出、不影响 Tool Calling 主路径协议。
+
+**生产建议**：
+- 当前已提供独立开关 `ENABLE_INTERNAL_CONTENT_SANITIZE`（建议 prod 关闭，按需开启）。
+- 当前版本通过“internal 作用域隔离”控制风险，属于兼容性兜底而非主链路能力。
 
 **数据流**:
 
@@ -480,7 +607,7 @@ messages = remove_incomplete_tool_calls(messages)
 ## 📡 Custom 事件机制 (stream_mode="custom")
 
 > [!TIP]
-> 关于 Custom Mode 的核心设计哲学、**双写架构 (Dual Write)** 以及与 State 的关系，请参阅专题文档：[流式通信与状态同步设计](../架构设计/流式通信与状态同步设计.md)
+> 关于 Custom Mode 的核心设计哲学、**双写架构 (Dual Write)** 以及与 State 的关系，请参阅专题文档：[流式通信与状态同步设计](../代码解读/流式通信与状态同步设计.md)
 
 ### 核心概念
 
@@ -515,6 +642,9 @@ graph TD
 
 ### 完整事件类型列表
 
+> [!IMPORTANT]
+> 本表用于理解发送链路；若与 `docs/开发文档/代码解读/SSE事件协议.md` 不一致，以协议文档为最终准绳。
+
 | 事件类型 | emit 函数 | AgentEvent 方法 | 用途 | 触发时机 |
 |---------|----------|----------------|------|----------|
 | `token` | `emit_token` | `AgentEvent.token()` | AI 文本输出 | LLM 生成 token 时 (on_chat_model_stream) |
@@ -527,7 +657,10 @@ graph TD
 | `clarification` | `emit_clarification` | - | 澄清问题 | 需要补充信息时 |
 | `handoff` | - | `AgentEvent.handoff()` | 专家切换 | Supervisor 切换专家时 |
 | `error` | `emit_error` | `AgentEvent.error()` | 错误 | 发生异常时 |
-| `done` | `emit_done` | `AgentEvent.done()` | 流结束 | 处理完成时 |
+| `done` | `emit_done` | `AgentEvent.done()` | 流结束（仅生命周期） | 处理完成时 |
+
+> [!IMPORTANT]
+> 协议约束（2026-02）：结构化数据仅允许通过 `result` 事件发送，`done` 不再承载 `additional_kwargs`。
 
 ### 关键组件
 
@@ -913,10 +1046,76 @@ sequenceDiagram
 | 完整 DDL 检索 | `vanna_client.py` | 从 `t_meta_columns` 获取完整列信息，构建真实 CREATE TABLE |
 | 统一 SQL 解析 | `sql_parser.py` (新) | 使用 sqlglot 替代分散的正则表达式 |
 | 错误自愈机制 | `data_graph.py` | 执行失败时自动重试（最多 3 次），错误信息反馈给 LLM |
+| 空结果表切换自愈 | `data_graph.py` | vanna_rag 结果为空且命中历史空表（如 `f_mid_loan_tb`）时，自动切换到有数表（如 `f_mid_loan_k_tb`）重试 |
 | 统一安全检查 | `sql_safety.py` (新) | 消除代码重复，集中管理危险关键词和敏感表黑名单 |
 | 向量相似度搜索 | `metric_service.py` | 指标匹配优先使用 embedding 向量搜索 |
 | LLM Judge 评估 | `llm_judge.py` | SQL 生成后可选质量评估，需设置 `ENABLE_LLM_JUDGE=true` |
 | Prompt 渐进披露 | `prompt_loader.py` | 复杂查询按需加载 sql_guide 参考文档，节省 Token |
+| 指标可组合查询 | `data_graph.py` | 同一指标支持总量→维度→TopN 语义派生，保持过滤条件一致 |
+| 规则驱动结果增强 | `data_graph.py` | 查询结果按规则链补齐展示字段（如客户号映射客户名称），避免场景硬编码 |
+
+#### 同指标多轮追问策略（2026-02-08）
+
+为避免"第一轮总量 + 第二轮TopN"返回重复答案，问数链路新增"指标可组合查询"策略：
+
+1. **指标口径保持**：继续命中同一指标（如 `LOAN_001: 贷款余额`）
+2. **形态识别**：从当前轮识别 `query_shape`（`total` / `dimension` / `top_n`）
+3. **SQL 派生**：在指标模板的聚合表达式基础上派生 `GROUP BY`/`ORDER BY`/`LIMIT`
+4. **条件继承**：继承同轮解析出的时间与筛选条件，避免用户重复输入
+5. **安全回退**：无法可靠派生时回退到通用 RAG，避免返回错误或重复总量答案
+
+> 当前默认客户维度映射：`客户 -> ecif_cust_no`（`f_mid_loan_k_tb`）。
+> 查询执行后进入“结果增强规则链”，当前内置规则为 `ecif_cust_no -> 客户名称`（源表 `fdmdata.f_mid_dep_tb`），按 `data_dt + ecif_cust_no` 优先，失败时回退 `ecif_cust_no` 级别。
+
+#### 查询结果展示增强（2026-02-08）
+
+为提升业务可读性，`sql_execute` 在保持执行 SQL 语义不变的前提下，新增展示专用字段：
+
+- `column_display_names`: 与 `columns` 索引对齐的表头显示名列表
+- `display_sql`: SQL 折叠区展示字符串（可能包含中文别名）
+- `chart`（可选）: 前端交互图规格（`type/x_key/y_key/data`），用于“图表补充回合”直出图形
+
+设计原则：
+
+1. `sql` 保持原可执行 SQL（用于日志、修正台、回放）。
+2. `rows` 键名保持原字段名，不做改写。
+3. 展示层改写失败时回退原值，不影响主链路。
+4. `chart` 仅作为展示增强字段，可推导失败时降级为仅表格展示。
+
+`chart` 生成约束（v1）：
+
+- 仅在用户意图为 `visualization` 或已携带 `viz_type` 时尝试生成；
+- 数据点上限 50（避免前端图表卡顿）；
+- 优先“首个非数值列 + 首个数值列”作为 `x/y` 轴；
+- `pie` 仍使用同一组 `x/y` 字段，不新增协议类型；
+- 无可用数值列时不输出 `chart`，保留 `sql_result` 表格输出。
+
+列名映射来源与策略：
+
+- 来源：`chat_db.t_meta_columns.display_name`
+- 优先：按 SQL 涉及表（`schema.table`）过滤映射
+- 回退：同名列全局映射（按出现频次择一）
+
+展示 SQL 生成策略：
+
+- 仅对未起别名的直出列补 `AS 中文名`
+- 已有别名（英文或中文）保持不变
+- SQL 解析失败时回退原 `sql`
+
+```mermaid
+flowchart TD
+    A[analyze_data_intent] --> B{命中指标?}
+    B -- 否 --> RAG[schema_retrieve -> sql_generate]
+    B -- 是 --> C[解析模板提取 measure/from/where]
+    C --> D{query_shape}
+    D -- total --> T[总量SQL]
+    D -- dimension --> G[GROUP BY维度]
+    D -- top_n --> N[GROUP BY + ORDER BY + LIMIT]
+    T --> S[sql_safety_check]
+    G --> S
+    N --> S
+    S --> E[sql_execute]
+```
 
 #### 多数据源架构
 
@@ -1552,3 +1751,161 @@ Data Agent 采用两层漏斗模型处理用户查询：
 2. 创建对应的 `emit_xxx` 函数
 3. 在 `web/src/hooks/useSSEStream.ts` 中处理
 4. 在 `web/src/lib/backend.ts` 的 `StreamCallbacks` 中添加回调
+
+### 问数补充回复继承与少问策略（2026-02）
+
+为解决“第二轮仅补充图表词却再次追问指标+时间”的体验问题，`app/ai/workflow/data_graph.py` 的 `analyze_data_intent` 已增加三层上下文融合与缺项驱动澄清策略：
+
+1. **上下文融合优先级**：当前轮明确输入 > `pending_handoff.task_description` > 历史 state。  
+2. **补充型短回复识别（收紧）**：基于“有历史上下文 + 输入长度 + 结构化信号（图表/层级/时间/维度）”综合判定 continuation；若识别到指标切换（如 `贷款余额 -> 存款户数`），强制视为新问题。  
+3. **新问题上下文隔离**：命中“新问题信号”时，重置历史继承，避免旧时间/旧维度污染新问题。  
+4. **缺项驱动澄清**：仅在关键槽位缺失时追问（指标、时间；图表分布场景补充机构层级）。  
+5. **重复澄清保护**：上一轮已问展示方式后，本轮短回复补充不再回退追问“指标+时间”。  
+6. **默认口径**：机构分布图表场景未指定层级时，默认按 `分行` 执行，并在 `query_context.used_default_org_level=true` 留痕。  
+7. **策略可配置 + 缓存**：意图归一化/图表别名/指标同义词可通过 `t_system_config` 的 `data_graph.intent_policy`（JSON）配置；运行时带 60 秒本地缓存，降低重复读取开销。  
+8. **日志增强**：新增 `continuation_reason/context_reset_for_new_query/intent_policy_source/intent_policy_cache_hit` 等排障字段。  
+
+#### 相关状态字段（DataAgentState）
+
+- `last_clarify_slot`: 上一轮澄清槽位（`metric/time_range/display_mode/org_level`）
+- `clarify_count`: 当前任务内已澄清次数（用于重复澄清保护）
+- `continuation_mode`: 当前轮是否识别为补充型短回复
+
+---
+
+## 问数结果增强规则加载链路（C 方案，2026-02）
+
+### 目标
+
+将 `data_graph.py` 中的结果增强规则由“代码常量主驱动”升级为“数据库配置主驱动 + 常量兜底”，减少新增/调整规则时的发版成本。
+
+### 运行链路
+
+1. `sql_execute` 得到 `rows/columns` 后进入 `_enrich_result_rows_if_needed`。
+2. 通过 `ResultEnrichmentRuleService.get_active_rules()` 获取当前生效规则：
+   - 优先读进程内缓存（TTL 默认 `120s`）。
+   - 缓存过期后从 `chat_db.t_result_enrichment_rule` 刷新。
+   - 刷新失败时优先使用旧缓存；若无缓存则回退 `_FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES`。
+3. 逐条规则执行 `_apply_lookup_enrichment_rule`，按 key 列补齐 target 列。
+4. 映射值查询始终走 `data_db`（`ANALYTICS_DATABASE_URL`）。
+5. 任一规则失败仅记录日志并跳过（Fail-open），不影响主查询结果返回。
+
+### 安全约束
+
+- 规则中的 `source_table` 必须是 `schema.table` 形式。
+- `schema` 必须落在 `ANALYTICS_SCHEMAS` 白名单。
+- 动态标识符（表名/列名）均做正则校验（`^[a-zA-Z_][a-zA-Z0-9_]*$`）。
+- 禁止配置任意 SQL 片段，仅允许“表 + 列”级别参数化。
+
+### 配置开关
+
+- `ENABLE_RESULT_ENRICHMENT`：全局开关，默认 `true`。
+- `RESULT_ENRICHMENT_RULE_TTL_SECONDS`：规则缓存 TTL，默认 `120`。
+
+## 跨 Agent 会话意图内核（已实现，2026-02）
+
+> 适用范围：`multi_agent_graph.py`、`data_graph.py`、`todo_graph.py`。  
+> 目标：治理“补充回复误判 + 上下文真值分裂 + 重复澄清”三类问题。
+
+### 1. 现状痛点（结构性）
+
+1. **真值源分裂**：同一轮决策同时依赖 `state`、`pending_handoff.task_description`、消息窗口，优先级在各节点实现不一致。
+2. **行为判定分裂**：`data_expert` 与 `todo_expert` 各自维护补充/澄清规则，策略难以对齐。
+3. **澄清策略分裂**：缺项驱动、重复保护、确认流程分别在不同节点实现，导致边界条件下反复追问。
+
+### 2. 目标架构
+
+#### 2.1 统一决策链
+
+```mermaid
+graph TD
+    U[用户输入] --> A[TurnActClassifier]
+    B[Baseline SessionFrame] --> R[SessionFrameReducer]
+    H[Handoff Structured Frame] --> R
+    A --> R
+    R --> C[ClarificationPlanner FSM]
+    C --> D{需要澄清?}
+    D -- 是 --> Q[输出最小澄清问题]
+    D -- 否 --> X[路由到 data/todo 执行]
+```
+
+#### 2.2 核心组件职责
+
+- **TurnActClassifier**：统一判断 `NEW_QUERY / SUPPLEMENT / CORRECTION / CONFIRM`。
+- **SessionFrameReducer**：统一合并 `current + handoff + state`，输出唯一 `resolved_frame`。
+- **ClarificationPlanner FSM**：按缺项驱动最小澄清，并维护防重复策略。
+
+### 3. 状态模型（统一帧）
+
+当前统一内部状态：
+
+- `session_frame`: 当前任务统一帧（含 metric/time/dimensions/org_level/chart_type/todo_action/todo_fields）。
+- `turn_act`: 当前轮行为分类。
+- `clarify_fsm_state`: `idle | asked_metric | asked_time | asked_org | asked_target | asked_action | done`。
+- `clarify_round`: 当前任务澄清轮次。
+- `frame_source_map`: 每个槽位来源（current/handoff/state/default）。
+
+### 4. 与现有字段兼容映射
+
+| 现有字段 | 统一帧字段 | 迁移策略 |
+|---|---|---|
+| `matched_metric` | `session_frame.metric` | 双写一段时间，稳定后下线旧字段读取 |
+| `time_range` | `session_frame.time_range` | 同上 |
+| `dimensions` | `session_frame.dimensions` | 同上 |
+| `viz_type` | `session_frame.chart_type` | 同上 |
+| `pending_operation.action` | `session_frame.todo_action` | Todo 先接入 |
+| `pending_operation.data` | `session_frame.todo_fields` | Todo 先接入 |
+| `pending_handoff.task_description` | `handoff_structured_frame` | 先增量扩展，保留文本兼容 |
+
+### 5. Handoff 协议演进（内部）
+
+当前 `HandoffResult` 已兼容结构化扩展字段：
+
+- 保留：`task_description`（兼容字段）
+- 增加：`frame`（结构化槽位）
+- 增加：`turn_act_hint`（可选，辅助专家侧判定）
+
+原则：**先加字段，不改旧字段语义**，确保 supervisor 与专家图可以灰度切换。
+
+### 6. 澄清状态机约束
+
+- 仅对关键缺项发起澄清（问数：指标、时间；待办：目标任务、关键动作）。
+- 同一任务同一槽位不得重复澄清。
+- 当 `turn_act=SUPPLEMENT` 且补齐关键缺项后，禁止回退全量追问。
+- 当 `turn_act=NEW_QUERY/CORRECTION` 时，必须清理不兼容继承字段。
+
+### 7. 可观测性与回滚
+
+统一日志字段（已落地/建议持续保留）：
+- `turn_act`
+- `frame_diff`
+- `baseline_source`
+- `clarify_reason`
+- `clarify_fsm_state`
+- `fallback_to_v1`
+
+回滚策略（当前版本）：
+- 默认值：会话意图内核 V2 在 `data_graph` 与 `todo_graph` 默认启用（当前无独立 `intent_kernel_v2_enabled` 运行时开关）。
+- 运行时可调项：`data_graph.intent_policy`（`t_system_config`）用于策略微调（模式判定/确认词/延续词），读取入口为 `app/ai/workflow/data_graph.py` 的 `_load_data_graph_intent_policy()`。
+- 轻量降级：Supervisor 仅透传 `task_description`，不传 `frame/turn_act_hint`，可快速回退到文本 handoff 主导模式（入口：`app/ai/workflow/multi_agent_graph.py` 的 `_create_task_handoff_tool`）。
+- 全量回滚：发布层回退到上一稳定版本（恢复 V1 行为），推荐作为生产应急兜底。
+
+### 8. 落地顺序（已执行）
+
+1. 已在 `multi_agent` 层统一 handoff 结构化载荷（兼容旧文本）。
+2. 已在 `data_graph` 接入 `SessionFrameReducer + ClarificationPlanner`。
+3. 已在 `todo_graph` 接入同一内核，替换分散规则。
+4. 已进入双写观测阶段，持续收敛旧 continuation/clarify 分支。
+
+
+### 9. 实现进展（2026-02-08）
+
+已完成首批代码接入，保持外部 API 不变（`/api/v1/chat/stream` 入参与响应结构不变）：
+
+1. **会话意图内核落地**：新增 `app/ai/workflow/session_intent_kernel.py`，统一提供 `TurnActClassifier`、`SessionFrameReducer`、`Clarification FSM` 基础能力。
+2. **Handoff 协议兼容扩展**：`HandoffResult` 新增可选字段 `frame`、`turn_act_hint`，保留 `task_description` 兼容旧链路。
+3. **Supervisor 透传结构化上下文**：`multi_agent_graph` handoff 工具可携带 `frame/turn_act_hint`，减少专家侧纯文本解析损耗。
+4. **问数 Agent 接入 V2 内核**：`data_graph.analyze_data_intent` 已接入 `turn_act + session_frame + frame_source_map + clarify_fsm_state + clarify_round`，并将 handoff frame 纳入基线判定。
+5. **待办 Agent 接入与收敛**：`todo_graph.analyze_intent` 已接入同一内核，并清理重复定义，统一补充轮合并与澄清状态推进。
+6. **Handoff 预提取增强**：`todo_intent_helpers.filter_messages_for_todo` 优先消费 `pending_handoff.frame`，`task_description` 仅作为回退。
+7. **测试状态**：`tests/unit/test_todo_nodes.py`（含补充轮收敛用例）通过；`data_graph` 相关用例在当前环境受 `vanna.base` 依赖缺失影响，已通过语法编译和代码审查校验。

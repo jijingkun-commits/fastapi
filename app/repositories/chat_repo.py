@@ -8,6 +8,7 @@ import logging
 from typing import Optional, List, Any
 from datetime import datetime
 from sqlalchemy import func
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.models.chat_message import ChatMessage
@@ -45,9 +46,13 @@ def save_message(
     Returns:
         保存后的 ChatMessage 实例
     """
-    # 如果 content 是列表/字典，转为 JSON 字符串
+    # 如果 content 是列表/字典，先做可序列化编码再转 JSON 字符串
     if isinstance(content, (list, dict)):
-        content = json.dumps(content, ensure_ascii=False)
+        content = json.dumps(jsonable_encoder(content), ensure_ascii=False)
+
+    # metadata 兜底编码：兼容 date/datetime/Decimal 等类型
+    if extra_data is not None:
+        extra_data = jsonable_encoder(extra_data)
     
     # AI 消息去除首尾换行（LLM 输出常带有多余换行）
     if role == "ai" and isinstance(content, str):
@@ -583,5 +588,31 @@ def get_feedback_by_message(db: Session, message_id: int, user_id: int) -> Optio
     except Exception as e:
         logger.error("获取反馈失败: %s", e)
         return None
+
+
+def get_feedback_scores_batch(
+    db: Session, user_id: int, message_ids: list[int]
+) -> dict[int, int]:
+    """批量查询用户对多条消息的反馈分数。
+    
+    Returns:
+        {message_id: score} 映射，只包含有反馈的消息
+    """
+    from sqlalchemy import text
+    
+    if not message_ids:
+        return {}
+    
+    try:
+        sql = text("""
+            SELECT message_id, score 
+            FROM t_chat_feedback 
+            WHERE user_id = :uid AND message_id = ANY(:mids) AND score != 0
+        """)
+        rows = db.execute(sql, {"uid": user_id, "mids": message_ids}).fetchall()
+        return {row.message_id: row.score for row in rows}
+    except Exception as e:
+        logger.error("批量查询反馈失败: %s", e)
+        return {}
 
 

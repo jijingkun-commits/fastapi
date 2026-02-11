@@ -23,10 +23,12 @@ class AgentProtocol:
     IMG_PLACEHOLDER_PATTERN = r'\[IMG-\d+\]'
 
 class HandoffResult(BaseModel):
-    """[Phase 2] 标准 Handoff 结果模型"""
+    """[Phase 2] 标准 Handoff 结果模型。"""
     action: str = Field(default="handoff", description="操作类型")
     target_agent: str = Field(..., description="目标专家 Agent 名称")
     task_description: str = Field(..., description="任务描述与上下文")
+    frame: Optional[Dict[str, Any]] = Field(default=None, description="结构化会话帧（可选）")
+    turn_act_hint: Optional[str] = Field(default=None, description="回合行为提示（可选）")
 
 class AgentOutputParser:
     """Agent 输出解析器"""
@@ -55,6 +57,30 @@ class AgentOutputParser:
             except json.JSONDecodeError:
                 pass
                 
+        return None
+
+    @staticmethod
+    def extract_latest_handoff_from_messages(messages: List[BaseMessage]) -> Optional[Dict[str, Any]]:
+        """从消息列表中提取最近一次 handoff 指令（只扫描 ToolMessage）。
+        
+        说明：
+        - 在 ReAct/工具调用链路中，模型可能在调用工具后继续输出一条 AIMessage。
+          因此 ToolMessage 不一定是 messages[-1]，需要回溯扫描。
+        - 调用方应传入“本轮增量消息”（delta），避免误取历史回合的 handoff。
+        """
+        if not messages:
+            return None
+        
+        for msg in reversed(messages):
+            if not isinstance(msg, ToolMessage):
+                continue
+            content = str(getattr(msg, "content", ""))
+            if not content:
+                continue
+            handoff = AgentOutputParser.parse_handoff(content)
+            if handoff:
+                return handoff
+        
         return None
     
     @staticmethod
@@ -90,30 +116,35 @@ class AgentOutputParser:
 
     @staticmethod
     def should_filter_content(content: str) -> bool:
-        """判断内容是否应该被过滤（不发送给用户）"""
-        stripped = content.strip()
+        """判断内容是否应该被过滤（不发送给用户）。
         
-        # 1. 纯 JSON (通常是内部意图分析结果)
-        # 必须是严格的 JSON 对象格式，且不包含额外的解释文本
+        只过滤明确属于内部协议的内容，避免误过滤 LLM 的正常回复。
+        """
+        if not content or not isinstance(content, str):
+            return False
+        
+        stripped = content.strip()
+        if not stripped:
+            return False
+        
+        # 1. 纯 JSON - 只过滤包含内部协议字段的 JSON
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                # 尝试解析
                 data = json.loads(stripped)
-                # 进一步校验：是否包含内部字段（如 intent, action 等）
-                if isinstance(data, dict) and any(k in data for k in ["intent", "action", "role", "node"]):
+                # 只有包含明确的内部协议字段才过滤
+                INTERNAL_KEYS = {"intent", "action", "target_agent", "task_description"}
+                if isinstance(data, dict) and data.get("action") == "handoff":
                     return True
-                # 如果只是普通 JSON 数据但不是内部协议，可能不应该过滤？
-                #但在当前架构中，LLM 只有在 tool_use 或 内部思考时才输出 JSON
-                # 给用户的内容通常是 Markdown
-                return True
-            except json.JSONDecodeError:
+                if isinstance(data, dict) and any(k in data for k in INTERNAL_KEYS) and len(data) <= 5:
+                    return True
+            except (json.JSONDecodeError, TypeError):
                 pass
                 
         # 2. Markdown JSON 代码块 - 仅当整个内容就是一个代码块时才过滤
         if stripped.startswith("```json") and stripped.endswith("```"):
             return True
             
-        # 3. 包含特定内部关键词 (更严格的校验)
+        # 3. 包含特定内部关键词
         if "<!--HANDOFF:" in stripped:
             return True
             

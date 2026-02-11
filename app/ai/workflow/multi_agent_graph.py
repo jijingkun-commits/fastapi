@@ -24,7 +24,7 @@ from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_llm, _normalize_text_content
 from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
@@ -44,6 +44,135 @@ logger = logging.getLogger(__name__)
 
 
 # SUPERVISOR_PROMPT 已迁移到 app/ai/prompts/agent_prompts.py
+
+
+MODEL_ACCESS_ERROR_HINTS = (
+    "error code: 400",
+    "error code: 401",
+    "error code: 402",
+    "error code: 403",
+    "permissiondenied",
+    "permission denied",
+    "subscription_not_found",
+    "no active subscription",
+    "insufficient balance",
+    "allocationquota",
+    "free tier",
+    "arrearage",
+    "request was blocked",
+    "forbidden",
+    "quota",
+)
+
+TODO_DOMAIN_HINTS = (
+    "待办",
+    "任务",
+    "提醒",
+    "清单",
+    "todo",
+)
+
+TODO_QUERY_HINTS = (
+    "查询",
+    "查看",
+    "列出",
+    "列表",
+    "清单",
+    "有哪些",
+    "显示",
+    "看看",
+)
+
+TODO_CREATE_HINTS = (
+    "创建",
+    "新建",
+    "新增",
+    "添加",
+    "记录",
+    "记一下",
+)
+
+
+def _is_model_access_error(error_text: str) -> bool:
+    """判断是否为上游模型权限/配额/订阅类错误。"""
+    lowered = str(error_text or "").strip().lower()
+    if not lowered:
+        return False
+    return any(hint in lowered for hint in MODEL_ACCESS_ERROR_HINTS)
+
+
+def _extract_latest_human_content(messages: Sequence[BaseMessage]) -> str:
+    """提取最近一条用户消息文本。"""
+    for message in reversed(messages or []):
+        message_type = str(getattr(message, "type", "")).lower().strip()
+        if message_type != "human":
+            continue
+        content = _normalize_text_content(getattr(message, "content", ""))
+        if content and content.strip():
+            return content.strip()
+    return ""
+
+
+def _infer_todo_handoff_from_text(user_text: str) -> Optional[Dict[str, Any]]:
+    """在 Supervisor 不可用时，基于关键词构造待办兜底委派。"""
+    if not user_text:
+        return None
+
+    normalized = user_text.lower().strip()
+    has_todo_domain = any(hint in normalized for hint in TODO_DOMAIN_HINTS)
+    if not has_todo_domain:
+        return None
+
+    has_query_signal = any(hint in normalized for hint in TODO_QUERY_HINTS)
+    has_create_signal = any(hint in normalized for hint in TODO_CREATE_HINTS)
+
+    todo_action = "query" if has_query_signal else ""
+    todo_fields: Dict[str, Any] = {}
+    detected_intent = "query_todo"
+
+    if todo_action == "query":
+        if "全部" in normalized or "所有" in normalized:
+            pass
+        elif "已完成" in normalized and "未完成" not in normalized:
+            todo_fields["status"] = "completed"
+        else:
+            todo_fields["status"] = "pending"
+    elif has_create_signal:
+        todo_action = "create"
+        detected_intent = "create_todo"
+    else:
+        todo_action = "query"
+        todo_fields["status"] = "pending"
+
+    return {
+        "action": "handoff",
+        "target_agent": AgentType.TODO,
+        "detected_intent": detected_intent,
+        "task_description": (
+            "Supervisor 模型服务暂不可用，已启用关键词兜底路由。"
+            f"请按待办流程处理用户请求：{user_text}"
+        ),
+        "frame": {
+            "todo_action": todo_action,
+            "todo_fields": todo_fields,
+        },
+    }
+
+
+def _build_supervisor_fallback_handoff(state: MultiAgentState, error_text: str) -> Optional[Dict[str, Any]]:
+    """构造 Supervisor 失败后的兜底委派。"""
+    if not _is_model_access_error(error_text):
+        return None
+
+    latest_user_text = _extract_latest_human_content(state.get("messages", []))
+    return _infer_todo_handoff_from_text(latest_user_text)
+
+
+def _build_stream_error_message(error_text: str) -> str:
+    """将底层异常转换为面向用户的稳定文案。"""
+    if _is_model_access_error(error_text):
+        return "模型服务当前不可用（配额/订阅或权限异常），请稍后重试或联系管理员检查模型配置。"
+    return "系统繁忙，当前请求暂时无法处理，请稍后重试。"
 
 
 def _get_common_tools():
@@ -133,12 +262,16 @@ def _create_task_handoff_tool(agent_name: str, description: str):
     @tool(name, description=description)
     def handoff_tool(
         task_description: Annotated[str, "详细描述下一个专家需要完成的任务，包含所有相关上下文和指令"],
+        frame: Annotated[Optional[Dict[str, Any]], "结构化上下文（可选）：metric/time/dimensions 或 todo_action/todo_fields"] = None,
+        turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）：NEW_QUERY/SUPPLEMENT/CORRECTION/CONFIRM"] = None,
     ) -> str:
         """将任务委派给指定的专家 Agent。返回 JSON 格式的委派指令。"""
         # [Phase 2] 标准化输出：使用 HandoffResult 模型生成纯 JSON
         result = HandoffResult(
             target_agent=agent_name,
-            task_description=task_description
+            task_description=task_description,
+            frame=frame if isinstance(frame, dict) else None,
+            turn_act_hint=str(turn_act_hint or "").strip() or None,
         )
         return result.model_dump_json(ensure_ascii=False)
     
@@ -446,6 +579,13 @@ async def create_multi_agent_graph(
                             msg, metadata = chunk
                             msg_type = type(msg).__name__
                             
+                            # data_expert 的有效输出通过 emit_result/emit_status 发送，
+                            # 跳过 messages 模式的 token 流，避免内部 SQL 生成 LLM 响应泄露
+                            if name == "data_expert":
+                                if hasattr(msg, 'id') and msg.id:
+                                    emitted_message_ids.add(msg.id)
+                                continue
+                            
                             # 记录流式消息 ID
                             if hasattr(msg, 'id') and msg.id:
                                 emitted_message_ids.add(msg.id)
@@ -522,30 +662,37 @@ async def create_multi_agent_graph(
                         final_state = chunk
                         messages = chunk.get("messages", [])
                         
-                        # 检查 kb_images
-                        if messages and isinstance(messages[-1], ToolMessage):
-                            last_tool_msg = messages[-1]
-                            tool_content = str(getattr(last_tool_msg, "content", ""))
-                            
-                            # A. 检测 Handoff (确保 ToolMessage 已在状态中)
-                            handoff_data = AgentOutputParser.parse_handoff(tool_content)
-                            if handoff_data and name == "supervisor":
-                                target_agent = handoff_data.get("target_agent")
-                                logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
-                                
-                                # 构造增量更新：只包含新增消息和 handoff 标记
-                                # 使用 initial_input_count 而非 input_message_count（后者可能已被更新）
-                                delta_messages = messages[initial_input_count:]
-                                
-                                # 确保此时不丢失其他状态 (如 user_id, thread_id 等)
-                                other_keys = {k: v for k, v in final_state.items() if k != "messages"}
-                                
-                                ret = other_keys.copy()
-                                ret["messages"] = delta_messages
-                                ret["pending_handoff"] = handoff_data
-                                return ret
+                        # 关键修复：不要只检查 messages[-1] 是否为 ToolMessage。
+                        # Supervisor 可能在调用 assign_to_* 后继续输出一条 AIMessage，
+                        # 导致最后一条消息不是 ToolMessage，从而漏掉 handoff。
+                        # 正确做法：在本次增量消息内回溯扫描 ToolMessage。
+                        delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
 
-                            # B. 检测 KB_IMAGES
+                        # A. 检测 Handoff (确保 ToolMessage 已在状态中)
+                        handoff_data = AgentOutputParser.extract_latest_handoff_from_messages(delta_messages_for_scan)
+                        if handoff_data and name == "supervisor":
+                            target_agent = handoff_data.get("target_agent")
+                            logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
+                            
+                            # 构造增量更新：只包含新增消息和 handoff 标记
+                            # 使用 initial_input_count 而非 input_message_count（后者可能已被更新）
+                            delta_messages = delta_messages_for_scan
+                            
+                            # 确保此时不丢失其他状态 (如 user_id, thread_id 等)
+                            other_keys = {k: v for k, v in final_state.items() if k != "messages"}
+                            
+                            ret = other_keys.copy()
+                            ret["messages"] = delta_messages
+                            ret["pending_handoff"] = handoff_data
+                            return ret
+
+                        # B. 检测 KB_IMAGES
+                        for tool_msg in reversed(delta_messages_for_scan):
+                            if not isinstance(tool_msg, ToolMessage):
+                                continue
+                            tool_content = str(getattr(tool_msg, "content", ""))
+                            if not tool_content:
+                                continue
                             new_images = AgentOutputParser.parse_kb_images(tool_content)
                             if new_images:
                                 kb_images.update(new_images)
@@ -663,11 +810,30 @@ async def create_multi_agent_graph(
                 raise
             except Exception as e:
                 logger.error(f"[{name}]流式输出异常: {e}", exc_info=True)
-                # 发生异常时，至少返回状态，避免前端挂起
-                # 注意：不要在开头加换行，否则保存到数据库后加载回来会显示空行
-                error_msg = f"[System Error: {str(e)}]"
+                error_text = str(e)
+
+                # Supervisor 配额/订阅类失败兜底：优先降级到待办专家，避免直接透传系统错误
+                if name == "supervisor":
+                    fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
+                    if fallback_handoff:
+                        logger.warning(
+                            "[%s] 命中模型权限错误，降级兜底路由到 %s",
+                            name,
+                            fallback_handoff.get("target_agent"),
+                        )
+                        emit_status(
+                            writer,
+                            message="模型服务暂不可用，已切换到待办兜底路由继续处理。",
+                            node=name,
+                        )
+                        return {
+                            "messages": [],
+                            "pending_handoff": fallback_handoff,
+                        }
+
+                # 发生异常时返回友好文案，避免将底层错误详情暴露给前端
+                error_msg = _build_stream_error_message(error_text)
                 emit_token(writer, error_msg, node=name)
-                # 返回错误消息以结束当前节点执行
                 return {"messages": [create_ai_message(error_msg)]}
         
         return streaming_wrapper
@@ -1030,4 +1196,3 @@ async def get_multi_agent_graph(enable_thinking: bool = False, model_id: str = N
             )
     
     return _MULTI_AGENT_GRAPH_CACHE[cache_key]
-

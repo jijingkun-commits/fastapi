@@ -7,6 +7,7 @@
 import { Button } from "@/components/ui/button";
 import { TooltipIconButton } from "@/components/chat/tooltip-icon-button";
 import { PanelRightClose, PanelRightOpen, SquarePen, LogOut, User, Settings } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
     Select,
     SelectContent,
@@ -18,14 +19,21 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ModelConfig } from "@/lib/model-config";
-import { logout } from "@/lib/backend";
+import { getMe, logout } from "@/lib/backend";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+
+interface CurrentUser {
+    id: number;
+    username: string | null;
+    mobile: string | null;
+}
 
 export interface ChatHeaderProps {
     /** 聊天历史面板是否打开 */
@@ -63,6 +71,60 @@ export function ChatHeader({
     chatStarted = false,
 }: ChatHeaderProps) {
     const router = useRouter();
+    const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const fetchCurrentUser = async () => {
+            try {
+                const me = await getMe();
+                if (!mounted) {
+                    return;
+                }
+
+                setCurrentUser({
+                    id: me.id,
+                    username: me.username ?? null,
+                    mobile: me.mobile ?? null,
+                });
+            } catch {
+                if (!mounted) {
+                    return;
+                }
+                setCurrentUser(null);
+            }
+        };
+
+        void fetchCurrentUser();
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    const userPrimaryText = useMemo(() => {
+        if (currentUser?.username?.trim()) {
+            return currentUser.username;
+        }
+        if (currentUser?.mobile?.trim()) {
+            return currentUser.mobile;
+        }
+        return "当前用户";
+    }, [currentUser]);
+
+    const userSecondaryText = useMemo(() => {
+        if (currentUser?.username?.trim() && currentUser.mobile?.trim()) {
+            return currentUser.mobile;
+        }
+        return null;
+    }, [currentUser]);
+
+    const userAvatarText = useMemo(() => {
+        const source = currentUser?.username?.trim() || currentUser?.mobile?.trim() || "U";
+        const firstChar = source.charAt(0);
+        return firstChar ? firstChar.toUpperCase() : "U";
+    }, [currentUser]);
 
     // 处理登出
     const handleLogout = async () => {
@@ -70,7 +132,7 @@ export function ChatHeader({
             await logout();
             toast.success("已退出登录");
             router.push("/auth");
-        } catch (e) {
+        } catch {
             // 即使服务端失败，也已清除本地 token
             router.push("/auth");
         }
@@ -137,13 +199,42 @@ export function ChatHeader({
                             </Avatar>
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onClick={() => router.push("/admin")}>
+                    <DropdownMenuContent align="end" className="w-56 rounded-2xl p-1">
+                        <DropdownMenuLabel className="p-1 font-normal">
+                            <div className="rounded-xl bg-muted/40 px-3 py-2.5">
+                                <div className="flex items-center gap-2.5">
+                                    <Avatar className="h-8 w-8">
+                                        <AvatarFallback className="bg-[#E8F4F4] text-xs font-semibold text-[#2F6868]">
+                                            {userAvatarText}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-[11px] text-muted-foreground">当前登录账号</p>
+                                        <p className="truncate text-sm font-semibold text-foreground">
+                                            {userPrimaryText}
+                                        </p>
+                                    </div>
+                                </div>
+                                {userSecondaryText && (
+                                    <p className="mt-1.5 truncate pl-[42px] text-xs text-muted-foreground">
+                                        {userSecondaryText}
+                                    </p>
+                                )}
+                            </div>
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            onClick={() => router.push("/admin")}
+                            className="mx-1 my-0.5 rounded-xl px-3 py-2 text-[15px] font-medium"
+                        >
                             <Settings className="mr-2 h-4 w-4" />
                             系统设置
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                        <DropdownMenuItem
+                            onClick={handleLogout}
+                            className="mx-1 my-0.5 rounded-xl px-3 py-2 text-[15px] font-medium text-red-600 focus:bg-red-50 focus:text-red-600"
+                        >
                             <LogOut className="mr-2 h-4 w-4" />
                             退出登录
                         </DropdownMenuItem>

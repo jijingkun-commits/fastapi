@@ -75,6 +75,7 @@ class DataQueryLog(Base):
     is_correct = Column(Boolean, comment="是否正确（用户反馈）")
     corrected_sql = Column(Text, comment="人工修正后的 SQL")
     trained = Column(Boolean, default=False, comment="是否已训练进向量库")
+    is_ignored = Column(Boolean, default=False, nullable=False, comment="是否已忽略（软隐藏）")
     question_embedding = Column(Vector(2048), comment="问题向量（智谱 embedding-3）")
     created_at = Column(TIMESTAMP, server_default=func.now())
 

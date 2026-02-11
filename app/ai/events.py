@@ -26,6 +26,7 @@ EventType = Literal[
     "tool_end",        # 工具调用结束
     "status",          # 状态更新（如"正在查询..."）
     "result",          # 结构化结果（卡片数据：todo_list, image, chart 等）
+    "kb_images",       # 知识库图片映射（RAG 占位符 [IMG-N] -> URL）
     "confirmation",    # 确认请求（需要用户确认的操作）
     "clarification",   # 澄清问题（需要用户补充信息）
     "interrupt",       # 中断等待（Human-in-the-loop）

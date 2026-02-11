@@ -7,9 +7,10 @@
 """
 import json
 import logging
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
+from fastapi.encoders import jsonable_encoder
 from langchain_core.messages import HumanMessage, AIMessage
 from app.ai.utils.message_factory import create_human_message
 
@@ -24,6 +25,216 @@ logger = logging.getLogger(__name__)
 # 注意：对话保存逻辑已移至 multi_agent_graph.py 的 postprocess 节点
 # 不再需要在 service 层手动保存
 # 单智能体模式已废弃（2026-01-31），系统默认使用多智能体模式
+
+
+def _slice_current_turn_messages(messages: list, human_message_id: Optional[str]) -> list:
+    """截取当前轮次的消息范围。
+
+    目标：避免 done 事件回溯时跨轮次读取到历史结构化数据（如上一轮 todo_list）。
+
+    规则：
+    1. 若无 human_message_id，返回原消息（兼容旧行为）
+    2. 从后向前找到当前 human 消息 ID，返回其后的全部消息（含该 human）
+    3. 若找不到，返回原消息（降级兜底）
+    """
+    if not messages:
+        return []
+
+    if not human_message_id:
+        return messages
+
+    for i in range(len(messages) - 1, -1, -1):
+        msg_i = messages[i]
+        if isinstance(msg_i, HumanMessage) and getattr(msg_i, "id", None) == human_message_id:
+            return messages[i:]
+
+    return messages
+
+
+def _normalize_message_content(content: object) -> str:
+    """将消息内容统一归一化为字符串。
+
+    兼容场景：
+    - str: 直接返回
+    - list: 提取 text/content 字段并拼接
+    - dict: 优先 text 字段，否则序列化为 JSON
+    - 其他类型: 转字符串
+    """
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+
+                inner = item.get("content")
+                if isinstance(inner, str):
+                    parts.append(inner)
+                    continue
+
+            parts.append(str(item))
+        return "".join(parts)
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        return json.dumps(content, ensure_ascii=False)
+
+    return str(content)
+
+
+def _infer_result_type(event_data: dict[str, Any]) -> str:
+    """推断 result 事件类型。"""
+    raw_type = event_data.get("type")
+    if isinstance(raw_type, str) and raw_type.strip():
+        return raw_type.strip()
+
+    data_type = event_data.get("data_type")
+    if isinstance(data_type, str) and data_type.strip():
+        return data_type.strip()
+
+    if "chart" in event_data:
+        return "chart"
+    if "table" in event_data:
+        return "table"
+    return "result"
+
+
+def _infer_result_content(event_data: dict[str, Any]) -> Any:
+    """推断 result 事件内容。"""
+    if "content" in event_data and event_data.get("content") is not None:
+        return event_data.get("content")
+
+    message = event_data.get("message")
+    if isinstance(message, str) and message:
+        return message
+
+    if "data" in event_data:
+        return event_data.get("data")
+
+    return ""
+
+
+def _normalize_result_event_payload(event_data: dict[str, Any], *, node: str = "") -> dict[str, Any]:
+    """标准化 result 事件，补齐冻结契约必填字段。"""
+    payload = dict(event_data or {})
+
+    if not isinstance(payload.get("type"), str) or not str(payload.get("type")).strip():
+        payload["type"] = _infer_result_type(payload)
+
+    if "content" not in payload or payload.get("content") is None:
+        payload["content"] = _infer_result_content(payload)
+
+    if "meta" not in payload:
+        meta: dict[str, Any] = {}
+        if node:
+            meta["node"] = node
+
+        data_type = payload.get("data_type")
+        if isinstance(data_type, str) and data_type.strip() and data_type != payload.get("type"):
+            meta["data_type"] = data_type
+
+        if meta:
+            payload["meta"] = meta
+
+    return payload
+
+
+def _normalize_interrupt_event_payload(
+    interrupt_value: Any,
+    *,
+    thread_id: str,
+    interrupt_id: str,
+) -> dict[str, Any]:
+    """标准化 interrupt 事件，补齐冻结契约并保留兼容字段。"""
+    value = interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}
+
+    reason = value.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        reason = value.get("type")
+
+    if (not isinstance(reason, str) or not reason.strip()) and isinstance(value.get("action_requests"), list):
+        action_requests = value.get("action_requests") or []
+        if action_requests and isinstance(action_requests[0], dict):
+            action_name = action_requests[0].get("name")
+            if isinstance(action_name, str) and action_name.strip():
+                reason = action_name
+
+    if not isinstance(reason, str) or not reason.strip():
+        reason = "action_required"
+
+    message = value.get("message")
+    if not isinstance(message, str) or not message.strip():
+        message = None
+        action_requests = value.get("action_requests")
+        if isinstance(action_requests, list) and action_requests and isinstance(action_requests[0], dict):
+            first_action = action_requests[0]
+            args = first_action.get("args")
+            if isinstance(args, dict):
+                display_message = args.get("_display_message")
+                if isinstance(display_message, str) and display_message.strip():
+                    message = display_message.strip()
+
+            if message is None:
+                description = first_action.get("description")
+                if isinstance(description, str) and description.strip():
+                    message = description.strip()
+
+        if message is None:
+            message = "需要用户确认后继续执行"
+
+    payload: dict[str, Any] = {
+        "reason": reason,
+        "message": message,
+        "thread_id": thread_id,
+        "interrupt_id": interrupt_id,
+        "value": value,
+    }
+
+    recoverable = value.get("recoverable")
+    payload["recoverable"] = recoverable if isinstance(recoverable, bool) else True
+
+    suggested_action = value.get("suggested_action")
+    if isinstance(suggested_action, str) and suggested_action.strip():
+        payload["suggested_action"] = suggested_action.strip()
+    elif reason == "action_required":
+        payload["suggested_action"] = "请确认后继续"
+
+    return payload
+
+
+def _build_done_payload(
+    *,
+    thread_id: str,
+    message_id: Optional[int],
+    final_content: Optional[str] = None,
+    meta: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """构造 done 事件载荷。"""
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "message_id": message_id,
+    }
+
+    if final_content is not None:
+        payload["final_content"] = final_content
+
+    if meta:
+        payload["meta"] = meta
+
+    return payload
 
 
 
@@ -129,6 +340,7 @@ class ChatService:
                        len(attachments), len(image_attachments), len(other_attachments))
             
         input_messages = [create_human_message(final_prompt)]
+        current_human_message_id = getattr(input_messages[0], "id", None)
         config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id}}
         
         # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）
@@ -145,8 +357,6 @@ class ChatService:
         full_answer = []
         tool_data = []
         thinking_content = None
-        # 用于收集流式过程中的结构化数据（result 事件）
-        collected_additional_kwargs = {}
         keyword_logged = False
         
         logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s", 
@@ -206,12 +416,11 @@ class ChatService:
                         # 如果有 message 字段，也收集到 full_answer
                         if event_data.get("message"):
                             full_answer.append(event_data["message"])
-                        # 收集结构化数据用于 done 事件的 additional_kwargs
-                        if event_data.get("data_type"):
-                            collected_additional_kwargs["data_type"] = event_data["data_type"]
-                            collected_additional_kwargs["data"] = event_data.get("data")
-                            logger.debug("收集结构化数据: data_type=%s", event_data["data_type"])
-                        yield self._format_sse("result", event_data)
+                        result_payload = _normalize_result_event_payload(
+                            event_data,
+                            node=chunk.get("node", ""),
+                        )
+                        yield self._format_sse("result", result_payload)
                     
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
                         yield self._format_sse(event_type, event_data)
@@ -248,11 +457,12 @@ class ChatService:
                         
                         for interrupt in task.interrupts:
                             logger.info("检测到 interrupt: %s", interrupt.value)
-                            yield self._format_sse("interrupt", {
-                                "thread_id": thread_id,
-                                "interrupt_id": str(id(interrupt)),
-                                "value": interrupt.value if isinstance(interrupt.value, dict) else {"message": str(interrupt.value)},
-                            })
+                            interrupt_payload = _normalize_interrupt_event_payload(
+                                interrupt.value,
+                                thread_id=thread_id,
+                                interrupt_id=str(id(interrupt)),
+                            )
+                            yield self._format_sse("interrupt", interrupt_payload)
                         # 有 interrupt 时不发送 done，等待 resume
                         return
 
@@ -261,62 +471,46 @@ class ChatService:
             # 4. 如果没有中断，检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
             # 例如: TodoAgent 的 query/execute 操作直接返回 AIMessage，没有触发 on_chat_model_stream
             
-            done_payload = {"thread_id": thread_id}
-            
-            # 1. 优先使用流式过程中收集的结构化数据（最可靠）
-            if collected_additional_kwargs:
-                done_payload["additional_kwargs"] = collected_additional_kwargs
-                logger.debug("使用流式收集的 additional_kwargs: %s", list(collected_additional_kwargs.keys()))
+            done_payload = _build_done_payload(thread_id=thread_id, message_id=None)
             
             if snapshot and "messages" in snapshot.values:
                 messages = snapshot.values["messages"]
                 if messages:
-                    last_msg = messages[-1]
-                    
+                    turn_messages = _slice_current_turn_messages(messages, current_human_message_id)
+
+                    last_msg = turn_messages[-1]
+
                     # 只有 AI 消息才需要补充发送 content
                     if isinstance(last_msg, AIMessage):
                         # 检查是否有 content 需要补充 (如果 full_answer 为空，说明没有流式输出过)
                         if last_msg.content and not full_answer:
-                            # 过滤掉看起来像JSON的原始分析结果
-                            content = last_msg.content
-                            is_raw_json = (content.strip().startswith("{") and 
-                                          ("needs_clarification" in content or "intent" in content))
-                            
-                            if not is_raw_json:
-                                logger.info("补充发送非流式响应: %s", content[:50])
-                                yield self._format_sse("token", {"content": content or ""})
-                                done_payload["final_content"] = content
-                            else:
-                                logger.warning("跳过原始JSON输出: %s", content[:100])
-                        
-                        # 2. 如果流式未收集到，尝试从最后一条 AI 消息获取
-                        if "additional_kwargs" not in done_payload and last_msg.additional_kwargs:
-                            # 过滤掉不需要传给前端的字段
-                            filtered = {k: v for k, v in last_msg.additional_kwargs.items() 
-                                       if v is not None and k not in ("reasoning_content",)}
-                            if filtered:
-                                done_payload["additional_kwargs"] = filtered
-                                logger.debug("使用 last_msg.additional_kwargs: %s", list(filtered.keys()))
+                            # 兼容 OpenAI Responses block 列表内容
+                            content = _normalize_message_content(last_msg.content)
+                            if content:
+                                # 过滤掉看起来像 JSON 的原始分析结果
+                                is_raw_json = (
+                                    content.strip().startswith("{") and
+                                    ("needs_clarification" in content or "intent" in content)
+                                )
 
-                    # 3. 最后回溯寻找 (兼容旧逻辑)
-                    if "additional_kwargs" not in done_payload:
-                        for msg in reversed(messages):
-                             if isinstance(msg, AIMessage) and hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
-                                  additional = {k: v for k, v in msg.additional_kwargs.items() 
-                                              if v is not None and k not in ("reasoning_content", )}
-                                  if additional:
-                                      done_payload["additional_kwargs"] = additional
-                                      logger.debug("通过回溯找到 additional_kwargs: %s", list(additional.keys()))
-                                      break
+                                if not is_raw_json:
+                                    logger.info("补充发送非流式响应: %s", content[:50])
+                                    yield self._format_sse("token", {"content": content})
+                                    done_payload["final_content"] = content
+                                else:
+                                    logger.warning("跳过原始JSON输出: %s", content[:100])
 
             # 流结束（对话由 postprocess 节点保存到数据库）
             streamed_content = "".join(full_answer)
-            additional_keys = list(done_payload.get("additional_kwargs", {}).keys()) if done_payload.get("additional_kwargs") else []
             logger.info(
-                "[SYNC-TRACE] 流式输出完成: thread_id=%s, content_len=%d, content_hash=%s, additional_kwargs_keys=%s, thinking=%s",
-                thread_id, len(streamed_content), _content_hash(streamed_content), 
-                additional_keys, bool(thinking_content)
+                "[SYNC-TRACE] 流式输出完成: thread_id=%s, content_len=%d, content_hash=%s, thinking=%s",
+                thread_id, len(streamed_content), _content_hash(streamed_content), bool(thinking_content)
             )
+            
+            # 回传数据库消息 ID，使实时对话中的点赞/点踩立即可用
+            message_id = self._get_latest_ai_message_id(thread_id)
+            if message_id is not None:
+                done_payload["message_id"] = message_id
             
             yield self._format_sse("done", done_payload)
             
@@ -328,7 +522,7 @@ class ChatService:
             self._save_conversation_fallback(
                 thread_id=thread_id,
                 user_id=user_id,
-                prompt=prompt,
+                prompt=None,  # human 已在 stream 开始保存，异常时避免重复写入
                 ai_content=ai_content,
                 scenario="Exception",
             )
@@ -339,14 +533,20 @@ class ChatService:
                 # 返回友好提示并正常结束对话
                 friendly_msg = "抱歉，您的请求内容或搜索结果触发了内容安全审核，无法继续处理。请尝试换一种方式提问。"
                 yield self._format_sse("token", {"content": friendly_msg})
-                yield self._format_sse("done", {"thread_id": thread_id})
+                yield self._format_sse(
+                    "done",
+                    _build_done_payload(
+                        thread_id=thread_id,
+                        message_id=self._get_latest_ai_message_id(thread_id),
+                    ),
+                )
             else:
                 logger.exception("流式处理错误: %s", e)
                 yield self._format_sse("error", {"message": error_msg})
     
     def _format_sse(self, event_type: str, data: dict) -> bytes:
         """格式化 SSE 事件。"""
-        payload = json.dumps(data, ensure_ascii=False)
+        payload = json.dumps(jsonable_encoder(data), ensure_ascii=False)
         return f"event: {event_type}\ndata: {payload}\n\n".encode()
 
     def _save_conversation_fallback(
@@ -408,6 +608,24 @@ class ChatService:
             )
         except Exception as save_error:
             logger.error("%s 场景保存消息失败: %s", scenario, save_error, exc_info=True)
+
+    def _get_latest_ai_message_id(self, thread_id: str) -> Optional[int]:
+        """获取线程最新 AI 消息 ID。"""
+        try:
+            from app.db.session import get_db_context
+            from app.models.chat_message import ChatMessage
+
+            with get_db_context() as db_session:
+                last_saved = db_session.query(ChatMessage).filter(
+                    ChatMessage.thread_id == thread_id,
+                    ChatMessage.role == "ai",
+                ).order_by(ChatMessage.id.desc()).first()
+                if last_saved is not None:
+                    return int(last_saved.id)
+        except Exception as exc:
+            logger.debug("获取保存消息ID失败: %s", exc)
+
+        return None
 
 
 async def sse_stream(
@@ -475,8 +693,6 @@ async def sse_resume_stream(
     
     # 用于收集完整回复
     full_answer = []
-    # 用于收集流式过程中的结构化数据
-    collected_additional_kwargs = {}
     
     svc = ChatService()
     format_sse = svc._format_sse
@@ -530,11 +746,11 @@ async def sse_resume_stream(
                 elif event_type == "result":
                     if event_data.get("message"):
                         full_answer.append(event_data["message"])
-                    # 收集结构化数据用于 done 事件
-                    if event_data.get("data_type"):
-                        collected_additional_kwargs["data_type"] = event_data["data_type"]
-                        collected_additional_kwargs["data"] = event_data.get("data")
-                    yield format_sse("result", event_data)
+                    result_payload = _normalize_result_event_payload(
+                        event_data,
+                        node=chunk.get("node", ""),
+                    )
+                    yield format_sse("result", result_payload)
                 
                 elif event_type in ("status", "clarification", "confirmation"):
                     yield format_sse(event_type, event_data)
@@ -555,11 +771,12 @@ async def sse_resume_stream(
                     # 有新的 interrupt，发送给前端，不保存消息（等流程结束时统一保存）
                     for interrupt in task.interrupts:
                         logger.info("检测到新的 interrupt: %s", interrupt.value)
-                        yield format_sse("interrupt", {
-                            "thread_id": thread_id,
-                            "interrupt_id": str(id(interrupt)),
-                            "value": interrupt.value if isinstance(interrupt.value, dict) else {"message": str(interrupt.value)},
-                        })
+                        interrupt_payload = _normalize_interrupt_event_payload(
+                            interrupt.value,
+                            thread_id=thread_id,
+                            interrupt_id=str(id(interrupt)),
+                        )
+                        yield format_sse("interrupt", interrupt_payload)
                     return
 
         # 流结束
@@ -568,11 +785,7 @@ async def sse_resume_stream(
         # 注意：AI 消息保存已由 _postprocess 节点统一处理，此处不再重复保存
         # 这避免了 resume 和 postprocess 同时保存导致的重复记录问题
         
-        done_payload = {"thread_id": thread_id}
-        
-        # 1. 优先使用流式过程中收集的结构化数据
-        if collected_additional_kwargs:
-            done_payload["additional_kwargs"] = collected_additional_kwargs
+        done_payload = _build_done_payload(thread_id=thread_id, message_id=None)
         
         # 检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
         if snapshot and "messages" in snapshot.values:
@@ -580,21 +793,16 @@ async def sse_resume_stream(
             if messages:
                 last_msg = messages[-1]
                 if last_msg.type == "ai":
-                    content = getattr(last_msg, "content", "")
-                    additional = getattr(last_msg, "additional_kwargs", {})
-                    
+                    content = _normalize_message_content(getattr(last_msg, "content", ""))
                     # 避免重复发送：只有当内容不同于已流式输出的内容时才补发
                     streamed_content = "".join(full_answer)
                     if content and content != streamed_content and not full_answer:
-                         yield format_sse("token", {"content": content or ""})
+                         yield format_sse("token", {"content": content})
                          done_payload["final_content"] = content
-                    
-                    # 2. 如果流式未收集到，从 snapshot 获取
-                    if "additional_kwargs" not in done_payload and additional:
-                        filtered = {k: v for k, v in additional.items() 
-                                   if v is not None and k not in ("reasoning_content",)}
-                        if filtered:
-                            done_payload["additional_kwargs"] = filtered
+
+        message_id = svc._get_latest_ai_message_id(thread_id)
+        if message_id is not None:
+            done_payload["message_id"] = message_id
 
         yield format_sse("done", done_payload)
         

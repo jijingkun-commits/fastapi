@@ -58,6 +58,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.0.1",
     "react-syntax-highlighter": "^15.5.0",
+    "react-vega": "^8.0.0",
     "recharts": "^2.15.1",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
@@ -68,6 +69,8 @@
     "tailwindcss-animate": "^1.0.7",
     "use-stick-to-bottom": "^1.0.46",
     "uuid": "^11.1.0",
+    "vega": "^6.2.0",
+    "vega-lite": "^6.4.2",
     "zod": "^4.1.12"
   },
   "devDependencies": {

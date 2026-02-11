@@ -9,6 +9,13 @@
  */
 
 import { apiFetch } from '@/lib/backend';
+import type {
+  ResultEnrichmentRule,
+  ResultEnrichmentRulePayload,
+  ResultEnrichmentRuleTestRequest,
+  ResultEnrichmentRuleTestResponse,
+  ResultEnrichmentRuleRefreshResponse,
+} from '@/types/result-enrichment-rule';
 
 const API_BASE = '/api/v1/data-admin';
 
@@ -24,6 +31,7 @@ export interface QueryLog {
   is_correct: boolean | null;
   corrected_sql: string | null;
   trained: boolean;
+  is_ignored: boolean;
   created_at: string;
 }
 
@@ -43,12 +51,14 @@ export async function getQueryLogs(params?: {
   limit?: number;
   is_correct?: boolean;
   trained?: boolean;
+  include_ignored?: boolean;
 }): Promise<QueryLog[]> {
   const searchParams = new URLSearchParams();
   if (params?.skip !== undefined) searchParams.set('skip', String(params.skip));
   if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params?.is_correct !== undefined) searchParams.set('is_correct', String(params.is_correct));
   if (params?.trained !== undefined) searchParams.set('trained', String(params.trained));
+  if (params?.include_ignored !== undefined) searchParams.set('include_ignored', String(params.include_ignored));
 
   const url = `${API_BASE}/query-logs${searchParams.toString() ? '?' + searchParams : ''}`;
   const response = await apiFetch(url);
@@ -102,6 +112,29 @@ export async function feedbackSQL(logId: number, isCorrect: boolean): Promise<vo
   if (!response.ok) {
     throw new Error('反馈提交失败');
   }
+}
+
+/**
+ * 批量忽略日志（软隐藏）
+ */
+export async function ignoreQueryLogs(logIds: number[]): Promise<{
+  message: string;
+  ignored_count: number;
+  skipped_count: number;
+  errors: string[] | null;
+}> {
+  const response = await apiFetch(`${API_BASE}/query-logs/ignore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ log_ids: logIds }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: '忽略失败' }));
+    throw new Error(error.detail || '忽略失败');
+  }
+
+  return response.json();
 }
 
 // ==================== 训练管理 ====================
@@ -330,6 +363,138 @@ export async function batchConvertTemplates(params: {
   if (!response.ok) {
     const err = await response.json().catch(() => ({ detail: '批量转换失败' }));
     throw new Error(err.detail || '批量转换失败');
+  }
+
+  return response.json();
+}
+
+// ==================== 结果增强规则管理 ====================
+
+/**
+ * 获取结果增强规则列表
+ */
+export async function getEnrichmentRules(): Promise<ResultEnrichmentRule[]> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules`);
+  if (!response.ok) {
+    throw new Error('获取结果增强规则失败');
+  }
+  return response.json();
+}
+
+/**
+ * 创建结果增强规则
+ */
+export async function createEnrichmentRule(
+  payload: ResultEnrichmentRulePayload,
+): Promise<ResultEnrichmentRule> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '创建规则失败' }));
+    throw new Error(err.detail || '创建规则失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 更新结果增强规则
+ */
+export async function updateEnrichmentRule(
+  ruleId: number,
+  payload: ResultEnrichmentRulePayload,
+): Promise<ResultEnrichmentRule> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules/${ruleId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '更新规则失败' }));
+    throw new Error(err.detail || '更新规则失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 启停结果增强规则
+ */
+export async function setEnrichmentRuleEnabled(
+  ruleId: number,
+  enabled: boolean,
+): Promise<ResultEnrichmentRule> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules/${ruleId}/enable`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '更新规则状态失败' }));
+    throw new Error(err.detail || '更新规则状态失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 更新结果增强规则优先级
+ */
+export async function updateEnrichmentRulePriority(
+  ruleId: number,
+  priority: number,
+): Promise<ResultEnrichmentRule> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules/${ruleId}/priority`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priority }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '更新优先级失败' }));
+    throw new Error(err.detail || '更新优先级失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 测试结果增强规则
+ */
+export async function testEnrichmentRules(
+  payload: ResultEnrichmentRuleTestRequest,
+): Promise<ResultEnrichmentRuleTestResponse> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '规则测试失败' }));
+    throw new Error(err.detail || '规则测试失败');
+  }
+
+  return response.json();
+}
+
+/**
+ * 刷新结果增强规则缓存
+ */
+export async function refreshEnrichmentRuleCache(): Promise<ResultEnrichmentRuleRefreshResponse> {
+  const response = await apiFetch(`${API_BASE}/enrichment-rules/refresh-cache`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '刷新缓存失败' }));
+    throw new Error(err.detail || '刷新缓存失败');
   }
 
   return response.json();

@@ -55,6 +55,7 @@ class BaseAgentState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     user_id: int
     thread_id: str
+    pending_handoff: Dict           # 当前轮 Supervisor 委派上下文（供专家子图消费）
     
     # 模型配置（由 chat_service 注入，所有节点可读取）
     enable_thinking: bool          # 是否启用深度思考模式
@@ -71,6 +72,13 @@ class BaseAgentState(TypedDict, total=False):
     detected_conflicts: List[Dict]     # 检测到的冲突
     time_constraints: Dict             # 时间约束
 
+    # 会话意图内核（跨 data/todo 复用）
+    session_frame: Dict                # 统一会话帧（槽位真值）
+    turn_act: Literal["NEW_QUERY", "SUPPLEMENT", "CORRECTION", "CONFIRM", "UNKNOWN"]
+    clarify_fsm_state: str             # 澄清状态机状态
+    clarify_round: int                 # 当前任务澄清轮次
+    frame_source_map: Dict             # 槽位来源（current/handoff/state/default）
+
 
 class MultiAgentState(BaseAgentState, total=False):
     """多智能体 Supervisor 状态定义。
@@ -78,7 +86,6 @@ class MultiAgentState(BaseAgentState, total=False):
     继承 BaseAgentState，扩展以下字段：
     - 运行时状态（附件分析、评估、迭代计数）
     - 意图识别（detected_intent, intent_route）
-    - 委派控制（pending_handoff）
     """
     # 运行时状态（enable_thinking / model_id 已提升至 BaseAgentState）
     attachment_analysis: str       # 附件分析结果（由 preprocess 节点填充）
@@ -92,9 +99,6 @@ class MultiAgentState(BaseAgentState, total=False):
     # 意图识别（借鉴 Flock Intent Recognition）
     detected_intent: str
     intent_route: str
-    
-    # 委派控制
-    pending_handoff: Dict         # 待处理的委派指令（由 handoff 工具返回值解析）
     
     # Skills RAG
     skill_context: str            # 检索到的相关技能上下文（由 preprocess 节点填充）
@@ -146,7 +150,7 @@ class DataAgentState(BaseAgentState, total=False):
     
     # SQL 生成
     generated_sql: str                 # 生成的 SQL 语句
-    sql_source: Literal["metric", "vanna", "template", "vanna_rag"]  # SQL 来源
+    sql_source: Literal["metric", "training", "vanna", "template", "vanna_rag"]  # SQL 来源
     sql_result: Any                    # SQL 执行结果
     pending_sql: str                   # 待审核的 SQL（需用户确认时）
     sql_approved: bool                 # SQL 是否已批准
@@ -158,9 +162,17 @@ class DataAgentState(BaseAgentState, total=False):
     # 意图分类
     data_intent: Literal["metric_query", "free_query", "visualization", "clarification"]
     clarification_needed: str          # 需要用户澄清的内容
+
+    # 澄清控制（多轮补充与重复澄清保护）
+    last_clarify_slot: str             # 上一次澄清槽位（metric/time_range/display_mode/org_level）
+    clarify_count: int                 # 当前任务内已澄清次数
+    continuation_mode: bool            # 当前轮是否识别为补充型短回复
     
     # 错误恢复（自愈机制）
     iterations: int                    # 当前迭代次数（用于限制重试）
     last_error: str                    # 最后一次执行错误信息
     sql_history: List[Dict]            # SQL 生成历史 [{"sql": str, "error": str}]
 
+    # 执行状态（用于路由/自愈）
+    execution_success: bool            # SQL 执行是否成功（route_after_execute 依赖）
+    fallback_target: str               # 空结果降级目标: "training"(→训练集) / "schema"(→通用RAG) / None

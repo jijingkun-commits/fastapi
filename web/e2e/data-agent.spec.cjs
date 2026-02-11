@@ -106,6 +106,47 @@ test.describe('Data Agent E2E Flow', () => {
     });
 
     /**
+     * @test-case TC-AD-10
+     * @description 同线程图表补充回合：先查 Top10，再补充“以柱状图方式展示”
+     */
+    test('should render chart and table together after chart supplement', async ({ page }) => {
+        test.setTimeout(150000);
+
+        const textarea = page.locator('textarea');
+
+        // 第 1 轮：先发 Top10 查询
+        await textarea.fill('查询2025-06-30贷款余额前10名客户');
+        await page.keyboard.press('Enter');
+
+        await page.waitForSelector('[data-testid="ai-message"]', { timeout: 70000 });
+        await page.waitForFunction(() => {
+            const loading = document.querySelector('[data-loading="true"]');
+            return !loading;
+        }, { timeout: 90000 });
+
+        // 第 2 轮：补充图表诉求
+        await textarea.fill('以柱状图方式展示');
+        await page.keyboard.press('Enter');
+
+        await page.waitForFunction(() => {
+            const loading = document.querySelector('[data-loading="true"]');
+            return !loading;
+        }, { timeout: 90000 });
+
+        // 断言：图表存在（新增 data-testid）
+        const chart = page.locator('[data-testid="sql-result-chart"]').last();
+        await expect(chart).toBeVisible({ timeout: 30000 });
+
+        // 断言：SQL 表格仍存在
+        const table = page.locator('table').last();
+        await expect(table).toBeVisible({ timeout: 30000 });
+
+        // 断言：当前轮 AI 消息存在，流正常结束
+        const messages = page.locator('[data-testid="ai-message"]');
+        await expect(messages.last()).toBeVisible();
+    });
+
+    /**
      * @test-case TC-AD-05
      * @description 安全拦截测试 - 危险操作应被拒绝
      */

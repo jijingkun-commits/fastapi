@@ -20,7 +20,7 @@ test.describe('用户故事: 管理后台', () => {
         });
 
         await test.step('Then: 页面显示 LLM 配置相关内容', async () => {
-            await expect(page.getByText('LLM 模型配置')).toBeVisible({ timeout: 15000 });
+            await expect(page.getByRole('heading', { name: 'LLM 模型配置' })).toBeVisible({ timeout: 15000 });
             await expect(page.getByText('模型列表')).toBeVisible();
         });
     });

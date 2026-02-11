@@ -401,13 +401,13 @@ export function Thread() {
                       const isLast = index === filteredMessages.length - 1;
                       return message.type === "human" ? (
                         <HumanMessage
-                          key={message.id || `${message.type}-${index}`}
+                          key={`${message.id ?? message.type}-${index}`}
                           message={message}
                           isLoading={isLoading && isLast}
                         />
                       ) : (
                         <AssistantMessage
-                          key={message.id || `${message.type}-${index}`}
+                          key={`${message.id ?? message.type}-${index}`}
                           message={message}
                           isLoading={isLoading && isLast}
                           isLatestMessage={isLast}

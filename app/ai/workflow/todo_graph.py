@@ -13,7 +13,7 @@
 """
 import logging
 import json
-from typing import TypedDict, Optional, Dict, List, Annotated, Literal, Union
+from typing import TypedDict, Optional, Dict, List, Annotated, Literal, Union, Tuple
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
@@ -24,7 +24,7 @@ from langgraph.types import interrupt
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_llm, _normalize_text_content
 from app.db.session import get_db_context  # 数据库上下文管理器
 from app.repositories.todo_repository import TodoRepository  # 待办仓库
 from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
@@ -55,6 +55,17 @@ from app.ai.workflow.todo_intent_helpers import (
     extract_heuristic_title,
     get_progressive_strategy,
     apply_goal_defaults,
+    canonicalize_extracted_info,
+    extract_reference_keyword,
+    is_implicit_reference_message,
+)
+from app.ai.workflow.session_intent_kernel import (
+    TURN_ACT_SUPPLEMENT,
+    TURN_ACT_CORRECTION,
+    TURN_ACT_CONFIRM,
+    classify_turn_act,
+    reduce_session_frame,
+    advance_clarify_fsm_state,
 )
 # 注意：process_clarify_intent, process_confirm_intent 已移除（LLM驱动重构）
 
@@ -66,6 +77,45 @@ todo_config = get_todo_config()
 
 
 logger = logging.getLogger(__name__)
+
+
+OUT_OF_SCOPE_PATTERNS = (
+    "天气", "新闻", "股价", "汇率", "黄金", "基金", "股票",
+    "贷款余额", "存款余额", "分行统计", "客户数量", "同比", "环比",
+    "知识库", "制度", "流程", "文档", "画图", "柱状图", "饼图", "折线图",
+    "sql", "python", "代码", "调试", "报错", "bug"
+)
+
+TODO_OPERATION_HINTS = (
+    "待办", "任务", "提醒", "清单", "截止", "优先级", "完成", "删除",
+    "更新", "修改", "改到", "改成", "标记", "进展", "创建", "新建",
+    "记一下", "记录一下"
+)
+
+
+def _is_out_of_scope_for_todo(message: str) -> bool:
+    """判断用户输入是否明显超出待办助手能力范围。"""
+    if not message:
+        return False
+    normalized = message.lower().strip()
+
+    # 若用户明确包含待办操作语义，优先认为是待办请求
+    if any(hint.lower() in normalized for hint in TODO_OPERATION_HINTS):
+        return False
+
+    return any(pattern.lower() in normalized for pattern in OUT_OF_SCOPE_PATTERNS)
+
+
+def _build_out_of_scope_message() -> str:
+    """构造超范围输入的统一回复文案。"""
+    return (
+        "这个请求超出了待办助手的能力范围。"
+        "我目前仅支持待办管理（创建、查询、更新、完成、删除）。\n\n"
+        "你可以这样说：\n"
+        "1) 查询我的待办列表\n"
+        "2) 明天下午3点提醒我提交分行周报\n"
+        "3) 把“财委会”改到周五17:00"
+    )
 
 
 # ==================== 状态定义 ====================
@@ -95,6 +145,13 @@ class TodoAgentState(TypedDict):
     
     # LLM 生成的回复消息（用于 clarify 等场景）
     response_message: Optional[str]
+
+    # 会话意图内核（跨 data/todo 复用）
+    session_frame: Optional[Dict]
+    turn_act: Optional[str]
+    clarify_fsm_state: Optional[str]
+    clarify_round: Optional[int]
+    frame_source_map: Optional[Dict]
 
 
 # 注意：OperationResult 已废弃，统一使用 ToolResult (从 app.core.types 导入)
@@ -201,6 +258,26 @@ def _get_user_todo_context(user_id: int, config: dict = None) -> str:
         return ""
 
 
+def _find_todo_candidates_by_keyword(user_id: int, keyword: str, limit: int = 5) -> List[Dict]:
+    """根据关键词查询用户待办候选。"""
+    if not user_id or not keyword:
+        return []
+
+    try:
+        with get_db_context() as db:
+            todos = todo_repo.list_by_user(
+                db,
+                user_id,
+                keyword=keyword,
+                status="pending",
+                limit=limit,
+            )
+            return [{"id": t.id, "title": t.title} for t in todos]
+    except Exception as e:
+        logger.warning(f"按关键词查询待办候选失败: keyword={keyword}, err={e}")
+        return []
+
+
 # ==================== LLM 调用辅助函数 ====================
 
 def _invoke_llm_for_intent(
@@ -243,7 +320,9 @@ def _invoke_llm_for_intent(
     analysis_messages.extend(recent_messages)
     
     response = llm.invoke(analysis_messages)  # internal=True 自动添加 tag
-    result_text = response.content
+    result_text = _normalize_text_content(
+        response.content if hasattr(response, "content") else response
+    )
     logger.info(f"LLM 分析结果长度: {len(result_text)}")
     
     # 解析 JSON 响应
@@ -267,32 +346,32 @@ def _invoke_llm_for_intent(
     except Exception as e:
         logger.warning(f"解析意外错误: {e}，使用默认意图")
         analysis_dict = {"intent": "clarify", "extracted_info": {}}
-    
+
     intent = analysis_dict.get("intent", "chat")
     if isinstance(intent, str):
         intent = intent.strip()
-        
+
     extracted_info = analysis_dict.get("extracted_info", {})
-    
+
     # 应用启发式标题修正
     if heuristic_title and not extracted_info.get("title"):
         logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
         extracted_info["title"] = heuristic_title
-        
+
         # 如果 intent 是 clarify，修正为 create
         if intent == "clarify":
             intent = "create"
             logger.info("根据 heuristic title 将 intent 修正为 create")
-    
+
     logger.info(f"LLM 分析结果: intent='{intent}', extracted_info={extracted_info}")
-    
+
     # 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
     if pre_extracted_info:
         for key, value in pre_extracted_info.items():
             if value and not extracted_info.get(key):
                 extracted_info[key] = value
                 logger.info(f"使用 Handoff 预提取的 {key}: {value}")
-    
+
     # 保留原始分析结果中的其他字段
     return {
         "intent": intent,
@@ -301,6 +380,105 @@ def _invoke_llm_for_intent(
         "conflicts": analysis_dict.get("conflicts", []),
         "quick_mode": analysis_dict.get("quick_mode", False),
     }
+
+
+def _normalize_missing_info(value: Optional[List]) -> List[str]:
+    """规范化 missing_info 列表。"""
+    if not isinstance(value, list):
+        return []
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _map_missing_info_to_slots(missing_info: List[str]) -> List[str]:
+    """将待办缺项提示映射到澄清状态槽位。"""
+    slots: List[str] = []
+    seen_slots: set[str] = set()
+    for item in missing_info:
+        compact = str(item or "").replace(" ", "")
+        if not compact:
+            continue
+        slot: str = ""
+        if any(token in compact for token in ("标题", "待办", "ID", "目标", "任务")):
+            slot = "todo_target"
+        elif any(token in compact for token in ("时间", "截止", "日期")):
+            slot = "time_range"
+        elif any(token in compact for token in ("动作", "操作", "修改", "更新", "完成", "删除", "创建")):
+            slot = "todo_action"
+
+        if slot and slot not in seen_slots:
+            seen_slots.add(slot)
+            slots.append(slot)
+    return slots
+
+
+def _is_missing_slot_satisfied(slot_text: str, data: Dict, action: str = "") -> bool:
+    """判断缺项是否已被补充。"""
+    compact = str(slot_text or "").replace(" ", "")
+    if not compact:
+        return True
+
+    title_related = any(token in compact for token in ("标题", "待办", "任务", "目标", "ID"))
+    if title_related:
+        return bool(
+            data.get("todo_id")
+            or str(data.get("title") or "").strip()
+            or str(data.get("resolved_title") or "").strip()
+        )
+
+    time_related = any(token in compact for token in ("时间", "截止", "日期"))
+    if time_related:
+        return bool(str(data.get("due_date") or data.get("time") or "").strip())
+
+    action_related = any(token in compact for token in ("动作", "操作", "修改", "更新", "完成", "删除", "创建"))
+    if action_related:
+        normalized_action = str(action or "").strip()
+        if normalized_action and normalized_action not in {"clarify", "chat"}:
+            return True
+        return bool(str(data.get("action") or "").strip())
+
+    # 未识别槽位时，按“有增量字段”宽松处理
+    return any(value not in (None, "", [], {}) for value in data.values())
+
+
+def _merge_pending_operation_by_supplement(
+    pending_operation: Dict,
+    extracted_info: Dict,
+    missing_info: List[str],
+) -> Tuple[Dict, List[str], List[str], bool]:
+    """补充轮将 extracted_info 增量并入已有 pending_operation。"""
+    merged_operation = dict(pending_operation or {})
+    merged_data = dict(merged_operation.get("data") or {})
+
+    changed_fields: List[str] = []
+    for key, value in (extracted_info or {}).items():
+        if value in (None, "", [], {}):
+            continue
+        if merged_data.get(key) != value:
+            changed_fields.append(key)
+        merged_data[key] = value
+
+    merged_operation["data"] = merged_data
+
+    unresolved = [
+        slot for slot in missing_info
+        if not _is_missing_slot_satisfied(slot, merged_data, str(merged_operation.get("action") or ""))
+    ]
+    can_promote_to_confirm = bool(changed_fields) and not unresolved
+
+    if can_promote_to_confirm:
+        merged_operation["needs_clarification"] = False
+
+    return merged_operation, unresolved, changed_fields, can_promote_to_confirm
 
 
 def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = None) -> Dict:
@@ -348,17 +526,21 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                     due_str = todo.due_date.strftime("%Y-%m-%d %H:%M") if todo.due_date else "无"
                     priority_map = {1: "高", 2: "中", 3: "低"}
                     selected_todo_context = (
-                        f"\n\n## 用户已选中的待办（重要上下文）\n"
-                        f"用户已在待办列表中选中了以下待办：\n"
+                        f"\n\n## ⚠️ 用户已选中待办（最高优先级上下文）\n"
+                        f"**重要：用户已选中一个待办，下面的消息是针对这个待办的操作，不是创建新任务。**\n"
+                        f"**除非用户明确说'另外创建'、'新建一个'等，否则 intent 绝对不能是 create。**\n\n"
+                        f"选中的待办信息：\n"
                         f"- ID: {todo.id}\n"
                         f"- 标题: {todo.title}\n"
                         f"- 描述: {todo.description or '无'}\n"
+                        f"- 进展: {todo.progress_notes or '无'}\n"
                         f"- 截止: {due_str}\n"
                         f"- 优先级: {priority_map.get(todo.priority, '中')}\n"
                         f"- 分类: {todo.category or '无'}\n\n"
-                        f"用户的消息**针对这个待办**，请根据消息内容判断真实意图：\n"
-                        f"- 补充信息（如「跟XX一起」「在YY地方」）→ intent=update，解析到 description/location 等字段\n"
-                        f"- 修改（如「改成明天」「优先级调高」）→ intent=update\n"
+                        f"请根据消息内容判断意图（默认是 update）：\n"
+                        f"- 补充任务内容（人物、地点、物品等）→ intent=update，放入 description\n"
+                        f"- 汇报进展（做了什么、进度如何）→ intent=update，放入 progress_notes\n"
+                        f"- 修改属性（时间、优先级等）→ intent=update\n"
                         f"- 完成（如「完成了」「做好了」）→ intent=complete\n"
                         f"- 删除（如「删掉」「不要了」）→ intent=delete\n"
                         f"无论哪种意图，extracted_info 中都应设置 todo_id={todo.id}。"
@@ -372,6 +554,29 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         updates["pending_clarifications"] = []
     if state.get("detected_conflicts"):
         updates["detected_conflicts"] = []
+
+    # Step 2.5: 提取最新用户消息并先做能力边界兜底（避免无效 LLM 初始化）
+    last_human_msg = ""
+    for msg in reversed(messages):
+        if hasattr(msg, 'type') and msg.type == 'human':
+            last_human_msg = msg.content if hasattr(msg, 'content') else str(msg)
+            break
+
+    if _is_out_of_scope_for_todo(last_human_msg):
+        logger.info("检测到超出待办能力范围输入，返回能力边界提示")
+        out_of_scope_message = _build_out_of_scope_message()
+        updates["response_message"] = out_of_scope_message
+        updates["extracted_info"] = {}
+        updates["pending_operation"] = {
+            "action": "out_of_scope",
+            "data": {},
+            "needs_clarification": True
+        }
+        updates["pending_clarifications"] = [
+            "当前请求不属于待办管理",
+            "请改用待办相关指令"
+        ]
+        return updates
     
     # Step 3: 调用 LLM 分析（internal=True 自动禁用流式 + 添加 tag）
     # 使用 SQL 生成/内部分析路由配置的模型，避免推理模型浪费 thinking tokens
@@ -388,13 +593,6 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
     user_confirmed = state.get("user_confirmed", False)
     quick_mode = state.get("quick_mode", False)
     
-    # 获取最后一条用户消息
-    last_human_msg = ""
-    for msg in reversed(messages):
-        if hasattr(msg, 'type') and msg.type == 'human':
-            last_human_msg = msg.content if hasattr(msg, 'content') else str(msg)
-            break
-            
     # 启发式标题提取（备用方案）
     heuristic_title = extract_heuristic_title(last_human_msg) if last_human_msg else None
     
@@ -422,7 +620,9 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
     
     try:
         response = llm.invoke(analysis_messages)  # internal=True 自动添加 tag
-        result_text = response.content
+        result_text = _normalize_text_content(
+            response.content if hasattr(response, "content") else response
+        )
         logger.info(f"LLM 分析结果长度: {len(result_text)}")
         
         try:
@@ -469,6 +669,7 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         action_state = analysis_dict.get("action_state", "need_confirm")
         response_message = analysis_dict.get("response_message", "")
         extracted_info = analysis_dict.get("extracted_info", {})
+        extracted_info = canonicalize_extracted_info(extracted_info)
         quick_mode = analysis_dict.get("quick_mode", False) or state.get("quick_mode", False)
         
         logger.info(f"LLM 分析结果: intent='{intent}', action_state='{action_state}', response_message='{response_message[:50]}...'")
@@ -484,11 +685,67 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                 if value and not extracted_info.get(key):
                     extracted_info[key] = value
                     logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+
+        # 再次归一化，确保合并后字段一致
+        extracted_info = canonicalize_extracted_info(extracted_info)
         
-        # 用户选中待办场景：若 extracted_info 无 todo_id，自动注入选中的待办 ID
-        if current_todo_id and not extracted_info.get("todo_id") and intent in ("update", "complete", "delete"):
-            extracted_info["todo_id"] = current_todo_id
-            logger.info(f"注入选中待办 todo_id={current_todo_id} (intent={intent})")
+        # 用户选中待办场景：修正 LLM 误判为 create 的情况
+        if current_todo_id:
+            if intent == "create":
+                logger.warning(f"用户已选中待办 todo_id={current_todo_id}，但 LLM 误判为 create，自动修正为 update")
+                intent = "update"
+                analysis_dict["intent"] = "update"
+            if not extracted_info.get("todo_id") and intent in ("update", "complete", "delete"):
+                extracted_info["todo_id"] = current_todo_id
+                logger.info(f"注入选中待办 todo_id={current_todo_id} (intent={intent})")
+
+        # 无动作指代（如“项目汇报那个”）的自适应判定：
+        # 1) 默认改为 update
+        # 2) 根据命中数决定 need_confirm/need_clarify
+        implicit_keyword = extract_reference_keyword(extracted_info, last_human_msg)
+        if (
+            not current_todo_id
+            and is_implicit_reference_message(last_human_msg, extracted_info)
+            and implicit_keyword
+            and intent in ("clarify", "chat", "create")
+        ):
+            matches = _find_todo_candidates_by_keyword(user_id, implicit_keyword)
+            logger.info(
+                "检测到无动作指代: keyword='%s', matches=%d, raw_intent=%s",
+                implicit_keyword,
+                len(matches),
+                intent,
+            )
+
+            intent = "update"
+            analysis_dict["intent"] = "update"
+            extracted_info.setdefault("title", implicit_keyword)
+
+            if len(matches) == 1:
+                target = matches[0]
+                extracted_info["todo_id"] = target["id"]
+                extracted_info["resolved_title"] = target["title"]
+                action_state = "need_confirm"
+                response_message = (
+                    f"我理解您在说 **{target['title']}**。"
+                    "我将按“更新待办”处理。确认继续吗？"
+                    "（如需完成/删除，请直接告诉我）"
+                )
+            elif len(matches) > 1:
+                action_state = "need_clarify"
+                extracted_info["keyword"] = implicit_keyword
+                response_message = (
+                    f"我找到了多个与“{implicit_keyword}”相关的待办，请告诉我具体是哪一个："
+                    "可以回复“第 X 个”或“ID 为 XX”。"
+                )
+                analysis_dict["missing_info"] = ["请选择目标待办"]
+            else:
+                action_state = "need_clarify"
+                response_message = (
+                    f"我暂时没找到“{implicit_keyword}”这个待办。"
+                    "请补充完整标题，或告诉我您想执行的动作（修改/完成/删除）。"
+                )
+                analysis_dict["missing_info"] = ["待办标题", "操作动作"]
         
         # Step 5: 时间解析
         extracted_info, time_constraints = parse_time_info(
@@ -505,37 +762,132 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         
         # Step 7: 应用 Goal 模板默认值（渐进式策略）
         extracted_info = apply_goal_defaults(intent, extracted_info, round_count)
-        
+        missing_info = _normalize_missing_info(analysis_dict.get("missing_info", []))
+
+        # Step 7.1: 会话意图内核（TurnAct + SessionFrame）
+        baseline_state_frame = {
+            "todo_action": str((pending_op or {}).get("action") or "").strip(),
+            "todo_target_id": str(((pending_op or {}).get("data") or {}).get("todo_id") or "").strip(),
+            "todo_fields": (pending_op or {}).get("data") if isinstance((pending_op or {}).get("data"), dict) else {},
+        }
+        handoff_frame = {
+            "todo_action": str((pre_extracted_info or {}).get("action") or "").strip(),
+            "todo_target_id": str((pre_extracted_info or {}).get("todo_id") or "").strip(),
+            "todo_fields": pre_extracted_info if isinstance(pre_extracted_info, dict) else {},
+        }
+        current_turn_frame = {
+            "todo_action": intent if intent not in {"clarify", "chat"} else "",
+            "todo_target_id": str(extracted_info.get("todo_id") or "").strip(),
+            "todo_fields": extracted_info,
+        }
+
+        has_prior_context = bool(
+            pending_op
+            or pre_extracted_info
+            or state.get("extracted_info")
+            or state.get("session_frame")
+            or state.get("pending_clarifications")
+        )
+        turn_act, turn_act_reason = classify_turn_act(
+            last_human_msg,
+            has_prior_context=has_prior_context,
+            baseline_frame=baseline_state_frame,
+            current_frame=current_turn_frame,
+            policy={
+                "confirm_patterns": [r"^(确认|好的|可以|行|对|是的|嗯|ok)$"]
+            },
+        )
+        if intent == "confirm":
+            turn_act = TURN_ACT_CONFIRM
+            turn_act_reason = "intent_confirm"
+
+        session_frame, frame_source_map = reduce_session_frame(
+            current_frame=current_turn_frame,
+            handoff_frame=handoff_frame,
+            state_frame=baseline_state_frame,
+        )
+        updates["turn_act"] = turn_act
+        updates["session_frame"] = session_frame
+        updates["frame_source_map"] = frame_source_map
+
+        # 补充轮保护：有历史 pending_operation 且本轮提供增量信息时，优先合并而非重复追问
+        if action_state == "need_clarify" and pending_op and turn_act in {TURN_ACT_SUPPLEMENT, TURN_ACT_CORRECTION}:
+            merged_pending_op, unresolved_missing, changed_fields, can_promote = _merge_pending_operation_by_supplement(
+                pending_operation=pending_op,
+                extracted_info=extracted_info,
+                missing_info=missing_info,
+            )
+            if changed_fields:
+                extracted_info = canonicalize_extracted_info(merged_pending_op.get("data") or {})
+                session_frame["todo_fields"] = extracted_info
+                logger.info("补充轮合并: changed_fields=%s", changed_fields)
+
+            pending_op = merged_pending_op
+            missing_info = unresolved_missing
+            analysis_dict["missing_info"] = missing_info
+
+            if can_promote:
+                action_state = "need_confirm"
+                merged_action = str(merged_pending_op.get("action") or intent or "update").strip() or "update"
+                intent = merged_action if merged_action not in {"clarify", "chat"} else "update"
+                if not response_message:
+                    response_message = "已根据您的补充更新待办信息，确认执行吗？"
+                logger.info("补充轮收敛: 自动从 need_clarify 提升为 need_confirm")
+
+        missing_slots = _map_missing_info_to_slots(missing_info)
+        previous_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
+        previous_clarify_round = int(state.get("clarify_round") or 0)
+        if action_state == "need_clarify":
+            updates["clarify_fsm_state"] = advance_clarify_fsm_state(previous_fsm_state, missing_slots)
+            updates["clarify_round"] = max(previous_clarify_round, 0) + 1
+        else:
+            updates["clarify_fsm_state"] = "done"
+            updates["clarify_round"] = 0
+
+        logger.info(
+            "todo意图内核: turn_act=%s(reason=%s), action_state=%s, missing=%s",
+            turn_act,
+            turn_act_reason,
+            action_state,
+            missing_info,
+        )
+
         # Step 8: 根据 action_state 设置状态和路由
         if quick_mode:
             updates["quick_mode"] = True
             logger.info("LLM 检测到快速模式")
-        
+
         # 保存 response_message 供后续节点使用
         updates["response_message"] = response_message
         updates["extracted_info"] = extracted_info
-        
+
         if action_state == "cancelled":
             # 用户取消操作
             logger.info("用户取消操作")
             updates["pending_operation"] = None
             updates["messages"] = [create_ai_message(response_message or "好的，已取消该操作。")]
-            
+
         elif action_state == "need_clarify":
             # 需要澄清
             logger.info(f"需要澄清: {intent}")
+            target_action = str((pending_op or {}).get("action") or intent or "create").strip() or "create"
+            if target_action == "clarify":
+                target_action = "create"
+            pending_data = extracted_info
+            if pending_op and isinstance(pending_op.get("data"), dict):
+                pending_data = pending_op.get("data")
             updates["pending_operation"] = {
-                "action": intent if intent != "clarify" else "create",
-                "data": extracted_info,
+                "action": target_action,
+                "data": pending_data,
                 "needs_clarification": True
             }
-            updates["pending_clarifications"] = analysis_dict.get("missing_info", [])
+            updates["pending_clarifications"] = missing_info
             # response_message 将由 clarify_node 使用
-            
+
         elif action_state == "ready":
             # 可直接执行（如查询、用户已确认）
             logger.info(f"直接执行: {intent}")
-            
+
             if intent == "confirm" and pending_op:
                 # 用户确认了待确认的操作
                 pending_op_copy = dict(pending_op)
@@ -549,16 +901,22 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                     "data": extracted_info,
                     "skip_confirmation": True
                 }
-            
+
         elif action_state == "need_confirm":
             # 需要用户确认
             logger.info(f"需要确认: {intent}")
+            confirm_action = str((pending_op or {}).get("action") or intent or "create").strip() or "create"
+            if confirm_action == "clarify":
+                confirm_action = "update"
+            confirm_data = extracted_info
+            if pending_op and isinstance(pending_op.get("data"), dict):
+                confirm_data = pending_op.get("data")
             updates["pending_operation"] = {
-                "action": intent,
-                "data": extracted_info,
+                "action": confirm_action,
+                "data": confirm_data,
                 "needs_clarification": False
             }
-            
+
         else:
             # 未知状态，默认需要确认
             logger.warning(f"未知 action_state: {action_state}，默认需要确认")
@@ -567,7 +925,7 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                 "data": extracted_info,
                 "needs_clarification": False
             }
-            
+
     except json.JSONDecodeError as e:
         logger.warning(f"意图分析 JSON 解析失败: {e}")
         updates["pending_clarifications"] = ["请告诉我您想要完成什么任务？"]
@@ -592,7 +950,7 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         logger.exception(f"意图分析意外错误: {e}")
         updates["pending_operation"] = None
         updates["messages"] = [create_ai_message("抱歉，处理您的请求时出现了问题。请重新描述您的需求。")]
-    
+
     return updates
 
 
@@ -1161,38 +1519,100 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
 # 系统不支持批量创建意图，用户一次只能创建一个待办
 
 
+def _merge_description(original: str, supplement: str) -> str:
+    """使用 LLM 将原有描述和补充信息融合为完整描述。"""
+    try:
+        llm = get_llm(internal=True)
+        prompt = (
+            "将以下原始描述和补充信息融合为一段完整的任务描述。\n"
+            "要求：语句通顺，保留所有关键信息，不要多余解释，直接输出融合后的描述。\n\n"
+            f"原始描述：{original}\n"
+            f"补充信息：{supplement}"
+        )
+        result = llm.invoke(prompt)
+        merged = _normalize_text_content(
+            result.content if hasattr(result, "content") else result
+        ).strip()
+        return merged if merged else supplement
+    except Exception as e:
+        logger.warning("描述融合失败，回退为追加: %s", e)
+        return f"{original}\n{supplement}"
+
+
 def _execute_update(data: Dict, state: TodoAgentState) -> ToolResult:
     """执行更新操作。
     
+    字段写入策略：
+    - progress_notes: 追加（倒序，带日期时间）
+    - description: LLM 语义融合（与原有内容合并）
+    - status: 仅在用户明确表达完成/取消时才写入
+    - 其他字段（title/due_date/priority/category）: 直接覆盖
+    
     注意：必须提供 todo_id。ID 解析应在 resolve_entity 阶段完成。
-    如果缺失 todo_id，将返回系统错误。
     """
     from app.ai.tools.todo_tools import update_todo
     
     user_id = _get_user_id_from_state(state)
-    # config = RunnableConfig(configurable={"user_id": user_id})
     config = {"configurable": {"user_id": user_id}}
     
     todo_id = data.get("todo_id") or data.get("id")
     
-    # 如果没有 todo_id，直接报错 (ID 解析应在 resolve 阶段完成)
     if not todo_id:
         return ToolResultBuilder.error("系统错误：缺失待办 ID (请先尝试解析该任务)")
     
     try:
-        # 直接调用 func
-        result_str = update_todo.func(
-            todo_id=todo_id,
-            title=data.get("new_title"),  # 注意：更新时使用 new_title
-            description=data.get("description"),
-            priority=_parse_priority(data.get("priority")) if data.get("priority") else None,
-            due_date=data.get("due_date") or data.get("time"),
-            category=data.get("category"),
-            status=data.get("status"),
-            config=config
-        )
+        results = []
         
-        return ToolResultBuilder.success(result_str)
+        # 1) progress_notes: 追加写入（倒序，带日期时间）
+        progress_notes = data.get("progress_notes")
+        if progress_notes:
+            with get_db_context() as db:
+                success = todo_repo.append_progress_notes(
+                    db, todo_id, user_id, progress_notes
+                )
+                if success:
+                    results.append(f"进展：{progress_notes}")
+                else:
+                    results.append("进展记录失败")
+        
+        # 2) description: LLM 语义融合
+        new_description = data.get("description")
+        if new_description:
+            with get_db_context() as db:
+                todo = todo_repo.get_by_id(db, todo_id, user_id)
+                if todo and todo.description:
+                    merged = _merge_description(todo.description, new_description)
+                    data["description"] = merged
+                else:
+                    data["description"] = new_description
+        
+        # 3) 收集需要走 update_todo 的字段
+        has_update_fields = any([
+            data.get("new_title"),
+            data.get("description"),
+            data.get("priority"),
+            data.get("due_date") or data.get("time"),
+            data.get("category"),
+            data.get("status"),
+        ])
+        
+        if has_update_fields:
+            result_str = update_todo.func(
+                todo_id=todo_id,
+                title=data.get("new_title"),
+                description=data.get("description"),
+                priority=_parse_priority(data.get("priority")) if data.get("priority") else None,
+                due_date=data.get("due_date") or data.get("time"),
+                category=data.get("category"),
+                status=data.get("status"),
+                config=config
+            )
+            results.append(result_str)
+        
+        if not results:
+            return ToolResultBuilder.error("没有需要更新的字段")
+        
+        return ToolResultBuilder.success("\n".join(results))
     except ValueError as e:
         logger.warning(f"更新待办参数错误: {e}")
         return ToolResultBuilder.error(f"更新失败: {str(e)}")

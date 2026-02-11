@@ -5,6 +5,7 @@ from app.models.chat_asset import ChatAsset, AssetType
 from app.models.agent_skill import AgentSkill
 from app.models.idempotency_key import IdempotencyKey
 from app.models.token_blacklist import TokenBlacklist
+from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
 
 __all__ = [
     "User",
@@ -14,4 +15,6 @@ __all__ = [
     "AgentSkill",
     "IdempotencyKey",
     "TokenBlacklist",
+    "ResultEnrichmentRule",
+    "ResultEnrichmentRuleAudit",
 ]

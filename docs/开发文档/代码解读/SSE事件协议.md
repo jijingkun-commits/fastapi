@@ -1,6 +1,8 @@
 # SSE 流式协议规范
 
 > **用途**: 定义后端与前端之间的 SSE 通信协议，确保事件处理一致。
+>
+> **权威性说明（2026-02）**：本文档是 SSE 事件清单的单一权威来源。`done` 仅用于生命周期收口，结构化数据只能通过 `result` 传递。
 
 ---
 
@@ -35,11 +37,38 @@ data: {json_payload}
 | `tool_end` | 工具调用结束 | Tool 执行后 |
 | `status` | 状态更新 | 长时间操作时 |
 | `result` | 结构化结果 | 返回卡片数据时 |
+| `kb_images` | 知识库图片映射 | RAG 返回图片占位符映射时 |
 | `confirmation` | 确认请求 | 需要用户确认时 |
 | `clarification` | 澄清问题 | 需要补充信息时 |
+| `handoff` | 专家切换通知 | Supervisor 委派专家时 |
 | `interrupt` | 中断等待 | Human-in-the-loop |
 | `done` | 流结束 | 处理完成时 |
 | `error` | 错误 | 发生异常时 |
+
+### emit 函数与事件来源对照
+
+| 事件类型 | 主要发送来源 | `emit_*` 函数 |
+|----------|-------------|---------------|
+| `init` | `ChatService.stream` | - |
+| `token` | Graph 节点 / 流包装器 | `emit_token` |
+| `thinking` | Graph 节点 / 流包装器 | `emit_thinking` |
+| `tool_start` | 流包装器 | `emit_tool_start` |
+| `tool_end` | 流包装器 | `emit_tool_end` |
+| `status` | Graph 节点 | `emit_status` |
+| `result` | Graph 节点 / 工具 | `emit_result` |
+| `kb_images` | 知识库检索链路 | `emit_kb_images` |
+| `confirmation` | Graph 节点 | `emit_confirmation` |
+| `clarification` | Graph 节点 | `emit_clarification` |
+| `handoff` | Supervisor 事件桥接 | -（使用 `AgentEvent.handoff()`） |
+| `interrupt` | LangGraph `interrupt()` 检测与转发 | - |
+| `done` | `ChatService.stream` | `emit_done`（可选） |
+| `error` | Graph 节点 / Service 异常处理 | `emit_error` |
+
+### 协议约束（2026-02 严格切换）
+
+1. **结构化数据单通道**：`result` 是唯一结构化载荷通道，格式为 `data_type + data + message?`。
+2. **`done` 仅生命周期收口**：`done` 仅允许 `thread_id`、`message_id`、`final_content?` 字段。
+3. **禁止在 `done` 携带结构化数据**：`done.additional_kwargs` 已废弃，不再作为前端卡片渲染输入。
 
 ---
 
@@ -135,6 +164,29 @@ data: {json_payload}
 | `image` | 图片 | `{url: string}` |
 | `chart` | 图表 | `{type: string, ...}` |
 
+### `kb_images` - 知识库图片映射
+
+```typescript
+{
+  type: "kb_images",
+  data: {
+    images: Record<string, string> // 占位符索引到 URL 的映射，如 {"1": "https://..."}
+  }
+}
+```
+
+### `handoff` - 专家切换通知
+
+```typescript
+{
+  type: "handoff",
+  data: {
+    target_agent: string,      // 目标专家
+    task_description: string   // 委派任务描述
+  }
+}
+```
+
 ### `confirmation` - 确认请求
 
 ```typescript
@@ -194,16 +246,13 @@ data: {json_payload}
   type: "done",
   data: {
     thread_id: string,
-    qa_record_id?: number,           // 问答记录 ID
-    additional_kwargs?: {            // 结构化数据（用于卡片渲染）
-      data_type?: string,            // 数据类型：todo_list / image 等
-      data?: any                     // 结构化数据
-    }
+    message_id?: number,             // 数据库消息 ID
+    final_content?: string           // 可选兜底文本
   }
 }
 ```
 
-> **注意**: `additional_kwargs` 字段用于传递需要在历史加载时恢复的结构化数据（如 TodoList 卡片）。前端需要在 `onDone` 回调中将其更新到消息的 `additional_kwargs` 属性。
+> **注意**: `done` 只负责流结束与消息绑定，不承载结构化卡片数据。前端应在 `result` 事件阶段处理并存储结构化数据。
 
 ### `error` - 错误
 
@@ -242,21 +291,22 @@ const callbacks: StreamCallbacks = {
     console.debug(`工具 ${name} 执行完成`);
   },
   onStatus: (message) => {
-    setCurrentStatus(message);  // 🆕 显示在 UI 中
+    setCurrentStatus(message);  // 显示在 UI 中
   },
   onResult: (data) => {
     if (data.data_type === 'image') {
       appendImageToAiMessage(aiId, data.data.url);
     } else if (data.data_type === 'todo_list') {
-      // 存入 additional_kwargs 用于渲染
+      // 在 result 阶段存入 additional_kwargs 用于渲染
     }
   },
   onInterrupt: (data) => {
     setInterrupt(data);
     setIsLoading(false);
   },
-  onDone: (threadId, additionalKwargs) => {
-    setCurrentStatus(null);  // 🆕 清除状态
+  onDone: (threadId, messageId) => {
+    bindMessageId(aiId, messageId);
+    setCurrentStatus(null);  // 清除状态
     setIsLoading(false);
     refreshThreads();
   },
@@ -370,4 +420,3 @@ yield self._format_sse("token", {"content": token})
  
  ⚠️ **已废弃方式**：旧版使用 `##N$$` 标记引用的方式已不再使用。
 ```
-
