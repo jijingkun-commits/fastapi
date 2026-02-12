@@ -30,6 +30,8 @@ description: VK Todo 批量建卡：优先走 MCP，502 时自动切本地后端
 4. `status`：默认 `todo`（创建时可省略）
 5. `move_filter`：推进时的筛选条件（如 `prefix=P0`、`top=5`）
 
+> 若卡片来源于某轮 `/rwfj` 拆解，建议先执行 `/vk <任务拆解目录>`（默认 strict）生成标准建卡内容，再由 `/vktodo` 负责落卡。
+
 ---
 
 ## 执行步骤

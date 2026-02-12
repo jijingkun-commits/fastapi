@@ -95,6 +95,31 @@ description: 并行任务分解：将计划拆成互不干涉的可并行工作�
    - 涉及前端交互或跨端契约消费的 WS，必须包含浏览器测试触发评估（是否触发、命令、结果或未触发原因）
 3. `merge_checklist.md`（可选）：仅共享文件/共享字段冲突场景启用
 
+### 2.1 看板导出规范（新增，供 `/vk` 消费）
+
+为保证拆解结果可直接转看板，`/rwfj` 产出时必须附带以下“可机读导出信息”：
+
+1. `parallel_plan.md` 中新增章节：`## 9. 看板导出索引`
+   - 本轮拆解目录 ID（如：`2026-02-12_文档治理`）
+   - WS 总数、Gate 总数
+   - 默认看板列流转：`Backlog -> Doing -> Review -> Gate -> Done`
+2. 每个 `workstreams/WS-*.md` 文末新增 `card_export` 区块（YAML）
+   - 必填字段：
+     - `id`（WS 编号）
+     - `title`
+     - `type`（`parallel` / `gate`）
+     - `lane`（并行泳道标识）
+     - `depends_on`
+     - `file_whitelist`
+     - `readonly_scope`
+     - `owner_fields`
+     - `check_cmd`
+     - `dod`
+3. 若出现并行冲突回退，`card_export` 必须显式加：
+   - `parallel_fallback: true`
+   - `fallback_reason`
+   - `serial_order`
+
 ## 3. 拆解步骤
 
 1. **执行 G0 协议冻结**：先冻结跨端契约，再做任务拆解。
@@ -131,10 +156,11 @@ description: 并行任务分解：将计划拆成互不干涉的可并行工作�
 
 ## 6. 与其他命令关系
 
-推荐链路：`/plan` → `/rwfj` → `/imp-ws` → `/review` → `/test`
+推荐链路：`/plan` → `/rwfj` → `/vk` → `/imp-ws` → `/review` → `/test`
 
 - `/plan` 负责“真理来源”（需求/架构）
 - `/rwfj` 负责“并行编排”（拆包/边界/依赖/合并）
+- `/vk` 负责“看板化落地”（建卡 payload + 导入提示词）
 - `/imp-ws` 负责“按单个 WS 实现”
 
 ## 7. 简化用法（默认即可）
@@ -157,6 +183,8 @@ description: 并行任务分解：将计划拆成互不干涉的可并行工作�
 8. 涉及前端交互/跨端契约消费的 WS 含浏览器测试触发评估。
 9. 若并行不通过，必须有“串行回退路线与原因”。
 10. Gate 层（如 `WS-G1`、`WS-G2`）保持串行，不伪装成并行 WS。
+11. 每个 `WS-*.md` 文末包含 `card_export`，且字段齐全。
+12. `parallel_plan.md` 包含“看板导出索引”与本轮拆解目录 ID。
 
 ---
 *使用 `/rwfj` 触发。适合多人并行或复杂改造场景。*
