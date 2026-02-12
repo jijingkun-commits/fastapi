@@ -1,7 +1,7 @@
 const { expect } = require('@playwright/test');
 
 const DEFAULT_USERNAME = 'jjk';
-const DEFAULT_API_BASE = process.env.E2E_API_BASE || 'http://localhost:8000';
+const DEFAULT_API_BASE = process.env.E2E_API_BASE || 'http://127.0.0.1:8000';
 
 /**
  * 通过后端 API 直接登录，并将 token 写入 sessionStorage。

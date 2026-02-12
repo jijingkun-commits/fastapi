@@ -51,7 +51,13 @@ scripts/                    # 运维和数据脚本
 ├── # === 工具脚本 ===
 ├── extract_metric_sql.py  # 提取指标 SQL
 ├── setup_data.py          # 数据初始化入口
-└── sync-repos.sh          # 仓库同步脚本
+├── sync-repos.sh          # 仓库同步脚本
+│
+├── # === Vibe Kanban 多 worktree 本机开发 ===
+├── vk_ports.sh            # 计算当前 worktree 端口
+├── vk_setup.sh            # 初始化 worktree 本地配置
+├── vk_dev.sh              # 启动 backend/web（本机命令）
+└── vk_cleanup.sh          # 清理当前 worktree 启动进程
 
 install/                   # 部署安装相关
 ├── scripts/
@@ -111,6 +117,24 @@ python scripts/import_skills.py
 python scripts/check_counts.py
 python scripts/validate_metric_coverage.py
 ```
+
+### Vibe Kanban 多 worktree（本机命令）
+
+```bash
+# 初始化当前 worktree（复制配置 + 生成本地端口文件）
+bash scripts/vk_setup.sh
+
+# 启动 backend + web
+bash scripts/vk_dev.sh up
+
+# 查看状态
+bash scripts/vk_dev.sh status
+
+# 清理当前 worktree 进程
+bash scripts/vk_cleanup.sh
+```
+
+> 主分支默认 8000/3000；子任务分支按 worktree 自动分配端口。
 
 ### 数据清理
 

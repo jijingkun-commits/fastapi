@@ -1,10 +1,12 @@
 import asyncio
+import os
 import json
 import httpx
 import sys
 
 # Configuration
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+BASE_URL = os.getenv("LIVE_API_BASE", "http://127.0.0.1:8000/api/v1")
+BACKEND_PORT = os.getenv("TEST_BACKEND_PORT", "8000")
 USERNAME = "admin"
 PASSWORD = "123456"
 
@@ -23,7 +25,7 @@ async def main():
             access_token = token_data["access_token"]
             print("Login successful.")
         except httpx.ConnectError:
-            print("CRITICAL: Cannot connect to server at http://127.0.0.1:8000. Is it running?")
+            print(f"CRITICAL: Cannot connect to server at http://127.0.0.1:{BACKEND_PORT}. Is it running?")
             sys.exit(1)
         except Exception as e:
             print(f"Login failed: {e}")

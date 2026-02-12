@@ -11,7 +11,7 @@ const { test, expect, request } = require('@playwright/test');
 const { loginIfNeeded, waitForChatReady, waitForAIResponse } = require('./helpers/auth-helper');
 
 // 后端 API 基础 URL
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = `${process.env.E2E_API_BASE || 'http://127.0.0.1:8000'}/api/v1`;
 
 function extractThreadId(url) {
     try {
@@ -35,7 +35,7 @@ test.describe('对话同步测试', () => {
         });
 
         // 登录获取 token
-        const loginResp = await apiContext.post('http://localhost:8000/api/v1/login', {
+        const loginResp = await apiContext.post('/login', {
             data: { username: 'jjk', password: '' }
         });
         

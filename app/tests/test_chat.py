@@ -1,9 +1,11 @@
 import asyncio
+import os
 import json
 import httpx
 
 # Configuration
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+BASE_URL = os.getenv("LIVE_API_BASE", "http://127.0.0.1:8000/api/v1")
+BACKEND_PORT = os.getenv("TEST_BACKEND_PORT", "8000")
 USERNAME = "admin"
 PASSWORD = "123456"
 

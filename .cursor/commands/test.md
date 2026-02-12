@@ -22,21 +22,30 @@ description: 完整测试流程：环境准备 -> 用例生成 -> 执行验证 -
 
 ## Step 0: 环境准备 (Environment Setup)
 
-| 服务 | 端口 | 检查命令 |
-|------|------|----------|
-| 前端 (Next.js) | `3000` | `lsof -i :3000` |
-| 后端 (FastAPI) | `8000` | `lsof -i :8000` |
+| 服务 | 端口策略 | 检查命令 |
+|------|----------|----------|
+| 前端 (Next.js) | 主分支固定 `3000`；子任务 worktree 默认 `TEST_FRONTEND_PORT` | `lsof -i :${TEST_FRONTEND_PORT}` |
+| 后端 (FastAPI) | 主分支固定 `8000`；子任务 worktree 默认 `TEST_BACKEND_PORT` | `lsof -i :${TEST_BACKEND_PORT}` |
 
 ```bash
+BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  BACKEND_PORT=8000
+  FRONTEND_PORT=3000
+else
+  BACKEND_PORT="${TEST_BACKEND_PORT:-${VK_BACKEND_PORT:-8000}}"
+  FRONTEND_PORT="${TEST_FRONTEND_PORT:-${VK_FRONTEND_PORT:-3000}}"
+fi
+
 # 仅检查服务状态，不自动启动
-if ! lsof -i :8000 >/dev/null 2>&1; then
-  echo "❌ 后端未启动：请先在新终端执行 uvicorn app.main:app --reload --port 8000"
+if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
+  echo "❌ 后端未启动：请先启动 backend（port=${BACKEND_PORT}）"
   exit 1
 fi
 
 # 仅当本轮需要 E2E/UI 时再检查前端（RUN_E2E=1）
-if [ "${RUN_E2E:-0}" = "1" ] && ! lsof -i :3000 >/dev/null 2>&1; then
-  echo "❌ 前端未启动：请先在新终端执行 cd web && pnpm dev"
+if [ "${RUN_E2E:-0}" = "1" ] && ! lsof -i :"$FRONTEND_PORT" >/dev/null 2>&1; then
+  echo "❌ 前端未启动：请先启动 web（port=${FRONTEND_PORT}）"
   exit 1
 fi
 ```
@@ -49,17 +58,24 @@ fi
 执行在线 API/E2E 前，必须先确认后端服务可用；若不可用，`/test` 立即中断并提示用户手动启动服务，不允许用 `skip` 作为通过依据。
 
 ```bash
+BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  BACKEND_PORT=8000
+else
+  BACKEND_PORT="${TEST_BACKEND_PORT:-${VK_BACKEND_PORT:-8000}}"
+fi
+
 # 后端端口硬检查（未监听则立即失败）
-if ! lsof -i :8000 >/dev/null 2>&1; then
-  echo "❌ 后端未启动：请先执行 uvicorn app.main:app --reload --port 8000"
+if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
+  echo "❌ 后端未启动：请先执行 uvicorn app.main:app --reload --port ${BACKEND_PORT}"
   exit 1
 fi
 
 # 健康检查（未就绪则立即失败）
-curl -fsS http://127.0.0.1:8000/health >/dev/null
+curl -fsS "http://127.0.0.1:${BACKEND_PORT}/api/v1/health" >/dev/null
 ```
 
-> 说明：若项目当前没有 `/health` 路由，可临时改为 `curl -fsS http://127.0.0.1:8000/docs >/dev/null`。
+> 说明：若项目当前没有 `/api/v1/health` 路由，可临时改为 `curl -fsS "http://127.0.0.1:${BACKEND_PORT}/docs" >/dev/null`。
 
 
 ## Step 1: 锁定测试依据 (Acquire Context)

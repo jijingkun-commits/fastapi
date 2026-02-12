@@ -2,6 +2,13 @@ const { defineConfig, devices } = require('@playwright/test');
 
 const HEADED = process.env.HEADED === 'true';
 const SLOW_MO = Number.parseInt(process.env.SLOW_MO || '0', 10);
+const FRONTEND_PORT = Number.parseInt(
+    process.env.PLAYWRIGHT_FRONTEND_PORT || process.env.TEST_FRONTEND_PORT || '3000',
+    10,
+);
+const BACKEND_PORT = Number.parseInt(process.env.TEST_BACKEND_PORT || '8000', 10);
+const API_BASE = process.env.E2E_API_BASE || `http://127.0.0.1:${BACKEND_PORT}`;
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${FRONTEND_PORT}`;
 
 module.exports = defineConfig({
     testDir: './e2e',
@@ -13,7 +20,7 @@ module.exports = defineConfig({
     reporter: 'html',
     timeout: 120 * 1000, // 2分钟超时
     use: {
-        baseURL: 'http://localhost:3000',
+        baseURL: BASE_URL,
         trace: HEADED ? 'on' : 'on-first-retry',
         screenshot: 'on',
         video: 'retain-on-failure',
@@ -40,8 +47,8 @@ module.exports = defineConfig({
         },
     ],
     webServer: {
-        command: 'npm run dev',
-        url: 'http://localhost:3000',
+        command: `NEXT_PUBLIC_API_BASE_URL=${API_BASE} npm run dev -- -p ${FRONTEND_PORT}`,
+        url: BASE_URL,
         reuseExistingServer: true,
         timeout: 120 * 1000,
     },

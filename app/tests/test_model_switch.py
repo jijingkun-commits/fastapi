@@ -8,6 +8,7 @@
 5. 测试 llm_util.get_llm 模型动态选择
 """
 import asyncio
+import os
 import json
 import httpx
 import pytest
@@ -18,7 +19,8 @@ from app.ai.llm_util import get_llm
 
 # ==================== 配置 ====================
 
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+BASE_URL = os.getenv("LIVE_API_BASE", "http://127.0.0.1:8000/api/v1")
+BACKEND_PORT = os.getenv("TEST_BACKEND_PORT", "8000")
 USERNAME = "admin"
 PASSWORD = "123456"
 
@@ -173,7 +175,7 @@ class TestModelSwitchAPI:
                 assert "done" in event_types or "token" in event_types
                 print("✓ deepseek-chat API 测试通过")
             except httpx.ConnectError as exc:
-                pytest.fail(f"服务器未运行：请先启动后端服务（uvicorn app.main:app --reload --port 8000）。原始错误: {exc}")
+                pytest.fail(f"服务器未运行：请先启动后端服务（uvicorn app.main:app --reload --port {BACKEND_PORT}）。原始错误: {exc}")
     
     @pytest.mark.asyncio
     async def test_model_switch_api_qwen_flash(self):
@@ -192,7 +194,7 @@ class TestModelSwitchAPI:
                 assert "done" in event_types or "token" in event_types
                 print("✓ qwen-flash API 测试通过")
             except httpx.ConnectError as exc:
-                pytest.fail(f"服务器未运行：请先启动后端服务（uvicorn app.main:app --reload --port 8000）。原始错误: {exc}")
+                pytest.fail(f"服务器未运行：请先启动后端服务（uvicorn app.main:app --reload --port {BACKEND_PORT}）。原始错误: {exc}")
 
 
 # ==================== 手动测试脚本 ====================
