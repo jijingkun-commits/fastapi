@@ -7,7 +7,7 @@ if [[ "${1:-}" == "--export" ]]; then
 fi
 
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-WORKTREE_DIR="$(pwd -P)"
+WORKTREE_DIR="$ROOT_DIR"
 BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
 
 MAIN_BRANCHES="${VK_MAIN_BRANCHES:-main,master}"

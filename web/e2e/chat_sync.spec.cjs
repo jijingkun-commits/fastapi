@@ -1,6 +1,13 @@
 /**
  * 对话同步测试 - 验证前端展示与后端保存的一致性
- * 
+ *
+ * @test-case TC-SYNC-01 前后端消息一致性
+ * @test-case TC-SYNC-02 刷新后消息完整加载
+ * @test-case TC-SYNC-03 快速连续发送
+ * @test-case TC-SYNC-04 长文本响应完整性
+ * @test-case TC-SYNC-05 特殊字符处理
+ * @see docs/开发文档/测试管理/聊天系统测试案例.md
+ *
  * 测试目标：
  * 1. 流式响应完成后，前端展示内容与后端保存一致
  * 2. additional_kwargs 正确传递（如 TodoList 卡片）
