@@ -48,6 +48,7 @@ Thumbs.db
 # 通用日志与构建输出
 *.log
 logs/
+.vibe/
 dist/
 build/
 coverage/

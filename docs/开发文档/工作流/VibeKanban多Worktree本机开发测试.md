@@ -40,6 +40,7 @@
 - `scripts/vk_setup.sh`
   - 初始化 worktree 本地配置。
   - 优先复用主 worktree 的 `.env.dev` / `web/.env.local`。
+  - 默认在本地 `venv` 不可用时，通过 `.vibe/venv` 复用主 worktree 的 `venv`。
   - 生成 `.env.vk.local` 与 `web/.env.vk.local`（记录当前 worktree 端口与 URL）。
 - `scripts/vk_dev.sh`
   - 启动本机 `backend + web`（或单独启动其中之一）。
@@ -48,6 +49,14 @@
   - 停止当前 worktree 启动的服务进程并清理 PID 文件。
 - `scripts/vk_ports.sh`
   - 统一计算端口并输出 `BACKEND_PORT/FRONTEND_PORT` 等环境变量。
+
+## 共享 venv 策略
+
+- 默认：`VK_SHARED_VENV_MODE=auto`（本地 `venv` 不可用时启用共享 venv）。
+- 强制共享：`VK_SHARED_VENV_MODE=always`（共享 venv 不可用时失败）。
+- 关闭共享：`VK_SHARED_VENV_MODE=off`（每个 worktree 使用独立环境）。
+- 可指定共享路径：`VK_SHARED_VENV_PATH=/绝对路径/venv`。
+- 若检测到本地 `venv` 不可用（例如只有 `Scripts/`），脚本会通过 `.vibe/venv` 自动指向共享 venv。
 
 ## 推荐流程
 
@@ -58,7 +67,7 @@ bash scripts/vk_setup.sh
 bash scripts/vk_dev.sh up
 
 # 最小验证（示例）
-venv/bin/python -m pytest -q tests/unit
+.vibe/venv/bin/python -m pytest -q tests/unit
 ```
 
 ### 2) 门禁 worktree（全量回归）

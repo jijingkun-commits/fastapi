@@ -6,6 +6,8 @@ cd "$ROOT_DIR"
 
 eval "$(bash scripts/vk_ports.sh --export)"
 
+PRIMARY_WORKTREE="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+
 RUN_DIR="$ROOT_DIR/.vibe/run"
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 WEB_PID_FILE="$RUN_DIR/web.pid"
@@ -55,6 +57,39 @@ ensure_port_available() {
   fi
 }
 
+resolve_uvicorn_cmd() {
+  local candidate
+  local runtime_venv
+  runtime_venv="${VK_RUNTIME_VENV:-$ROOT_DIR/.vibe/venv}"
+
+  local -a candidates=(
+    "$ROOT_DIR/venv/bin/uvicorn"
+    "$ROOT_DIR/.venv/bin/uvicorn"
+    "${runtime_venv}/bin/uvicorn"
+  )
+
+  if [[ -n "${VK_SHARED_VENV_PATH:-}" ]]; then
+    candidates+=("${VK_SHARED_VENV_PATH}/bin/uvicorn")
+  fi
+  if [[ -n "$PRIMARY_WORKTREE" ]]; then
+    candidates+=("${PRIMARY_WORKTREE}/venv/bin/uvicorn")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v uvicorn >/dev/null 2>&1; then
+    command -v uvicorn
+    return 0
+  fi
+
+  return 1
+}
+
 start_backend() {
   local current_pid
   current_pid="$(read_pid "$BACKEND_PID_FILE")"
@@ -65,18 +100,14 @@ start_backend() {
 
   ensure_port_available "backend" "$VK_BACKEND_PORT"
 
-  local uvicorn_cmd
-  if [[ -x "$ROOT_DIR/venv/bin/uvicorn" ]]; then
-    uvicorn_cmd="$ROOT_DIR/venv/bin/uvicorn"
-  elif command -v uvicorn >/dev/null 2>&1; then
-    uvicorn_cmd="uvicorn"
-  else
-    echo "[vk_dev] 未找到 uvicorn，请先安装依赖。" >&2
-    return 1
-  fi
-
   load_env_file "$ROOT_DIR/.env.dev"
   load_env_file "$ROOT_DIR/.env.vk.local"
+
+  local uvicorn_cmd
+  if ! uvicorn_cmd="$(resolve_uvicorn_cmd)"; then
+    echo "[vk_dev] 未找到 uvicorn，请先准备共享或本地 venv（建议先执行 bash scripts/vk_setup.sh）。" >&2
+    return 1
+  fi
 
   export ENV="${ENV:-dev}"
   export API_PUBLIC_URL="http://127.0.0.1:${VK_BACKEND_PORT}/public"
