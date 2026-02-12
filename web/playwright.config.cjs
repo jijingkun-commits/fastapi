@@ -2,6 +2,7 @@ const { defineConfig, devices } = require('@playwright/test');
 
 const HEADED = process.env.HEADED === 'true';
 const SLOW_MO = Number.parseInt(process.env.SLOW_MO || '0', 10);
+const BROWSER_CHANNEL = process.env.PLAYWRIGHT_BROWSER_CHANNEL || (process.env.CI ? undefined : 'chrome');
 const FRONTEND_PORT = Number.parseInt(
     process.env.PLAYWRIGHT_FRONTEND_PORT || process.env.TEST_FRONTEND_PORT || '3000',
     10,
@@ -9,6 +10,10 @@ const FRONTEND_PORT = Number.parseInt(
 const BACKEND_PORT = Number.parseInt(process.env.TEST_BACKEND_PORT || '8000', 10);
 const API_BASE = process.env.E2E_API_BASE || `http://127.0.0.1:${BACKEND_PORT}`;
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${FRONTEND_PORT}`;
+const E2E_BROWSER_USE = {
+    ...devices['Desktop Chrome'],
+    ...(BROWSER_CHANNEL ? { channel: BROWSER_CHANNEL } : {}),
+};
 
 module.exports = defineConfig({
     testDir: './e2e',
@@ -34,12 +39,13 @@ module.exports = defineConfig({
         {
             name: 'setup',
             testMatch: /auth\.setup\.cjs/,
+            use: E2E_BROWSER_USE,
         },
         // 主测试项目 (使用认证状态)
         {
             name: 'chromium',
             use: {
-                ...devices['Desktop Chrome'],
+                ...E2E_BROWSER_USE,
                 // 复用认证状态
                 storageState: '.auth/user.json',
             },
