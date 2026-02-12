@@ -135,6 +135,8 @@ bash scripts/vk_cleanup.sh
 ```
 
 > 主分支默认 8000/3000；子任务分支按 worktree 自动分配端口。
+>
+> 共享 venv 建议：`VK_SHARED_VENV_MODE=auto`（默认）。当本地 `venv` 不可用时，`vk_setup.sh` 会通过 `.vibe/venv` 复用主 worktree 的 `venv`。
 
 ### 数据清理
 
