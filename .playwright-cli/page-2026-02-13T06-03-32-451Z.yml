@@ -1,0 +1,256 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e26] [cursor=pointer]:
+    - img [ref=e27]
+  - alert [ref=e30]
+  - generic [ref=e31]:
+    - region "Notifications alt+T"
+    - generic [ref=e32]:
+      - generic [ref=e35]:
+        - generic [ref=e37]:
+          - button "批量管理" [ref=e38]:
+            - img
+          - button [ref=e39]:
+            - img
+        - generic [ref=e412]:
+          - generic [ref=e414]:
+            - img [ref=e416]
+            - button "历史格式回归测试 20260213-140305" [ref=e418]
+          - generic [ref=e420]:
+            - img [ref=e422]
+            - button "测试历史格式修复 20260213" [ref=e424]
+          - generic [ref=e426]:
+            - img [ref=e428]
+            - button "查询2025年6月30日各机构的贷款余额分布，并生成图表" [ref=e430]
+          - generic [ref=e432]:
+            - img [ref=e434]
+            - button "查询我的待办列表" [ref=e436]
+          - generic [ref=e438]:
+            - img [ref=e440]
+            - button "明天上午9点去陆家嘴和张三开会" [ref=e442]
+          - generic [ref=e444]:
+            - img [ref=e446]
+            - button "查询2025年6月30日的贷款余额" [ref=e448]
+          - generic [ref=e450]:
+            - img [ref=e452]
+            - button "查询2025年6月30日贷款余额前10名的客户，并生成图表" [ref=e454]
+          - generic [ref=e456]:
+            - img [ref=e458]
+            - button "Hello E2E Test" [ref=e460]
+          - generic [ref=e462]:
+            - img [ref=e464]
+            - button "查询2025年6月30日各机构的贷款余额分布" [ref=e466]
+          - generic [ref=e468]:
+            - img [ref=e470]
+            - button "查询2025年6月30日各机构的贷款余额分布" [ref=e472]
+          - generic [ref=e474]:
+            - img [ref=e476]
+            - button "你好" [ref=e478]
+          - generic [ref=e480]:
+            - img [ref=e482]
+            - button "查询2025-06-30贷款余额前10名客户" [ref=e484]
+          - generic [ref=e486]:
+            - img [ref=e488]
+            - button "查询2025年6月30日的贷款余额" [ref=e490]
+          - generic [ref=e492]:
+            - img [ref=e494]
+            - button "创建任务：明天开会" [ref=e496]
+          - generic [ref=e498]:
+            - img [ref=e500]
+            - button "最近事情太多了，帮我把接下来要做的事情理一理。" [ref=e502]
+          - generic [ref=e504]:
+            - img [ref=e506]
+            - button "帮我创建这些待办：1. 明天开会 2. 后天交报告 3. 下周培训" [ref=e508]
+          - generic [ref=e510]:
+            - img [ref=e512]
+            - button "帮我批量创建这些任务：周一开会、周二写报告、周三测试、周四部署、周五上线" [ref=e514]
+          - generic [ref=e516]:
+            - img [ref=e518]
+            - button "帮我创建一个任务，这个任务非常复杂，包含很多细节： 首先需要调研市场情况，然后整理行业报告，接着分析" [ref=e520]
+          - generic [ref=e522]:
+            - img [ref=e524]
+            - button "帮我创建一个任务：明天交报告" [ref=e526]
+          - generic [ref=e528]:
+            - img [ref=e530]
+            - button "明天的会议准备下" [ref=e532]
+          - generic [ref=e534]:
+            - img [ref=e536]
+            - button "明天下午2点开会" [ref=e538]
+          - generic [ref=e540]:
+            - img [ref=e542]
+            - button "领导周五要听项目汇报" [ref=e544]
+          - generic [ref=e546]:
+            - img [ref=e548]
+            - button "下周要交付一个系统，需要先完成开发、测试、部署文档，然后才能上线" [ref=e550]
+          - generic [ref=e552]:
+            - img [ref=e554]
+            - button "刚刚老板说马上要一份项目进度报告" [ref=e556]
+          - generic [ref=e558]:
+            - img [ref=e560]
+            - button "帮我记几件事" [ref=e562]
+          - generic [ref=e564]:
+            - img [ref=e566]
+            - button "后天下午3点有个技术评审会" [ref=e568]
+          - generic [ref=e570]:
+            - img [ref=e572]
+            - button "帮我理一理最近的事" [ref=e574]
+          - generic [ref=e576]:
+            - img [ref=e578]
+            - 'button "帮我创建一个高优先级任务: 准备项目汇报" [ref=e580]'
+          - generic [ref=e582]:
+            - img [ref=e584]
+            - 'button "有几个项目要做: 预售资金系统、AI中台、人力系统评测" [ref=e586]'
+          - generic [ref=e588]:
+            - img [ref=e590]
+            - button "帮我在下周二前完成报告,但周一我全天开会" [ref=e592]
+          - generic [ref=e594]:
+            - img [ref=e596]
+            - button "技术方案里要写系统架构、信创适配、实施计划" [ref=e598]
+          - generic [ref=e600]:
+            - img [ref=e602]
+            - button "路线图跟说明能不能合并一下?" [ref=e604]
+          - generic [ref=e606]:
+            - img [ref=e608]
+            - button "领导下周要听项目汇报" [ref=e610]
+          - generic [ref=e612]:
+            - img [ref=e614]
+            - button "刚刚领导说明天要一个项目进度报告" [ref=e616]
+          - generic [ref=e618]:
+            - img [ref=e620]
+            - button "最近事情太多了，帮我把接下来要做的事情理一理。" [ref=e622]
+          - generic [ref=e624]:
+            - img [ref=e626]
+            - 'button "帮我在周五创建5个任务: 任务1, 任务2, 任务3, 任务4, 任务5" [ref=e628]'
+          - generic [ref=e630]:
+            - img [ref=e632]
+            - button "帮我创建一个任务,下周二之前完成" [ref=e634]
+          - generic [ref=e636]:
+            - img [ref=e638]
+            - button "帮我创建一个待办：BDD-待办-1770727928851，优先级高" [ref=e640]
+          - generic [ref=e642]:
+            - img [ref=e644]
+            - button "你好" [ref=e646]
+          - generic [ref=e648]:
+            - img [ref=e650]
+            - button "你好，简短回复我 1770727918801" [ref=e652]
+          - generic [ref=e654]:
+            - img [ref=e656]
+            - button "今天的销售额是多少" [ref=e658]
+          - generic [ref=e660]:
+            - img [ref=e662]
+            - button "今天天气怎么样" [ref=e664]
+          - generic [ref=e666]:
+            - img [ref=e668]
+            - button "查询本月存款余额" [ref=e670]
+          - generic [ref=e672]:
+            - img [ref=e674]
+            - button "删除所有订单数据" [ref=e676]
+          - generic [ref=e678]:
+            - img [ref=e680]
+            - button "按机构统计贷款余额" [ref=e682]
+          - generic [ref=e684]:
+            - img [ref=e686]
+            - button "请详细解释一下人工智能的发展历史，包括主要里程碑事件。" [ref=e688]
+          - generic [ref=e690]:
+            - img [ref=e692]
+            - button "快速消息1 1770727856078" [ref=e694]
+          - generic [ref=e696]:
+            - img [ref=e698]
+            - button "Hello E2E Test" [ref=e700]
+          - generic [ref=e702]:
+            - img [ref=e704]
+            - button "刷新测试 1770727856359" [ref=e706]
+          - generic [ref=e708]:
+            - img [ref=e710]
+            - button "测试同步 1770727856155" [ref=e712]
+      - generic [ref=e341]:
+        - generic [ref=e342]:
+          - generic [ref=e343]:
+            - generic [ref=e344]:
+              - button [ref=e345]:
+                - img
+              - combobox [ref=e346]:
+                - generic: 选择模型
+                - img [ref=e347]
+            - generic [ref=e349]:
+              - button "New thread" [ref=e396]:
+                - img
+                - generic [ref=e397]: New thread
+              - button [ref=e350]:
+                - generic [ref=e352]:
+                  - img
+          - generic [ref=e355]:
+            - generic [ref=e399]:
+              - paragraph [ref=e403]: 历史格式回归测试 20260213-140305
+              - generic [ref=e405]:
+                - button "Copy content" [ref=e406]:
+                  - generic [ref=e407]:
+                    - img
+                  - generic [ref=e408]: Copy content
+                - button "Edit" [ref=e409]:
+                  - img
+                  - generic [ref=e410]: Edit
+            - generic [ref=e714]:
+              - generic [ref=e716]:
+                - paragraph [ref=e717]: 你这条“历史格式回归测试 20260213-140305”我理解为在验证一条“历史记录/日志/用例”的时间戳格式是否符合预期。
+                - paragraph [ref=e718]: 按常见约定拆解：
+                - list [ref=e719]:
+                  - listitem [ref=e720]:
+                    - code [ref=e721]: 20260213-140305
+                    - text: =
+                    - code [ref=e722]: YYYYMMDD-HHMMSS
+                  - listitem [ref=e723]:
+                    - text: 对应时间：
+                    - code [ref=e724]: 2026-02-13 14:03:05
+                    - text: （本地时区未指明时通常按系统/环境默认时区）
+                - paragraph [ref=e725]: 如果你期望的是 ISO 8601 或带时区格式，常见等价写法：
+                - list [ref=e726]:
+                  - listitem [ref=e727]:
+                    - code [ref=e728]: 2026-02-13T14:03:05
+                  - listitem [ref=e729]:
+                    - code [ref=e730]: 2026-02-13T14:03:05+08:00
+                    - text: （若需要显式时区，例如中国标准时间）
+                - paragraph [ref=e731]: 你要我帮你做哪一种“回归”？
+                - list [ref=e732]:
+                  - listitem [ref=e733]:
+                    - text: 仅校验字符串格式是否匹配
+                    - code [ref=e734]: "^\\d{8}-\\d{6}$"
+                  - listitem [ref=e735]: 解析并转换成标准时间格式（含/不含时区）
+                  - listitem [ref=e736]: 在代码库里加/修对应的单元测试与历史用例比对
+              - generic [ref=e738]:
+                - button "Copy content" [ref=e739]:
+                  - generic [ref=e740]:
+                    - img
+                  - generic [ref=e741]: Copy content
+                - button "Refresh" [ref=e742]:
+                  - img
+                  - generic [ref=e743]: Refresh
+                - button "Good response" [ref=e744]:
+                  - img
+                  - generic [ref=e745]: Good response
+                - button "Bad response" [ref=e746]:
+                  - img
+                  - generic [ref=e747]: Bad response
+          - contentinfo [ref=e361]:
+            - generic [ref=e363]:
+              - generic [ref=e366]:
+                - textbox "Type your message..." [active] [ref=e367]
+                - generic [ref=e368]:
+                  - generic [ref=e369]:
+                    - img [ref=e371] [cursor=pointer]
+                    - generic [ref=e372]:
+                      - combobox [ref=e373]:
+                        - generic: 快捷指令
+                        - img [ref=e374]
+                      - combobox [ref=e376]
+                  - generic [ref=e377]:
+                    - generic [ref=e379]:
+                      - switch "思考" [disabled] [ref=e380]
+                      - checkbox [disabled]
+                      - generic [ref=e381]: 思考
+                    - button [ref=e382]:
+                      - img [ref=e383]
+                    - button [disabled]:
+                      - img
+              - paragraph [ref=e386]: AI 可能会出错。请谨慎甄别，要是出错了它可不负责哦~
+        - button [ref=e391] [cursor=pointer]:
+          - img [ref=e392]
