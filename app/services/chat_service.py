@@ -16,6 +16,7 @@ from app.ai.utils.message_factory import create_human_message
 
 from app.ai.workflow import get_multi_agent_graph
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
+from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
 
 
@@ -52,47 +53,8 @@ def _slice_current_turn_messages(messages: list, human_message_id: Optional[str]
 
 
 def _normalize_message_content(content: object) -> str:
-    """将消息内容统一归一化为字符串。
-
-    兼容场景：
-    - str: 直接返回
-    - list: 提取 text/content 字段并拼接
-    - dict: 优先 text 字段，否则序列化为 JSON
-    - 其他类型: 转字符串
-    """
-    if isinstance(content, str):
-        return content
-    if content is None:
-        return ""
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-                continue
-
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-                    continue
-
-                inner = item.get("content")
-                if isinstance(inner, str):
-                    parts.append(inner)
-                    continue
-
-            parts.append(str(item))
-        return "".join(parts)
-
-    if isinstance(content, dict):
-        text = content.get("text")
-        if isinstance(text, str):
-            return text
-        return json.dumps(content, ensure_ascii=False)
-
-    return str(content)
+    """将消息内容统一归一化为字符串。"""
+    return normalize_message_content(content)
 
 
 def _infer_result_type(event_data: dict[str, Any]) -> str:

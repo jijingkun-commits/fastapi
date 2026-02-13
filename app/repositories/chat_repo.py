@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.repositories import chat_assets_repository
+from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
 
 
@@ -412,7 +413,7 @@ def save_conversation_from_messages(
     
     # 提取内容
     human_content = getattr(last_human, "content", "") if last_human else ""
-    ai_content = str(getattr(last_ai, "content", "")) if last_ai else ""
+    ai_content = normalize_message_content(getattr(last_ai, "content", "")) if last_ai else ""
     replaced_count = 0  # 用于跟踪图片占位符替换数量
     
     # ============================================================
@@ -614,5 +615,4 @@ def get_feedback_scores_batch(
     except Exception as e:
         logger.error("批量查询反馈失败: %s", e)
         return {}
-
 

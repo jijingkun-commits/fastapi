@@ -19,6 +19,7 @@ from app.schemas.chat import ChatRequest, FeedbackRequest
 from app.repositories import chat_repo
 from app.api.deps import get_current_user
 from app.core.utils import content_hash as _content_hash
+from app.core.message_content import normalize_legacy_message_content
 
 from app.models.user import User
 
@@ -179,7 +180,7 @@ def get_thread_messages(
     
     result = []
     for m in messages:
-        content = m.content
+        content = normalize_legacy_message_content(m.content)
         
         # 同步追踪日志（仅对 AI 消息记录）
         if m.role == "ai":

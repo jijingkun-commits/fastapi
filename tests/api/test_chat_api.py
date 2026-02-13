@@ -110,6 +110,41 @@ class TestMessagesAPI:
         finally:
             app.dependency_overrides.clear()
 
+    def test_get_messages_normalizes_legacy_structured_content(self):
+        """测试历史结构串会在接口层归一化为可读文本。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        mock_msg = MagicMock()
+        mock_msg.id = 2
+        mock_msg.thread_id = "thread-legacy"
+        mock_msg.role = "ai"
+        mock_msg.content_type = "markdown"
+        mock_msg.content = "[{'type': 'text', 'text': '历史格式已归一化'}]"
+        mock_msg.extra_data = {}
+        mock_msg.title = None
+        mock_msg.create_time = datetime.now()
+
+        try:
+            with patch("app.repositories.chat_repo.get_messages_by_thread") as mock_get, patch(
+                "app.repositories.chat_repo.get_feedback_scores_batch"
+            ) as mock_feedback:
+                mock_get.return_value = [mock_msg]
+                mock_feedback.return_value = {}
+
+                response = client.get("/api/v1/chat/threads/thread-legacy/messages")
+                assert response.status_code == 200
+
+                data = response.json()
+                assert len(data) == 1
+                assert data[0]["content"] == "历史格式已归一化"
+        finally:
+            app.dependency_overrides.clear()
+
 
 class TestDeleteThreadAPI:
     """删除对话接口测试。"""
