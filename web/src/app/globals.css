@@ -254,8 +254,8 @@
     border: 1px solid var(--admin-content-border);
     border-radius: 1.25rem;
     background: var(--admin-content-surface);
-    box-shadow: 0 12px 28px rgb(15 23 42 / 0.06);
-    backdrop-filter: blur(8px);
+    box-shadow: none;
+    backdrop-filter: none;
   }
 
   .app-sidebar-surface {
@@ -285,7 +285,7 @@
     border-color: var(--app-sidebar-item-active-ring);
     background-color: var(--app-sidebar-item-active-bg);
     color: var(--app-sidebar-item-active-fg);
-    box-shadow: 0 10px 22px rgb(15 23 42 / 0.09);
+    box-shadow: none;
   }
 
   .app-sidebar-icon {
@@ -302,11 +302,11 @@
   }
 
   .shadow-inner-right {
-    box-shadow: inset -10px 0 8px -8px rgb(15 23 42 / 0.12);
+    box-shadow: none;
   }
 
   .shadow-inner-left {
-    box-shadow: inset 10px 0 8px -8px rgb(15 23 42 / 0.12);
+    box-shadow: none;
   }
 
   @media (max-width: 640px) {
