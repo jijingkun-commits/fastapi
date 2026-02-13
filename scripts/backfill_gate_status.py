@@ -96,7 +96,7 @@ def format_pytest_status(result: CommandResult) -> str:
     return f"失败（exit={result.return_code}）"
 
 
-def format_simple_status(name: str, result: CommandResult, warning_count: int | None = None) -> str:
+def format_simple_status(result: CommandResult, warning_count: int | None = None) -> str:
     if result.return_code == 0:
         if warning_count is not None:
             return f"通过（{warning_count} warning）"
@@ -114,16 +114,16 @@ def format_docs_guard_status(stats: dict[str, int]) -> str:
     return f"失败（{errors} error, {warnings} warning）"
 
 
-def replace_or_append_section(
+def replace_with_fallback_patterns(
     text: str,
-    pattern: str,
+    patterns: list[str],
     replacement: str,
     append_hint: str,
 ) -> str:
-    compiled = re.compile(pattern, re.DOTALL)
-    if compiled.search(text):
-        return compiled.sub(replacement, text, count=1)
-
+    for pattern in patterns:
+        compiled = re.compile(pattern, re.DOTALL)
+        if compiled.search(text):
+            return compiled.sub(replacement, text, count=1)
     return text + f"\n\n{append_hint}\n\n{replacement}\n"
 
 
@@ -138,19 +138,22 @@ def update_parallel_plan(
 ) -> None:
     content = plan_path.read_text(encoding="utf-8")
 
-    section_91 = (
-        f"### 9.1 WS-G1 结果（自动回填：{now_label}）\n\n"
+    section_101 = (
+        f"### 10.1 WS-G1 结果（自动回填：{now_label}）\n\n"
         f"- `pytest`：{pytest_status}\n"
         f"- `tsc`：{tsc_status}\n"
         f"- `lint`：{lint_status}\n"
         f"- `docs_guard`：{docs_status}\n"
     )
 
-    content = replace_or_append_section(
+    content = replace_with_fallback_patterns(
         content,
-        r"### 9\.1 WS-G1 结果(?:（[^）]*）)?\n[\s\S]*?(?=\n### 9\.2 WS-G2 预期动作)",
-        section_91,
-        "### 9.1 WS-G1 结果",
+        [
+            r"### 10\.1 WS-G1 结果(?:（[^）]*）)?\n[\s\S]*?(?=\n### 10\.2 WS-G2 预期动作)",
+            r"### 9\.1 WS-G1 结果(?:（[^）]*）)?\n[\s\S]*?(?=\n### 9\.2 WS-G2 预期动作)",
+        ],
+        section_101,
+        "### 10.1 WS-G1 结果",
     )
 
     if docs_errors == 0:
@@ -158,8 +161,8 @@ def update_parallel_plan(
     else:
         gate_conclusion = "业务门禁可通过但文档门禁未通过，请先修复文档后重跑 Gate。"
 
-    section_10 = (
-        f"## 10. Gate 收口结果（自动回填：{now_label}）\n\n"
+    section_11 = (
+        f"## 11. Gate 收口结果（自动回填：{now_label}）\n\n"
         "1. `WS-G1` 已执行：\n"
         f"   - `pytest` {pytest_status}\n"
         f"   - `tsc` {tsc_status}\n"
@@ -171,11 +174,14 @@ def update_parallel_plan(
         f"   - {gate_conclusion}\n"
     )
 
-    content = replace_or_append_section(
+    content = replace_with_fallback_patterns(
         content,
-        r"## 10\. Gate 收口结果(?:（[^）]*）)?\n[\s\S]*$",
-        section_10,
-        "## 10. Gate 收口结果",
+        [
+            r"## 11\. Gate 收口结果(?:（[^）]*）)?\n[\s\S]*$",
+            r"## 10\. Gate 收口结果(?:（[^）]*）)?\n[\s\S]*$",
+        ],
+        section_11,
+        "## 11. Gate 收口结果",
     )
 
     plan_path.write_text(content, encoding="utf-8")
@@ -241,9 +247,8 @@ def main() -> None:
     docs_errors = int(stats.get("errors", 0))
 
     pytest_status = format_pytest_status(pytest_result)
-    tsc_status = format_simple_status("tsc", tsc_result)
+    tsc_status = format_simple_status(tsc_result)
     lint_status = format_simple_status(
-        "lint",
         lint_result,
         warning_count=parse_lint_warning_count(lint_result.output),
     )

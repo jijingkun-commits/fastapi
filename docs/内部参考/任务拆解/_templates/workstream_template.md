@@ -2,7 +2,14 @@
 
 > WS 编号: WS-XX  
 > 名称: <工作包名称>  
-> 负责人: <姓名>
+> 负责人: <姓名>  
+> 类型: <parallel|gate|foundation>
+
+## 0. 关联与来源
+
+- 对应 `task_key`:
+- 来源主计划：`docs/内部参考/迭代需求/implementation_plan.md`
+- 来源并行计划：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 
 ## 1. 目标
 
@@ -26,9 +33,9 @@
 
 ## 4. 实施步骤
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## 5. 测试与验收
 
@@ -63,3 +70,29 @@
 - 测试命令与结果：
 - 已知风险点：
 - 回滚建议：
+
+## 8. card_export（/vk 机读，必填）
+
+```yaml
+card_export:
+  id: WS-XX
+  card_key: <task_key>::WS-XX
+  title: <工作包名称>
+  type: parallel
+  lane: lane-backend
+  hard_depends_on: []
+  soft_depends_on: []
+  depends_on: []
+  file_whitelist:
+    - path/to/file_a
+  readonly_scope:
+    - path/to/readonly
+  owner_fields:
+    - field_a
+  check_cmd:
+    - venv/bin/python -m pytest -q tests/unit/test_x.py
+  handoff_artifacts:
+    - docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/contracts/sse_events_v1.json
+  dod:
+    - DoD-1
+```

@@ -91,3 +91,22 @@ bash scripts/vk_dev.sh up
 2. 全量 `review/test` 在门禁层统一执行，保持基线稳定。
 3. 若在主分支执行测试，仍优先使用 `3000/8000`。
 
+
+## 命令侧端到端流程（并行开发）
+
+为避免“拆了解但不能并行执行”，建议命令链路固定为：
+
+```text
+/clarify -> /vkplan -> /rwfj -> /vk -> /vktodo(可选)
+        -> /imp-ws(WS-00)
+        -> /imp-ws(WS-01...WS-N 并行)
+        -> /imp-ws(WS-G1) -> /imp-ws(WS-G2)
+        -> /review -> /test
+```
+
+关键要求：
+
+1. `/vkplan` 产出 `task_key/card_seed`，避免 `/rwfj` 仅基于纯文字推断。
+2. `/rwfj` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
+3. `/vk` 使用 strict 模式读取拆解结果，卡片唯一键必须为 `<task_key>::<WS-ID>`。
+4. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。

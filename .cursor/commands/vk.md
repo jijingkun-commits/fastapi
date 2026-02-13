@@ -1,5 +1,5 @@
 ---
-description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提示词（默认 strict，支持无参数名）
+description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提示词（默认 strict，严格读取 card_export）
 ---
 
 # VK 工作流 (VK Workflow)
@@ -27,7 +27,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 - 第 1 个参数：任务拆解目录（无需写 `task_split_dir=`）
 - 第 2 个参数（可选）：`mode`，可选 `strict` / `auto`
 - 若不传 `mode`，默认 `strict`
-- **模式快捷写法**：当仅传 1 个位置参数且值为 `auto` 或 `strict` 时，视为 `mode`（而非目录）
+- 当仅传 1 个参数且值为 `auto` 或 `strict` 时，视为 `mode`
 
 ### 2) 兼容键值参数（可选）
 
@@ -44,7 +44,24 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 2. **仓库相对路径（可用）**：`docs/内部参考/任务拆解/2026-02-12_文档治理`
 3. **绝对路径（可用，但需校验）**：`/abs/.../docs/内部参考/任务拆解/2026-02-12_文档治理`
 
-约束：无论相对还是绝对，解析后的真实路径必须落在 `docs/内部参考/任务拆解/` 目录树内，否则报错并停止。
+约束：解析后的真实路径必须落在 `docs/内部参考/任务拆解/` 目录树内，否则报错并停止。
+
+---
+
+## 模式语义（新增）
+
+### strict（默认，推荐）
+
+- 必须读取到：
+  - `parallel_plan.md` 的 `## 9. 看板导出索引`
+  - 每个 WS 的 `card_export`
+  - `task_key`
+- 任一缺失：直接失败（fail-fast），**不做文本推断回退**。
+
+### auto（兼容老文档）
+
+- 优先读取 `card_export`。
+- 若缺失，可回退按 WS 文本结构推断；但输出必须标注“推断模式，存在风险”。
 
 ---
 
@@ -66,7 +83,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
    - `mode=auto` → 自动选择“最新且包含 `parallel_plan.md` + `workstreams/WS-*.md`”目录
 5. 若存在多个候选且无法唯一确定：输出候选列表并停止，不得盲选。
 
-> 结论：`/vk` 必须在输出开头明确“来源目录 = xxx”，确保你能确认是哪个任务拆解。
+> 结论：输出开头必须明确“来源目录 = xxx”。
 
 ### Step 2: 读取拆解产物
 
@@ -75,18 +92,22 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 1. `parallel_plan.md`
 2. `workstreams/WS-*.md`
 
-优先从每个 WS 的 `card_export` 区块提取结构化字段；若缺失，则根据 WS 文档结构回退解析。
+解析顺序：
+1. 读取 `task_key` 与看板导出索引
+2. 读取每个 WS 的 `card_export`
+3. 组装依赖图（优先 `hard_depends_on`，兼容 `depends_on`）
 
 ### Step 3: 生成看板卡片 payload
 
-输出卡片字段至少包含：
+输出字段至少包含：
 
-- `id`
-- `title`
-- `column`（默认 `Backlog`，`gate` 类型默认 `Gate`）
+- `id`（必须为 `<task_key>::<WS-ID>`）
+- `title`（必须为 `[<task_key>] <WS-ID> <标题>`）
+- `column`（默认 `Backlog`，`gate/foundation` 类型默认 `Gate`）
 - `priority`
-- `labels`
-- `depends_on`
+- `labels`（至少包含 `task_key` 与拆解目录 ID）
+- `hard_depends_on`
+- `soft_depends_on`
 - `file_scope`
 - `dod`
 - `check_cmd`
@@ -96,8 +117,8 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 
 生成 1 条可直接喂给 Vibe Kanban 的提示词，要求其：
 
-1. 按 `depends_on` 建立依赖图。
-2. 同泳道且互不依赖卡片标记为可并行。
+1. 仅按 `hard_depends_on` 建立阻塞依赖。
+2. 同泳道且无 hard 依赖卡片标记为可并行。
 3. Gate 卡保持串行。
 4. 若 `file_scope` 冲突，提示阻止并行。
 
@@ -105,9 +126,9 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 
 当 `/vk` 解析失败或看板导入失败时：
 
-1. 明确失败点（目录确认失败 / WS 缺字段 / 导入失败）。
-2. 引导使用 `/vktodo` 执行兜底建卡。
-3. 提供“最小可执行输入”（例如必须补 `task_split_dir` 或位置参数）。
+1. 明确失败点（目录确认失败 / 缺 `task_key` / 缺 `card_export` / 导入失败）。
+2. 提供“最小可执行输入”（例如补 `task_split_dir` 或补齐 `card_export`）。
+3. 引导使用 `/vktodo` 进行落卡兜底。
 
 ---
 
@@ -117,6 +138,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 ## VK 来源确认
 - 来源任务拆解目录: `<task_split_dir_or_path>`
 - 解析后的标准路径: `<resolved_path>`
+- 解析模式: `strict|auto`
 - 解析文件数: `parallel_plan.md + WS-*.md(<N>)`
 
 ## 建卡内容（JSON）
@@ -138,11 +160,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 ```
 
 ```text
-/vk docs/内部参考/任务拆解/2026-02-12_文档治理
-```
-
-```text
-/vk /Users/xxx/fastapi/docs/内部参考/任务拆解/2026-02-12_文档治理 strict
+/vk 2026-02-12_文档治理 auto
 ```
 
 ```text

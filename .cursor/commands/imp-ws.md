@@ -38,20 +38,23 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 5. 若 WS 同时引用主计划和专项附录：
    - 先满足主计划门禁与兼容约束
    - 再按附录推进专项 phase
-6. Gate 层 WS 必须串行执行：`WS-G1 -> WS-G2`。
-7. `WS-G2` 启动前提：`WS-G1` 已完成且门禁结论已回填。
-8. 若 `WS-G1` 未通过且无批准豁免，不得执行 `WS-G2`。
+6. 若存在 `WS-00_G0_协议冻结.md`，必须先执行 `WS-00`，并确认并行 WS 的 `hard_depends_on` 已满足。
+7. Gate 层 WS 必须串行执行：`WS-G1 -> WS-G2`。
+8. `WS-G2` 启动前提：`WS-G1` 已完成且门禁结论已回填。
+9. 若 `WS-G1` 未通过且无批准豁免，不得执行 `WS-G2`。
 
-### 2.1 Gate 层执行顺序（固定）
+### 2.1 Foundation/Gate 执行顺序（固定）
 
-当任务拆解包含 Gate 层工作包时，执行顺序固定如下：
+当任务拆解包含 Foundation 与 Gate 层工作包时，执行顺序如下：
 
-1. 先执行并完成 `WS-G1_集成回归门禁.md`
-2. 再执行 `WS-G2_文档终稿门禁.md`
+1. 先执行并完成 `WS-00_G0_协议冻结.md`（若存在）
+2. 再执行并行层 `WS-01 ... WS-N`
+3. 并行层完成后执行 `WS-G1_集成回归门禁.md`
+4. 最后执行 `WS-G2_文档终稿门禁.md`
 
-不允许并行执行两个 Gate WS，也不允许跳过 `WS-G1` 直接进入 `WS-G2`。
+不允许并行执行 `WS-G1/WS-G2`，也不允许跳过 `WS-G1` 直接进入 `WS-G2`。
 
-### 2.2 Gate 追溯矩阵要求（新增）
+### 2.2 Gate 追溯矩阵要求
 
 当执行 Gate 层 WS（尤其 `WS-G1`）时，必须在 WS 文档中维护“TC-ID 映射表”，至少包含以下列：
 
@@ -68,7 +71,7 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 2. 暂无现成 TC-ID 时，先标记 `TC-TBD-*`，并在 `WS-G2` 前补齐。
 3. Gate 复测必须更新同一映射表，确保前后轮可对比。
 
-### 2.3 浏览器测试触发规则（新增）
+### 2.3 浏览器测试触发规则
 
 默认不是每个 WS 都执行浏览器测试（Playwright / E2E），按变更影响面触发。
 
@@ -104,13 +107,12 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 5. （Gate WS 必做）回填“TC-ID 映射表”并标注失败归属
 6. （触发式）回填浏览器测试命令、结果与证据路径
 
-
-### 4.1 Gate 自动回填（新增，WS-G1/WS-G2 必做）
+### 4.1 Gate 自动回填（WS-G1/WS-G2 必做）
 
 执行 Gate WS 时，完成门禁命令后必须执行自动回填脚本，禁止手工改数字：
 
 ```bash
-venv/bin/python scripts/backfill_gate_status.py   --plan docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md
+venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md
 ```
 
 规则：
@@ -127,10 +129,12 @@ venv/bin/python scripts/backfill_gate_status.py   --plan docs/内部参考/任�
 - TC-ID 映射结果（Gate WS）
 - 风险点与回滚建议
 
-## 6. 常用执行示例（Gate 串行）
+## 6. 常用执行示例
 
-1. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md`
-2. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md`
+1. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-00_G0_协议冻结.md`
+2. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md`
+3. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md`
+4. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md`
 
 ---
 *使用 `/imp-ws` 触发。用于多人并行中的单子任务执行。*

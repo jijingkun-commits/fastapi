@@ -1,12 +1,12 @@
 ---
-description: 正式规划：产出 requirements.md 和技术方案
+description: 正式规划：默认产出 requirements.md 与技术方案，可选生成并行 card_seed
 ---
 
 > 参考规则: @dual-database
 
 # 规划工作流 (Planning Workflow)
 
-将需求转化为正式文档，为后续开发提供"真理来源"。
+将需求转化为正式文档，为后续开发提供“真理来源”。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
@@ -14,11 +14,32 @@ description: 正式规划：产出 requirements.md 和技术方案
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 需要产出正式需求文档 | `/plan` ✅ |
+| 只需要需求与技术方案（不拆卡） | `/plan` ✅ |
+| 需要后续并行拆解与看板落卡 | `/plan parallel` 或 `/vkplan` ✅ |
 | 只想快速澄清理解 | `/clarify` |
 | 一站式从需求到交付 | `/feature` |
 
-> **与 `/clarify` 的区别**: `/plan` 会产出 `requirements.md` 文档；`/clarify` 只做问答确认。
+> **与 `/clarify` 的区别**: `/plan` 会产出 `requirements.md` 与 `implementation_plan.md`；`/clarify` 只做问答确认。
+
+---
+
+## 输入模式（新增）
+
+### 1) core 模式（默认）
+
+`/plan` 或 `/plan core`
+
+- 产出：`requirements.md` + `implementation_plan.md`
+- 不强制产出 `card_seed`
+- 适用于单人/单 AI、小范围改动、无需并行落卡
+
+### 2) parallel 模式（并行规划）
+
+`/plan parallel` 或 `/vkplan`
+
+- 产出：`requirements.md` + `implementation_plan.md` + 最小 `card_seed`
+- 要求给出 `task_key`（后续卡片前缀）
+- 适用于多人/多 AI/多 worktree 并行
 
 ---
 
@@ -31,9 +52,9 @@ description: 正式规划：产出 requirements.md 和技术方案
 **必须包含**:
 1. **用户故事**: 谁？在什么场景？想要做什么？为什么？
 2. **验收标准**:
-    - 功能性: Happy Path
-    - 异常/边界: 断网、非法输入、超长文本
-    - 性能/稳定性: 关键路径耗时、重试/超时
+   - 功能性: Happy Path
+   - 异常/边界: 断网、非法输入、超长文本
+   - 性能/稳定性: 关键路径耗时、重试/超时
 3. **非功能需求**: 性能、安全、数据一致性
 4. **关联测试**: 预留 TC 编号（便于追溯矩阵）
 5. **业务场景**: 结合银行工作场景（如贷款/存款/分行/合规约束）
@@ -49,17 +70,17 @@ description: 正式规划：产出 requirements.md 和技术方案
 2. **API 设计**: 接口定义
 3. **风险评估**: 哪里容易出 Bug？
 
-### 架构评审必查项（新增）
+### 架构评审必查项
 
-在输出 `docs/内部参考/迭代需求/implementation_plan.md` 前，必须补充一节“架构影响与约束”，至少包含：
+在输出 `docs/内部参考/迭代需求/implementation_plan.md` 前，必须补充“架构影响与约束”，至少包含：
 
 1. **模块边界**：策略属于哪个层（Prompt / Workflow / Node / Frontend），是否越层；避免同一决策分散在多个节点重复实现。
-2. **状态契约**：关键字段的 canonical 定义、来源优先级、生命周期（创建/合并/清理），是否存在别名漂移风险。
+2. **状态契约**：关键字段 canonical 定义、来源优先级、生命周期（创建/合并/清理），是否存在别名漂移风险。
 3. **路由闭环**：从意图分析到澄清/消歧/确认/执行的收敛路径，是否存在“回到同一追问”的循环风险。
 4. **端到端链路**：前端上下文（如 `current_todo_id`）到后端状态注入的时序一致性，是否会在发送前被提前清理。
-5. **可测试性**：以上四项是否有对应单测/联测用例覆盖，缺口需在计划中显式列出。
+5. **可测试性**：以上四项是否有对应单测/联测覆盖，缺口需在计划中显式列出。
 
-### 2.1 主从文档机制（新增）
+### 2.1 主从文档机制
 
 当某个子域存在“专项架构重构”且复杂度明显高于主计划时，采用“主计划 + 专项附录”模式：
 
@@ -84,37 +105,44 @@ description: 正式规划：产出 requirements.md 和技术方案
 
 并要求 `/rwfj` 在 WS 文档中同步“契约 owner + 消费只读方”关系。
 
-### 2.3 并行拆解与看板种子（新增）
+### 2.3 并行拆解种子（仅 parallel 模式必填）
 
-为让 `/rwfj` 与 `/vk` 稳定衔接，`implementation_plan.md` 必须追加“可拆解种子信息”，至少包含：
+仅当命令为 `/plan parallel` 或 `/vkplan` 时，`implementation_plan.md` 必须追加“可拆解种子信息”。
 
-1. **CAP 清单（Capability）**
-   - 字段：`CAP-ID`、能力描述、业务价值、影响模块、是否可并行、原因
-2. **边界矩阵**
-   - 字段：`CAP-ID`、可改文件白名单、禁止触碰区、主要风险
-3. **owner 矩阵**
-   - 字段：关键状态字段/协议、owner CAP、只读 CAP
-4. **最小验证矩阵**
-   - 字段：`CAP-ID`、最小验证命令、通过标准
-5. **Gate 预设**
-   - 固定保留：`G1 集成回归门禁`、`G2 文档终稿门禁`
+最小字段：
 
-建议在文档末尾补充 `card_seed`（YAML 或表格）供 `/rwfj` 直接消费，至少包含：
+1. `task_key`（全局唯一，建议 `PP-YYYYMMDD-主题`）
+2. `card_seed`（YAML 或表格）
+   - `cap_id`
+   - `title`
+   - `hard_depends_on`
+   - `soft_depends_on`
+   - `file_scope`
+   - `owner_fields`
+   - `check_cmd`
+   - `dod`
 
-- `cap_id`
-- `title`
-- `depends_on`
-- `file_scope`
-- `check_cmd`
-- `dod`
+补充规则：
 
-## 3. 衔接下游
+1. `hard_depends_on` 仅用于阻塞依赖；非阻塞引用写入 `soft_depends_on`。
+2. `file_scope` 必须可映射到后续 WS 白名单。
+3. 未提供 seed 时，`/rwfj` 可临时补齐，但必须在 `parallel_plan.md` 标注“seed 来源为 rwfj 推导”。
+
+## 3. 与 `/rwfj` 的关系（澄清）
+
+`/plan` 与 `/rwfj` **不是二选一的替代关系**，而是分工关系：
+
+1. `/plan` 负责“需求与架构正确性”。
+2. `/rwfj` 负责“并行拆包与可执行边界”。
+3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/rwfj -> /vk -> /imp-ws`。
+
+## 4. 衔接下游
 
 规划完成后：
-- 执行 `/rwfj` 进行并行拆解（继承主从关系与契约冻结）
-- 执行 `/vk` 基于拆解结果生成看板卡片与提示词
-- 执行 `/imp` 进入实现
-- 或执行 `/test` 基于模块需求文档生成测试用例
+- 并行场景：执行 `/rwfj` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
+- 看板场景：执行 `/vk` 基于拆解结果生成看板卡片与导入提示词
+- 单任务实现：执行 `/imp`
+- 测试设计：执行 `/test` 基于模块需求文档生成测试用例
 
 ---
 *使用 `/plan` 触发。是开发周期的正式起点。*

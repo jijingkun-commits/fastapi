@@ -1,68 +1,71 @@
 # AI 协作速查表
 
-> **一句话原则**: 用 Slash Command (/) 触发流程，用 @ 注入上下文。
+> 一句话原则：先把需求与边界讲清，再按命令工作流推进；并行场景优先保证“可机读、可追溯、可落卡”。
 
-**本文定位**：一页速查卡，开发时快速查阅"用哪个命令"。如需了解 Skills、Commands、Rules 的详细原理和用法，请阅读 [Vibe Coding 开发技巧](vibe-coding开发技巧.md)。
+本文定位：开发人员一页速查卡。若需命令/技能/规则细节，请配合阅读 `vibe-coding开发技巧.md` 与 `.cursor/commands/*.md`。
 
 ---
 
 ## 1. 核心工作流
 
-```
-想法 → /clarify → /plan → requirements.md → /imp → 代码 → /review → /test → 验收
+### 1.1 常规开发（单任务）
+
+```text
+想法 -> /clarify -> /plan -> /imp -> /review -> /test -> 验收
 ```
 
-并行协作（大任务）推荐链路：
+### 1.2 并行开发（多 AI / 多 worktree）
 
-```
-想法 → /clarify → /plan → /rwfj → WS文档 → /imp-ws(按子任务) → /review+/test(门禁层) → 验收
+```text
+想法 -> /clarify -> /vkplan -> /rwfj -> /vk -> /vktodo(可选落卡)
+     -> /imp-ws(并行层) -> /imp-ws(WS-G1) -> /imp-ws(WS-G2)
+     -> /review -> /test -> 验收
 ```
 
-| 阶段 | 命令 | AI 产出 | 你的下一步 |
+并行执行顺序固定：
+
+1. `WS-00_G0_协议冻结`（Foundation）
+2. `WS-01 ... WS-N`（并行层）
+3. `WS-G1_集成回归门禁`
+4. `WS-G2_文档终稿门禁`
+
+---
+
+## 2. 并行流程逐步清单（推荐）
+
+| 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
-| **澄清需求** | `/clarify` | (无，纯对话) | 明确意图，准备规划 |
-| **做规划** | `/plan` | `requirements.md` | @引用此文件进行开发 |
-| **写代码** | `/imp` + `@requirements.md` | 代码变更 + 文档更新 | 审查代码 |
-| **并行拆解** | `/rwfj` | `parallel_plan.md` + `WS-*.md` | 一对一分发 WS 给协作者 |
-| **子任务实现** | `/imp-ws` + `@WS-*.md` | 单个子任务代码 + 自检卡 | 回收子任务结果 |
-| **审查** | `/review` | 审查意见 | 修复问题 |
-| **测功能** | `/test` | 测试报告 | 验收通过 |
-| **修 Bug** | `/debug` | 修复 + 测试用例 | 确认修复 |
-| **全流程** | `/feature` | 全部（= plan + imp + review） | 验收 |
+| 1. 并行规划 | `/vkplan`（等价 `/plan parallel`） | `requirements.md` + `implementation_plan.md`（含 `task_key/card_seed`） | `task_key` 全局唯一，`card_seed` 字段完整 |
+| 2. 并行拆解 | `/rwfj` | `parallel_plan.md` + `workstreams/WS-*.md` | 有 `WS-00`，每个 WS 含 `card_export` |
+| 3. 看板导出 | `/vk <任务拆解目录>` | 建卡 JSON + 导入提示词 | strict 模式下无缺字段（缺失即失败） |
+| 4. 看板落地 | `/vktodo` | VK 实际卡片 | 卡片 ID 带前缀：`<task_key>::<WS-ID>` |
+| 5. 子任务执行 | `/imp-ws @WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
+| 6. Gate 回填 | `/imp-ws @WS-G1` + `/imp-ws @WS-G2` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
 ---
 
-## 2. 如何引用上下文 (@Context)
+## 3. 命令选型速查
 
-不要把所有文档都扔给 AI。根据当前任务，只 @ 最相关的那个：
-
-| 场景 | 必须引用 | 可选引用 |
-|------|---------|---------|
-| 开发新功能 | `@requirements.md` | `@相关代码文件`, `@数据库设计.md` |
-| 做正式规划 | `@docs/内部参考/迭代需求/requirements.md` | `@docs/内部参考/迭代需求/implementation_plan.md` |
-| 执行子任务 | `@docs/内部参考/任务拆解/.../workstreams/WS-*.md` | `@parallel_plan.md` |
-| 修复 Bug | `@报错日志`, `@疑似出问题的代码` | `@requirements.md` |
-| 写新 API | `@接口文档.md`, `@requirements.md` | `@后端架构.md` |
-| 前端开发 | `@web/src/components/相关组件` | `@前端架构.md` |
-
----
-
-## 3. 常见误区
-
-- **"AI 写的代码不用看"** — 你是 Tech Lead，AI 是实习生，必须 Review。
-- **"开发完了再补文档"** — 先 `/plan` 生成需求文档，再写代码。文档是 AI 的导航图。
-- **"只给规范不给需求"** — 规范只告诉 AI "格式"，`@requirements.md` 才告诉它 "做什么"。
-- **"子任务也跑全量 review/test"** — `imp-ws` 阶段只做子任务最小验证；全量 `review/test` 应在门禁层统一执行。
+| 场景 | 推荐命令 | 说明 |
+|---|---|---|
+| 快速澄清需求 | `/clarify` | 只问答，不落文档 |
+| 规划（不拆卡） | `/plan` 或 `/plan core` | 只产出需求与技术方案 |
+| 规划（要并行） | `/vkplan` 或 `/plan parallel` | 强制产出 `task_key/card_seed` |
+| 并行拆包 | `/rwfj` | 产出 `WS-00 + WS-N` |
+| 看板导出 | `/vk` | strict 默认，读 `card_export` |
+| 看板落卡 | `/vktodo` | 批量创建/推进卡片 |
+| 执行单个 WS | `/imp-ws` | 按白名单改动并回填自检卡 |
+| 单任务实现 | `/imp` | 不走并行流程时使用 |
+| 代码审查 | `/review` | 质量与风险检查 |
+| 测试验证 | `/test` | 回归验证与报告沉淀 |
 
 ---
 
-## 4. 并行拆解前 3 秒判断法
-
-> 原则：并行任务必须天然互不影响；有冲突或强依赖时，不要强行分解。
+## 4. 并行前 3 秒判断法
 
 满足以下 4 条才建议 `/rwfj`：
 
-1. 子任务可独立开始并独立交付（不等待其他子任务结果）
+1. 子任务可独立开始并独立交付（无需等待他人产出）
 2. 文件白名单互斥（无共享文件并发写）
 3. 关键状态字段无语义冲突（单写入权清晰）
 4. 子任务可做局部验证（不依赖全量集成）
@@ -70,54 +73,36 @@
 若任一不满足：
 
 - 回退单任务 `/imp`
-- 或先解耦，再拆分
+- 或先解耦后再拆分
 
 ---
 
-## 5. 全部命令速查（21 个，含并行协作）
+## 5. 上下文注入（@）最小原则
 
-### 核心开发流程
+只 @ 当前任务最相关文档，避免上下文污染。
 
-| 命令 | 说明 |
-|------|------|
-| `/clarify` | 通过问答澄清需求，不产出文档 |
-| `/plan` | 生成 requirements.md 和技术方案 |
-| `/rwfj` | 并行任务分解（先过可并行判定） |
-| `/imp` | 根据计划编写代码，自动同步文档 |
-| `/imp-ws` | 按单个 WS 子任务实现并回填自检卡 |
-| `/review` | 功能验证 + 质量检查 + 安全审计 |
-| `/test` | 用例生成、执行验证、报告产出 |
-| `/debug` | 重现、定位、修复、预防 |
-| `/feature` | 一站式：plan + imp + review |
+| 场景 | 必须引用 | 可选引用 |
+|------|---------|---------|
+| 并行规划 | `@docs/内部参考/迭代需求/requirements.md` | `@implementation_plan.md` |
+| 并行拆解 | `@implementation_plan.md` | `@requirements.md` |
+| 执行 WS | `@workstreams/WS-*.md` | `@parallel_plan.md` |
+| 修 Bug | `@错误日志` + `@疑似代码` | `@需求文档` |
 
-### Git 工作流
+---
 
-| 命令 | 说明 |
-|------|------|
-| `/git-commit` | 自动分析变更并生成规范提交信息 |
-| `/create-pr` | 生成完整 PR 描述，含变更摘要和测试计划 |
+## 6. 常见误区
 
-### 代码质量
+- “并行 = 随便拆几个 WS”：错误；缺 `task_key/card_export` 会导致看板不可执行。
+- “/plan 一定要出 seed”：错误；只有并行场景才建议 `/vkplan` 或 `/plan parallel`。
+- “子任务阶段跑全量回归”：错误；并行层做最小验证，全量回归放 Gate 层。
+- “Gate 结果手工改”：错误；必须走回填脚本，保证可追溯。
 
-| 命令 | 说明 |
-|------|------|
-| `/lint` | 运行 ruff/eslint 并自动修复 |
-| `/refactor` | 保持功能不变，改善代码结构 |
-| `/deslop` | 移除 AI 生成的不必要复杂性 |
-| `/optimize` | 分析性能瓶颈并提供优化方案 |
-| `/error-handling` | 添加健壮的异常处理和输入验证 |
-| `/security-audit` | 检查注入漏洞、认证问题、数据泄露 |
+---
 
-### 数据库
+## 7. 最终验收要点
 
-| 命令 | 说明 |
-|------|------|
-| `/migration` | 创建带回滚脚本的迁移文件 |
-
-### 文档与可视化
-
-| 命令 | 说明 |
-|------|------|
-| `/diagrams` | 生成 Mermaid 图（流程图、时序图、ER 图等） |
-| `/api-docs` | 根据代码自动生成接口文档 |
-| `/doc-check` | 检查代码变更是否有对应文档更新 |
+1. `parallel_plan.md` 有 `task_key` 与看板导出索引。
+2. 每个 `WS-*.md` 文末都有 `card_export`。
+3. 卡片 ID 与标题都带 `task_key` 前缀。
+4. 执行顺序遵循 `WS-00 -> 并行层 -> WS-G1 -> WS-G2`。
+5. `review/test` 在门禁收口后统一执行。
