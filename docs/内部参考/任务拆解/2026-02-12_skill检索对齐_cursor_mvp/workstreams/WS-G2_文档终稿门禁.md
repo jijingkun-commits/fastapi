@@ -63,10 +63,40 @@
 ## 6. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
-- 是否修改白名单外文件（是/否）：
+  - `docs/SUMMARY.md`
+  - `docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G2_文档终稿门禁.md`
+- 是否修改白名单外文件（是/否）：否
 - 测试命令与结果：
+  - `python3 scripts/docs_guard.py --strict` -> 通过（`errors: 0 | warnings: 0`）
 - 已知风险点：
+  - 当前工作树 `venv` 为 Windows 目录结构（`venv/Scripts`），`venv/bin/python` 不存在；如在类 Unix 环境复跑，需确认虚拟环境路径一致。
 - 回滚建议：
+  - 如需回滚，仅回滚 `docs/SUMMARY.md` 的索引修正；保留本文件的门禁执行记录。
+
+---
+
+## 7. 本次执行记录（2026-02-13）
+
+### 7.1 动作
+
+1. 修复 `docs/SUMMARY.md` 中“内部参考/迭代需求”下的断链：
+   - 移除不存在的 `内部参考/迭代需求/requirements.md`
+   - 移除不存在的 `内部参考/迭代需求/implementation_plan.md`
+   - 将入口收敛到已存在文档：`skill_admin_frontend_requirements.md`、`skill_admin_frontend_plan.md`、`evaluation_report.md`
+2. 执行 strict 门禁检查：
+   - `python3 scripts/docs_guard.py --strict`
+
+### 7.2 结果
+
+- `broken_links: 0`
+- `summary_broken_targets: 0`
+- `summary_coverage: 83/83 (100.00%)`
+- `errors: 0 | warnings: 0`
+
+### 7.3 Gate 结论
+
+- `WS-G2` 文档终稿门禁通过。
+- `TC-GATE-DOC-01`（文档治理 strict）阻塞项已关闭。
 
 ---
 

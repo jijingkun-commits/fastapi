@@ -137,10 +137,8 @@
 
 ### 迭代需求
 
-* [当前需求](内部参考/迭代需求/requirements.md)
-* [实施方案](内部参考/迭代需求/implementation_plan.md)
-* [技能后台前端需求](内部参考/迭代需求/skill_admin_frontend_requirements.md)
-* [技能后台前端方案](内部参考/迭代需求/skill_admin_frontend_plan.md)
+* [当前需求（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
+* [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
 * [评估报告](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解
