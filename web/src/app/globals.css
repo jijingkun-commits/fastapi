@@ -42,24 +42,24 @@
   --color-state-forbidden-surface: oklch(0.95 0.01 80);
   --color-state-forbidden-icon: oklch(0.45 0.02 80);
 
-  --background: oklch(0.994 0.004 205);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.235 0.02 225);
-  --card: oklch(0.998 0.002 220);
+  --card: oklch(1 0 0);
   --card-foreground: oklch(0.235 0.02 225);
-  --popover: oklch(0.998 0.002 220);
+  --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.235 0.02 225);
   --primary: oklch(0.46 0.07 192);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.966 0.01 205);
+  --secondary: oklch(0.985 0 0);
   --secondary-foreground: oklch(0.285 0.019 223);
-  --muted: oklch(0.966 0.008 210);
+  --muted: oklch(0.978 0 0);
   --muted-foreground: oklch(0.51 0.015 223);
-  --accent: oklch(0.97 0.014 196);
+  --accent: oklch(0.978 0 0);
   --accent-foreground: oklch(0.295 0.02 220);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.9 0.012 220);
-  --input: oklch(0.9 0.012 220);
+  --border: oklch(0.91 0 0);
+  --input: oklch(0.91 0 0);
   --ring: oklch(0.56 0.09 192);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -67,32 +67,32 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.978 0.011 198);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.235 0.02 225);
   --sidebar-primary: oklch(0.46 0.07 192);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0.014 196);
+  --sidebar-accent: oklch(0.978 0 0);
   --sidebar-accent-foreground: oklch(0.295 0.02 220);
-  --sidebar-border: oklch(0.9 0.012 220);
+  --sidebar-border: oklch(0.91 0 0);
   --sidebar-ring: oklch(0.56 0.09 192);
 
-  --app-sidebar-bg: oklch(0.978 0.011 198);
-  --app-sidebar-border: oklch(0.89 0.015 210);
+  --app-sidebar-bg: oklch(1 0 0);
+  --app-sidebar-border: oklch(0.91 0 0);
   --app-sidebar-title: oklch(0.325 0.022 223);
   --app-sidebar-item-fg: oklch(0.47 0.016 223);
   --app-sidebar-item-hover-fg: oklch(0.3 0.02 220);
-  --app-sidebar-item-hover-bg: oklch(0.992 0.014 194);
-  --app-sidebar-item-active-bg: oklch(0.977 0.028 192);
+  --app-sidebar-item-hover-bg: oklch(0.985 0 0);
+  --app-sidebar-item-active-bg: oklch(1 0 0);
   --app-sidebar-item-active-fg: oklch(0.255 0.02 220);
-  --app-sidebar-item-active-ring: oklch(0.81 0.05 192 / 0.58);
+  --app-sidebar-item-active-ring: oklch(0.85 0.02 192 / 0.6);
   --app-sidebar-icon: oklch(0.56 0.018 220);
   --app-sidebar-icon-active: oklch(0.45 0.08 192);
-  --app-sidebar-icon-active-bg: oklch(0.94 0.03 192);
+  --app-sidebar-icon-active-bg: oklch(0.968 0.01 192);
 
-  --admin-canvas-top: oklch(0.986 0.016 194);
-  --admin-canvas-bottom: oklch(0.995 0.006 220);
-  --admin-content-surface: oklch(1 0 0 / 0.92);
-  --admin-content-border: oklch(0.89 0.015 210 / 0.75);
+  --admin-canvas-top: oklch(1 0 0);
+  --admin-canvas-bottom: oklch(1 0 0);
+  --admin-content-surface: oklch(1 0 0);
+  --admin-content-border: oklch(0.91 0 0 / 0.75);
   --admin-content-max-width: 1280px;
 }
 
@@ -235,16 +235,11 @@
 
 @layer utilities {
   .app-shell-canvas {
-    background:
-      radial-gradient(circle at 8% -20%, color-mix(in oklab, var(--color-brand-50) 84%, white 16%) 0%, transparent 52%),
-      radial-gradient(circle at 92% 6%, color-mix(in oklab, var(--color-brand-50) 70%, white 30%) 0%, transparent 46%),
-      linear-gradient(180deg, var(--background) 0%, color-mix(in oklab, var(--background) 88%, var(--color-brand-50) 12%) 100%);
+    background: var(--background);
   }
 
   .admin-main-scroll {
-    background:
-      radial-gradient(circle at 100% 0, color-mix(in oklab, var(--color-brand-50) 48%, transparent) 0%, transparent 42%),
-      linear-gradient(180deg, var(--admin-canvas-top) 0%, var(--admin-canvas-bottom) 100%);
+    background: var(--admin-canvas-top);
   }
 
   .admin-page-content {
@@ -258,11 +253,9 @@
   .admin-surface {
     border: 1px solid var(--admin-content-border);
     border-radius: 1.25rem;
-    background:
-      linear-gradient(180deg, color-mix(in oklab, var(--color-brand-50) 75%, transparent) 0%, transparent 240px),
-      var(--admin-content-surface);
-    box-shadow: 0 16px 36px rgb(15 23 42 / 0.08);
-    backdrop-filter: blur(10px);
+    background: var(--admin-content-surface);
+    box-shadow: 0 12px 28px rgb(15 23 42 / 0.06);
+    backdrop-filter: blur(8px);
   }
 
   .app-sidebar-surface {
