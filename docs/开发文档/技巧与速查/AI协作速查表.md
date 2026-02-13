@@ -38,7 +38,7 @@
 | 1. 并行规划 | `/vkplan`（等价 `/plan parallel`） | `requirements.md` + `implementation_plan.md`（含 `task_key/card_seed`） | `task_key` 全局唯一，`card_seed` 字段完整 |
 | 2. 并行拆解 | `/rwfj` | `parallel_plan.md` + `workstreams/WS-*.md` | 有 `WS-00`，每个 WS 含 `card_export` |
 | 3. 看板导出 | `/vk <任务拆解目录>` | 建卡 JSON + 导入提示词 | strict 模式下无缺字段（缺失即失败） |
-| 4. 看板落地 | `/vktodo` | VK 实际卡片 | 卡片 ID 带前缀：`<task_key>::<WS-ID>` |
+| 4. 看板落地 | `/vktodo <任务拆解目录>` | VK 实际卡片 | 默认读取 `vk_cards.json` 自动建卡/推进 |
 | 5. 子任务执行 | `/imp-ws @WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
 | 6. Gate 回填 | `/imp-ws @WS-G1` + `/imp-ws @WS-G2` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
@@ -53,7 +53,8 @@
 | 规划（要并行） | `/vkplan` 或 `/plan parallel` | 强制产出 `task_key/card_seed` |
 | 并行拆包 | `/rwfj` | 产出 `WS-00 + WS-N` |
 | 看板导出 | `/vk` | strict 默认，读 `card_export` |
-| 看板落卡 | `/vktodo` | 批量创建/推进卡片 |
+| 看板落卡（简化） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡 |
+| 看板推进（简化） | `/vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
 | 执行单个 WS | `/imp-ws` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/imp` | 不走并行流程时使用 |
 | 代码审查 | `/review` | 质量与风险检查 |
@@ -96,6 +97,29 @@
 - “/plan 一定要出 seed”：错误；只有并行场景才建议 `/vkplan` 或 `/plan parallel`。
 - “子任务阶段跑全量回归”：错误；并行层做最小验证，全量回归放 Gate 层。
 - “Gate 结果手工改”：错误；必须走回填脚本，保证可追溯。
+
+---
+
+## 6.1 `/vktodo` 最简用法（新增）
+
+1. 先执行 `/vk <任务拆解目录>` 生成 `vk_cards.json`。
+2. 建卡可直接用路径直传：
+
+```text
+/vktodo 2026-02-12_skill检索对齐_cursor_mvp
+```
+
+3. 推进状态可直接用：
+
+```text
+/vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
+```
+
+4. 若需要指定项目：
+
+```text
+/vktodo 2026-02-12_skill检索对齐_cursor_mvp create Backlog project=fastapi
+```
 
 ---
 

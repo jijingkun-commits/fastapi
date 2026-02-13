@@ -104,9 +104,22 @@ bash scripts/vk_dev.sh up
         -> /review -> /test
 ```
 
+`/vktodo` 推荐优先使用路径直传，减少手写 `cards=` 长参数：
+
+```text
+/vktodo 2026-02-12_skill检索对齐_cursor_mvp
+```
+
+推进状态示例：
+
+```text
+/vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
+```
+
 关键要求：
 
 1. `/vkplan` 产出 `task_key/card_seed`，避免 `/rwfj` 仅基于纯文字推断。
 2. `/rwfj` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
 3. `/vk` 使用 strict 模式读取拆解结果，卡片唯一键必须为 `<task_key>::<WS-ID>`。
-4. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
+4. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
+5. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
