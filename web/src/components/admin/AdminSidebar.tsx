@@ -89,7 +89,7 @@ export function AdminSidebar() {
         <TooltipProvider delayDuration={0}>
             <aside
                 className={cn(
-                    "relative flex h-screen flex-col border-r border-gray-200/80 bg-[#f8f9fa] transition-all duration-200",
+                    "app-sidebar-surface relative flex h-screen flex-col border-r transition-all duration-200",
                     collapsed ? "w-[60px]" : "w-[220px]"
                 )}
             >
@@ -99,18 +99,18 @@ export function AdminSidebar() {
                 {/* 顶部标题区 */}
                 <div
                     className={cn(
-                        "flex h-14 shrink-0 items-center border-b border-gray-200/80",
+                        "app-sidebar-separator flex h-14 shrink-0 items-center border-b",
                         collapsed ? "justify-center px-2" : "justify-between px-4"
                     )}
                 >
                     {!collapsed && (
-                        <span className="text-sm font-semibold text-gray-800">
+                        <span className="app-sidebar-title text-sm font-semibold">
                             管理后台
                         </span>
                     )}
                     <button
                         onClick={() => setCollapsed(!collapsed)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-[#2F6868]/10 hover:text-[#2F6868]"
+                        className="app-sidebar-item flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:text-[var(--app-sidebar-icon-active)]"
                     >
                         {collapsed ? (
                             <PanelLeft className="h-3.5 w-3.5" />
@@ -129,19 +129,15 @@ export function AdminSidebar() {
                                 <Link
                                     href={item.href}
                                     className={cn(
-                                        "flex items-center rounded-lg px-3 py-2 text-[13px] transition-all duration-150",
+                                        "app-sidebar-item flex items-center rounded-lg px-3 py-2 text-[13px] transition-all duration-150",
                                         collapsed ? "justify-center" : "gap-3",
-                                        active
-                                            ? "bg-white text-gray-900 shadow-sm ring-1 ring-black/5"
-                                            : "text-gray-600 hover:bg-white/70 hover:text-gray-900"
+                                        active && "app-sidebar-item-active"
                                     )}
                                 >
                                     <item.icon
                                         className={cn(
-                                            "h-4 w-4 shrink-0 transition-colors",
-                                            active
-                                                ? "text-[#2F6868]"
-                                                : "text-gray-400"
+                                            "app-sidebar-icon h-4 w-4 shrink-0 transition-colors",
+                                            active && "app-sidebar-icon-active"
                                         )}
                                     />
                                     {!collapsed && (
@@ -176,15 +172,15 @@ export function AdminSidebar() {
                 </nav>
 
                 {/* 底部返回聊天入口 */}
-                <div className="shrink-0 border-t border-gray-200/80 px-2 py-2">
+                <div className="app-sidebar-separator shrink-0 border-t px-2 py-2">
                     {collapsed ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Link
                                     href="/"
-                                    className="flex items-center justify-center rounded-lg px-3 py-2 text-[13px] text-gray-600 transition-all duration-150 hover:bg-white/70 hover:text-gray-900"
+                                    className="app-sidebar-item flex items-center justify-center rounded-lg px-3 py-2 text-[13px] transition-all duration-150"
                                 >
-                                    <MessageSquare className="h-4 w-4 shrink-0 text-gray-400" />
+                                    <MessageSquare className="app-sidebar-icon h-4 w-4 shrink-0" />
                                 </Link>
                             </TooltipTrigger>
                             <TooltipContent side="right" sideOffset={8}>
@@ -194,9 +190,9 @@ export function AdminSidebar() {
                     ) : (
                         <Link
                             href="/"
-                            className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-gray-600 transition-all duration-150 hover:bg-white/70 hover:text-gray-900"
+                            className="app-sidebar-item flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition-all duration-150"
                         >
-                            <MessageSquare className="h-4 w-4 shrink-0 text-gray-400" />
+                            <MessageSquare className="app-sidebar-icon h-4 w-4 shrink-0" />
                             <span>返回聊天</span>
                         </Link>
                     )}

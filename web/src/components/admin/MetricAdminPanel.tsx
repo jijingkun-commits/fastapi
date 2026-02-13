@@ -515,7 +515,7 @@ export function MetricAdminPanel() {
     };
 
     return (
-        <div className="container mx-auto py-8 px-4">
+        <div className="admin-page-content space-y-6">
             {/* 页头 */}
             <div className="flex items-center justify-between mb-6">
                 <div>

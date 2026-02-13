@@ -71,36 +71,34 @@ const adminModules = [
 
 export default function AdminPage() {
     return (
-        <div className="h-full overflow-y-auto bg-white">
-            <div className="mx-auto max-w-5xl px-8 py-10">
-                <header className="mb-8">
-                    <h1 className="text-2xl font-semibold text-gray-900">总览</h1>
-                    <p className="mt-1 text-sm text-gray-500">选择功能模块开始管理</p>
-                </header>
-                
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {adminModules.map((module) => (
-                        <Link
-                            key={module.href}
-                            href={module.href}
-                            className="group relative flex flex-col rounded-xl border border-gray-200/80 bg-white p-6 shadow-sm ring-1 ring-black/5 transition-all duration-150 hover:shadow-md"
-                        >
-                            <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-[#2F6868]">
-                                <module.icon className="h-5 w-5 text-white" />
-                            </div>
-                            <h2 className="text-base font-semibold text-gray-900">
-                                {module.title}
-                            </h2>
-                            <p className="mt-1 flex-1 text-sm text-gray-500">
-                                {module.description}
-                            </p>
-                            <div className="mt-4 flex items-center text-sm font-medium text-[#2F6868] opacity-0 transition-opacity group-hover:opacity-100">
-                                进入管理
-                                <ChevronRight className="ml-1 h-4 w-4" />
-                            </div>
-                        </Link>
-                    ))}
-                </div>
+        <div className="admin-page-content space-y-8">
+            <header>
+                <h1 className="text-2xl font-semibold text-foreground">总览</h1>
+                <p className="mt-1 text-sm text-muted-foreground">选择功能模块开始管理</p>
+            </header>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {adminModules.map((module) => (
+                    <Link
+                        key={module.href}
+                        href={module.href}
+                        className="group relative flex flex-col rounded-2xl border border-[color:var(--admin-content-border)] bg-card/95 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-brand-700)]/90">
+                            <module.icon className="h-5 w-5 text-white" />
+                        </div>
+                        <h2 className="text-base font-semibold text-foreground">
+                            {module.title}
+                        </h2>
+                        <p className="mt-1 flex-1 text-sm text-muted-foreground">
+                            {module.description}
+                        </p>
+                        <div className="mt-4 flex items-center text-sm font-medium text-[var(--color-brand-700)] opacity-0 transition-opacity group-hover:opacity-100">
+                            进入管理
+                            <ChevronRight className="ml-1 h-4 w-4" />
+                        </div>
+                    </Link>
+                ))}
             </div>
         </div>
     );

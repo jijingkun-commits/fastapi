@@ -341,7 +341,7 @@ export function UserAdminPanel() {
   };
 
   return (
-    <div className="admin-surface mx-auto w-full max-w-7xl px-4 py-8">
+    <div className="admin-page-content admin-surface space-y-6">
       <Card className="rounded-[var(--ds-radius-md)] border-border/80 shadow-[var(--ds-shadow-1)]">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">

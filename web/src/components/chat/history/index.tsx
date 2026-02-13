@@ -35,6 +35,7 @@ import {
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { toast } from "sonner";
 import { deleteThreadsBatch } from "@/lib/backend";
+import { cn } from "@/lib/utils";
 
 interface ThreadItemProps {
   thread: Thread;
@@ -111,13 +112,10 @@ function ThreadItem({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
-        className={`group relative flex w-full items-center rounded-lg px-3 py-2.5 transition-all duration-150 ${
-          isSelected
-            ? "bg-[#E8F4F4] shadow-sm"
-            : isActive
-            ? "bg-white shadow-sm ring-1 ring-black/5"
-            : "hover:bg-white/70"
-          }`}
+        className={cn(
+          "app-sidebar-item group relative flex w-full items-center rounded-lg px-3 py-2.5 transition-all duration-150",
+          (isSelected || isActive) && "app-sidebar-item-active"
+        )}
       >
         {/* 批量选择模式：显示 Checkbox */}
         {isSelectMode ? (
@@ -127,9 +125,12 @@ function ThreadItem({
             className="mr-2.5 h-4 w-4 shrink-0"
           />
         ) : (
-          <div className={`mr-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-            isActive ? "bg-[#2F6868]/10 text-[#2F6868]" : "bg-gray-100 text-gray-400"
-          }`}>
+          <div className={cn(
+            "mr-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+            isActive || isSelected
+              ? "app-sidebar-icon-pill"
+              : "app-sidebar-icon bg-white/70"
+          )}>
             <MessageSquare className="h-3.5 w-3.5" />
           </div>
         )}
@@ -147,7 +148,7 @@ function ThreadItem({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-[#2F6868] hover:bg-[#2F6868]/10"
+              className="app-sidebar-item h-7 w-7 hover:text-[var(--app-sidebar-icon-active)]"
               onClick={handleRename}
             >
               <Check className="h-3.5 w-3.5" />
@@ -155,7 +156,7 @@ function ThreadItem({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-gray-400 hover:text-gray-600"
+              className="app-sidebar-item h-7 w-7"
               onClick={() => {
                 setEditTitle(thread.title);
                 setIsEditing(false);
@@ -168,7 +169,9 @@ function ThreadItem({
           <>
             <button
               className={`flex-1 truncate text-left text-[13px] leading-snug ${
-                isActive ? "font-medium text-gray-900" : "text-gray-600"
+                isActive || isSelected
+                  ? "font-medium text-[var(--app-sidebar-item-active-fg)]"
+                  : "text-[var(--app-sidebar-item-fg)]"
               }`}
               onClick={handleClick}
             >
@@ -177,11 +180,11 @@ function ThreadItem({
 
             {/* 操作按钮 - 悬停时显示（非选择模式） */}
             {!isSelectMode && isHovered && (
-              <div className="absolute right-1.5 flex items-center gap-0.5 bg-gradient-to-l from-[#f8f9fa] via-[#f8f9fa] to-transparent pl-4">
+              <div className="absolute right-1.5 flex items-center gap-0.5 bg-gradient-to-l from-[var(--app-sidebar-bg)] via-[var(--app-sidebar-bg)] to-transparent pl-4">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-gray-400 hover:text-[#2F6868] hover:bg-[#2F6868]/10"
+                  className="app-sidebar-item h-7 w-7 hover:text-[var(--app-sidebar-icon-active)]"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsEditing(true);
@@ -192,7 +195,7 @@ function ThreadItem({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-gray-400 hover:text-rose-500 hover:bg-rose-50"
+                  className="app-sidebar-item h-7 w-7 text-rose-500/80 hover:text-rose-600 hover:bg-rose-50/80"
                   onClick={handleDelete}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -345,7 +348,7 @@ export default function ThreadHistory() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-1.5 text-xs shrink-0 hover:bg-[#2F6868]/10 hover:text-[#2F6868]"
+            className="app-sidebar-item h-7 px-1.5 text-xs shrink-0 hover:text-[var(--app-sidebar-icon-active)]"
             onClick={handleSelectAll}
           >
             {selectedIds.size === threads.length ? (
@@ -362,7 +365,7 @@ export default function ThreadHistory() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-xs shrink-0 text-gray-500"
+          className="app-sidebar-item h-7 px-2 text-xs shrink-0"
           onClick={exitSelectMode}
         >
           完成
@@ -385,7 +388,7 @@ export default function ThreadHistory() {
 
   // 渲染桌面端工具栏
   const renderDesktopToolbar = () => (
-    <div className="w-full border-b border-gray-200/80 overflow-hidden">
+    <div className="app-sidebar-separator w-full overflow-hidden border-b">
       {isSelectMode ? (
         renderSelectToolbar()
       ) : (
@@ -394,7 +397,7 @@ export default function ThreadHistory() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-gray-400 hover:text-gray-600 hover:bg-gray-200/60"
+              className="app-sidebar-item h-8 w-8 hover:text-[var(--app-sidebar-icon-active)]"
               onClick={() => setIsSelectMode(true)}
               title="批量管理"
             >
@@ -404,7 +407,7 @@ export default function ThreadHistory() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-gray-400 hover:text-gray-600 hover:bg-gray-200/60"
+            className="app-sidebar-item h-8 w-8 hover:text-[var(--app-sidebar-icon-active)]"
             onClick={() => setChatHistoryOpen((p) => !p)}
           >
             {chatHistoryOpen ? (
@@ -421,7 +424,7 @@ export default function ThreadHistory() {
   return (
     <>
       {/* 大屏幕侧边栏 */}
-      <div className="shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start border-r border-gray-200/80 bg-[#f8f9fa] lg:flex">
+      <div className="app-sidebar-surface shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start border-r lg:flex">
         {renderDesktopToolbar()}
         {threadsLoading ? (
           <ThreadHistoryLoading />
@@ -445,8 +448,8 @@ export default function ThreadHistory() {
             if (!open) exitSelectMode();
           }}
         >
-          <SheetContent side="left" className="flex w-[85vw] max-w-[300px] flex-col lg:hidden bg-[#f8f9fa] p-0">
-            <SheetHeader className="border-b border-gray-200/80 px-0 py-0">
+          <SheetContent side="left" className="app-sidebar-surface flex w-[85vw] max-w-[300px] flex-col p-0 lg:hidden">
+            <SheetHeader className="app-sidebar-separator border-b px-0 py-0">
               <SheetTitle className="sr-only">对话列表</SheetTitle>
               {isSelectMode ? (
                 renderSelectToolbar(true)
@@ -456,7 +459,7 @@ export default function ThreadHistory() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-200/60"
+                      className="app-sidebar-item h-8 text-xs"
                       onClick={() => setIsSelectMode(true)}
                     >
                       <CheckSquare className="h-3.5 w-3.5 mr-1" />
