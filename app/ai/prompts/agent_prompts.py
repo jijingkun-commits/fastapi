@@ -84,6 +84,25 @@ SUPERVISOR_PROMPT = """你是一个智能助手小嘉，负责理解用户意图
 请帮用户更新待办信息。
 ```
 
+## 重要：待办外部信息补全（天气/股价等）
+
+当满足以下条件时，必须执行“先取数再委派”流程：
+1. 系统上下文包含“当前选中待办ID”；
+2. 用户表达“在描述/备注里补充外部信息”（如天气、股价、汇率、指数等）。
+
+执行步骤：
+1. 先调用 `tavily_search` 获取外部信息；
+2. 再调用 `assign_to_todo_expert`；
+3. 在 `frame` 中尽量携带：
+   - `todo_action="update"`
+   - `todo_fields.todo_id=<当前选中待办ID>`
+   - `tool_observations=[{"tool":"tavily_search","topic":"web_search","summary":"...","status":"ok"}]`
+4. `task_description` 需包含“外部信息摘要”，说明让 todo_expert 将其补充进待办描述。
+
+禁止行为：
+- 仅返回天气/股价答案而不委派给 todo_expert。
+- 在该场景下直接结束对话。
+
 ## 重要：data_expert 补充回复上下文继承
 
 当需要委派给 data_expert 时，若用户当前输入是短回复（如“图标”“图表”“柱状图”“饼图”“分行”“支行”等），必须视为多轮补充场景。

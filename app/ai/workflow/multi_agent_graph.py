@@ -10,11 +10,12 @@
     User -> preprocess -> supervisor -> [experts] -> postprocess -> User
 """
 import asyncio
+import json
 import logging
 import re
 from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple
 
-from langchain_core.messages import BaseMessage, trim_messages
+from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
@@ -90,6 +91,30 @@ TODO_CREATE_HINTS = (
     "添加",
     "记录",
     "记一下",
+)
+
+TODO_ENRICHMENT_HINTS = (
+    "补充",
+    "添加",
+    "加上",
+    "写入",
+    "写到",
+    "备注",
+    "描述",
+    "追加",
+)
+
+EXTERNAL_INFO_HINTS = (
+    "天气",
+    "气温",
+    "股价",
+    "股票",
+    "指数",
+    "汇率",
+    "黄金",
+    "油价",
+    "行情",
+    "基金",
 )
 
 
@@ -173,6 +198,172 @@ def _build_stream_error_message(error_text: str) -> str:
     if _is_model_access_error(error_text):
         return "模型服务当前不可用（配额/订阅或权限异常），请稍后重试或联系管理员检查模型配置。"
     return "系统繁忙，当前请求暂时无法处理，请稍后重试。"
+
+
+def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
+    """清洗并截断工具文本，避免把噪声大段透传给待办。"""
+    raw = str(value or "")
+    cleaned = re.sub(r"\s+", " ", raw).strip()
+    if not cleaned:
+        return ""
+    return cleaned[:limit]
+
+
+def _summarize_tavily_tool_output(tool_content: str) -> str:
+    """从 Tavily 工具输出中提取可用于待办补充的摘要。"""
+    stripped = str(tool_content or "").strip()
+    if not stripped:
+        return ""
+
+    payload: Any = None
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            payload = None
+
+    if isinstance(payload, dict):
+        answer = _normalize_tool_summary_text(payload.get("answer"), limit=220)
+        if answer:
+            return answer
+        results = payload.get("results")
+    elif isinstance(payload, list):
+        results = payload
+    else:
+        return _normalize_tool_summary_text(stripped, limit=220)
+
+    if not isinstance(results, list):
+        return _normalize_tool_summary_text(stripped, limit=220)
+
+    lines = []
+    for item in results[:2]:
+        if not isinstance(item, dict):
+            continue
+        title = _normalize_tool_summary_text(item.get("title"), limit=36)
+        snippet = _normalize_tool_summary_text(
+            item.get("content") or item.get("snippet"),
+            limit=140,
+        )
+        if title and snippet:
+            lines.append(f"{title}: {snippet}")
+        elif snippet:
+            lines.append(snippet)
+
+    merged = "；".join(lines)
+    return _normalize_tool_summary_text(merged, limit=240)
+
+
+def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
+    """提取 Supervisor 本轮工具观察结果，供 TodoExpert 合并描述。"""
+    observations: list[dict[str, str]] = []
+
+    for msg in messages or []:
+        if not isinstance(msg, ToolMessage):
+            continue
+
+        tool_name = str(getattr(msg, "name", "") or "unknown")
+        tool_content = str(getattr(msg, "content", "") or "")
+        if not tool_content:
+            continue
+
+        lowered_name = tool_name.lower()
+        if "tavily" not in lowered_name:
+            continue
+
+        summary = _summarize_tavily_tool_output(tool_content)
+        if not summary:
+            continue
+
+        observations.append(
+            {
+                "tool": tool_name,
+                "topic": "web_search",
+                "summary": summary,
+                "status": "ok",
+            }
+        )
+
+    return observations[:2]
+
+
+def _is_todo_external_enrichment_request(user_text: str) -> bool:
+    """判断是否是“待办补充外部信息”的表达。"""
+    normalized = str(user_text or "").strip().lower()
+    if not normalized:
+        return False
+
+    has_enrichment = any(hint in normalized for hint in TODO_ENRICHMENT_HINTS)
+    has_external = any(hint in normalized for hint in EXTERNAL_INFO_HINTS)
+    return has_enrichment and has_external
+
+
+def _augment_todo_handoff_with_observations(
+    handoff_data: Dict[str, Any],
+    delta_messages: Sequence[BaseMessage],
+    state: MultiAgentState,
+) -> Dict[str, Any]:
+    """将 Supervisor 工具观察结果并入 todo handoff 结构化 frame。"""
+    if not isinstance(handoff_data, dict):
+        return handoff_data
+
+    if handoff_data.get("target_agent") != AgentType.TODO:
+        return handoff_data
+
+    observations = _extract_supervisor_tool_observations(delta_messages)
+    if not observations:
+        return handoff_data
+
+    enriched = dict(handoff_data)
+    frame = dict(enriched.get("frame") or {})
+    todo_fields = dict(frame.get("todo_fields") or {})
+
+    current_todo_id = state.get("current_todo_id")
+    if current_todo_id and not todo_fields.get("todo_id"):
+        todo_fields["todo_id"] = current_todo_id
+        frame.setdefault("todo_target_id", str(current_todo_id))
+
+    if current_todo_id and not str(frame.get("todo_action") or "").strip():
+        frame["todo_action"] = "update"
+
+    frame["tool_observations"] = observations
+
+    summary_lines = [obs.get("summary", "") for obs in observations if obs.get("summary")]
+    summary_text = "；".join(summary_lines)
+    summary_text = _normalize_tool_summary_text(summary_text, limit=280)
+
+    if summary_text:
+        existing_desc = _normalize_tool_summary_text(todo_fields.get("description"), limit=280)
+        if not existing_desc:
+            todo_fields["description"] = f"外部信息补充：{summary_text}"
+        elif summary_text not in existing_desc:
+            todo_fields["description"] = f"{existing_desc}\n外部信息补充：{summary_text}"
+
+        task_description = str(enriched.get("task_description") or "").strip()
+        if "外部信息摘要" not in task_description:
+            addon = f"外部信息摘要：{summary_text}"
+            enriched["task_description"] = f"{task_description}\n{addon}" if task_description else addon
+
+    if todo_fields:
+        frame["todo_fields"] = todo_fields
+
+    user_text = _extract_latest_human_content(state.get("messages", []))
+    if (
+        current_todo_id
+        and _is_todo_external_enrichment_request(user_text)
+        and not str(enriched.get("turn_act_hint") or "").strip()
+    ):
+        enriched["turn_act_hint"] = "SUPPLEMENT"
+
+    enriched["frame"] = frame
+    logger.info(
+        "handoff_with_observation: target=%s, observations=%d, todo_id=%s",
+        enriched.get("target_agent"),
+        len(observations),
+        todo_fields.get("todo_id"),
+    )
+    return enriched
 
 
 def _get_common_tools():
@@ -262,7 +453,7 @@ def _create_task_handoff_tool(agent_name: str, description: str):
     @tool(name, description=description)
     def handoff_tool(
         task_description: Annotated[str, "详细描述下一个专家需要完成的任务，包含所有相关上下文和指令"],
-        frame: Annotated[Optional[Dict[str, Any]], "结构化上下文（可选）：metric/time/dimensions 或 todo_action/todo_fields"] = None,
+        frame: Annotated[Optional[Dict[str, Any]], "结构化上下文（可选）：metric/time/dimensions 或 todo_action/todo_fields/tool_observations"] = None,
         turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）：NEW_QUERY/SUPPLEMENT/CORRECTION/CONFIRM"] = None,
     ) -> str:
         """将任务委派给指定的专家 Agent。返回 JSON 格式的委派指令。"""
@@ -350,10 +541,20 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             content = sanitized_content
     
     # ========== 3. 系统上下文注入 ==========
-    # 为所有 Agent 提供当前时间等系统级信息
+    # 为所有 Agent 提供当前时间与待办锚点等系统级信息
     from datetime import datetime
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
-    updates["system_context"] = f"当前时间: {current_time}"
+    context_parts = [f"当前时间: {current_time}"]
+
+    current_todo_id = state.get("current_todo_id")
+    if current_todo_id:
+        context_parts.append(
+            "当前选中待办ID: "
+            f"{current_todo_id}。若用户要求“描述里补充/添加外部信息（天气、股价等）”，"
+            "应优先按更新该待办处理。"
+        )
+
+    updates["system_context"] = "\n".join(context_parts)
     
     # ========== 4. Skills RAG 检索 ==========
     # 根据用户消息检索相关技能，为后续 Agent 提供专业知识上下文
@@ -671,6 +872,11 @@ async def create_multi_agent_graph(
                         # A. 检测 Handoff (确保 ToolMessage 已在状态中)
                         handoff_data = AgentOutputParser.extract_latest_handoff_from_messages(delta_messages_for_scan)
                         if handoff_data and name == "supervisor":
+                            handoff_data = _augment_todo_handoff_with_observations(
+                                handoff_data,
+                                delta_messages_for_scan,
+                                state,
+                            )
                             target_agent = handoff_data.get("target_agent")
                             logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
                             

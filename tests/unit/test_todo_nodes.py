@@ -428,6 +428,72 @@ class TestOutOfScopeGuard:
         assert result.get("pending_operation", {}).get("needs_clarification") is True
         assert "能力范围" in (result.get("response_message") or "")
 
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_llm")
+    def test_selected_todo_external_supplement_should_not_trigger_out_of_scope(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """已选中待办时，补充天气/股价信息应走 update，不应被越界拦截。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"update","action_state":"need_confirm",'
+            '"response_message":"好的，已整理外部信息并准备更新待办。",'
+            '"extracted_info":{"description":"请关注会前路线。"},'
+            '"missing_info":[]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="描述里添加，当天的天气情况")],
+            "user_id": 1,
+            "current_todo_id": 88,
+            "pending_handoff": {
+                "target_agent": "todo_expert",
+                "task_description": "请补充外部信息后更新待办",
+                "turn_act_hint": "SUPPLEMENT",
+                "frame": {
+                    "todo_action": "update",
+                    "todo_fields": {"todo_id": 88, "description": "原始描述"},
+                    "tool_observations": [
+                        {
+                            "tool": "tavily_search",
+                            "topic": "web_search",
+                            "summary": "上海明天多云，10~16℃",
+                            "status": "ok",
+                        }
+                    ],
+                },
+            },
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "pending_clarifications": None,
+            "response_message": None,
+        }
+
+        result = analyze_intent(state)
+
+        assert result.get("pending_operation", {}).get("action") == "update"
+        description = result.get("pending_operation", {}).get("data", {}).get("description", "")
+        assert "外部信息补充" in description
+        assert "上海明天多云" in description
+
     def test_in_scope_todo_query_not_blocked(self):
         """包含待办语义的查询不应被超范围兜底误拦截。"""
         from app.ai.workflow.todo_graph import _is_out_of_scope_for_todo

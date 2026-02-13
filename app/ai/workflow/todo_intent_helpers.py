@@ -15,6 +15,7 @@
 - 保留的函数：filter_messages_for_todo, query_existing_todos, parse_time_info,
   get_progressive_strategy, apply_goal_defaults, determine_confirmation_need, extract_heuristic_title
 """
+import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple, Any
@@ -188,6 +189,35 @@ def is_implicit_reference_message(user_message: str, extracted_info: Optional[Di
     return has_reference_pattern and bool(keyword)
 
 
+def _extract_tool_observation_summary(handoff_frame: Optional[Dict[str, Any]]) -> str:
+    """从 handoff.frame.tool_observations 中提炼简短摘要。"""
+    if not isinstance(handoff_frame, dict):
+        return ""
+
+    observations = handoff_frame.get("tool_observations")
+    if not isinstance(observations, list):
+        return ""
+
+    chunks: List[str] = []
+    for obs in observations[:2]:
+        if not isinstance(obs, dict):
+            continue
+
+        summary = str(obs.get("summary") or "").strip()
+        if not summary:
+            continue
+
+        topic = str(obs.get("topic") or "").strip()
+        if topic:
+            chunks.append(f"{topic}: {summary}")
+        else:
+            chunks.append(summary)
+
+    merged = "；".join(chunks)
+    merged = re.sub(r"\s+", " ", merged).strip()
+    return merged[:260] if merged else ""
+
+
 # ==================== 消息过滤 ====================
 
 def filter_messages_for_todo(
@@ -235,6 +265,29 @@ def filter_messages_for_todo(
             todo_action = str(handoff_frame.get("todo_action") or "").strip()
             if todo_action:
                 pre_extracted_info["action"] = todo_action
+
+            # Supervisor 工具观察结果：提炼摘要并并入描述
+            raw_observations = handoff_frame.get("tool_observations")
+            if isinstance(raw_observations, str):
+                try:
+                    raw_observations = json.loads(raw_observations)
+                except json.JSONDecodeError:
+                    raw_observations = None
+
+            if isinstance(raw_observations, list):
+                pre_extracted_info["tool_observations"] = raw_observations
+                observation_summary = _extract_tool_observation_summary(
+                    {"tool_observations": raw_observations}
+                )
+                if observation_summary:
+                    existing_desc = str(pre_extracted_info.get("description") or "").strip()
+                    observation_desc = f"外部信息补充：{observation_summary}"
+                    if existing_desc and observation_desc not in existing_desc:
+                        pre_extracted_info["description"] = f"{existing_desc}\n{observation_desc}"
+                    elif not existing_desc:
+                        pre_extracted_info["description"] = observation_desc
+
+                    handoff_context += f"\n外部信息摘要：{observation_summary}"
 
         # 回退：从 task_description 中做轻量结构化解析
         if task_desc:

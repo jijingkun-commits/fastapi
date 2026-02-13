@@ -55,7 +55,8 @@ class BaseAgentState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     user_id: int
     thread_id: str
-    pending_handoff: Dict           # 当前轮 Supervisor 委派上下文（供专家子图消费）
+    current_todo_id: int            # 前端选中待办锚点（可选，供 supervisor/todo 共享）
+    pending_handoff: Dict           # 当前轮 Supervisor 委派上下文（含 frame/tool_observations，供专家子图消费）
     
     # 模型配置（由 chat_service 注入，所有节点可读取）
     enable_thinking: bool          # 是否启用深度思考模式

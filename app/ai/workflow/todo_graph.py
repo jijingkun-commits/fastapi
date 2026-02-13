@@ -13,7 +13,7 @@
 """
 import logging
 import json
-from typing import TypedDict, Optional, Dict, List, Annotated, Literal, Union, Tuple
+from typing import TypedDict, Optional, Dict, List, Annotated, Literal, Union, Tuple, Any
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
@@ -89,7 +89,15 @@ OUT_OF_SCOPE_PATTERNS = (
 TODO_OPERATION_HINTS = (
     "待办", "任务", "提醒", "清单", "截止", "优先级", "完成", "删除",
     "更新", "修改", "改到", "改成", "标记", "进展", "创建", "新建",
-    "记一下", "记录一下"
+    "记一下", "记录一下", "添加", "补充", "描述", "备注", "加上"
+)
+
+SUPPLEMENT_EXTERNAL_HINTS = (
+    "天气", "股价", "汇率", "黄金", "基金", "指数", "行情", "油价"
+)
+
+SUPPLEMENT_ACTION_HINTS = (
+    "补充", "添加", "加上", "写入", "写到", "备注", "描述", "追加"
 )
 
 
@@ -118,6 +126,95 @@ def _build_out_of_scope_message() -> str:
     )
 
 
+def _is_todo_external_supplement_message(message: str) -> bool:
+    """识别“在待办中补充外部信息”的表达。"""
+    normalized = str(message or "").lower().strip()
+    if not normalized:
+        return False
+
+    has_action = any(hint in normalized for hint in SUPPLEMENT_ACTION_HINTS)
+    has_external = any(hint in normalized for hint in SUPPLEMENT_EXTERNAL_HINTS)
+    return has_action and has_external
+
+
+def _should_skip_out_of_scope_guard(
+    message: str,
+    current_todo_id: Optional[int],
+    pending_operation: Optional[Dict],
+    pending_handoff: Optional[Dict],
+    pre_extracted_info: Optional[Dict],
+) -> bool:
+    """判断是否应跳过 out_of_scope 兜底。"""
+    normalized = str(message or "").lower().strip()
+
+    if current_todo_id:
+        has_todo_action = any(hint.lower() in normalized for hint in TODO_OPERATION_HINTS)
+        if has_todo_action or _is_todo_external_supplement_message(message):
+            return True
+
+    if isinstance(pending_operation, dict):
+        action = str(pending_operation.get("action") or "").strip()
+        if action in {"create", "update", "delete", "complete"} and _is_todo_external_supplement_message(message):
+            return True
+
+    handoff_frame = pending_handoff.get("frame") if isinstance(pending_handoff, dict) else None
+    if isinstance(handoff_frame, dict):
+        todo_action = str(handoff_frame.get("todo_action") or "").strip()
+        todo_fields = handoff_frame.get("todo_fields")
+        if todo_action in {"create", "update", "delete", "complete"}:
+            return True
+        if isinstance(todo_fields, dict) and todo_fields.get("todo_id"):
+            return True
+        if handoff_frame.get("tool_observations"):
+            return True
+
+    if isinstance(pre_extracted_info, dict):
+        action = str(pre_extracted_info.get("action") or "").strip()
+        if pre_extracted_info.get("todo_id"):
+            return True
+        if action in {"create", "update", "delete", "complete"}:
+            return True
+        if pre_extracted_info.get("tool_observations"):
+            return True
+
+    return _is_todo_external_supplement_message(message)
+
+
+def _merge_prefilled_extracted_info(
+    extracted_info: Dict[str, Any],
+    pre_extracted_info: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """合并 handoff 预提取信息，描述字段采用追加策略。"""
+    if not isinstance(pre_extracted_info, dict):
+        return extracted_info
+
+    merged = dict(extracted_info or {})
+    for key, value in pre_extracted_info.items():
+        if value in (None, "", [], {}):
+            continue
+
+        if key == "description":
+            existing = str(merged.get("description") or "").strip()
+            incoming = str(value).strip()
+            if not incoming:
+                continue
+            if not existing:
+                merged["description"] = incoming
+            elif incoming not in existing:
+                merged["description"] = f"{existing}\n{incoming}"
+            continue
+
+        if key == "tool_observations":
+            if not merged.get("tool_observations") and isinstance(value, list):
+                merged["tool_observations"] = value
+            continue
+
+        if not merged.get(key):
+            merged[key] = value
+
+    return merged
+
+
 # ==================== 状态定义 ====================
 
 class TodoAgentState(TypedDict):
@@ -125,6 +222,7 @@ class TodoAgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     user_id: Optional[int]
     thread_id: Optional[str]
+    current_todo_id: Optional[int]
     pending_operation: Optional[Dict]
     user_confirmed: Optional[bool]
     quick_mode: Optional[bool]
@@ -365,12 +463,10 @@ def _invoke_llm_for_intent(
 
     logger.info(f"LLM 分析结果: intent='{intent}', extracted_info={extracted_info}")
 
-    # 合并 Handoff 预提取的信息（优先级高于 LLM 分析结果）
+    # 合并 Handoff 预提取的信息（描述字段采用追加策略）
+    extracted_info = _merge_prefilled_extracted_info(extracted_info, pre_extracted_info)
     if pre_extracted_info:
-        for key, value in pre_extracted_info.items():
-            if value and not extracted_info.get(key):
-                extracted_info[key] = value
-                logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+        logger.info("合并 Handoff 预提取信息: keys=%s", list(pre_extracted_info.keys()))
 
     # 保留原始分析结果中的其他字段
     return {
@@ -562,7 +658,16 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
             last_human_msg = msg.content if hasattr(msg, 'content') else str(msg)
             break
 
-    if _is_out_of_scope_for_todo(last_human_msg):
+    pending_op = state.get("pending_operation")
+    should_skip_guard = _should_skip_out_of_scope_guard(
+        message=last_human_msg,
+        current_todo_id=current_todo_id,
+        pending_operation=pending_op,
+        pending_handoff=pending_handoff,
+        pre_extracted_info=pre_extracted_info,
+    )
+
+    if _is_out_of_scope_for_todo(last_human_msg) and not should_skip_guard:
         logger.info("检测到超出待办能力范围输入，返回能力边界提示")
         out_of_scope_message = _build_out_of_scope_message()
         updates["response_message"] = out_of_scope_message
@@ -608,7 +713,6 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
     
     # 注入待确认操作的上下文（如果有）
     pending_op_context = ""
-    pending_op = state.get("pending_operation")
     if pending_op:
         pending_op_context = f"\n\n## 当前待确认操作\n操作类型: {pending_op.get('action')}\n数据: {pending_op.get('data')}\n用户可能正在对此操作进行确认或取消。"
     
@@ -679,12 +783,10 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
             logger.info(f"LLM 未提取标题，使用 heuristic_title: {heuristic_title}")
             extracted_info["title"] = heuristic_title
         
-        # 合并 Handoff 预提取的信息
+        # 合并 Handoff 预提取的信息（描述字段采用追加策略）
+        extracted_info = _merge_prefilled_extracted_info(extracted_info, pre_extracted_info)
         if pre_extracted_info:
-            for key, value in pre_extracted_info.items():
-                if value and not extracted_info.get(key):
-                    extracted_info[key] = value
-                    logger.info(f"使用 Handoff 预提取的 {key}: {value}")
+            logger.info("合并 Handoff 预提取信息: keys=%s", list(pre_extracted_info.keys()))
 
         # 再次归一化，确保合并后字段一致
         extracted_info = canonicalize_extracted_info(extracted_info)

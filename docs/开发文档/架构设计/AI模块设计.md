@@ -341,7 +341,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | 取消后补充恢复 | 创建确认阶段若用户先拒绝，随后以补充轮继续输入细节（`SUPPLEMENT`/`CORRECTION`），在无目标待办 ID 且历史会话帧 `todo_action=create` 时系统优先恢复 `create` 并重新进入确认；恢复判定不依赖 handoff 文案中的“更新/创建”措辞，避免误入 `update` 的目标 ID 追问 |
 | 提取字段归一化 | 统一将 `target_ref/target_title/new_due_date/new_priority/new_category/new_description` 映射为执行链路可消费的 canonical 字段 |
 | 选中待办上下文 | 前端选中待办后，`analyze_intent` 从 DB 加载该待办完整信息注入 prompt，辅助 LLM 将用户消息关联到具体待办（支持 update/complete/delete），并自动注入 `todo_id` |
-| 能力边界兜底 | 当输入明显属于天气/新闻/问数/知识库/绘图等非待办请求时，不触发待办查询，统一返回“超出待办能力范围”的引导文案 |
+| 能力边界兜底 | 当输入明显属于天气/新闻/问数/知识库/绘图等非待办请求时，不触发待办查询并返回引导文案；但若已存在待办锚点（`current_todo_id` 或 handoff `todo_id/todo_action=update`）且用户表达“补充外部信息”，则按待办 `update` 处理 |
 
 #### 指代消歧与自适应确认规则
 
@@ -1881,6 +1881,13 @@ graph TD
 - 保留：`task_description`（兼容字段）
 - 增加：`frame`（结构化槽位）
 - 增加：`turn_act_hint`（可选，辅助专家侧判定）
+- 增加：`frame.tool_observations`（可选，Supervisor 工具观测摘要）
+
+`tool_observations` 约定（2026-02）：
+- 产生方：Supervisor（如 `tavily_search` 工具调用后）
+- 消费方：TodoExpert（合并到 `description/progress_notes`）
+- 推荐结构：`[{"tool":"tavily_search","topic":"web_search","summary":"...","status":"ok"}]`
+- 兼容策略：缺失时按旧逻辑处理，不影响原有 handoff
 
 原则：**先加字段，不改旧字段语义**，确保 supervisor 与专家图可以灰度切换。
 

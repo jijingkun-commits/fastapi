@@ -262,6 +262,11 @@ TODO_INTENT_ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
 - `action_state="need_clarify"`
 - `response_message` 为能力边界提示 + 待办示例话术
 
+例外（必须遵守）：
+- 当系统上下文已明确“用户已选中待办”或 handoff 提供 `todo_id/todo_action=update` 时，
+  用户说“在描述里补充天气/股价”等外部信息，属于 **update**，不是 out_of_scope。
+- 该场景下应将外部信息归入 `description`（或 `progress_notes`），并进入待办确认流程。
+
 严禁将上述请求降级为待办查询 (`intent="query"`)。
 
 ## 输出格式
