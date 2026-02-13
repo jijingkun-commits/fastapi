@@ -2472,6 +2472,29 @@ def _is_numeric_column(rows: List[Dict[str, Any]], column: str) -> bool:
     return numeric_count / non_null_count >= 0.8
 
 
+def _is_identifier_column(column: str) -> bool:
+    """判断列是否属于标识字段（客户号/编号/ID 等）。"""
+    text = str(column or "").strip()
+    if not text:
+        return False
+
+    lowered = re.sub(r"\s+", "", text).lower()
+
+    if any(token in lowered for token in ("ecif_cust_no", "cust_no", "customer_no", "customer_id")):
+        return True
+
+    if any(token in text for token in ("客户统一编号", "客户编号", "客户号", "编号", "编码")):
+        return True
+
+    if lowered in {"id", "no", "code"}:
+        return True
+
+    if lowered.endswith(("_id", "id", "_no", "no", "_code", "code")):
+        return True
+
+    return False
+
+
 def _is_date_like_column(column: str) -> bool:
     """根据列名判断是否为时间维度列。"""
     lowered = str(column or "").strip().lower()
@@ -2507,7 +2530,13 @@ def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[st
     if not rows:
         return "", ""
 
-    numeric_columns = [column for column in columns if _is_numeric_column(rows, column)]
+    numeric_flags = {column: _is_numeric_column(rows, column) for column in columns}
+
+    numeric_columns = [
+        column
+        for column in columns
+        if numeric_flags.get(column) and not _is_identifier_column(column)
+    ]
     if not numeric_columns:
         return "", ""
 
@@ -2517,7 +2546,7 @@ def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[st
 
     dimension_columns = [
         column for column in columns
-        if column != y_key and not _is_numeric_column(rows, column)
+        if column != y_key and not numeric_flags.get(column)
     ]
 
     if dimension_columns:
@@ -2525,6 +2554,13 @@ def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[st
         if date_like_columns:
             return date_like_columns[0], y_key
         return dimension_columns[0], y_key
+
+    identifier_columns = [
+        column for column in columns
+        if column != y_key and _is_identifier_column(column)
+    ]
+    if identifier_columns:
+        return identifier_columns[0], y_key
 
     fallback_columns = [column for column in columns if column != y_key]
     if fallback_columns:
@@ -2543,6 +2579,72 @@ def _serialize_chart_dimension_value(value: Any) -> str:
 
     text = str(value).strip()
     return text or "未知"
+
+
+def _serialize_chart_identifier_value(value: Any) -> str:
+    """序列化标识字段值（空值返回空字符串）。"""
+    if value is None:
+        return ""
+
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    lowered = text.lower()
+    if lowered in {"none", "null", "nan", "未知", "-"}:
+        return ""
+
+    return text
+
+
+def _ensure_chart_dimension_uniqueness(
+    chart_rows: List[Dict[str, Any]],
+    rows: List[Dict[str, Any]],
+    x_key: str,
+    y_key: str,
+    columns: List[str],
+) -> None:
+    """在维度重复时补齐唯一后缀，避免图表类目塌缩。"""
+    if not chart_rows or _is_date_like_column(x_key):
+        return
+
+    x_counter = Counter(str(item.get(x_key, "")) for item in chart_rows)
+    if not any(count > 1 for count in x_counter.values()):
+        return
+
+    identifier_columns = [
+        column
+        for column in columns
+        if column not in {x_key, y_key} and _is_identifier_column(column)
+    ]
+    sequence_counter: Counter[str] = Counter()
+    final_counter: Counter[str] = Counter()
+
+    for idx, chart_item in enumerate(chart_rows):
+        label = str(chart_item.get(x_key, ""))
+        if x_counter.get(label, 0) <= 1:
+            continue
+
+        sequence_counter[label] += 1
+        row = rows[idx] if idx < len(rows) and isinstance(rows[idx], dict) else {}
+        suffix = ""
+        for identifier_column in identifier_columns:
+            suffix = _serialize_chart_identifier_value(row.get(identifier_column))
+            if suffix:
+                break
+
+        if not suffix:
+            suffix = f"#{sequence_counter[label]}"
+
+        dedup_label = f"{label}（{suffix}）"
+        final_counter[dedup_label] += 1
+        if final_counter[dedup_label] > 1:
+            dedup_label = f"{dedup_label}#{final_counter[dedup_label]}"
+
+        chart_item[x_key] = dedup_label
 
 
 def _build_sql_result_chart_payload(
@@ -2571,6 +2673,7 @@ def _build_sql_result_chart_payload(
     }
 
     chart_rows: List[Dict[str, Any]] = []
+    source_rows: List[Dict[str, Any]] = []
     for row in rows[:50]:
         if not isinstance(row, dict):
             continue
@@ -2585,9 +2688,18 @@ def _build_sql_result_chart_payload(
                 y_key: y_value,
             }
         )
+        source_rows.append(row)
 
     if not chart_rows:
         return None
+
+    _ensure_chart_dimension_uniqueness(
+        chart_rows=chart_rows,
+        rows=source_rows,
+        x_key=x_key,
+        y_key=y_key,
+        columns=columns,
+    )
 
     title = str(question or "").strip()
     if title:

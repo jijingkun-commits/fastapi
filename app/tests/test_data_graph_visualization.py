@@ -5,6 +5,8 @@
 - viz_type=折线图，日期/金额 -> 生成 line
 - 无数值列 -> 不生成 chart
 - 图表请求但空结果 -> 不生成 chart
+- 维度值重复/为空时 -> 图元仍与行数一致
+- 标识列为数字字符串时 -> 不误判为 y 轴指标
 """
 from __future__ import annotations
 
@@ -180,3 +182,53 @@ def test_sql_execute_skips_chart_when_result_empty(monkeypatch):
 
     assert chart is None
 
+
+def test_sql_execute_keeps_unique_points_when_dimension_has_duplicates(monkeypatch):
+    """维度列含重复/空值时，图表应保留逐行可区分的图元。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [
+        {"ecif_cust_no": "2009001293", "客户名称": None, "贷款金额": 15.26 * 1_0000_0000},
+        {"ecif_cust_no": "2110009159", "客户名称": "潮州华盛物流贸易有限公司", "贷款金额": 9.92 * 1_0000_0000},
+        {"ecif_cust_no": "2000045474", "客户名称": None, "贷款金额": 6.92 * 1_0000_0000},
+        {"ecif_cust_no": "2110019805", "客户名称": "兰钧新能源科技有限公司-保证金", "贷款金额": 6.12 * 1_0000_0000},
+    ]
+    columns = ["ecif_cust_no", "客户名称", "贷款金额"]
+
+    _setup_common_patches(monkeypatch, module, rows=rows, columns=columns)
+
+    state = {
+        "generated_sql": "SELECT ecif_cust_no, 客户名称, 贷款金额 FROM t_demo",
+        "query_context": {"original_question": "查询2025-06-30贷款余额前10名客户"},
+        "data_intent": "visualization",
+        "viz_type": "柱状图",
+        "sql_source": "vanna_rag",
+        "iterations": 1,
+    }
+
+    output = module.sql_execute(state)
+    chart = _extract_chart_from_sql_execute_output(output)
+
+    assert chart is not None
+    assert len(chart["data"]) == 4
+
+    x_values = [item[chart["x_key"]] for item in chart["data"]]
+    assert len(set(x_values)) == 4
+    assert any(str(value).startswith("未知（2009001293") for value in x_values)
+    assert any(str(value).startswith("未知（2000045474") for value in x_values)
+
+
+def test_pick_chart_axes_keeps_identifier_column_as_dimension():
+    """标识列即使全为数字字符串，也不应被当作 y 轴指标。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [
+        {"客户编号": "1001", "value": 10.0},
+        {"客户编号": "1002", "value": 20.0},
+        {"客户编号": "1003", "value": 30.0},
+    ]
+    columns = ["客户编号", "value"]
+
+    x_key, y_key = module._pick_chart_axes(columns, rows)
+    assert x_key == "客户编号"
+    assert y_key == "value"
