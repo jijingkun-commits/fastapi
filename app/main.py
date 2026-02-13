@@ -52,23 +52,30 @@ async def lifespan(app: FastAPI):
         from app.db.session import SessionLocal
         with SessionLocal() as db:
             LLMConfigService.load_from_db(db)
-            LLMConfigService.load_from_db(db)
             SystemConfigService.load_from_db(db)
 
             from app.services.result_enrichment_rule_service import get_result_enrichment_rule_service
             rule_service = get_result_enrichment_rule_service()
             rule_service.refresh_rules()
-            
-            # 启动时自动同步技能文件到数据库
-            from app.services.skill_service import SkillService
-            from app.core.config import PROJECT_ROOT
-            import os
-            skills_dir = os.path.join(PROJECT_ROOT, "app/ai/skills")
-            count = SkillService.sync_changed_skills(Path(skills_dir))
-            logging.info(f"技能同步完成，更新了 {count} 个技能")
     except Exception as e:
         import logging
         logging.exception("配置服务初始化失败，将使用环境变量降级")
+
+    # 启动时自动同步技能文件到数据库（失败可观测且不阻断启动）
+    try:
+        import logging
+        import os
+
+        from app.core.config import PROJECT_ROOT
+        from app.services.skill_service import SkillService
+
+        skills_dir = os.path.join(PROJECT_ROOT, "app/ai/skills")
+        count = SkillService.sync_changed_skills(Path(skills_dir))
+        logging.info("技能同步完成: path=%s, updated=%d", skills_dir, count)
+    except Exception:
+        import logging
+
+        logging.exception("技能启动同步失败，将跳过并继续启动")
 
     yield
     

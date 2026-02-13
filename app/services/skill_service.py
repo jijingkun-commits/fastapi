@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,20 @@ class SkillService:
     """技能管理服务。"""
 
     DEFAULT_SCOPE = "global"
+    DEFAULT_PRIORITY = 100
+    PRIORITY_MIN = 0
+    PRIORITY_MAX = 10000
+    VALID_SCOPES = {DEFAULT_SCOPE, "data", "todo", "admin"}
+    FRONTMATTER_ALIASES = {
+        "name": ("name",),
+        "description": ("description",),
+        "scope": ("scope",),
+        "priority": ("priority",),
+        "auto_enabled": ("auto_enabled", "auto-enabled", "autoEnabled"),
+        "is_enabled": ("is_enabled", "is-enabled", "enabled"),
+        "trigger_phrases": ("trigger_phrases", "trigger-phrases"),
+        "conflicts_with": ("conflicts_with", "conflicts-with"),
+    }
 
     @staticmethod
     def _compute_file_hash(content: str) -> str:
@@ -31,49 +46,165 @@ class SkillService:
         return hashlib.md5(content.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _parse_list_value(raw_value: str) -> List[str]:
+    def _format_warning(field: str, message: str, raw_value: Any = None) -> str:
+        """构造字段级 warning 文本，便于日志检索。"""
+
+        if raw_value is None:
+            return f"field={field} message={message}"
+
+        normalized = str(raw_value).strip().replace("\n", "\\n")
+        if len(normalized) > 80:
+            normalized = f"{normalized[:77]}..."
+        return f"field={field} value={normalized!r} message={message}"
+
+    @staticmethod
+    def _get_frontmatter_value(frontmatter: Dict[str, Any], aliases: Tuple[str, ...]) -> Tuple[Any, bool]:
+        """按别名顺序读取 frontmatter 字段值。"""
+
+        for alias in aliases:
+            if alias in frontmatter:
+                return frontmatter[alias], True
+        return None, False
+
+    @classmethod
+    def _parse_legacy_frontmatter(cls, frontmatter_text: str) -> Dict[str, Any]:
+        """兼容旧版逐行解析，作为非法 YAML 的降级兜底。"""
+
+        parsed: Dict[str, Any] = {}
+        for line in frontmatter_text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or ":" not in stripped:
+                continue
+
+            key, raw_value = stripped.split(":", 1)
+            parsed[key.strip()] = raw_value.strip().strip("\"'")
+
+        return parsed
+
+    @classmethod
+    def _load_frontmatter(cls, frontmatter_text: str) -> Tuple[Dict[str, Any], str, List[str]]:
+        """解析 frontmatter，返回结构化结果、状态与 warning。"""
+
+        if not frontmatter_text.strip():
+            return {}, "valid", []
+
+        warnings: List[str] = []
+        try:
+            loaded = yaml.safe_load(frontmatter_text)
+        except yaml.YAMLError as exc:
+            fallback = cls._parse_legacy_frontmatter(frontmatter_text)
+            warnings.append(
+                cls._format_warning(
+                    "frontmatter",
+                    "YAML 解析失败，已按宽松模式降级",
+                    exc.__class__.__name__,
+                )
+            )
+            return fallback, "invalid", warnings
+
+        if loaded is None:
+            return {}, "valid", warnings
+
+        if isinstance(loaded, dict):
+            return loaded, "valid", warnings
+
+        warnings.append(
+            cls._format_warning(
+                "frontmatter",
+                "顶层结构必须是对象，已忽略",
+                type(loaded).__name__,
+            )
+        )
+        return {}, "invalid", warnings
+
+    @staticmethod
+    def _parse_list_value(raw_value: Any) -> Tuple[List[str], bool]:
         """将 frontmatter 中的列表字段解析为字符串列表。"""
 
-        value = raw_value.strip()
-        if not value:
-            return []
+        if raw_value is None:
+            return [], True
 
-        parsed: Any = value
-        if value.startswith("[") and value.endswith("]"):
-            try:
-                parsed = ast.literal_eval(value)
-            except (SyntaxError, ValueError):
-                parsed = value
+        parsed: Any = raw_value
+        parse_ok = True
 
-        if isinstance(parsed, list):
-            return [str(item).strip() for item in parsed if str(item).strip()]
+        if isinstance(parsed, str):
+            value = parsed.strip()
+            if not value:
+                return [], True
+
+            parsed = value
+            if value.startswith("[") and value.endswith("]"):
+                try:
+                    parsed = ast.literal_eval(value)
+                except (SyntaxError, ValueError):
+                    parse_ok = False
+                    parsed = value
+
+        if isinstance(parsed, (list, tuple, set)):
+            values = [str(item).strip() for item in parsed if str(item).strip()]
+            return list(dict.fromkeys(values)), parse_ok
 
         if isinstance(parsed, str):
             if "," in parsed:
-                return [item.strip() for item in parsed.split(",") if item.strip()]
-            return [parsed.strip()] if parsed.strip() else []
+                values = [item.strip() for item in parsed.split(",") if item.strip()]
+                return list(dict.fromkeys(values)), parse_ok
+            return ([parsed] if parsed else []), parse_ok
 
-        return []
+        return [], False
 
     @staticmethod
-    def _parse_bool_value(raw_value: str, default: bool = True) -> bool:
+    def _parse_bool_value(raw_value: Any, default: bool = True) -> Tuple[bool, bool]:
         """解析 frontmatter 布尔值。"""
 
-        value = raw_value.strip().lower()
-        if value in {"true", "1", "yes", "on"}:
-            return True
-        if value in {"false", "0", "no", "off"}:
-            return False
-        return default
+        if isinstance(raw_value, bool):
+            return raw_value, True
+
+        if isinstance(raw_value, (int, float)) and raw_value in {0, 1}:
+            return bool(raw_value), True
+
+        if isinstance(raw_value, str):
+            value = raw_value.strip().lower()
+            if value in {"true", "1", "yes", "on"}:
+                return True, True
+            if value in {"false", "0", "no", "off"}:
+                return False, True
+
+        return default, False
 
     @staticmethod
-    def _parse_int_value(raw_value: str, default: int = 100) -> int:
+    def _parse_int_value(
+        raw_value: Any,
+        default: int = DEFAULT_PRIORITY,
+        min_value: int = PRIORITY_MIN,
+        max_value: int = PRIORITY_MAX,
+    ) -> Tuple[int, bool]:
         """解析 frontmatter 整数值。"""
 
         try:
-            return int(raw_value.strip())
+            value = int(str(raw_value).strip())
         except (TypeError, ValueError):
-            return default
+            return default, False
+
+        if value < min_value or value > max_value:
+            return default, False
+
+        return value, True
+
+    @classmethod
+    def _normalize_scope(cls, raw_value: Any, default: str = DEFAULT_SCOPE) -> Tuple[str, bool]:
+        """标准化作用域值。"""
+
+        if raw_value is None:
+            return default, True
+
+        normalized = str(raw_value).strip().lower()
+        if not normalized:
+            return default, True
+
+        if normalized not in cls.VALID_SCOPES:
+            return default, False
+
+        return normalized, True
 
     @classmethod
     def _parse_skill_file(cls, skill_path: Path) -> Optional[dict]:
@@ -85,16 +216,22 @@ class SkillService:
         content = skill_path.read_text(encoding="utf-8")
         skill_id = skill_path.parent.name
 
+        warnings: List[str] = []
+        frontmatter_status = "missing"
+
         name = skill_id.replace("-", " ").title()
         description = ""
         scope = cls.DEFAULT_SCOPE
-        priority = 100
+        priority = cls.DEFAULT_PRIORITY
         auto_enabled = True
         is_enabled = True
         trigger_phrases: List[str] = []
         conflicts_with: List[str] = []
 
-        lines = content.split("\n")
+        body_content = content
+        frontmatter_data: Dict[str, Any] = {}
+
+        lines = content.splitlines()
         if lines and lines[0].strip() == "---":
             end_idx = -1
             for idx, line in enumerate(lines[1:], start=1):
@@ -103,34 +240,161 @@ class SkillService:
                     break
 
             if end_idx > 0:
-                frontmatter = "\n".join(lines[1:end_idx])
-                for line in frontmatter.split("\n"):
-                    if ":" not in line:
-                        continue
-                    key, raw_value = line.split(":", 1)
-                    key = key.strip()
-                    value = raw_value.strip().strip("\"'")
+                frontmatter_text = "\n".join(lines[1:end_idx])
+                body_content = "\n".join(lines[end_idx + 1 :])
+                frontmatter_data, frontmatter_status, frontmatter_warnings = cls._load_frontmatter(frontmatter_text)
+                warnings.extend(frontmatter_warnings)
+            else:
+                frontmatter_status = "invalid"
+                warnings.append(
+                    cls._format_warning(
+                        "frontmatter",
+                        "缺少结束分隔符，已按默认值回退",
+                    )
+                )
 
-                    if key == "name":
-                        name = value or name
-                    elif key == "description":
-                        description = value
-                    elif key == "scope":
-                        scope = value or cls.DEFAULT_SCOPE
-                    elif key == "priority":
-                        priority = cls._parse_int_value(value, default=100)
-                    elif key == "auto_enabled":
-                        auto_enabled = cls._parse_bool_value(value, default=True)
-                    elif key == "is_enabled":
-                        is_enabled = cls._parse_bool_value(value, default=True)
-                    elif key == "trigger_phrases":
-                        trigger_phrases = cls._parse_list_value(value)
-                    elif key == "conflicts_with":
-                        conflicts_with = cls._parse_list_value(value)
+        name_value, has_name = cls._get_frontmatter_value(frontmatter_data, cls.FRONTMATTER_ALIASES["name"])
+        if has_name:
+            normalized_name = str(name_value).strip()
+            if normalized_name:
+                name = normalized_name
+            else:
+                warnings.append(
+                    cls._format_warning(
+                        "name",
+                        "值为空，已回退为目录名",
+                        name_value,
+                    )
+                )
+
+        description_value, has_description = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["description"],
+        )
+        if has_description:
+            normalized_description = str(description_value).strip()
+            if normalized_description:
+                description = normalized_description
+            else:
+                warnings.append(
+                    cls._format_warning(
+                        "description",
+                        "值为空，已回退为正文摘要",
+                        description_value,
+                    )
+                )
+
+        scope_value, has_scope = cls._get_frontmatter_value(frontmatter_data, cls.FRONTMATTER_ALIASES["scope"])
+        if has_scope:
+            scope, valid_scope = cls._normalize_scope(scope_value, default=cls.DEFAULT_SCOPE)
+            if not valid_scope:
+                warnings.append(
+                    cls._format_warning(
+                        "scope",
+                        f"仅支持 {sorted(cls.VALID_SCOPES)}，已回退默认值",
+                        scope_value,
+                    )
+                )
+
+        priority_value, has_priority = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["priority"],
+        )
+        if has_priority:
+            priority, valid_priority = cls._parse_int_value(
+                priority_value,
+                default=cls.DEFAULT_PRIORITY,
+                min_value=cls.PRIORITY_MIN,
+                max_value=cls.PRIORITY_MAX,
+            )
+            if not valid_priority:
+                warnings.append(
+                    cls._format_warning(
+                        "priority",
+                        f"需为 {cls.PRIORITY_MIN}-{cls.PRIORITY_MAX} 的整数，已回退默认值",
+                        priority_value,
+                    )
+                )
+
+        auto_enabled_value, has_auto_enabled = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["auto_enabled"],
+        )
+        if has_auto_enabled:
+            auto_enabled, valid_auto_enabled = cls._parse_bool_value(auto_enabled_value, default=True)
+            if not valid_auto_enabled:
+                warnings.append(
+                    cls._format_warning(
+                        "auto_enabled",
+                        "需为布尔值，已回退默认值 true",
+                        auto_enabled_value,
+                    )
+                )
+
+        is_enabled_value, has_is_enabled = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["is_enabled"],
+        )
+        if has_is_enabled:
+            is_enabled, valid_is_enabled = cls._parse_bool_value(is_enabled_value, default=True)
+            if not valid_is_enabled:
+                warnings.append(
+                    cls._format_warning(
+                        "is_enabled",
+                        "需为布尔值，已回退默认值 true",
+                        is_enabled_value,
+                    )
+                )
+
+        trigger_phrases_value, has_trigger_phrases = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["trigger_phrases"],
+        )
+        if has_trigger_phrases:
+            trigger_phrases, valid_trigger_phrases = cls._parse_list_value(trigger_phrases_value)
+            if not valid_trigger_phrases:
+                warnings.append(
+                    cls._format_warning(
+                        "trigger_phrases",
+                        "需为字符串列表或逗号分隔字符串，已回退为空数组",
+                        trigger_phrases_value,
+                    )
+                )
+
+        conflicts_with_value, has_conflicts_with = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["conflicts_with"],
+        )
+        if has_conflicts_with:
+            parsed_conflicts, valid_conflicts_with = cls._parse_list_value(conflicts_with_value)
+            if not valid_conflicts_with:
+                warnings.append(
+                    cls._format_warning(
+                        "conflicts_with",
+                        "需为字符串列表或逗号分隔字符串，已回退为空数组",
+                        conflicts_with_value,
+                    )
+                )
+            conflicts_with = list(
+                dict.fromkeys([item.strip().lower() for item in parsed_conflicts if item and item.strip()])
+            )
+
+            if skill_id in conflicts_with:
+                conflicts_with = [item for item in conflicts_with if item != skill_id]
+                warnings.append(
+                    cls._format_warning(
+                        "conflicts_with",
+                        "包含自身 skill_id，已自动移除",
+                        skill_id,
+                    )
+                )
 
         if not description:
-            clean_content = content.replace("#", "").strip()
+            clean_content = re.sub(r"^#+\s*", "", body_content, flags=re.MULTILINE).strip()
             description = clean_content[:200] if len(clean_content) > 200 else clean_content
+
+        if warnings and frontmatter_status == "valid":
+            frontmatter_status = "invalid"
 
         return {
             "skill_id": skill_id,
@@ -143,6 +407,8 @@ class SkillService:
             "is_enabled": is_enabled,
             "trigger_phrases": trigger_phrases,
             "conflicts_with": conflicts_with,
+            "frontmatter_status": frontmatter_status,
+            "warnings": warnings,
         }
 
     @classmethod
@@ -153,16 +419,27 @@ class SkillService:
         if not parsed:
             return False
 
+        skill_id = parsed["skill_id"]
+
+        for warning in parsed.get("warnings", []):
+            logger.warning("技能 %s frontmatter 字段异常: %s", skill_id, warning)
+
+        frontmatter_status = parsed.get("frontmatter_status")
+        if frontmatter_status == "missing":
+            logger.debug("技能 %s 未声明 frontmatter，使用默认元数据", skill_id)
+        elif frontmatter_status == "invalid":
+            logger.warning("技能 %s frontmatter 存在非法或降级字段，已按回退策略导入", skill_id)
+
         content = parsed["content"]
         file_hash = cls._compute_file_hash(content)
 
         existing = db.execute(
-            select(AgentSkill).where(AgentSkill.skill_id == parsed["skill_id"])
+            select(AgentSkill).where(AgentSkill.skill_id == skill_id)
         ).scalar_one_or_none()
 
         if existing:
             if not force and existing.file_hash == file_hash:
-                logger.debug("技能 %s 未变化，跳过", parsed["skill_id"])
+                logger.debug("技能 %s 未变化，跳过", skill_id)
                 return False
 
             existing.name = parsed["name"]
@@ -176,11 +453,11 @@ class SkillService:
             existing.is_enabled = parsed["is_enabled"]
             existing.trigger_phrases = parsed["trigger_phrases"]
             existing.conflicts_with = parsed["conflicts_with"]
-            logger.info("更新技能: %s", parsed["skill_id"])
+            logger.info("更新技能: %s", skill_id)
         else:
             embedding = get_embedding(parsed["description"])
             skill = AgentSkill(
-                skill_id=parsed["skill_id"],
+                skill_id=skill_id,
                 name=parsed["name"],
                 description=parsed["description"],
                 content=content,
@@ -194,7 +471,7 @@ class SkillService:
                 conflicts_with=parsed["conflicts_with"],
             )
             db.add(skill)
-            logger.info("导入技能: %s", parsed["skill_id"])
+            logger.info("导入技能: %s", skill_id)
 
         db.commit()
         return True
@@ -212,11 +489,14 @@ class SkillService:
             logger.warning("技能目录不存在: %s", skills_dir)
             return 0
 
-        count = 0
-        skill_files = list(skills_dir.glob("*/SKILL.md"))
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        skill_files = sorted(skills_dir.glob("*/SKILL.md"), key=lambda path: path.parent.name)
 
         if whitelist:
-            skill_files = [f for f in skill_files if f.parent.name in whitelist]
+            whitelist_set = set(whitelist)
+            skill_files = [f for f in skill_files if f.parent.name in whitelist_set]
             logger.info("应用白名单过滤: %s", whitelist)
 
         logger.info("发现 %d 个技能文件", len(skill_files))
@@ -225,16 +505,28 @@ class SkillService:
             for skill_path in skill_files:
                 try:
                     if cls.import_skill(skill_path, db, force):
-                        count += 1
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
                 except Exception as exc:  # pragma: no cover - 仅记录日志
-                    logger.error("导入技能失败 %s: %s", skill_path, exc)
+                    failed_count += 1
+                    db.rollback()
+                    logger.exception(
+                        "导入技能失败 skill_id=%s path=%s error=%s",
+                        skill_path.parent.name,
+                        skill_path,
+                        exc,
+                    )
 
-        if count == 0 and skill_files:
-            logger.info("共导入 0 个技能（%d 个文件均已是最新，无需更新）", len(skill_files))
-        else:
-            logger.info("共导入 %d 个技能", count)
+        logger.info(
+            "技能导入完成: 总数=%d, 更新=%d, 跳过=%d, 失败=%d",
+            len(skill_files),
+            updated_count,
+            skipped_count,
+            failed_count,
+        )
 
-        return count
+        return updated_count
 
     @classmethod
     def sync_changed_skills(cls, skills_dir: Path) -> int:

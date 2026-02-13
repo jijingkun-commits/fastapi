@@ -1,17 +1,27 @@
 """SkillService 单元测试（中文注释）。"""
 
 from pathlib import Path
+from typing import Any, Dict, List
 
 from app.services.skill_service import SkillService
 
 
-def test_parse_skill_file_with_metadata(tmp_path: Path) -> None:
-    """应正确解析 SKILL frontmatter 元数据。"""
+def _build_skill_file(tmp_path: Path, skill_id: str, content: str) -> Path:
+    """创建临时 SKILL.md 文件。"""
 
-    skill_dir = tmp_path / "sql-expert"
+    skill_dir = tmp_path / skill_id
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "SKILL.md"
-    skill_file.write_text(
+    skill_file.write_text(content, encoding="utf-8")
+    return skill_file
+
+
+def test_skill_ingest_parse_with_metadata(tmp_path: Path) -> None:
+    """应正确解析 SKILL frontmatter 元数据。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "sql-expert",
         """---
 name: SQL Expert
 description: SQL 检索与优化
@@ -19,15 +29,14 @@ scope: data
 priority: 10
 auto_enabled: true
 is_enabled: false
-trigger_phrases: ["贷款余额", "分行统计"]
-conflicts_with: ["copywriter"]
+trigger_phrases: [\"贷款余额\", \"分行统计\"]
+conflicts_with: [\"copywriter\"]
 ---
 
 # SQL Expert
 
 这是技能正文。
 """,
-        encoding="utf-8",
     )
 
     parsed = SkillService._parse_skill_file(skill_file)
@@ -41,6 +50,101 @@ conflicts_with: ["copywriter"]
     assert parsed["is_enabled"] is False
     assert parsed["trigger_phrases"] == ["贷款余额", "分行统计"]
     assert parsed["conflicts_with"] == ["copywriter"]
+    assert parsed["frontmatter_status"] == "valid"
+    assert parsed["warnings"] == []
+
+
+def test_skill_ingest_missing_frontmatter_uses_defaults(tmp_path: Path) -> None:
+    """缺失 frontmatter 时应按默认值回退。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "meeting-minutes",
+        """# 会议纪要助手
+
+自动整理会议记录。
+""",
+    )
+
+    parsed = SkillService._parse_skill_file(skill_file)
+
+    assert parsed is not None
+    assert parsed["skill_id"] == "meeting-minutes"
+    assert parsed["name"] == "Meeting Minutes"
+    assert parsed["scope"] == SkillService.DEFAULT_SCOPE
+    assert parsed["priority"] == SkillService.DEFAULT_PRIORITY
+    assert parsed["auto_enabled"] is True
+    assert parsed["is_enabled"] is True
+    assert parsed["trigger_phrases"] == []
+    assert parsed["conflicts_with"] == []
+    assert parsed["frontmatter_status"] == "missing"
+    assert parsed["warnings"] == []
+
+
+def test_skill_ingest_invalid_frontmatter_fallback(tmp_path: Path) -> None:
+    """非法 frontmatter 应回退且记录字段级 warning。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "risk-review",
+        """---
+name: 风险审查
+scope: unknown
+priority: high
+auto_enabled: maybe
+is_enabled: 2
+trigger_phrases: {}
+conflicts_with: [risk-review, copywriter]
+---
+
+# 风险审查
+
+正文内容。
+""",
+    )
+
+    parsed = SkillService._parse_skill_file(skill_file)
+
+    assert parsed is not None
+    assert parsed["name"] == "风险审查"
+    assert parsed["scope"] == SkillService.DEFAULT_SCOPE
+    assert parsed["priority"] == SkillService.DEFAULT_PRIORITY
+    assert parsed["auto_enabled"] is True
+    assert parsed["is_enabled"] is True
+    assert parsed["trigger_phrases"] == []
+    assert parsed["conflicts_with"] == ["copywriter"]
+    assert parsed["frontmatter_status"] == "invalid"
+    assert any("field=scope" in warning for warning in parsed["warnings"])
+    assert any("field=priority" in warning for warning in parsed["warnings"])
+    assert any("field=auto_enabled" in warning for warning in parsed["warnings"])
+    assert any("field=is_enabled" in warning for warning in parsed["warnings"])
+    assert any("field=trigger_phrases" in warning for warning in parsed["warnings"])
+    assert any("field=conflicts_with" in warning for warning in parsed["warnings"])
+
+
+def test_skill_ingest_yaml_error_uses_legacy_fallback(tmp_path: Path) -> None:
+    """YAML 解析失败时应降级到旧解析策略。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "legacy-skill",
+        """---
+name: Legacy Skill
+trigger_phrases: ["贷款余额", "分行统计"
+---
+
+# Legacy Skill
+
+正文内容。
+""",
+    )
+
+    parsed = SkillService._parse_skill_file(skill_file)
+
+    assert parsed is not None
+    assert parsed["name"] == "Legacy Skill"
+    assert parsed["frontmatter_status"] == "invalid"
+    assert any("field=frontmatter" in warning for warning in parsed["warnings"])
 
 
 def test_pick_sections_prefers_query_relevant_content() -> None:
@@ -99,3 +203,185 @@ def test_apply_policy_filters_resolves_conflicts_by_priority() -> None:
     assert [item["skill_id"] for item in selected] == ["safe-review"]
     assert dropped[0]["skill_id"] == "general-review"
     assert dropped[0]["reason"] == "conflict_replaced"
+
+
+class _FakeSkill:
+    """测试导入流程用的假 Skill ORM 对象。"""
+
+    def __init__(self, skill_id: str, file_hash: str):
+        self.skill_id = skill_id
+        self.file_hash = file_hash
+        self.name = ""
+        self.description = ""
+        self.content = ""
+        self.embedding = None
+        self.scope = SkillService.DEFAULT_SCOPE
+        self.priority = SkillService.DEFAULT_PRIORITY
+        self.auto_enabled = True
+        self.is_enabled = True
+        self.trigger_phrases: List[str] = []
+        self.conflicts_with: List[str] = []
+
+
+class _FakeResult:
+    """模拟 SQLAlchemy execute 结果。"""
+
+    def __init__(self, item: Any):
+        self._item = item
+
+    def scalar_one_or_none(self) -> Any:
+        return self._item
+
+
+class _FakeSession:
+    """模拟最小化 Session 行为。"""
+
+    def __init__(self, records: Dict[str, _FakeSkill]):
+        self.records = records
+        self.added: List[_FakeSkill] = []
+        self.commit_count = 0
+        self.rollback_count = 0
+
+    def execute(self, statement) -> _FakeResult:  # noqa: ANN001
+        params = statement.compile().params
+        skill_id = next(iter(params.values()), None)
+        if skill_id is None:
+            return _FakeResult(None)
+        return _FakeResult(self.records.get(str(skill_id)))
+
+    def add(self, skill: _FakeSkill) -> None:
+        self.records[skill.skill_id] = skill
+        self.added.append(skill)
+
+    def commit(self) -> None:
+        self.commit_count += 1
+
+    def rollback(self) -> None:
+        self.rollback_count += 1
+
+
+def test_skill_ingest_import_is_idempotent_for_unchanged_file(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """同文件哈希重复导入应跳过写入。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "copywriter",
+        """---
+name: 文案润色专家
+description: 优化文案表达
+---
+
+# 文案润色专家
+""",
+    )
+
+    parsed = SkillService._parse_skill_file(skill_file)
+    assert parsed is not None
+    file_hash = SkillService._compute_file_hash(parsed["content"])
+
+    session = _FakeSession(records={"copywriter": _FakeSkill("copywriter", file_hash)})
+    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2])
+
+    updated = SkillService.import_skill(skill_file, session, force=False)
+
+    assert updated is False
+    assert session.commit_count == 0
+
+
+def test_skill_ingest_import_updates_existing_record(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """文件变化时应更新已存在技能。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "copywriter",
+        """---
+name: 文案润色专家
+description: 新描述
+priority: 5
+---
+
+# 文案润色专家
+""",
+    )
+
+    existing = _FakeSkill("copywriter", "old-hash")
+    session = _FakeSession(records={"copywriter": existing})
+    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.9])
+
+    updated = SkillService.import_skill(skill_file, session, force=False)
+
+    assert updated is True
+    assert session.commit_count == 1
+    assert existing.description == "新描述"
+    assert existing.priority == 5
+    assert existing.embedding == [0.9]
+
+
+def test_skill_ingest_import_all_continue_on_error(tmp_path: Path, monkeypatch, caplog) -> None:  # noqa: ANN001
+    """批量导入遇到单文件异常时应继续处理并记录错误。"""
+
+    _build_skill_file(
+        tmp_path,
+        "skill-ok-a",
+        """---
+name: Skill A
+description: A
+---
+
+# Skill A
+""",
+    )
+    _build_skill_file(
+        tmp_path,
+        "skill-fail",
+        """---
+name: Skill B
+description: B
+---
+
+# Skill B
+""",
+    )
+    _build_skill_file(
+        tmp_path,
+        "skill-ok-c",
+        """---
+name: Skill C
+description: C
+---
+
+# Skill C
+""",
+    )
+
+    session = _FakeSession(records={})
+
+    class _ContextManager:
+        def __enter__(self) -> _FakeSession:
+            return session
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    def _fake_import_skill(skill_path: Path, db: _FakeSession, force: bool) -> bool:  # noqa: ANN001
+        if skill_path.parent.name == "skill-fail":
+            raise RuntimeError("ingest failed")
+        db.commit()
+        return True
+
+    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: _ContextManager())
+    monkeypatch.setattr(SkillService, "import_skill", classmethod(lambda cls, p, d, f: _fake_import_skill(p, d, f)))
+
+    with caplog.at_level("ERROR"):
+        updated = SkillService.import_all_skills(tmp_path)
+
+    assert updated == 2
+    assert session.rollback_count == 1
+    assert any("导入技能失败 skill_id=skill-fail" in record.message for record in caplog.records)
+
+
+def test_skill_ingest_import_all_returns_zero_when_missing_dir(tmp_path: Path) -> None:
+    """目录不存在时返回 0。"""
+
+    missing_dir = tmp_path / "missing"
+    assert SkillService.import_all_skills(missing_dir) == 0
