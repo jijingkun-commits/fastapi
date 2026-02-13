@@ -17,43 +17,71 @@ branch_labels = None
 depends_on = None
 
 
+TABLE_NAME = "t_agent_skills"
+METADATA_COLUMNS = (
+    "auto_enabled",
+    "priority",
+    "scope",
+    "trigger_phrases",
+    "conflicts_with",
+)
+
+
+def _get_existing_columns(table_name: str) -> set[str]:
+    """读取指定表当前已存在列。"""
+
+    context = op.get_context()
+    if context.is_offline_mode():
+        return set()
+
+    inspector = sa.inspect(op.get_bind())
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
 def upgrade() -> None:
     """升级：新增技能治理字段与 Hybrid 检索索引。"""
 
-    op.add_column(
-        "t_agent_skills",
-        sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-    )
-    op.add_column(
-        "t_agent_skills",
-        sa.Column("auto_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-    )
-    op.add_column(
-        "t_agent_skills",
-        sa.Column("priority", sa.Integer(), nullable=False, server_default=sa.text("100")),
-    )
-    op.add_column(
-        "t_agent_skills",
-        sa.Column("scope", sa.String(length=32), nullable=False, server_default=sa.text("'global'")),
-    )
-    op.add_column(
-        "t_agent_skills",
-        sa.Column(
-            "trigger_phrases",
-            postgresql.JSONB(astext_type=sa.Text()),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
-    )
-    op.add_column(
-        "t_agent_skills",
-        sa.Column(
-            "conflicts_with",
-            postgresql.JSONB(astext_type=sa.Text()),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
-    )
+    existing_columns = _get_existing_columns(TABLE_NAME)
+
+    if "auto_enabled" not in existing_columns:
+        op.add_column(
+            TABLE_NAME,
+            sa.Column("auto_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        )
+
+    if "priority" not in existing_columns:
+        op.add_column(
+            TABLE_NAME,
+            sa.Column("priority", sa.Integer(), nullable=False, server_default=sa.text("100")),
+        )
+
+    if "scope" not in existing_columns:
+        op.add_column(
+            TABLE_NAME,
+            sa.Column("scope", sa.String(length=32), nullable=False, server_default=sa.text("'global'")),
+        )
+
+    if "trigger_phrases" not in existing_columns:
+        op.add_column(
+            TABLE_NAME,
+            sa.Column(
+                "trigger_phrases",
+                postgresql.JSONB(astext_type=sa.Text()),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            ),
+        )
+
+    if "conflicts_with" not in existing_columns:
+        op.add_column(
+            TABLE_NAME,
+            sa.Column(
+                "conflicts_with",
+                postgresql.JSONB(astext_type=sa.Text()),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            ),
+        )
 
     op.execute(
         sa.text(
@@ -84,17 +112,15 @@ def upgrade() -> None:
     )
 
 
-
 def downgrade() -> None:
     """降级：移除技能治理字段与 Hybrid 检索索引。"""
+
+    existing_columns = _get_existing_columns(TABLE_NAME)
 
     op.execute(sa.text("DROP INDEX IF EXISTS idx_agent_skills_trigger_phrases_gin"))
     op.execute(sa.text("DROP INDEX IF EXISTS idx_agent_skills_fts"))
     op.execute(sa.text("DROP INDEX IF EXISTS idx_agent_skills_embedding_ivfflat"))
 
-    op.drop_column("t_agent_skills", "conflicts_with")
-    op.drop_column("t_agent_skills", "trigger_phrases")
-    op.drop_column("t_agent_skills", "scope")
-    op.drop_column("t_agent_skills", "priority")
-    op.drop_column("t_agent_skills", "auto_enabled")
-    op.drop_column("t_agent_skills", "is_enabled")
+    for column_name in reversed(METADATA_COLUMNS):
+        if column_name in existing_columns:
+            op.drop_column(TABLE_NAME, column_name)
