@@ -36,7 +36,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 2. `project`：项目名或项目 ID（可选；若当前 workspace 已绑定项目可省略）
 3. `action`：`create` / `move`（可选，默认 `create`）
 4. `cards`：
-   - 批量编号模式：如 `PP-20260213::WS-00..PP-20260213::WS-08`
+   - 批量编号模式：如 `PP-20260213::WS-01..PP-20260213::WS-08`
    - 或显式列表：如 `["PP-20260213::WS-01", "PP-20260213::WS-02"]`
 5. `status`：目标列（如 `Backlog/Doing/Review/Gate/Done`）
 6. `move_filter`：推进时筛选条件（如 `prefix:PP-20260213,top:5`）
@@ -54,7 +54,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
    - `move_filter=prefix:<task_key>`
 4. 若 `vk_cards.json` 缺失：先自动执行 `/vk <任务拆解目录> strict` 生成，再继续当前 `/vktodo`。
 5. 若自动生成后仍缺失或结构非法：再失败并提示人工修复拆解产物。
-6. 若检测到 `WS-00` 产物齐全（`WS-00_G0_协议冻结.md` + `contracts/sse_events_v1.json` + `parallel_plan.md` 的 G0 章节），建卡后自动将 `WS-00` 推进到 `Done`。
+6. `vk_cards.json.cards[*]` 默认仅包含可落卡工作包（`WS-01...WS-G2`），不包含 `WS-00`。
 
 > 推荐最短链路：`/plan -> /vkplan -> /vktodo <任务拆解目录>`（`/vk` 改为可选排障命令）
 
@@ -79,7 +79,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 1. `action=create`：
    - 若传了 `cards`，按 `cards` 生成目标清单。
    - 若没传 `cards`，按 `vk_cards.json.cards[*]` 生成目标清单。
-   - 若命中 G0 自动完成条件，额外执行一次 `WS-00` 状态推进到 `Done`。
+   - 若传入列表中包含 `WS-00`，自动忽略并提示“WS-00 为前置里程碑，不落卡”。
 2. `action=move`：
    - 若传了 `move_filter`，按 `move_filter` 筛选。
    - 若没传 `move_filter` 且有 `vk_cards.json.task_key`，自动使用 `prefix:<task_key>`。
@@ -129,7 +129,7 @@ VK 的 MCP 可直接操作 issue（`create_issue` / `update_issue`）。
 ## 使用示例
 
 ```text
-/vktodo project=fastapi action=create cards=PP-20260213-TODO::WS-00..PP-20260213-TODO::WS-08 status=Backlog
+/vktodo project=fastapi action=create cards=PP-20260213-TODO::WS-01..PP-20260213-TODO::WS-08 status=Backlog
 ```
 
 ```text

@@ -17,32 +17,6 @@
   },
   "cards": [
     {
-      "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-00",
-      "title": "WS-00 G0 协议冻结 [PP-20260213-SKILL-RETRIEVAL-MVP]",
-      "column": "Gate",
-      "priority": "P0",
-      "labels": [
-        "PP-20260213-SKILL-RETRIEVAL-MVP",
-        "2026-02-12_skill检索对齐_cursor_mvp",
-        "foundation",
-        "lane-foundation"
-      ],
-      "hard_depends_on": [],
-      "soft_depends_on": [],
-      "file_scope": [
-        "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md",
-        "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-00_G0_协议冻结.md",
-        "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/contracts/sse_events_v1.json"
-      ],
-      "dod": [
-        "done/result/interrupt 契约冻结并可机读消费"
-      ],
-      "check_cmd": [
-        "venv/bin/python scripts/docs_guard.py --strict"
-      ],
-      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-00_G0_协议冻结.md"
-    },
-    {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-01",
       "title": "WS-01 技能元数据与迁移 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Backlog",
@@ -53,9 +27,7 @@
         "parallel",
         "lane-backend-model"
       ],
-      "hard_depends_on": [
-        "WS-00"
-      ],
+      "hard_depends_on": [],
       "soft_depends_on": [],
       "file_scope": [
         "app/models/agent_skill.py",
@@ -81,7 +53,6 @@
         "lane-backend-ingest"
       ],
       "hard_depends_on": [
-        "WS-00",
         "WS-01"
       ],
       "soft_depends_on": [],
@@ -109,7 +80,6 @@
         "lane-backend-retrieval"
       ],
       "hard_depends_on": [
-        "WS-00",
         "WS-01",
         "WS-02"
       ],
@@ -138,7 +108,6 @@
         "lane-observability"
       ],
       "hard_depends_on": [
-        "WS-00",
         "WS-03"
       ],
       "soft_depends_on": [

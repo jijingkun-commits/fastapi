@@ -178,12 +178,13 @@
 - `task_key`: `PP-20260213-SKILL-RETRIEVAL-MVP`
 - 拆解目录 ID：`2026-02-12_skill检索对齐_cursor_mvp`
 - WS 总数：`7`
+- VK 落卡总数：`6`（不含 `WS-00`）
 - Gate 总数：`2`
 - 默认列流转：`Backlog -> Doing -> Review -> Gate -> Done`
 - 卡片 ID 规则：`<task_key>::<WS-ID>`
 - 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
+- 落卡范围：`WS-01...WS-G2`（`WS-00` 仅前置里程碑）
 - 卡片列表：
-  - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-00`
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-01`
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-02`
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-03`

@@ -2,15 +2,14 @@
 规则：
 1) 仅根据 hard_depends_on 建立阻塞依赖；soft_depends_on 仅作参考。
 2) 同泳道且无 hard 依赖冲突的卡片标记可并行。
-3) Gate/Foundation 卡片保持串行（column=Gate）。
+3) Gate 卡片保持串行（column=Gate）；`WS-00` 为前置里程碑，不建卡。
 4) 若 file_scope 存在冲突，阻止并行并提示回退串行。
 5) 默认列流转：Backlog -> Doing -> Review -> Gate -> Done。
 
 卡片概览：
-- PP-20260213-SKILL-RETRIEVAL-MVP::WS-00 | WS-00 G0 协议冻结 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Gate | hard_depends_on=[]
-- PP-20260213-SKILL-RETRIEVAL-MVP::WS-01 | WS-01 技能元数据与迁移 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-00']
-- PP-20260213-SKILL-RETRIEVAL-MVP::WS-02 | WS-02 SKILL导入与frontmatter治理 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-00', 'WS-01']
-- PP-20260213-SKILL-RETRIEVAL-MVP::WS-03 | WS-03 混合检索与注入策略 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-00', 'WS-01', 'WS-02']
-- PP-20260213-SKILL-RETRIEVAL-MVP::WS-04 | WS-04 可观测与离线评测 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-00', 'WS-03']
+- PP-20260213-SKILL-RETRIEVAL-MVP::WS-01 | WS-01 技能元数据与迁移 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=[]
+- PP-20260213-SKILL-RETRIEVAL-MVP::WS-02 | WS-02 SKILL导入与frontmatter治理 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-01']
+- PP-20260213-SKILL-RETRIEVAL-MVP::WS-03 | WS-03 混合检索与注入策略 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-01', 'WS-02']
+- PP-20260213-SKILL-RETRIEVAL-MVP::WS-04 | WS-04 可观测与离线评测 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Backlog | hard_depends_on=['WS-03']
 - PP-20260213-SKILL-RETRIEVAL-MVP::WS-G1 | WS-G1 集成回归门禁 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Gate | hard_depends_on=['WS-01', 'WS-02', 'WS-03', 'WS-04']
 - PP-20260213-SKILL-RETRIEVAL-MVP::WS-G2 | WS-G2 文档终稿门禁 [PP-20260213-SKILL-RETRIEVAL-MVP] | column=Gate | hard_depends_on=['WS-G1']

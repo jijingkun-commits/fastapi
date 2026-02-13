@@ -34,7 +34,7 @@ description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
 1. 读取 `/plan` 产物（`requirements.md`、`implementation_plan.md`）。
 2. 生成并行拆解（`parallel_plan.md` + `workstreams/WS-*.md`）。
 3. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
-4. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`。
+4. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`（默认落卡范围不含 `WS-00`）。
 
 若任一阶段失败，立即停止并给出最小修复动作。
 

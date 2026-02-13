@@ -120,6 +120,7 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 4. 默认列流转：`Backlog -> Doing -> Review -> Gate -> Done`
 5. 卡片 ID 规则：`<task_key>::<WS-ID>`
 6. 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
+7. VK 落卡范围：默认 `WS-01...WS-G2`，`WS-00` 仅前置里程碑（不落卡）
 
 每个 `workstreams/WS-*.md` 文末必须有 `card_export`（YAML）：
 

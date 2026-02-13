@@ -36,8 +36,8 @@
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
 | 1. 需求与方案 | `/plan` | `requirements.md` + `implementation_plan.md`（含 `task_key/card_seed`） | `task_key` 全局唯一，`card_seed` 字段完整 |
-| 2. 并行拆解 | `/vkplan`（等价 `/rwfj`） | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`，可直接落卡 |
-| 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片 | 建卡成功且依赖关系正确 |
+| 2. 并行拆解 | `/vkplan`（等价 `/rwfj`） | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
+| 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
 | 4. 子任务执行 | `/imp-ws @WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
 | 5. Gate 回填 | `/imp-ws @WS-G1` + `/imp-ws @WS-G2` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
@@ -53,7 +53,7 @@
 | 并行拆包（兼容） | `/rwfj` | 与 `/vkplan` 语义等价 |
 | 基线同步（调试） | `/vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
 | 看板一体落地（推荐） | `/vkkb <任务拆解目录>` | 自动补导出并落卡 |
-| 看板落卡（兼容） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡 |
+| 看板落卡（兼容） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
 | 看板导出（可选） | `/vk` | 仅在需要审阅 payload 或排障时使用 |
 | 看板推进（简化） | `/vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
 | 执行单个 WS | `/imp-ws` | 按白名单改动并回填自检卡 |
@@ -103,7 +103,7 @@
 
 ## 6.1 `/vktodo` 最简用法（新增）
 
-1. 先执行 `/vk <任务拆解目录>` 生成 `vk_cards.json`。
+1. 先执行 `/plan -> /vkplan`，产出 `vk_cards.json`。
 2. 建卡可直接用路径直传：
 
 ```text
@@ -129,5 +129,5 @@
 1. `parallel_plan.md` 有 `task_key` 与看板导出索引。
 2. 每个 `WS-*.md` 文末都有 `card_export`。
 3. 卡片 ID 使用 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
-4. 执行顺序遵循 `WS-00 -> 并行层 -> WS-G1 -> WS-G2`。
+4. `WS-00` 在 master 基线前置完成，不进入 VK 落卡列表。
 5. `review/test` 在门禁收口后统一执行。

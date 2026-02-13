@@ -98,6 +98,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 1. 读取 `task_key` 与看板导出索引
 2. 读取每个 WS 的 `card_export`
 3. 组装依赖图（优先 `hard_depends_on`，兼容 `depends_on`）
+4. 默认过滤 `WS-00`（Foundation 前置里程碑，不进入 VK 落卡清单）
 
 ### Step 3: 生成看板卡片 payload
 
@@ -105,7 +106,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 
 - `id`（必须为 `<task_key>::<WS-ID>`）
 - `title`（必须为 `<WS-ID> <标题> [<task_key>]`）
-- `column`（默认 `Backlog`，`gate/foundation` 类型默认 `Gate`）
+- `column`（默认 `Backlog`，`gate` 类型默认 `Gate`）
 - `priority`
 - `labels`（至少包含 `task_key` 与拆解目录 ID）
 - `hard_depends_on`

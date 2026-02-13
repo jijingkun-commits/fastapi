@@ -121,6 +121,7 @@ bash scripts/vk_dev.sh up
 2. `/vkplan` 语义等价 `/rwfj`，固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
 3. `WS-00` 在 `/vkplan`（`/rwfj`）阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
 4. `/vkkb` 或 `/vktodo` 负责默认落卡；其前置会自动执行 G0 基线校验，`/vk` 降级为可选导出审阅命令。
-5. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
-6. 卡片唯一键必须为 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
-7. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
+5. `WS-00` 为 master 前置里程碑，不进入 VK 落卡与推进列表。
+6. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
+7. 卡片唯一键必须为 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
+8. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
