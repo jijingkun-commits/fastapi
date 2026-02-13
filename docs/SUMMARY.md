@@ -138,6 +138,8 @@
 
 * [当前需求](内部参考/迭代需求/requirements.md)
 * [实施方案](内部参考/迭代需求/implementation_plan.md)
+* [技能后台前端需求](内部参考/迭代需求/skill_admin_frontend_requirements.md)
+* [技能后台前端方案](内部参考/迭代需求/skill_admin_frontend_plan.md)
 * [评估报告](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解
@@ -164,6 +166,7 @@
 
 * [并行总计划](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md)
 * [合并检查清单](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/merge_checklist.md)
+* [WS-00 G0 协议冻结](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-00_G0_协议冻结.md)
 * [WS-01 技能元数据与迁移](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-01_技能元数据与迁移.md)
 * [WS-02 SKILL导入与frontmatter治理](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-02_SKILL导入与frontmatter治理.md)
 * [WS-03 混合检索与注入策略](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-03_混合检索与注入策略.md)

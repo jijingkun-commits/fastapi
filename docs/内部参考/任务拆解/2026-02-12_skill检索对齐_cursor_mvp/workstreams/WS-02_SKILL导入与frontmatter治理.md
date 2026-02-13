@@ -72,6 +72,16 @@
 
 ---
 
+## 5.1 浏览器测试触发评估
+
+- 是否触发浏览器测试：否
+- 触发依据：本 WS 聚焦导入与服务层逻辑，不涉及前端交互。
+- 执行命令：N/A
+- 结果与证据路径：N/A
+- 未执行原因：未改 `web/src/**`。
+
+---
+
 ## 6. 风险与回滚
 
 - 风险：frontmatter 自由格式导致解析歧义。
@@ -92,22 +102,33 @@
 ## card_export
 
 ```yaml
-id: WS-02
-title: SKILL导入与frontmatter治理
-type: parallel
-lane: backend-ingest
-depends_on:
-  - WS-01
-file_whitelist:
-  - app/services/skill_service.py
-  - app/main.py
-readonly_scope:
-  - app/models/
-  - app/ai/workflow/
-owner_fields:
-  - frontmatter_parse_rules
-  - import_idempotency
-check_cmd: venv/bin/python -m pytest -q tests/unit -k "skill and ingest"
-dod: frontmatter 解析、校验、幂等导入通过
+card_export:
+  id: WS-02
+  card_key: PP-20260213-SKILL-RETRIEVAL-MVP::WS-02
+  title: SKILL导入与frontmatter治理
+  type: parallel
+  lane: lane-backend-ingest
+  hard_depends_on:
+    - WS-00
+    - WS-01
+  soft_depends_on: []
+  depends_on:
+    - WS-00
+    - WS-01
+  file_whitelist:
+    - app/services/skill_service.py
+    - app/main.py
+  readonly_scope:
+    - app/models/
+    - app/ai/workflow/
+  owner_fields:
+    - frontmatter_parse
+    - file_hash
+    - scope_normalize
+  check_cmd:
+    - venv/bin/python -m pytest -q tests/unit -k "skill and ingest"
+  handoff_artifacts:
+    - app/services/skill_service.py
+  dod:
+    - frontmatter 解析、校验、幂等导入通过
 ```
-

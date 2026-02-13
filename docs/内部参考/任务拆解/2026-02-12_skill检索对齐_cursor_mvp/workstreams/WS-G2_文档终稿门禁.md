@@ -73,21 +73,30 @@
 ## card_export
 
 ```yaml
-id: WS-G2
-title: 文档终稿门禁
-type: gate
-lane: gate
-depends_on:
-  - WS-G1
-file_whitelist:
-  - docs/
-  - .env.example
-readonly_scope:
-  - app/
-  - web/
-owner_fields:
-  - gate_g2_doc_status
-check_cmd: venv/bin/python scripts/docs_guard.py --strict
-dod: 文档同步与索引门禁通过
+card_export:
+  id: WS-G2
+  card_key: PP-20260213-SKILL-RETRIEVAL-MVP::WS-G2
+  title: 文档终稿门禁
+  type: gate
+  lane: lane-gate
+  hard_depends_on:
+    - WS-G1
+  soft_depends_on: []
+  depends_on:
+    - WS-G1
+  file_whitelist:
+    - docs/
+    - .env.example
+  readonly_scope:
+    - app/
+    - web/
+  owner_fields:
+    - gate.g2.status
+    - docs.summary
+  check_cmd:
+    - venv/bin/python scripts/docs_guard.py --strict
+  handoff_artifacts:
+    - docs/SUMMARY.md
+  dod:
+    - 文档同步与索引门禁通过
 ```
-

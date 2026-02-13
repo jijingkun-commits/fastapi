@@ -1,0 +1,57 @@
+{
+  "version": "v1",
+  "task_key": "PP-20260213-SKILL-RETRIEVAL-MVP",
+  "events": {
+    "result": {
+      "required": [
+        "type",
+        "data.data_type",
+        "data.data"
+      ],
+      "optional": [
+        "node",
+        "data.message"
+      ],
+      "constraints": {
+        "type": "result",
+        "data.data_type": "non_empty_string"
+      },
+      "compatibility": "新增字段仅可追加 optional，不可变更 required 语义"
+    },
+    "interrupt": {
+      "required": [
+        "type",
+        "data.thread_id",
+        "data.interrupt_id",
+        "data.value"
+      ],
+      "optional": [
+        "node",
+        "data.value.message",
+        "data.value.action_requests",
+        "data.value.review_configs"
+      ],
+      "constraints": {
+        "type": "interrupt",
+        "data.interrupt_id": "non_empty_string"
+      },
+      "compatibility": "value 内只允许追加可选字段"
+    },
+    "done": {
+      "required": [
+        "type",
+        "data.thread_id",
+        "data.message_id"
+      ],
+      "optional": [
+        "node",
+        "data.final_content"
+      ],
+      "constraints": {
+        "type": "done",
+        "forbid_structured_payload": true
+      },
+      "compatibility": "done 仅用于生命周期收口"
+    }
+  }
+}

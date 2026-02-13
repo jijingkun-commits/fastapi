@@ -84,23 +84,39 @@
 ## card_export
 
 ```yaml
-id: WS-G1
-title: 集成回归门禁
-type: gate
-lane: gate
-depends_on:
-  - WS-01
-  - WS-02
-  - WS-03
-  - WS-04
-file_whitelist:
-  - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md
-  - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md
-readonly_scope:
-  - app/
-owner_fields:
-  - gate_g1_status
-check_cmd: venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md
-dod: G1门禁通过并完成自动回填
+card_export:
+  id: WS-G1
+  card_key: PP-20260213-SKILL-RETRIEVAL-MVP::WS-G1
+  title: 集成回归门禁
+  type: gate
+  lane: lane-gate
+  hard_depends_on:
+    - WS-01
+    - WS-02
+    - WS-03
+    - WS-04
+  soft_depends_on: []
+  depends_on:
+    - WS-01
+    - WS-02
+    - WS-03
+    - WS-04
+  file_whitelist:
+    - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md
+    - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md
+  readonly_scope:
+    - app/
+  owner_fields:
+    - gate.g1.status
+    - gate.g1.report
+  check_cmd:
+    - venv/bin/python -m pytest -q app/tests/test_skill_retrieval_smoke.py
+    - venv/bin/python -m pytest -q tests -k "skill"
+    - venv/bin/python scripts/docs_guard.py --strict
+    - venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md
+  handoff_artifacts:
+    - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md
+    - docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md
+  dod:
+    - G1 门禁命令通过并完成自动回填
 ```
-
