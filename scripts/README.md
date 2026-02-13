@@ -46,6 +46,7 @@ scripts/                    # 运维和数据脚本
 ├── check_counts.py        # 检查各表记录数
 ├── verify_data_db.py      # 验证数据库状态
 ├── validate_metric_coverage.py  # 验证指标覆盖率
+├── skill_offline_evaluation.py  # ★ Skill 检索离线评测与基线对比
 ├── inspect_data_files.py  # 检查数据文件
 │
 ├── # === 工具脚本 ===
@@ -112,6 +113,9 @@ python scripts/schema_sync.py
 
 # 更新 AI 技能（修改 SKILL.md 后执行）
 python scripts/import_skills.py
+
+# Skill 检索离线评测（默认 mock 数据集）
+python scripts/skill_offline_evaluation.py
 
 # 检查数据状态
 python scripts/check_counts.py

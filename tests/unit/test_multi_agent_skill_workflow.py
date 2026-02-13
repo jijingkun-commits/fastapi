@@ -28,6 +28,8 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
         threshold: float = None,
         scope: str = "global",
         auto_only: bool = False,
+        thread_id=None,
+        trace_id=None,
     ):
         return {
             "query": query,

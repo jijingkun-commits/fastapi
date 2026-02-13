@@ -2,8 +2,10 @@
 
 import ast
 import hashlib
+import json
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,6 +46,26 @@ class SkillService:
         """计算内容 MD5。"""
 
         return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _compute_query_hash(query: str) -> str:
+        """计算查询哈希，避免明文写入检索日志。"""
+
+        normalized = " ".join(query.strip().lower().split())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _normalize_trace_key(raw_value: Optional[str]) -> str:
+        """标准化 thread/trace 标识值，空值统一为 `-`。"""
+
+        if raw_value is None:
+            return "-"
+
+        normalized = str(raw_value).strip()
+        if not normalized:
+            return "-"
+
+        return normalized[:128]
 
     @staticmethod
     def _format_warning(field: str, message: str, raw_value: Any = None) -> str:
@@ -920,6 +942,46 @@ class SkillService:
         return selected, dropped
 
     @classmethod
+    def _build_retrieval_log(
+        cls,
+        query: str,
+        thread_id: Optional[str],
+        trace_id: Optional[str],
+        retrieval_mode: str,
+        scope: str,
+        top_k: int,
+        base_threshold: float,
+        effective_threshold: float,
+        vector_candidates: List[Dict[str, Any]],
+        lexical_candidates: List[Dict[str, Any]],
+        merged_candidates: List[Dict[str, Any]],
+        selected_candidates: List[Dict[str, Any]],
+        dropped_candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """构建结构化检索日志，支撑 query->candidates->final 追踪。"""
+
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "thread_id": cls._normalize_trace_key(thread_id),
+            "trace_id": cls._normalize_trace_key(trace_id),
+            "query_hash": cls._compute_query_hash(query),
+            "query_length": len(query.strip()),
+            "mode": retrieval_mode,
+            "scope": scope,
+            "top_k": top_k,
+            "threshold": round(base_threshold, 4),
+            "effective_threshold": round(effective_threshold, 4),
+            "vector_candidate_count": len(vector_candidates),
+            "lexical_candidate_count": len(lexical_candidates),
+            "candidate_count": len(merged_candidates),
+            "candidate_skill_ids": [item["skill_id"] for item in merged_candidates[: min(20, len(merged_candidates))]],
+            "selected_skill_ids": [item["skill_id"] for item in selected_candidates],
+            "selected_count": len(selected_candidates),
+            "dropped_count": len(dropped_candidates),
+            "dropped_preview": dropped_candidates[: min(6, len(dropped_candidates))],
+        }
+
+    @classmethod
     def _search_skills_internal(
         cls,
         query: str,
@@ -927,11 +989,35 @@ class SkillService:
         threshold: Optional[float],
         scope: str,
         auto_only: bool,
+        thread_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Tuple[List[AgentSkill], Dict[str, Any]]:
         """统一检索入口，返回技能列表和调试信息。"""
 
         if not query.strip():
-            return [], {"reason": "empty_query"}
+            retrieval_log = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "thread_id": cls._normalize_trace_key(thread_id),
+                "trace_id": cls._normalize_trace_key(trace_id),
+                "query_hash": cls._compute_query_hash(query),
+                "query_length": 0,
+                "mode": "none",
+                "scope": scope,
+                "top_k": max(1, top_k),
+                "threshold": None,
+                "effective_threshold": None,
+                "vector_candidate_count": 0,
+                "lexical_candidate_count": 0,
+                "candidate_count": 0,
+                "candidate_skill_ids": [],
+                "selected_skill_ids": [],
+                "selected_count": 0,
+                "dropped_count": 0,
+                "dropped_preview": [],
+                "reason": "empty_query",
+            }
+            logger.info("技能检索日志: %s", json.dumps(retrieval_log, ensure_ascii=False, sort_keys=True))
+            return [], {"reason": "empty_query", "retrieval_log": retrieval_log}
 
         configured_top_k = SystemConfigService.get_int("skill.top_k", top_k)
         final_top_k = top_k if top_k > 0 else max(1, configured_top_k)
@@ -1022,6 +1108,22 @@ class SkillService:
             skill._lazy_section_count = section_count
             skills.append(skill)
 
+        retrieval_log = cls._build_retrieval_log(
+            query=query,
+            thread_id=thread_id,
+            trace_id=trace_id,
+            retrieval_mode=retrieval_mode,
+            scope=scope,
+            top_k=final_top_k,
+            base_threshold=base_threshold,
+            effective_threshold=effective_threshold,
+            vector_candidates=vector_candidates,
+            lexical_candidates=lexical_candidates,
+            merged_candidates=merged,
+            selected_candidates=selected,
+            dropped_candidates=dropped,
+        )
+
         debug_info = {
             "query": query,
             "mode": retrieval_mode,
@@ -1065,6 +1167,7 @@ class SkillService:
             "dropped": dropped,
             "selected_skill_ids": [item["skill_id"] for item in selected],
             "context_budget": context_max_length,
+            "retrieval_log": retrieval_log,
         }
 
         merged_preview = ", ".join(
@@ -1083,6 +1186,7 @@ class SkillService:
             [item["skill_id"] for item in selected],
             dropped[:4],
         )
+        logger.info("技能检索日志: %s", json.dumps(retrieval_log, ensure_ascii=False, sort_keys=True))
 
         return skills, debug_info
 
@@ -1094,6 +1198,8 @@ class SkillService:
         threshold: float = None,
         scope: str = DEFAULT_SCOPE,
         auto_only: bool = True,
+        thread_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> List[AgentSkill]:
         """检索相关技能（支持 hybrid/vector 策略）。"""
 
@@ -1103,6 +1209,8 @@ class SkillService:
             threshold=threshold,
             scope=scope,
             auto_only=auto_only,
+            thread_id=thread_id,
+            trace_id=trace_id,
         )
         return skills
 
@@ -1114,6 +1222,8 @@ class SkillService:
         threshold: float = None,
         scope: str = DEFAULT_SCOPE,
         auto_only: bool = False,
+        thread_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """检索技能并返回调试信息。"""
 
@@ -1123,6 +1233,8 @@ class SkillService:
             threshold=threshold,
             scope=scope,
             auto_only=auto_only,
+            thread_id=thread_id,
+            trace_id=trace_id,
         )
 
         context_budget = int(debug.get("context_budget") or 1200)
@@ -1173,11 +1285,35 @@ class SkillService:
                 for item in results
             ]
 
+        retrieval_log = debug.get("retrieval_log")
+        if not isinstance(retrieval_log, dict):
+            retrieval_log = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "thread_id": cls._normalize_trace_key(thread_id),
+                "trace_id": cls._normalize_trace_key(trace_id),
+                "query_hash": cls._compute_query_hash(query),
+                "query_length": len(query.strip()),
+                "mode": str(debug.get("mode") or "unknown"),
+                "scope": str(debug.get("scope") or scope),
+                "top_k": top_k,
+                "threshold": debug.get("threshold"),
+                "effective_threshold": debug.get("effective_threshold"),
+                "vector_candidate_count": len(debug.get("vector_candidates") or []),
+                "lexical_candidate_count": len(debug.get("lexical_candidates") or []),
+                "candidate_count": len(skill_candidates),
+                "candidate_skill_ids": [item.get("skill_id") for item in skill_candidates if item.get("skill_id")],
+                "selected_skill_ids": selected_skill_ids,
+                "selected_count": len(selected_skill_ids),
+                "dropped_count": len(debug.get("dropped") or []),
+                "dropped_preview": (debug.get("dropped") or [])[:6],
+            }
+
         debug["results"] = results
         debug["count"] = len(skills)
         debug["context_preview"] = context_preview
         debug["skill_candidates"] = skill_candidates
         debug["selected_skill_ids"] = selected_skill_ids
+        debug["retrieval_log"] = retrieval_log
         debug["skill_injection_meta"] = {
             **injection_meta,
             "mode": debug.get("mode"),

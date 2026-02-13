@@ -1,0 +1,227 @@
+{
+  "name": "skill_retrieval_offline_eval",
+  "version": "2026-02-13",
+  "source": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-04",
+  "cases": [
+    {
+      "case_id": "SK-OFFLINE-001",
+      "scenario": "银行对公贷款分析",
+      "query": "按分行统计对公贷款余额，并给出环比趋势",
+      "scope": "data",
+      "top_k": 2,
+      "thread_id": "offline-thread-001",
+      "trace_id": "offline-trace-001",
+      "expected_selected_skill_ids": [
+        "sql-expert",
+        "data-insight"
+      ],
+      "expected_candidate_contains": [
+        "sql-expert",
+        "data-insight"
+      ],
+      "mock_debug": {
+        "mode": "hybrid",
+        "scope": "data",
+        "threshold": 0.4,
+        "effective_threshold": 0.35,
+        "skill_candidates": [
+          {
+            "skill_id": "sql-expert",
+            "vector_score": 0.92,
+            "lexical_score": 0.81,
+            "trigger_hit": 1.0,
+            "final_score": 0.9,
+            "selected": true,
+            "drop_reasons": []
+          },
+          {
+            "skill_id": "data-insight",
+            "vector_score": 0.85,
+            "lexical_score": 0.74,
+            "trigger_hit": 0.0,
+            "final_score": 0.79,
+            "selected": true,
+            "drop_reasons": []
+          },
+          {
+            "skill_id": "copywriter",
+            "vector_score": 0.3,
+            "lexical_score": 0.11,
+            "trigger_hit": 0.0,
+            "final_score": 0.25,
+            "selected": false,
+            "drop_reasons": [
+              {
+                "reason": "below_threshold"
+              }
+            ]
+          }
+        ],
+        "selected_skill_ids": [
+          "sql-expert",
+          "data-insight"
+        ],
+        "dropped": [
+          {
+            "skill_id": "copywriter",
+            "reason": "below_threshold",
+            "score": 0.25
+          }
+        ],
+        "retrieval_log": {
+          "thread_id": "offline-thread-001",
+          "trace_id": "offline-trace-001",
+          "query_hash": "9901a42fb9bb091f",
+          "selected_skill_ids": [
+            "sql-expert",
+            "data-insight"
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "SK-OFFLINE-002",
+      "scenario": "分行待办与存款日报提醒",
+      "query": "请把明天分行巡检会议加入待办，并提醒准备存款日报",
+      "scope": "todo",
+      "top_k": 2,
+      "thread_id": "offline-thread-002",
+      "trace_id": "offline-trace-002",
+      "expected_selected_skill_ids": [
+        "todo-intent"
+      ],
+      "expected_candidate_contains": [
+        "todo-intent"
+      ],
+      "mock_debug": {
+        "mode": "hybrid",
+        "scope": "todo",
+        "threshold": 0.4,
+        "effective_threshold": 0.35,
+        "skill_candidates": [
+          {
+            "skill_id": "todo-intent",
+            "vector_score": 0.88,
+            "lexical_score": 0.79,
+            "trigger_hit": 1.0,
+            "final_score": 0.89,
+            "selected": true,
+            "drop_reasons": []
+          },
+          {
+            "skill_id": "meeting-minutes",
+            "vector_score": 0.33,
+            "lexical_score": 0.2,
+            "trigger_hit": 0.0,
+            "final_score": 0.29,
+            "selected": false,
+            "drop_reasons": [
+              {
+                "reason": "below_threshold"
+              }
+            ]
+          }
+        ],
+        "selected_skill_ids": [
+          "todo-intent"
+        ],
+        "dropped": [
+          {
+            "skill_id": "meeting-minutes",
+            "reason": "below_threshold",
+            "score": 0.29
+          }
+        ],
+        "retrieval_log": {
+          "thread_id": "offline-thread-002",
+          "trace_id": "offline-trace-002",
+          "query_hash": "ddd26e72c0e7daae",
+          "selected_skill_ids": [
+            "todo-intent"
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "SK-OFFLINE-003",
+      "scenario": "客户明细权限与脱敏边界",
+      "query": "查询客户手机号和证件号明细，若无权限请返回脱敏提示",
+      "scope": "admin",
+      "top_k": 2,
+      "thread_id": "offline-thread-003",
+      "trace_id": "offline-trace-003",
+      "expected_selected_skill_ids": [
+        "api-doc"
+      ],
+      "expected_candidate_contains": [
+        "api-doc",
+        "sql-expert"
+      ],
+      "mock_debug": {
+        "mode": "hybrid",
+        "scope": "admin",
+        "threshold": 0.4,
+        "effective_threshold": 0.35,
+        "skill_candidates": [
+          {
+            "skill_id": "api-doc",
+            "vector_score": 0.86,
+            "lexical_score": 0.71,
+            "trigger_hit": 1.0,
+            "final_score": 0.85,
+            "selected": true,
+            "drop_reasons": []
+          },
+          {
+            "skill_id": "sql-expert",
+            "vector_score": 0.7,
+            "lexical_score": 0.66,
+            "trigger_hit": 0.0,
+            "final_score": 0.63,
+            "selected": false,
+            "drop_reasons": [
+              {
+                "reason": "scope_mismatch"
+              }
+            ]
+          },
+          {
+            "skill_id": "data-insight",
+            "vector_score": 0.44,
+            "lexical_score": 0.27,
+            "trigger_hit": 0.0,
+            "final_score": 0.36,
+            "selected": false,
+            "drop_reasons": [
+              {
+                "reason": "below_threshold"
+              }
+            ]
+          }
+        ],
+        "selected_skill_ids": [
+          "api-doc"
+        ],
+        "dropped": [
+          {
+            "skill_id": "sql-expert",
+            "reason": "scope_mismatch"
+          },
+          {
+            "skill_id": "data-insight",
+            "reason": "below_threshold",
+            "score": 0.36
+          }
+        ],
+        "retrieval_log": {
+          "thread_id": "offline-thread-003",
+          "trace_id": "offline-trace-003",
+          "query_hash": "266a38246f6318e2",
+          "selected_skill_ids": [
+            "api-doc"
+          ]
+        }
+      }
+    }
+  ]
+}

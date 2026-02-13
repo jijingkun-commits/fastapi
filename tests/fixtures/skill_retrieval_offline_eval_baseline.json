@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-02-13T00:00:00+00:00",
+  "dataset": {
+    "name": "skill_retrieval_offline_eval",
+    "version": "2026-02-13",
+    "source": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-04"
+  },
+  "summary": {
+    "total_cases": 3,
+    "passed_cases": 3,
+    "failed_cases": 0,
+    "pass_rate": 1.0,
+    "avg_precision": 1.0,
+    "avg_recall": 1.0
+  }
+}

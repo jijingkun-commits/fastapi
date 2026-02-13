@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-02-13T13:34:29.039260+00:00",
+  "dataset": {
+    "name": "skill_retrieval_offline_eval",
+    "version": "2026-02-13",
+    "source": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-04"
+  },
+  "mode": "mock",
+  "summary": {
+    "total_cases": 3,
+    "passed_cases": 3,
+    "failed_cases": 0,
+    "pass_rate": 1.0,
+    "avg_precision": 1.0,
+    "avg_recall": 1.0
+  },
+  "cases": [
+    {
+      "case_id": "SK-OFFLINE-001",
+      "scenario": "银行对公贷款分析",
+      "query": "按分行统计对公贷款余额，并给出环比趋势",
+      "scope": "data",
+      "expected_selected_skill_ids": [
+        "sql-expert",
+        "data-insight"
+      ],
+      "actual_selected_skill_ids": [
+        "sql-expert",
+        "data-insight"
+      ],
+      "candidate_skill_ids": [
+        "sql-expert",
+        "data-insight",
+        "copywriter"
+      ],
+      "precision": 1.0,
+      "recall": 1.0,
+      "passed": true,
+      "missing_expected": [],
+      "missing_candidates": [],
+      "missing_retrieval_log_fields": [],
+      "trace_mismatch": false,
+      "thread_mismatch": false,
+      "selected_sync_ok": true,
+      "retrieval_log": {
+        "thread_id": "offline-thread-001",
+        "trace_id": "offline-trace-001",
+        "query_hash": "9901a42fb9bb091f",
+        "selected_skill_ids": [
+          "sql-expert",
+          "data-insight"
+        ]
+      }
+    },
+    {
+      "case_id": "SK-OFFLINE-002",
+      "scenario": "分行待办与存款日报提醒",
+      "query": "请把明天分行巡检会议加入待办，并提醒准备存款日报",
+      "scope": "todo",
+      "expected_selected_skill_ids": [
+        "todo-intent"
+      ],
+      "actual_selected_skill_ids": [
+        "todo-intent"
+      ],
+      "candidate_skill_ids": [
+        "todo-intent",
+        "meeting-minutes"
+      ],
+      "precision": 1.0,
+      "recall": 1.0,
+      "passed": true,
+      "missing_expected": [],
+      "missing_candidates": [],
+      "missing_retrieval_log_fields": [],
+      "trace_mismatch": false,
+      "thread_mismatch": false,
+      "selected_sync_ok": true,
+      "retrieval_log": {
+        "thread_id": "offline-thread-002",
+        "trace_id": "offline-trace-002",
+        "query_hash": "ddd26e72c0e7daae",
+        "selected_skill_ids": [
+          "todo-intent"
+        ]
+      }
+    },
+    {
+      "case_id": "SK-OFFLINE-003",
+      "scenario": "客户明细权限与脱敏边界",
+      "query": "查询客户手机号和证件号明细，若无权限请返回脱敏提示",
+      "scope": "admin",
+      "expected_selected_skill_ids": [
+        "api-doc"
+      ],
+      "actual_selected_skill_ids": [
+        "api-doc"
+      ],
+      "candidate_skill_ids": [
+        "api-doc",
+        "sql-expert",
+        "data-insight"
+      ],
+      "precision": 1.0,
+      "recall": 1.0,
+      "passed": true,
+      "missing_expected": [],
+      "missing_candidates": [],
+      "missing_retrieval_log_fields": [],
+      "trace_mismatch": false,
+      "thread_mismatch": false,
+      "selected_sync_ok": true,
+      "retrieval_log": {
+        "thread_id": "offline-thread-003",
+        "trace_id": "offline-trace-003",
+        "query_hash": "266a38246f6318e2",
+        "selected_skill_ids": [
+          "api-doc"
+        ]
+      }
+    }
+  ],
+  "baseline_compare": {
+    "baseline": {
+      "total_cases": 3,
+      "passed_cases": 3,
+      "failed_cases": 0,
+      "pass_rate": 1.0,
+      "avg_precision": 1.0,
+      "avg_recall": 1.0
+    },
+    "delta": {
+      "pass_rate_delta": 0.0,
+      "avg_precision_delta": 0.0,
+      "avg_recall_delta": 0.0
+    },
+    "regressed": false
+  }
+}

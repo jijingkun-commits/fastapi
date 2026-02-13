@@ -256,6 +256,8 @@ def test_search_skills_debug_exposes_candidates_and_injection_meta(monkeypatch) 
         threshold,
         scope: str,
         auto_only: bool,
+        thread_id,
+        trace_id,
     ):
         return [debug_skill], {
             "query": query,
@@ -311,6 +313,105 @@ def test_search_skills_debug_exposes_candidates_and_injection_meta(monkeypatch) 
     assert candidates["data-loan"]["selected"] is True
     assert candidates["todo-skill"]["selected"] is False
     assert candidates["todo-skill"]["drop_reasons"][0]["reason"] == "disabled"
+
+
+def test_build_retrieval_log_should_include_trace_fields() -> None:
+    """结构化检索日志应包含 trace/thread/query_hash 与入选信息。"""
+
+    retrieval_log = SkillService._build_retrieval_log(
+        query="按分行统计贷款余额",
+        thread_id="thread-skill-001",
+        trace_id="trace-skill-001",
+        retrieval_mode="hybrid",
+        scope="data",
+        top_k=2,
+        base_threshold=0.4,
+        effective_threshold=0.35,
+        vector_candidates=[{"skill_id": "sql-expert"}],
+        lexical_candidates=[{"skill_id": "data-insight"}],
+        merged_candidates=[{"skill_id": "sql-expert"}, {"skill_id": "data-insight"}],
+        selected_candidates=[{"skill_id": "sql-expert"}],
+        dropped_candidates=[{"skill_id": "data-insight", "reason": "below_threshold"}],
+    )
+
+    assert retrieval_log["thread_id"] == "thread-skill-001"
+    assert retrieval_log["trace_id"] == "trace-skill-001"
+    assert len(retrieval_log["query_hash"]) == 16
+    assert retrieval_log["selected_skill_ids"] == ["sql-expert"]
+    assert retrieval_log["candidate_count"] == 2
+
+
+def test_search_skills_debug_should_backfill_retrieval_log(monkeypatch) -> None:  # noqa: ANN001
+    """内部调试信息缺失 retrieval_log 时应自动补齐。"""
+
+    class _DebugSkill:
+        def __init__(self) -> None:
+            self.skill_id = "data-loan"
+            self.name = "贷款分析技能"
+            self.description = "按分行统计贷款余额"
+            self._retrieval_score = 0.91
+            self._vector_score = 0.88
+            self._lexical_score = 0.76
+            self._trigger_hit = 1.0
+            self._lazy_context_fragment = "### 贷款分析技能 · 概要\n按分行统计贷款余额。\n"
+            self._lazy_section_count = 1
+
+    debug_skill = _DebugSkill()
+
+    def _fake_search(  # noqa: ANN001
+        cls,
+        query: str,
+        top_k: int,
+        threshold,
+        scope: str,
+        auto_only: bool,
+        thread_id,
+        trace_id,
+    ):
+        _ = cls, threshold, auto_only
+        return [debug_skill], {
+            "query": query,
+            "mode": "hybrid",
+            "scope": scope,
+            "threshold": 0.4,
+            "effective_threshold": 0.35,
+            "context_budget": 160,
+            "merged_candidates": [
+                {
+                    "skill_id": "data-loan",
+                    "vector_score": 0.88,
+                    "lexical_score": 0.76,
+                    "trigger_hit": 1.0,
+                    "final_score": 0.91,
+                    "priority": 10,
+                    "scope": "data",
+                    "is_enabled": True,
+                    "auto_enabled": True,
+                }
+            ],
+            "dropped": [],
+            "thread_id_from_internal": thread_id,
+            "trace_id_from_internal": trace_id,
+        }
+
+    monkeypatch.setattr(SkillService, "_search_skills_internal", classmethod(_fake_search))
+
+    debug = SkillService.search_skills_debug(
+        query="按分行统计贷款余额",
+        top_k=2,
+        threshold=0.4,
+        scope="data",
+        auto_only=True,
+        thread_id="thread-skill-002",
+        trace_id="trace-skill-002",
+    )
+
+    retrieval_log = debug["retrieval_log"]
+    assert retrieval_log["thread_id"] == "thread-skill-002"
+    assert retrieval_log["trace_id"] == "trace-skill-002"
+    assert len(retrieval_log["query_hash"]) == 16
+    assert retrieval_log["selected_skill_ids"] == ["data-loan"]
+
 
 
 class _FakeSkill:

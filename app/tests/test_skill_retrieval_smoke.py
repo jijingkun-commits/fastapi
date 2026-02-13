@@ -90,7 +90,10 @@ def test_skill_retrieval_smoke(db_session, mock_embedding):
         assert "skill_candidates" in debug
         assert "selected_skill_ids" in debug
         assert "skill_injection_meta" in debug
+        assert "retrieval_log" in debug
         assert any(item.get("skill_id") == "smoke-test-skill" for item in debug["skill_candidates"])
+        assert debug["retrieval_log"]["selected_skill_ids"] == debug["selected_skill_ids"]
+        assert debug["retrieval_log"]["query_hash"]
 
         print(f"\n✅ Skill retrieval smoke test passed. Found skill: {found_skill.name}")
         
