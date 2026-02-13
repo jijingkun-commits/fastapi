@@ -191,3 +191,31 @@
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-04`
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-G1`
   - `PP-20260213-SKILL-RETRIEVAL-MVP::WS-G2`
+
+## 10. Gate 执行记录
+
+### 10.1 WS-G1 结果（自动回填：2026-02-13 22:27）
+
+- `pytest`：通过（21 passed）
+- `tsc`：通过
+- `lint`：通过（38 warning）
+- `docs_guard`：失败（4 error, 0 warning）
+
+### 10.2 WS-G2 预期动作
+
+- 修复 `docs/SUMMARY.md` 中以下断链后重跑 strict：
+  - `内部参考/迭代需求/requirements.md`
+  - `内部参考/迭代需求/implementation_plan.md`
+- `docs_guard --strict` 全绿后再执行 `WS-G2` 收口。
+
+## 11. Gate 收口结果（自动回填：2026-02-13 22:27）
+
+1. `WS-G1` 已执行：
+   - `pytest` 通过（21 passed）
+   - `tsc` 通过
+   - `lint` 通过（38 warning）
+   - `docs_guard` 失败（4 error, 0 warning）
+2. `WS-G2` 已执行：
+   - `docs_guard --strict` 失败（4 error, 0 warning）
+3. Gate 结论：
+   - 业务门禁可通过但文档门禁未通过，请先修复文档后重跑 Gate。
