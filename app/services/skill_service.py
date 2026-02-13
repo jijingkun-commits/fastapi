@@ -628,12 +628,18 @@ class SkillService:
         return selected[:max_sections]
 
     @classmethod
-    def _build_skill_fragment(cls, skill: AgentSkill, query: str, max_sections: int = 2) -> str:
-        """生成单个技能的章节级上下文片段。"""
+    def _build_skill_fragment_with_meta(
+        cls,
+        skill: AgentSkill,
+        query: str,
+        max_sections: int = 2,
+    ) -> Tuple[str, int]:
+        """生成单个技能的章节级上下文片段，并返回命中章节数。"""
 
         selected_sections = cls._pick_sections(skill.content or "", query=query, max_sections=max_sections)
         if not selected_sections:
-            return f"### {skill.name}\n{(skill.description or '').strip()}\n"
+            fallback = f"### {skill.name}\n{(skill.description or '').strip()}\n"
+            return fallback, 1 if (skill.description or "").strip() else 0
 
         parts: List[str] = []
         for section_title, body in selected_sections:
@@ -642,7 +648,14 @@ class SkillService:
                 snippet = f"{snippet[:400]}..."
             parts.append(f"### {skill.name} · {section_title}\n{snippet}\n")
 
-        return "\n".join(parts)
+        return "\n".join(parts), len(selected_sections)
+
+    @classmethod
+    def _build_skill_fragment(cls, skill: AgentSkill, query: str, max_sections: int = 2) -> str:
+        """生成单个技能的章节级上下文片段。"""
+
+        fragment, _ = cls._build_skill_fragment_with_meta(skill, query=query, max_sections=max_sections)
+        return fragment
 
     @classmethod
     def _fetch_vector_candidates(
@@ -1000,7 +1013,13 @@ class SkillService:
             skill._vector_score = item.get("vector_score", 0.0)
             skill._lexical_score = item.get("lexical_score", 0.0)
             skill._trigger_hit = item.get("trigger_hit", 0.0)
-            skill._lazy_context_fragment = cls._build_skill_fragment(skill, query=query, max_sections=section_max_count)
+            fragment, section_count = cls._build_skill_fragment_with_meta(
+                skill,
+                query=query,
+                max_sections=section_max_count,
+            )
+            skill._lazy_context_fragment = fragment
+            skill._lazy_section_count = section_count
             skills.append(skill)
 
         debug_info = {
@@ -1021,6 +1040,20 @@ class SkillService:
                 }
                 for item in lexical_candidates[: min(10, len(lexical_candidates))]
             ],
+            "merged_candidates": [
+                {
+                    "skill_id": item["skill_id"],
+                    "vector_score": round(item.get("vector_score", 0.0), 4),
+                    "lexical_score": round(item.get("lexical_score", 0.0), 4),
+                    "trigger_hit": round(item.get("trigger_hit", 0.0), 4),
+                    "final_score": round(item.get("final_score", 0.0), 4),
+                    "priority": item.get("priority", 100),
+                    "scope": item.get("scope") or cls.DEFAULT_SCOPE,
+                    "is_enabled": item.get("is_enabled", True),
+                    "auto_enabled": item.get("auto_enabled", True),
+                }
+                for item in merged[: min(20, len(merged))]
+            ],
             "final_candidates": [
                 {
                     "skill_id": item["skill_id"],
@@ -1030,6 +1063,7 @@ class SkillService:
                 for item in selected
             ],
             "dropped": dropped,
+            "selected_skill_ids": [item["skill_id"] for item in selected],
             "context_budget": context_max_length,
         }
 
@@ -1090,9 +1124,11 @@ class SkillService:
             scope=scope,
             auto_only=auto_only,
         )
-        context_preview = cls.format_skills_as_context(skills, max_length=1200)
 
-        debug["results"] = [
+        context_budget = int(debug.get("context_budget") or 1200)
+        context_preview, injection_meta = cls.format_skills_as_context_with_meta(skills, max_length=context_budget)
+
+        results = [
             {
                 "skill_id": skill.skill_id,
                 "name": skill.name,
@@ -1104,8 +1140,51 @@ class SkillService:
             }
             for skill in skills
         ]
+
+        selected_skill_ids = [skill.skill_id for skill in skills]
+        dropped_by_skill: Dict[str, List[Dict[str, Any]]] = {}
+        for dropped_item in debug.get("dropped", []):
+            skill_id = str(dropped_item.get("skill_id", "")).strip()
+            if not skill_id:
+                continue
+            dropped_by_skill.setdefault(skill_id, []).append(dropped_item)
+
+        merged_candidates = debug.get("merged_candidates", [])
+        if merged_candidates:
+            skill_candidates = [
+                {
+                    **candidate,
+                    "selected": candidate.get("skill_id") in selected_skill_ids,
+                    "drop_reasons": dropped_by_skill.get(candidate.get("skill_id", ""), []),
+                }
+                for candidate in merged_candidates
+            ]
+        else:
+            skill_candidates = [
+                {
+                    "skill_id": item["skill_id"],
+                    "vector_score": item["vector_score"],
+                    "lexical_score": item["lexical_score"],
+                    "trigger_hit": item["trigger_hit"],
+                    "final_score": item["score"],
+                    "selected": True,
+                    "drop_reasons": [],
+                }
+                for item in results
+            ]
+
+        debug["results"] = results
         debug["count"] = len(skills)
         debug["context_preview"] = context_preview
+        debug["skill_candidates"] = skill_candidates
+        debug["selected_skill_ids"] = selected_skill_ids
+        debug["skill_injection_meta"] = {
+            **injection_meta,
+            "mode": debug.get("mode"),
+            "scope": debug.get("scope"),
+            "top_k": top_k,
+            "selected_count": len(selected_skill_ids),
+        }
         return debug
 
     @classmethod
@@ -1118,27 +1197,70 @@ class SkillService:
             ).scalar_one_or_none()
 
     @classmethod
-    def format_skills_as_context(cls, skills: List[AgentSkill], max_length: int = 2000) -> str:
-        """将技能列表格式化为注入上下文。"""
-
-        if not skills:
-            return ""
+    def format_skills_as_context_with_meta(
+        cls,
+        skills: List[AgentSkill],
+        max_length: int = 2000,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """将技能列表格式化为注入上下文，并返回预算使用元信息。"""
 
         configured_max_length = SystemConfigService.get_int("skill.context_max_length", max_length)
         final_limit = min(max_length, configured_max_length) if max_length > 0 else configured_max_length
+        if final_limit <= 0:
+            final_limit = configured_max_length if configured_max_length > 0 else 2000
+
+        if not skills:
+            return "", {
+                "budget_chars": final_limit,
+                "used_chars": 0,
+                "truncated": False,
+                "included_skill_ids": [],
+                "excluded_skill_ids": [],
+                "sections_used": 0,
+            }
 
         context_parts: List[str] = []
         total_length = 0
+        sections_used = 0
+        included_skill_ids: List[str] = []
+        excluded_skill_ids: List[str] = []
+        truncated = False
 
-        for skill in skills:
+        for index, skill in enumerate(skills):
             fragment = getattr(skill, "_lazy_context_fragment", None)
             if not fragment:
-                fragment = cls._build_skill_fragment(skill, query=skill.description or "", max_sections=1)
+                fragment, section_count = cls._build_skill_fragment_with_meta(
+                    skill,
+                    query=skill.description or "",
+                    max_sections=1,
+                )
+            else:
+                section_count = int(getattr(skill, "_lazy_section_count", 0) or 0)
+                if section_count <= 0:
+                    section_count = fragment.count("### ") or 1
 
             if total_length + len(fragment) > final_limit:
+                truncated = True
+                excluded_skill_ids.extend([item.skill_id for item in skills[index:]])
                 break
 
             context_parts.append(fragment)
             total_length += len(fragment)
+            sections_used += section_count
+            included_skill_ids.append(skill.skill_id)
 
-        return "\n".join(context_parts)
+        return "\n".join(context_parts), {
+            "budget_chars": final_limit,
+            "used_chars": total_length,
+            "truncated": truncated,
+            "included_skill_ids": included_skill_ids,
+            "excluded_skill_ids": excluded_skill_ids,
+            "sections_used": sections_used,
+        }
+
+    @classmethod
+    def format_skills_as_context(cls, skills: List[AgentSkill], max_length: int = 2000) -> str:
+        """将技能列表格式化为注入上下文。"""
+
+        context, _ = cls.format_skills_as_context_with_meta(skills, max_length=max_length)
+        return context

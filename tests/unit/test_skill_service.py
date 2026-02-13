@@ -205,6 +205,114 @@ def test_apply_policy_filters_resolves_conflicts_by_priority() -> None:
     assert dropped[0]["reason"] == "conflict_replaced"
 
 
+def test_format_skills_as_context_with_meta_respects_budget() -> None:
+    """上下文注入应返回预算信息并在超限时截断。"""
+
+    class _SkillContextItem:
+        def __init__(self, skill_id: str, fragment: str, section_count: int) -> None:
+            self.skill_id = skill_id
+            self.name = skill_id
+            self.description = ""
+            self._lazy_context_fragment = fragment
+            self._lazy_section_count = section_count
+
+    first = _SkillContextItem("skill-a", "### A\n" + ("a" * 24) + "\n", 1)
+    second = _SkillContextItem("skill-b", "### B\n" + ("b" * 30) + "\n", 1)
+
+    context, meta = SkillService.format_skills_as_context_with_meta(
+        [first, second],
+        max_length=len(first._lazy_context_fragment) + 4,
+    )
+
+    assert "skill-a" in meta["included_skill_ids"]
+    assert meta["excluded_skill_ids"] == ["skill-b"]
+    assert meta["truncated"] is True
+    assert meta["sections_used"] == 1
+    assert "### A" in context
+    assert "### B" not in context
+
+
+def test_search_skills_debug_exposes_candidates_and_injection_meta(monkeypatch) -> None:  # noqa: ANN001
+    """调试接口应返回候选明细、入选列表与注入元信息。"""
+
+    class _DebugSkill:
+        def __init__(self) -> None:
+            self.skill_id = "data-loan"
+            self.name = "贷款分析技能"
+            self.description = "按分行统计贷款余额"
+            self._retrieval_score = 0.91
+            self._vector_score = 0.88
+            self._lexical_score = 0.76
+            self._trigger_hit = 1.0
+            self._lazy_context_fragment = "### 贷款分析技能 · 概要\n按分行统计贷款余额。\n"
+            self._lazy_section_count = 1
+
+    debug_skill = _DebugSkill()
+
+    def _fake_search(  # noqa: ANN001
+        cls,
+        query: str,
+        top_k: int,
+        threshold,
+        scope: str,
+        auto_only: bool,
+    ):
+        return [debug_skill], {
+            "query": query,
+            "mode": "hybrid",
+            "scope": scope,
+            "threshold": 0.4,
+            "effective_threshold": 0.35,
+            "context_budget": 160,
+            "merged_candidates": [
+                {
+                    "skill_id": "data-loan",
+                    "vector_score": 0.88,
+                    "lexical_score": 0.76,
+                    "trigger_hit": 1.0,
+                    "final_score": 0.91,
+                    "priority": 10,
+                    "scope": "data",
+                    "is_enabled": True,
+                    "auto_enabled": True,
+                },
+                {
+                    "skill_id": "todo-skill",
+                    "vector_score": 0.21,
+                    "lexical_score": 0.15,
+                    "trigger_hit": 0.0,
+                    "final_score": 0.19,
+                    "priority": 200,
+                    "scope": "todo",
+                    "is_enabled": False,
+                    "auto_enabled": True,
+                },
+            ],
+            "dropped": [{"skill_id": "todo-skill", "reason": "disabled"}],
+        }
+
+    monkeypatch.setattr(SkillService, "_search_skills_internal", classmethod(_fake_search))
+
+    debug = SkillService.search_skills_debug(
+        query="按分行统计贷款余额",
+        top_k=2,
+        threshold=0.4,
+        scope="data",
+        auto_only=True,
+    )
+
+    assert debug["selected_skill_ids"] == ["data-loan"]
+    assert debug["skill_injection_meta"]["selected_count"] == 1
+    assert debug["skill_injection_meta"]["mode"] == "hybrid"
+    assert debug["skill_injection_meta"]["scope"] == "data"
+    assert debug["skill_injection_meta"]["used_chars"] > 0
+
+    candidates = {item["skill_id"]: item for item in debug["skill_candidates"]}
+    assert candidates["data-loan"]["selected"] is True
+    assert candidates["todo-skill"]["selected"] is False
+    assert candidates["todo-skill"]["drop_reasons"][0]["reason"] == "disabled"
+
+
 class _FakeSkill:
     """测试导入流程用的假 Skill ORM 对象。"""
 

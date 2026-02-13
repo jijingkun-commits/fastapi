@@ -82,6 +82,9 @@ app/ai/
 2. **检索相关技能**：通过 `SkillService` 进行 Hybrid 检索（向量 + 关键词）。
 3. **策略过滤与冲突裁决**：执行 `is_enabled/auto_enabled/scope/conflicts_with/priority`。
 4. **章节级懒加载**：按查询相关性选择技能章节，控制注入预算。
+5. **状态显式回写**：统一写入 `skill_candidates`、`selected_skill_ids`、`skill_context`、`skill_injection_meta`。
+
+> **降级策略**：当 embedding 模型未配置或调用失败时，不阻断主链路，自动回退到关键词召回。
 
 **配置参数（t_system_config）**：
 
@@ -92,6 +95,7 @@ app/ai/
 | `skill.top_k` | 3 | 最多返回技能数量 |
 | `skill.context_max_length` | 2400 | skill_context 最大字符预算 |
 | `skill.section_max_count` | 2 | 单技能最多注入章节数 |
+| `skill.hybrid.candidate_multiplier` | 3 | 候选放大倍数（用于混合召回融合） |
 | `skill.hybrid.vector_weight` | 0.65 | Hybrid 向量分权重 |
 | `skill.hybrid.lexical_weight` | 0.25 | Hybrid 关键词分权重 |
 | `skill.hybrid.trigger_weight` | 0.10 | trigger phrase 加权 |
@@ -137,7 +141,10 @@ class MultiAgentState(BaseAgentState, total=False):
     thinking_content: Optional[str]           # 思考内容
     detected_intent: Optional[str]            # 识别到的意图类型
     intent_route: Optional[str]               # 意图路由目标
+    skill_candidates: Optional[List[Dict]]    # 候选技能（含向量分/关键词分/融合分/裁决结果）
+    selected_skill_ids: Optional[List[str]]   # 最终入选 skill_id 列表
     skill_context: Optional[str]              # 检索到的相关技能上下文
+    skill_injection_meta: Optional[Dict]      # 注入预算与命中章节统计
     system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
 ```
 
@@ -153,7 +160,7 @@ class MultiAgentState(BaseAgentState, total=False):
 | 类型 | 字段 | 说明 |
 |------|------|------|
 | **持久化状态** | `messages`, `user_id`, `thread_id`, `model_id`, `enable_thinking` | 跨轮次保留，用于上下文连续性 |
-| **瞬态状态** | `pending_handoff`, `pending_operation`, `evaluation`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_context` | 仅在单轮有效，每轮结束时清理 |
+| **瞬态状态** | `pending_handoff`, `pending_operation`, `evaluation`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_candidates`, `selected_skill_ids`, `skill_context`, `skill_injection_meta` | 仅在单轮有效，每轮结束时清理 |
 
 #### 清理机制
 
@@ -181,7 +188,10 @@ def _postprocess(state: MultiAgentState) -> dict:
         "intent_route": None,
         # 预处理结果
         "attachment_analysis": None,
+        "skill_candidates": [],
+        "selected_skill_ids": [],
         "skill_context": None,
+        "skill_injection_meta": None,
     }
 ```
 

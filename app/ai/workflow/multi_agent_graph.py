@@ -558,19 +558,44 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     
     # ========== 4. Skills RAG 检索 ==========
     # 根据用户消息检索相关技能，为后续 Agent 提供专业知识上下文
+    updates["skill_candidates"] = []
+    updates["selected_skill_ids"] = []
+    updates["skill_context"] = None
+    updates["skill_injection_meta"] = None
+
     try:
         from app.services.skill_service import SkillService
-        from app.services.llm_config_service import LLMConfigService
-        
-        # 只有在 embedding 模型配置好时才执行检索
-        if LLMConfigService.is_type_configured("embedding") and content:
-            skills = SkillService.search_skills(content, top_k=2)
-            if skills:
-                skill_context = SkillService.format_skills_as_context(skills)
-                updates["skill_context"] = skill_context
-                skill_names = [s.skill_id for s in skills]
-                logger.info("预处理节点: 检索到 %d 个相关技能: %s", len(skills), skill_names)
-                emit_status(writer, message=f"已加载 {len(skills)} 个相关技能: {skill_names}", node="preprocess")
+
+        if content:
+            debug_payload = SkillService.search_skills_debug(
+                content,
+                top_k=2,
+                auto_only=True,
+            )
+            skill_candidates = debug_payload.get("skill_candidates", [])
+            selected_skill_ids = debug_payload.get("selected_skill_ids", [])
+            skill_context = debug_payload.get("context_preview", "")
+            skill_injection_meta = debug_payload.get("skill_injection_meta", {})
+
+            updates["skill_candidates"] = skill_candidates
+            updates["selected_skill_ids"] = selected_skill_ids
+            updates["skill_context"] = skill_context or None
+            updates["skill_injection_meta"] = skill_injection_meta
+
+            if selected_skill_ids:
+                logger.info(
+                    "预处理节点: 检索到 %d 个相关技能: %s", len(selected_skill_ids), selected_skill_ids
+                )
+                emit_status(
+                    writer,
+                    message=f"已加载 {len(selected_skill_ids)} 个相关技能: {selected_skill_ids}",
+                    node="preprocess",
+                )
+            else:
+                logger.info(
+                    "预处理节点: 技能检索完成但未命中，候选=%d",
+                    len(skill_candidates),
+                )
     except Exception as e:
         logger.warning("预处理节点: 技能检索失败 - %s", e)
     
@@ -1127,7 +1152,10 @@ async def create_multi_agent_graph(
             
             # === 预处理结果（下一轮会重新生成）===
             "attachment_analysis": None,
+            "skill_candidates": [],
+            "selected_skill_ids": [],
             "skill_context": None,
+            "skill_injection_meta": None,
         }
 
     # 6. 定义评估节点（判断专家工作是否完成）

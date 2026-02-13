@@ -6,6 +6,7 @@ It mocks the embedding generation to avoid external API calls.
 """
 import pytest
 from unittest.mock import patch
+from sqlalchemy import inspect
 from app.services.skill_service import SkillService
 from app.models.agent_skill import AgentSkill
 from app.db.session import get_db
@@ -35,6 +36,19 @@ def mock_embedding():
 
 def test_skill_retrieval_smoke(db_session, mock_embedding):
     """Smoke test: Verify skill retrieval infrastructure works."""
+    required_columns = {
+        "is_enabled",
+        "auto_enabled",
+        "priority",
+        "scope",
+        "trigger_phrases",
+        "conflicts_with",
+    }
+    inspector = inspect(db_session.bind)
+    existing_columns = {column["name"] for column in inspector.get_columns("t_agent_skills")}
+    missing_columns = sorted(required_columns - existing_columns)
+    if missing_columns:
+        pytest.skip(f"t_agent_skills 缺少列: {missing_columns}")
     # 1. Clean up existing test skills (optional)
     db_session.query(AgentSkill).filter(AgentSkill.skill_id == "smoke-test-skill").delete()
     db_session.commit()
@@ -66,7 +80,18 @@ def test_skill_retrieval_smoke(db_session, mock_embedding):
         found_skill = results[0]
         assert found_skill.skill_id == "smoke-test-skill", "Should find the smoke test skill"
         assert found_skill.name == "Smoke Test Skill"
-        
+
+        debug = SkillService.search_skills_debug(
+            "test query",
+            top_k=2,
+            threshold=0.0,
+            auto_only=False,
+        )
+        assert "skill_candidates" in debug
+        assert "selected_skill_ids" in debug
+        assert "skill_injection_meta" in debug
+        assert any(item.get("skill_id") == "smoke-test-skill" for item in debug["skill_candidates"])
+
         print(f"\n✅ Skill retrieval smoke test passed. Found skill: {found_skill.name}")
         
     finally:
