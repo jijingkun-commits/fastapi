@@ -16,7 +16,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 | 需要把一批卡片推进到 Doing/Review/Gate/Done | `/vktodo` ✅ |
 | 仅查看卡片列表 | 直接用 `list_issues` |
 
-> 多 worktree 场景：`/vktodo` 会在执行前自动做 `/vksync` 等价校验。
+> 多 worktree 场景：建议先执行 `/vksync`；`/vktodo` 默认不再因未同步 worktree 强制拦截。
 
 ---
 
@@ -62,10 +62,10 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 
 ## 执行步骤
 
-### Step 0: G0 基线前置校验（自动）
+### Step 0: G0 基线前置校验（可选）
 
-1. 多 worktree 场景自动执行 `/vksync` 等价校验。
-2. 若校验未通过，直接失败，不允许继续建卡/推进。
+1. 多 worktree 场景可先执行 `/vksync` 进行基线一致性检查。
+2. 若存在 `NOT_READY`，输出告警并继续落卡；由协作者自行承担后续合并风险。
 
 ### Step 1: 解析来源目录、项目与基线
 

@@ -57,7 +57,7 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 ### Step 5: 通过判定
 
-全部 worktree 为 READY 后，才允许进入 `/vktodo`。
+若全部 worktree 为 READY，建议直接进入 `/vktodo`；若存在 NOT_READY，可带风险继续。
 
 ---
 
