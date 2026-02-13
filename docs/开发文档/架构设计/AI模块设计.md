@@ -75,33 +75,42 @@ app/ai/
 
 ## 🔄 MultiAgentGraph 架构
 
-### Skills RAG 与系统上下文增强 (2026-01)
+### Skills RAG 与系统上下文增强 (2026-02)
 
 在进入 Supervisor 之前，预处理节点会：
-1. **注入系统上下文**：为所有 Agent 提供当前时间等系统信息
-2. **检索相关技能**：根据用户消息动态检索业务技能
+1. **注入系统上下文**：为所有 Agent 提供当前时间等系统信息。
+2. **检索相关技能**：通过 `SkillService` 进行 Hybrid 检索（向量 + 关键词）。
+3. **策略过滤与冲突裁决**：执行 `is_enabled/auto_enabled/scope/conflicts_with/priority`。
+4. **章节级懒加载**：按查询相关性选择技能章节，控制注入预算。
 
-**配置参数**：
+**配置参数（t_system_config）**：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `skill_similarity_threshold` | 0.55 | 相似度阈值，低于此值的技能不会被加载 |
-| `top_k` | 2 | 最多返回的技能数量 |
+| `skill_similarity_threshold` | 0.55 | 向量基础阈值 |
+| `skill.retrieval_mode` | hybrid | 检索模式：`vector/hybrid` |
+| `skill.top_k` | 3 | 最多返回技能数量 |
+| `skill.context_max_length` | 2400 | skill_context 最大字符预算 |
+| `skill.section_max_count` | 2 | 单技能最多注入章节数 |
+| `skill.hybrid.vector_weight` | 0.65 | Hybrid 向量分权重 |
+| `skill.hybrid.lexical_weight` | 0.25 | Hybrid 关键词分权重 |
+| `skill.hybrid.trigger_weight` | 0.10 | trigger phrase 加权 |
 
-> **调试日志**: 技能检索会输出候选技能及相似度分数，格式：`技能检索: 阈值=0.55, 候选=[skill(0.7), ...], 匹配=1个`
+> **调试日志**：检索日志会输出 mode/scope/候选分/淘汰原因，便于排查误召回与漏召回。
 
 ```mermaid
 graph LR
-    UserMsg -->Preprocess[预处理节点]
-    
+    UserMsg --> Preprocess[预处理节点]
+
     subgraph Preprocess
         direction TB
         Guard[护栏验证] --> Time[注入系统上下文]
-        Time --> Embed[生成向量]
-        Embed --> Search[PostgreSQL 检索]
-        Search --> Context[注入 skill_context]
+        Time --> Hybrid[Hybrid 召回]
+        Hybrid --> Policy[策略过滤/冲突裁决]
+        Policy --> Lazy[章节懒加载]
+        Lazy --> Context[注入 skill_context]
     end
-    
+
     Context --> Supervisor
 ```
 

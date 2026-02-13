@@ -46,6 +46,17 @@ CONFIGS = [
     
     # AI 模型参数
     ("ai.model_temperature", "0.7", "number", "ai", "模型温度参数（0-2）"),
+
+    # Skill 检索配置
+    ("skill_similarity_threshold", "0.55", "number", "ai", "技能检索向量相似度阈值"),
+    ("skill.retrieval_mode", "hybrid", "string", "ai", "技能检索模式：vector/hybrid"),
+    ("skill.top_k", "3", "number", "ai", "技能检索返回数量"),
+    ("skill.context_max_length", "2400", "number", "ai", "技能上下文最大字符长度"),
+    ("skill.section_max_count", "2", "number", "ai", "单技能最多注入章节数"),
+    ("skill.hybrid.vector_weight", "0.65", "number", "ai", "Hybrid 检索向量分权重"),
+    ("skill.hybrid.lexical_weight", "0.25", "number", "ai", "Hybrid 检索关键词分权重"),
+    ("skill.hybrid.trigger_weight", "0.10", "number", "ai", "Hybrid 检索触发短语加权"),
+    ("skill.hybrid.candidate_multiplier", "3", "number", "ai", "Hybrid 检索候选扩容倍率"),
     
     # 问数助手配置
     ("askdata.schema_whitelist", "fdmdata,sdmdata,public", "string", "askdata", "允许查询的 Schema 白名单（逗号分隔）"),

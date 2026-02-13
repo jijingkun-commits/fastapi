@@ -338,11 +338,20 @@ CREATE TABLE IF NOT EXISTS t_agent_skills (
     content TEXT NOT NULL,
     file_hash VARCHAR(64),
     embedding VECTOR(2048),
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    priority INTEGER NOT NULL DEFAULT 100,
+    scope VARCHAR(32) NOT NULL DEFAULT 'global',
+    trigger_phrases JSONB NOT NULL DEFAULT '[]'::jsonb,
+    conflicts_with JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_skills_skill_id ON t_agent_skills(skill_id);
+CREATE INDEX IF NOT EXISTS idx_agent_skills_embedding_ivfflat ON t_agent_skills USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_agent_skills_fts ON t_agent_skills USING gin (to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(content, '')));
+CREATE INDEX IF NOT EXISTS idx_agent_skills_trigger_phrases_gin ON t_agent_skills USING gin (trigger_phrases jsonb_path_ops);
 
 COMMENT ON TABLE t_agent_skills IS 'AI技能表';
 COMMENT ON COLUMN t_agent_skills.skill_id IS '技能唯一标识';
@@ -351,6 +360,12 @@ COMMENT ON COLUMN t_agent_skills.description IS '技能描述（用于向量匹�
 COMMENT ON COLUMN t_agent_skills.content IS 'SKILL.md完整内容';
 COMMENT ON COLUMN t_agent_skills.file_hash IS '文件MD5（增量同步用）';
 COMMENT ON COLUMN t_agent_skills.embedding IS '语义向量（2048维）';
+COMMENT ON COLUMN t_agent_skills.is_enabled IS '是否启用';
+COMMENT ON COLUMN t_agent_skills.auto_enabled IS '是否允许自动触发';
+COMMENT ON COLUMN t_agent_skills.priority IS '冲突裁决优先级（越小越优先）';
+COMMENT ON COLUMN t_agent_skills.scope IS '技能作用域：global/data/todo/admin';
+COMMENT ON COLUMN t_agent_skills.trigger_phrases IS '触发短语列表';
+COMMENT ON COLUMN t_agent_skills.conflicts_with IS '冲突技能ID列表';
 
 -- 对话反馈表
 CREATE TABLE IF NOT EXISTS t_chat_feedback (
