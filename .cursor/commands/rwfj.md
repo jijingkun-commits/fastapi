@@ -49,7 +49,7 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 2. `card_seed` 来源：`implementation_plan.md` / `rwfj 推导`
 3. 若为推导，需写“推导依据 + 风险提醒”
 
-### 1.1 G0 协议冻结（必须先执行）
+### 1.1 G0 协议冻结（在 `/rwfj` 阶段生成并生效）
 
 > 目的：在并行前冻结跨端契约，避免 WS 并发开发时产生字段语义漂移。
 
@@ -65,6 +65,8 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 4. 必须在 `parallel_plan.md` 写入独立章节：`## 0. G0 协议冻结`。
 5. 固定生成 `WS-00_G0_协议冻结.md`，并声明并行 WS 的 `hard_depends_on: [WS-00]`。
 6. 冻结完成后，消费方 WS 只能只读消费，不得自行扩展私有字段假设。
+7. `/rwfj` 结束即视为 `WS-00`（M0）完成，不再要求额外执行 `/imp-ws WS-00`。
+8. 多 worktree 生效条件：含 `WS-00` 产物的提交已进入基线分支，后续 worktree 必须基于该基线创建（或先 rebase 到该基线）。
 
 ### 1.2 前置可并行判定清单（必须先过）
 
@@ -117,7 +119,7 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 3. WS 总数、Gate 总数
 4. 默认列流转：`Backlog -> Doing -> Review -> Gate -> Done`
 5. 卡片 ID 规则：`<task_key>::<WS-ID>`
-6. 卡片标题规则：`[<task_key>] <WS-ID> <标题>`
+6. 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
 
 每个 `workstreams/WS-*.md` 文末必须有 `card_export`（YAML）：
 
@@ -146,14 +148,15 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 ## 3. 拆解步骤
 
 1. 读取或补齐 `task_key/card_seed`。
-2. 先产出 `WS-00`（G0 协议冻结卡）。
-3. 抽取任务单元：从主计划与 seed 抽取可交付能力点。
-4. 构建冲突图：文件重叠、状态单写入权冲突、强依赖阻断。
-5. 自动拆分 `WS-01 ... WS-N`：并行层仅保留可独立开始与可独立交付项。
-6. 声明 owner 与互斥：白名单、禁区、共享资源 owner 与消费方。
-7. 定义依赖：区分 `hard_depends_on` 与 `soft_depends_on`。
-8. 定义验收口：每个 WS 绑定独立 DoD 与最小验证命令。
-9. 串行回退：存在不可消解冲突时，停止并行拆分并写回退路线。
+2. 先产出 `WS-00`（G0 协议冻结卡）及机读契约（如 `contracts/sse_events_v1.json`）。
+3. 运行最小校验（如 `docs_guard --strict`）并将 G0 标记为 M0 完成。
+4. 抽取任务单元：从主计划与 seed 抽取可交付能力点。
+5. 构建冲突图：文件重叠、状态单写入权冲突、强依赖阻断。
+6. 自动拆分 `WS-01 ... WS-N`：并行层仅保留可独立开始与可独立交付项。
+7. 声明 owner 与互斥：白名单、禁区、共享资源 owner 与消费方。
+8. 定义依赖：区分 `hard_depends_on` 与 `soft_depends_on`。
+9. 定义验收口：每个 WS 绑定独立 DoD 与最小验证命令。
+10. 串行回退：存在不可消解冲突时，停止并行拆分并写回退路线。
 
 ### 并行拆解禁忌（必须遵守）
 
@@ -178,11 +181,13 @@ description: 并行任务分解：将计划拆成互不干涉、可在多 worktr
 
 ## 6. 与其他命令关系
 
-推荐链路：`/plan parallel`（或 `/vkplan`）`-> /rwfj -> /vk -> /imp-ws -> /review -> /test`
+推荐最短链路：`/plan -> /vkplan（= /rwfj） -> /vktodo（或 /vkkb） -> /imp-ws -> /review -> /test`
 
-- `/plan` / `/vkplan`：提供需求、架构与 seed 真理来源
-- `/rwfj`：负责并行编排（拆包/边界/依赖/合并）
-- `/vk`：负责看板化落地（建卡 payload + 导入提示词）
+- `/plan`：提供需求、架构与 seed 真理来源
+- `/vkplan`：用户入口，语义等价 `/rwfj`
+- `/rwfj`：底层并行编排实现（拆包/边界/依赖/合并）
+- `/vk`：可选预览命令（查看建卡 payload + 导入提示词）
+- `/vktodo` / `/vkkb`：默认看板落地命令
 - `/imp-ws`：负责单 WS 实现
 
 ## 7. 简化用法（默认即可）

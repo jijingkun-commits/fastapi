@@ -77,7 +77,7 @@
 - Gate 总数:
 - 默认列流转：`Backlog -> Doing -> Review -> Gate -> Done`
 - 卡片 ID 规则：`<task_key>::<WS-ID>`
-- 卡片标题规则：`[<task_key>] <WS-ID> <标题>`
+- 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
 
 ## 10. Gate 执行状态
 

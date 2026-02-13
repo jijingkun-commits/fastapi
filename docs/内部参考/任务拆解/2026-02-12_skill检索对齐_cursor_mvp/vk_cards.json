@@ -18,7 +18,7 @@
   "cards": [
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-00",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-00 G0 协议冻结",
+      "title": "WS-00 G0 协议冻结 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Gate",
       "priority": "P0",
       "labels": [
@@ -44,7 +44,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-01",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-01 技能元数据与迁移",
+      "title": "WS-01 技能元数据与迁移 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Backlog",
       "priority": "P1",
       "labels": [
@@ -71,7 +71,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-02",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-02 SKILL导入与frontmatter治理",
+      "title": "WS-02 SKILL导入与frontmatter治理 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Backlog",
       "priority": "P1",
       "labels": [
@@ -99,7 +99,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-03",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-03 混合检索与注入策略",
+      "title": "WS-03 混合检索与注入策略 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Backlog",
       "priority": "P1",
       "labels": [
@@ -128,7 +128,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-04",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-04 可观测与离线评测",
+      "title": "WS-04 可观测与离线评测 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Backlog",
       "priority": "P1",
       "labels": [
@@ -161,7 +161,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-G1",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-G1 集成回归门禁",
+      "title": "WS-G1 集成回归门禁 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Gate",
       "priority": "P0",
       "labels": [
@@ -194,7 +194,7 @@
     },
     {
       "id": "PP-20260213-SKILL-RETRIEVAL-MVP::WS-G2",
-      "title": "[PP-20260213-SKILL-RETRIEVAL-MVP] WS-G2 文档终稿门禁",
+      "title": "WS-G2 文档终稿门禁 [PP-20260213-SKILL-RETRIEVAL-MVP]",
       "column": "Gate",
       "priority": "P0",
       "labels": [

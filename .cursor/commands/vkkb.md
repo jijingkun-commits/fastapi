@@ -1,14 +1,18 @@
 ---
-description: VK 看板命令别名（并行规划推荐先 /vkplan，再 /rwfj -> /vk，落地失败再 /vktodo）
+description: VK 看板一体命令（前置完成 /vkplan 后自动补导出并落卡）
 ---
 
-# VK 看板命令别名
+# VK 看板一体命令
 
-`/vkkb` 推荐三阶段执行：
+`/vkkb` 默认一条命令完成“导出 + 落卡”（含自动基线校验）：
 
-1. （可选）先走 `/vkplan`：在规划阶段直接产出 `task_key/card_seed`
-2. 再走 `/vk`：从 `/rwfj` 产物生成“建卡内容 + 导入提示词”
-3. 如导入失败，再走 `/vktodo`：MCP/本地后端兜底落卡
+1. 读取 `<任务拆解目录>/vk_cards.json`
+2. 若缺失，先自动执行 `/vk <任务拆解目录> strict` 生成导出产物
+3. 自动执行 `/vktodo <任务拆解目录> create` 批量落卡
+4. 如指定 `move <状态>`，继续推进状态
+5. 若命中 G0 自动完成条件，自动将 `WS-00` 推进到 `Done`
+
+推荐最短链路：`/plan -> /vkplan -> /vkkb`
 
 请按以下文件中的规范执行（按优先级）：
 
@@ -22,5 +26,5 @@ description: VK 看板命令别名（并行规划推荐先 /vkplan，再 /rwfj -
 ```
 
 ```text
-/vkkb auto
+/vkkb 2026-02-12_文档治理 move Doing
 ```

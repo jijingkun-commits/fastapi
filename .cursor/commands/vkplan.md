@@ -1,22 +1,21 @@
 ---
-description: 并行规划快捷命令：等价于 /plan parallel，产出可供 /rwfj 直读的 seed
+description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
 ---
 
 > 参考规则: @dual-database
 
-# VKPlan 工作流 (Parallel Planning Shortcut)
+# VKPlan 工作流 (Parallel Split Shortcut)
 
-用于在规划阶段直接产出“可拆解、可落卡”的最小结构化种子，避免 `/rwfj` 只能基于纯文字推断。
+用于在 `/plan` 完成后执行并行拆解，产出可直接供 `/vktodo` 落卡的结果。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 定位
 
-`/vkplan` = `/plan parallel`
+`/vkplan` = `/rwfj`（用户入口别名）
 
-- 保留完整规划产物：`requirements.md` + `implementation_plan.md`
-- 额外强制：`task_key` + 最小 `card_seed`
-- 目标：给 `/rwfj` 提供 machine-readable 输入
+- 前置要求：必须先完成 `/plan`
+- 核心目标：完成并行拆解与 G0 冻结，生成 `vk_cards.json` 供 `/vktodo` 直接使用
 
 ---
 
@@ -24,55 +23,41 @@ description: 并行规划快捷命令：等价于 /plan parallel，产出可供 
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 需要多人/多 AI/多 worktree 并行 | `/vkplan` ✅ |
-| 只需技术方案，不拆卡 | `/plan` |
-| 已有拆解文档，直接落卡 | `/vk` |
+| 已完成 `/plan`，准备并行拆解 | `/vkplan` ✅ |
+| 尚未完成需求与技术方案 | 先 `/plan` |
+| 已有完整拆解产物，仅需重落卡 | `/vktodo` |
+
+---
+
+## 执行阶段
+
+1. 读取 `/plan` 产物（`requirements.md`、`implementation_plan.md`）。
+2. 生成并行拆解（`parallel_plan.md` + `workstreams/WS-*.md`）。
+3. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
+4. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`。
+
+若任一阶段失败，立即停止并给出最小修复动作。
 
 ---
 
 ## 必做产出
 
-1. `docs/内部参考/迭代需求/requirements.md`
-2. `docs/内部参考/迭代需求/implementation_plan.md`
-3. 在 `implementation_plan.md` 中新增并行种子区块：
-   - `task_key`
-   - `card_seed[]`（每项至少包含 `cap_id/title/hard_depends_on/soft_depends_on/file_scope/owner_fields/check_cmd/dod`）
-
-### 最小示例（YAML）
-
-```yaml
-task_key: PP-20260213-TODO-REFINE
-card_seed:
-  - cap_id: CAP-01
-    title: 后端意图路由收敛
-    hard_depends_on: [WS-00]
-    soft_depends_on: []
-    file_scope: [app/ai/workflow/**, app/ai/state.py]
-    owner_fields: [turn_act, clarify_fsm_state]
-    check_cmd: [venv/bin/python -m pytest -q tests/unit -k todo_graph]
-    dod:
-      - 路由可收敛且无重复澄清循环
-  - cap_id: CAP-02
-    title: SSE 协议 owner 对齐
-    hard_depends_on: [WS-00]
-    soft_depends_on: [CAP-01]
-    file_scope: [app/api/**, app/services/**]
-    owner_fields: [sse.done, sse.result, sse.interrupt]
-    check_cmd: [venv/bin/python -m pytest -q tests/api -k chat]
-    dod:
-      - done/result/interrupt 与冻结契约一致
-```
+1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
+2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
+3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
+4. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_import_prompt.txt`
 
 ---
 
 ## 下游链路
 
-推荐链路：`/vkplan -> /rwfj -> /vk -> /imp-ws`
+推荐极简链路：`/plan -> /vkplan -> /vktodo（或 /vkkb） -> /imp-ws`
 
-1. `/rwfj` 基于 `task_key/card_seed` 生成 `WS-00 + WS-*.md`。
-2. `/vk` 读取 `card_export` 落看板，卡片标题自动带 `task_key` 前缀。
-3. `/imp-ws` 按单 WS 白名单执行。
+- `/vktodo`：直接落卡/推进（会在执行前自动做 G0 基线校验）
+- `/imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
+
+手工分步链路（调试用）：`/plan -> /rwfj -> /vksync -> /vk -> /vktodo`
 
 ---
-*使用 `/vkplan` 触发。用于“规划即并行”。*
+*使用 `/vkplan` 触发。用于“完成拆解后直接进入 `/vktodo`”。*
 ---

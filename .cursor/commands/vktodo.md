@@ -16,6 +16,8 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 | 需要把一批卡片推进到 Doing/Review/Gate/Done | `/vktodo` ✅ |
 | 仅查看卡片列表 | 直接用 `list_issues` |
 
+> 多 worktree 场景：`/vktodo` 会在执行前自动做 `/vksync` 等价校验。
+
 ---
 
 ## 输入约定（支持路径直传）
@@ -50,18 +52,25 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
    - 状态：若未传 `status`，使用卡片内 `column`
 3. `action=move` 时，若未传 `move_filter`，从 `vk_cards.json.task_key` 推导：
    - `move_filter=prefix:<task_key>`
-4. 若 `vk_cards.json` 缺失或结构非法，直接失败并提示先执行 `/vk <任务拆解目录>`。
+4. 若 `vk_cards.json` 缺失：先自动执行 `/vk <任务拆解目录> strict` 生成，再继续当前 `/vktodo`。
+5. 若自动生成后仍缺失或结构非法：再失败并提示人工修复拆解产物。
+6. 若检测到 `WS-00` 产物齐全（`WS-00_G0_协议冻结.md` + `contracts/sse_events_v1.json` + `parallel_plan.md` 的 G0 章节），建卡后自动将 `WS-00` 推进到 `Done`。
 
-> 推荐链路：`/vk <任务拆解目录> -> /vktodo <任务拆解目录> [action] [status]`
+> 推荐最短链路：`/plan -> /vkplan -> /vktodo <任务拆解目录>`（`/vk` 改为可选排障命令）
 
 ---
 
 ## 执行步骤
 
+### Step 0: G0 基线前置校验（自动）
+
+1. 多 worktree 场景自动执行 `/vksync` 等价校验。
+2. 若校验未通过，直接失败，不允许继续建卡/推进。
+
 ### Step 1: 解析来源目录、项目与基线
 
 1. 若传入 `task_split_dir`（或位置参数），先按路径规则解析并校验目录合法性。
-2. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`。
+2. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`；缺失则先执行 `/vk <任务拆解目录> strict` 自动补齐后再读取。
 3. 调用 `mcp__vibe_kanban__list_organizations` + `mcp__vibe_kanban__list_projects`，将 `project` 解析为唯一 `project_id`（若 workspace 已绑定项目可省略）。
 4. 调用 `mcp__vibe_kanban__list_issues` 获取变更前统计（按状态聚合）。
 
@@ -70,6 +79,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 1. `action=create`：
    - 若传了 `cards`，按 `cards` 生成目标清单。
    - 若没传 `cards`，按 `vk_cards.json.cards[*]` 生成目标清单。
+   - 若命中 G0 自动完成条件，额外执行一次 `WS-00` 状态推进到 `Done`。
 2. `action=move`：
    - 若传了 `move_filter`，按 `move_filter` 筛选。
    - 若没传 `move_filter` 且有 `vk_cards.json.task_key`，自动使用 `prefix:<task_key>`。

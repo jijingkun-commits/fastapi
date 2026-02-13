@@ -15,7 +15,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 | 场景 | 推荐命令 |
 |------|----------|
 | 只需要需求与技术方案（不拆卡） | `/plan` ✅ |
-| 需要后续并行拆解与看板落卡 | `/plan parallel` 或 `/vkplan` ✅ |
+| 需要后续并行拆解与看板落卡 | `/plan`（建议 `parallel`）后接 `/vkplan` ✅ |
 | 只想快速澄清理解 | `/clarify` |
 | 一站式从需求到交付 | `/feature` |
 
@@ -35,11 +35,12 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 ### 2) parallel 模式（并行规划）
 
-`/plan parallel` 或 `/vkplan`
+`/plan parallel`
 
 - 产出：`requirements.md` + `implementation_plan.md` + 最小 `card_seed`
 - 要求给出 `task_key`（后续卡片前缀）
 - 适用于多人/多 AI/多 worktree 并行
+- 并行拆解与落卡前准备由后续 `/vkplan`（= `/rwfj`）承接
 
 ---
 
@@ -107,7 +108,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 ### 2.3 并行拆解种子（仅 parallel 模式必填）
 
-仅当命令为 `/plan parallel` 或 `/vkplan` 时，`implementation_plan.md` 必须追加“可拆解种子信息”。
+仅当命令为 `/plan parallel` 时，`implementation_plan.md` 必须追加“可拆解种子信息”。
 
 最小字段：
 
@@ -134,13 +135,13 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 1. `/plan` 负责“需求与架构正确性”。
 2. `/rwfj` 负责“并行拆包与可执行边界”。
-3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/rwfj -> /vk -> /imp-ws`。
+3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo（或 /vkkb） -> /imp-ws`。
 
 ## 4. 衔接下游
 
 规划完成后：
-- 并行场景：执行 `/rwfj` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
-- 看板场景：执行 `/vk` 基于拆解结果生成看板卡片与导入提示词
+- 并行场景：执行 `/vkplan`（等价 `/rwfj`）进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
+- 看板场景：执行 `/vktodo`（或 `/vkkb`）直接落卡；其前置会自动完成 G0 基线校验
 - 单任务实现：执行 `/imp`
 - 测试设计：执行 `/test` 基于模块需求文档生成测试用例
 

@@ -97,8 +97,7 @@ bash scripts/vk_dev.sh up
 为避免“拆了解但不能并行执行”，建议命令链路固定为：
 
 ```text
-/clarify -> /vkplan -> /rwfj -> /vk -> /vktodo(可选)
-        -> /imp-ws(WS-00)
+/clarify -> /plan -> /vkplan(= /rwfj) -> /vkkb(或 /vktodo)
         -> /imp-ws(WS-01...WS-N 并行)
         -> /imp-ws(WS-G1) -> /imp-ws(WS-G2)
         -> /review -> /test
@@ -118,8 +117,10 @@ bash scripts/vk_dev.sh up
 
 关键要求：
 
-1. `/vkplan` 产出 `task_key/card_seed`，避免 `/rwfj` 仅基于纯文字推断。
-2. `/rwfj` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
-3. `/vk` 使用 strict 模式读取拆解结果，卡片唯一键必须为 `<task_key>::<WS-ID>`。
-4. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
-5. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
+1. 先执行 `/plan`，产出需求与技术方案（含 `task_key/card_seed`）。
+2. `/vkplan` 语义等价 `/rwfj`，固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
+3. `WS-00` 在 `/vkplan`（`/rwfj`）阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
+4. `/vkkb` 或 `/vktodo` 负责默认落卡；其前置会自动执行 G0 基线校验，`/vk` 降级为可选导出审阅命令。
+5. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
+6. 卡片唯一键必须为 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
+7. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。

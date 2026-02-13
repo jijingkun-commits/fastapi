@@ -12,9 +12,11 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 已完成 `/rwfj`，需要生成看板导入内容 | `/vk` ✅ |
-| 需要自动实际建卡（MCP/后端） | `/vktodo` |
-| 仅需要别名入口 | `/vkkb` |
+| 已完成 `/rwfj`，需要审阅看板导出内容 | `/vk` ✅ |
+| 需要直接落卡（默认路径） | `/vktodo` |
+| 需要一体化导出+落卡 | `/vkkb` |
+
+> 默认并行链路：`/plan -> /vkplan -> /vktodo`（或 `/vkkb`）；无需强制单独执行 `/vk`。
 
 ---
 
@@ -102,7 +104,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 输出字段至少包含：
 
 - `id`（必须为 `<task_key>::<WS-ID>`）
-- `title`（必须为 `[<task_key>] <WS-ID> <标题>`）
+- `title`（必须为 `<WS-ID> <标题> [<task_key>]`）
 - `column`（默认 `Backlog`，`gate/foundation` 类型默认 `Gate`）
 - `priority`
 - `labels`（至少包含 `task_key` 与拆解目录 ID）
@@ -128,7 +130,7 @@ description: VK 看板生成：基于 /rwfj 产物生成建卡内容与导入提
 
 1. 明确失败点（目录确认失败 / 缺 `task_key` / 缺 `card_export` / 导入失败）。
 2. 提供“最小可执行输入”（例如补 `task_split_dir` 或补齐 `card_export`）。
-3. 引导使用 `/vktodo` 进行落卡兜底。
+3. 引导使用 `/vktodo` 或 `/vkkb` 进行落卡兜底。
 
 ---
 
