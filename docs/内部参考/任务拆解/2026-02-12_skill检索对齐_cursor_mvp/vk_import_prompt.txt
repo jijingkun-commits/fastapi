@@ -1,0 +1,16 @@
+请在 Vibe Kanban 中按以下规则导入并建立依赖：
+1) 先创建全部卡片，再按 depends_on 建立依赖关系。
+2) 同 lane 且无依赖冲突的卡片标记为可并行。
+3) Gate 卡片（WS-G1/WS-G2）保持串行，不允许并行执行。
+4) 若 file_scope 冲突，阻止并行并提示回退串行。
+5) 默认列：parallel -> Backlog，gate -> Gate。
+
+来源目录：docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp
+卡片总数：6
+卡片清单：
+- WS-01 | 技能元数据与迁移 | depends_on=[] | column=Backlog
+- WS-02 | SKILL导入与frontmatter治理 | depends_on=WS-01 | column=Backlog
+- WS-03 | 混合检索与注入策略 | depends_on=WS-01,WS-02 | column=Backlog
+- WS-04 | 可观测与离线评测 | depends_on=WS-03 | column=Backlog
+- WS-G1 | 集成回归门禁 | depends_on=WS-01,WS-02,WS-03,WS-04 | column=Gate
+- WS-G2 | 文档终稿门禁 | depends_on=WS-G1 | column=Gate

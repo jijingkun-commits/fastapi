@@ -1,0 +1,190 @@
+{
+  "source_task_split_dir": "2026-02-12_skill检索对齐_cursor_mvp",
+  "resolved_path": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp",
+  "parsed_files": {
+    "parallel_plan": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-01_技能元数据与迁移.md",
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-02_SKILL导入与frontmatter治理.md",
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-03_混合检索与注入策略.md",
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-04_可观测与离线评测.md",
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md",
+      "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G2_文档终稿门禁.md"
+    ]
+  },
+  "cards": [
+    {
+      "id": "WS-01",
+      "title": "技能元数据与迁移",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "skill-retrieval-mvp",
+        "parallel"
+      ],
+      "depends_on": [],
+      "file_scope": [
+        "app/models/agent_skill.py",
+        "alembic/versions/"
+      ],
+      "readonly_scope": [
+        "app/services/skill_service.py",
+        "app/ai/workflow/"
+      ],
+      "owner_fields": [
+        "auto_enabled",
+        "priority",
+        "scope",
+        "trigger_phrases",
+        "conflicts_with"
+      ],
+      "dod": "元数据字段迁移完成并兼容旧数据",
+      "check_cmd": "venv/bin/python -m pytest -q tests/unit -k \"agent_skill\"",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-01_技能元数据与迁移.md"
+    },
+    {
+      "id": "WS-02",
+      "title": "SKILL导入与frontmatter治理",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "skill-retrieval-mvp",
+        "parallel"
+      ],
+      "depends_on": [
+        "WS-01"
+      ],
+      "file_scope": [
+        "app/services/skill_service.py",
+        "app/main.py"
+      ],
+      "readonly_scope": [
+        "app/models/",
+        "app/ai/workflow/"
+      ],
+      "owner_fields": [
+        "frontmatter_parse_rules",
+        "import_idempotency"
+      ],
+      "dod": "frontmatter 解析、校验、幂等导入通过",
+      "check_cmd": "venv/bin/python -m pytest -q tests/unit -k \"skill and ingest\"",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-02_SKILL导入与frontmatter治理.md"
+    },
+    {
+      "id": "WS-03",
+      "title": "混合检索与注入策略",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "skill-retrieval-mvp",
+        "parallel"
+      ],
+      "depends_on": [
+        "WS-01",
+        "WS-02"
+      ],
+      "file_scope": [
+        "app/services/skill_service.py",
+        "app/ai/workflow/multi_agent_graph.py"
+      ],
+      "readonly_scope": [
+        "app/models/"
+      ],
+      "owner_fields": [
+        "skill_candidates",
+        "selected_skill_ids",
+        "skill_context"
+      ],
+      "dod": "hybrid召回、冲突裁决、懒加载注入生效",
+      "check_cmd": "venv/bin/python -m pytest -q app/tests/test_skill_retrieval_smoke.py",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-03_混合检索与注入策略.md"
+    },
+    {
+      "id": "WS-04",
+      "title": "可观测与离线评测",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "skill-retrieval-mvp",
+        "parallel"
+      ],
+      "depends_on": [
+        "WS-03"
+      ],
+      "file_scope": [
+        "tests/",
+        "scripts/",
+        "docs/内部参考/迭代需求/evaluation_report.md"
+      ],
+      "readonly_scope": [
+        "app/models/",
+        "app/ai/workflow/"
+      ],
+      "owner_fields": [
+        "retrieval_observability",
+        "evaluation_baseline"
+      ],
+      "dod": "检索链路日志可追溯，离线评测可执行",
+      "check_cmd": "venv/bin/python -m pytest -q tests -k \"skill\"",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-04_可观测与离线评测.md"
+    },
+    {
+      "id": "WS-G1",
+      "title": "集成回归门禁",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "skill-retrieval-mvp",
+        "gate",
+        "serial"
+      ],
+      "depends_on": [
+        "WS-01",
+        "WS-02",
+        "WS-03",
+        "WS-04"
+      ],
+      "file_scope": [
+        "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md"
+      ],
+      "readonly_scope": [
+        "app/"
+      ],
+      "owner_fields": [
+        "gate_g1_status"
+      ],
+      "dod": "G1门禁通过并完成自动回填",
+      "check_cmd": "venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md"
+    },
+    {
+      "id": "WS-G2",
+      "title": "文档终稿门禁",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "skill-retrieval-mvp",
+        "gate",
+        "serial"
+      ],
+      "depends_on": [
+        "WS-G1"
+      ],
+      "file_scope": [
+        "docs/",
+        ".env.example"
+      ],
+      "readonly_scope": [
+        "app/",
+        "web/"
+      ],
+      "owner_fields": [
+        "gate_g2_doc_status"
+      ],
+      "dod": "文档同步与索引门禁通过",
+      "check_cmd": "venv/bin/python scripts/docs_guard.py --strict",
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G2_文档终稿门禁.md"
+    }
+  ]
+}

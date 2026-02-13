@@ -18,6 +18,7 @@
 * [管理后台需求](产品文档/管理后台需求.md)
 * [用户管理需求](产品文档/用户管理需求.md)
 * [模型路由需求](产品文档/模型路由需求.md)
+* [技能系统需求](产品文档/技能系统需求.md)
 
 ---
 
@@ -157,6 +158,17 @@
 * [WS-03 前端SSE与交互收敛](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-03_前端SSE与交互收敛.md)
 * [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-G1_集成回归门禁.md)
 * [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-G2_文档终稿门禁.md)
+
+#### 当前并行拆解（2026-02-12 Skill检索对齐 Cursor MVP）
+
+* [并行总计划](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md)
+* [合并检查清单](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/merge_checklist.md)
+* [WS-01 技能元数据与迁移](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-01_技能元数据与迁移.md)
+* [WS-02 SKILL导入与frontmatter治理](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-02_SKILL导入与frontmatter治理.md)
+* [WS-03 混合检索与注入策略](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-03_混合检索与注入策略.md)
+* [WS-04 可观测与离线评测](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-04_可观测与离线评测.md)
+* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md)
+* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G2_文档终稿门禁.md)
 
 ---
 
