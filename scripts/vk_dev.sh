@@ -57,6 +57,43 @@ ensure_port_available() {
   fi
 }
 
+wait_service_ready() {
+  local service_name="$1"
+  local pid_file="$2"
+  local port="$3"
+  local log_file="$4"
+  local wait_seconds="${5:-12}"
+
+  local elapsed=0
+  local pid
+  while [[ "$elapsed" -lt "$wait_seconds" ]]; do
+    pid="$(read_pid "$pid_file")"
+    if ! is_pid_running "$pid"; then
+      break
+    fi
+
+    if is_port_listening "$port"; then
+      return 0
+    fi
+
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  pid="$(read_pid "$pid_file")"
+  if [[ -n "$pid" ]] && is_pid_running "$pid"; then
+    kill "$pid" >/dev/null 2>&1 || true
+  fi
+  rm -f "$pid_file"
+
+  echo "[vk_dev] ${service_name} 启动失败：端口 ${port} 在 ${wait_seconds}s 内未就绪" >&2
+  if [[ -f "$log_file" ]]; then
+    echo "[vk_dev] ${service_name} 日志（最近 80 行）: ${log_file}" >&2
+    tail -n 80 "$log_file" >&2 || true
+  fi
+  return 1
+}
+
 resolve_uvicorn_cmd() {
   local candidate
   local runtime_venv
@@ -119,6 +156,8 @@ start_backend() {
   nohup "$uvicorn_cmd" app.main:app --reload --host 127.0.0.1 --port "$VK_BACKEND_PORT" >"$BACKEND_LOG_FILE" 2>&1 &
   echo $! > "$BACKEND_PID_FILE"
 
+  wait_service_ready "backend" "$BACKEND_PID_FILE" "$VK_BACKEND_PORT" "$BACKEND_LOG_FILE"
+
   echo "[vk_dev] backend started: http://127.0.0.1:${VK_BACKEND_PORT} (pid=$(cat "$BACKEND_PID_FILE"))"
 }
 
@@ -154,6 +193,8 @@ start_web() {
     nohup "${web_cmd[@]}" >"$WEB_LOG_FILE" 2>&1 &
     echo $! > "$WEB_PID_FILE"
   )
+
+  wait_service_ready "web" "$WEB_PID_FILE" "$VK_FRONTEND_PORT" "$WEB_LOG_FILE"
 
   echo "[vk_dev] web started: http://127.0.0.1:${VK_FRONTEND_PORT} (pid=$(cat "$WEB_PID_FILE"))"
 }

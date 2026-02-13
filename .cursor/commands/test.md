@@ -24,28 +24,62 @@ description: 完整测试流程：环境准备 -> 用例生成 -> 执行验证 -
 
 | 服务 | 端口策略 | 检查命令 |
 |------|----------|----------|
-| 前端 (Next.js) | 主分支固定 `3000`；子任务 worktree 默认 `TEST_FRONTEND_PORT` | `lsof -i :${TEST_FRONTEND_PORT}` |
-| 后端 (FastAPI) | 主分支固定 `8000`；子任务 worktree 默认 `TEST_BACKEND_PORT` | `lsof -i :${TEST_BACKEND_PORT}` |
+| 前端 (Next.js) | 主分支固定 `3000`；子任务 worktree 自动读取 `scripts/vk_ports.sh` 结果 | `lsof -i :${FRONTEND_PORT}` |
+| 后端 (FastAPI) | 主分支固定 `8000`；子任务 worktree 自动读取 `scripts/vk_ports.sh` 结果 | `lsof -i :${BACKEND_PORT}` |
 
 ```bash
+# 1) 先统一端口来源（避免回落到 3000/8000）
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+cd "$ROOT_DIR"
+
+# worktree 场景优先使用 vk 端口计算
+if [ -f scripts/vk_ports.sh ]; then
+  eval "$(bash scripts/vk_ports.sh --export)"
+fi
+
+# 兼容 vk_setup 生成的环境文件
+if [ -f .env.vk.local ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.vk.local
+  set +a
+fi
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   BACKEND_PORT=8000
   FRONTEND_PORT=3000
 else
-  BACKEND_PORT="${TEST_BACKEND_PORT:-${VK_BACKEND_PORT:-8000}}"
-  FRONTEND_PORT="${TEST_FRONTEND_PORT:-${VK_FRONTEND_PORT:-3000}}"
+  BACKEND_PORT="${VK_BACKEND_PORT:-${TEST_BACKEND_PORT:-8000}}"
+  FRONTEND_PORT="${VK_FRONTEND_PORT:-${TEST_FRONTEND_PORT:-3000}}"
 fi
 
-# 仅检查服务状态，不自动启动
+# 导出统一测试变量，供 pytest / playwright 复用
+export TEST_BACKEND_PORT="$BACKEND_PORT"
+export TEST_FRONTEND_PORT="$FRONTEND_PORT"
+export E2E_API_BASE="${E2E_API_BASE:-http://127.0.0.1:${BACKEND_PORT}}"
+export LIVE_API_BASE="${LIVE_API_BASE:-http://127.0.0.1:${BACKEND_PORT}/api/v1}"
+export PLAYWRIGHT_FRONTEND_PORT="${PLAYWRIGHT_FRONTEND_PORT:-$FRONTEND_PORT}"
+export PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:${FRONTEND_PORT}}"
+
+# 2) 服务未启动时自动拉起（先尝试一次）
 if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
-  echo "❌ 后端未启动：请先启动 backend（port=${BACKEND_PORT}）"
+  echo "⚠️ 后端未启动，自动执行: bash scripts/vk_dev.sh backend"
+  bash scripts/vk_dev.sh backend
+fi
+
+if [ "${RUN_E2E:-0}" = "1" ] && ! lsof -i :"$FRONTEND_PORT" >/dev/null 2>&1; then
+  echo "⚠️ 前端未启动，自动执行: bash scripts/vk_dev.sh web"
+  bash scripts/vk_dev.sh web
+fi
+
+# 3) 自动拉起后再次硬检查
+if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
+  echo "❌ 后端未启动：port=${BACKEND_PORT}"
   exit 1
 fi
-
-# 仅当本轮需要 E2E/UI 时再检查前端（RUN_E2E=1）
 if [ "${RUN_E2E:-0}" = "1" ] && ! lsof -i :"$FRONTEND_PORT" >/dev/null 2>&1; then
-  echo "❌ 前端未启动：请先启动 web（port=${FRONTEND_PORT}）"
+  echo "❌ 前端未启动：port=${FRONTEND_PORT}"
   exit 1
 fi
 ```
@@ -55,19 +89,30 @@ fi
 
 ### Step 0.1: 在线测试硬门禁（禁止以 skip 代替）
 
-执行在线 API/E2E 前，必须先确认后端服务可用；若不可用，`/test` 立即中断并提示用户手动启动服务，不允许用 `skip` 作为通过依据。
+执行在线 API/E2E 前，必须先确认后端服务可用；若不可用，`/test` 先尝试自动拉起一次，仍失败则立即中断，不允许用 `skip` 作为通过依据。
 
 ```bash
-BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  BACKEND_PORT=8000
-else
-  BACKEND_PORT="${TEST_BACKEND_PORT:-${VK_BACKEND_PORT:-8000}}"
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+cd "$ROOT_DIR"
+
+if [ -f scripts/vk_ports.sh ]; then
+  eval "$(bash scripts/vk_ports.sh --export)"
+fi
+if [ -f .env.vk.local ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.vk.local
+  set +a
+fi
+BACKEND_PORT="${VK_BACKEND_PORT:-${TEST_BACKEND_PORT:-8000}}"
+
+if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
+  bash scripts/vk_dev.sh backend
 fi
 
 # 后端端口硬检查（未监听则立即失败）
 if ! lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
-  echo "❌ 后端未启动：请先执行 uvicorn app.main:app --reload --port ${BACKEND_PORT}"
+  echo "❌ 后端未启动：自动拉起失败（port=${BACKEND_PORT}）"
   exit 1
 fi
 
@@ -125,13 +170,21 @@ def test_example():
 
 **在线验证门禁规则**:
 - 在线 API 与 E2E 测试前必须通过 Step 0.1 端口与健康检查。
-- 检查未通过时必须立即中断并提示用户先启动服务（前端门禁仅在 RUN_E2E=1 时启用）。
+- 检查未通过时先自动拉起一次服务，仍未通过则立即中断（前端门禁仅在 RUN_E2E=1 时启用）。
 - 因后端未启动导致的连接错误应记为 **FAIL**，不得记为 **SKIP**。
 
 ### Playwright E2E 测试（可视化优先）
 
 ```bash
 cd web
+
+# 推荐：每次 E2E 前显式注入当前 worktree 端口
+eval "$(bash ../scripts/vk_ports.sh --export)"
+export TEST_BACKEND_PORT="${VK_BACKEND_PORT:-${TEST_BACKEND_PORT:-8000}}"
+export TEST_FRONTEND_PORT="${VK_FRONTEND_PORT:-${TEST_FRONTEND_PORT:-3000}}"
+export PLAYWRIGHT_FRONTEND_PORT="${PLAYWRIGHT_FRONTEND_PORT:-$TEST_FRONTEND_PORT}"
+export PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:${TEST_FRONTEND_PORT}}"
+
 npm test                         # 无界面运行（CI）
 npm run test:visual              # 可视化慢速执行（推荐）
 npm run test:ui                  # 交互式调试

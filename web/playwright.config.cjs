@@ -1,15 +1,26 @@
 const { defineConfig, devices } = require('@playwright/test');
+const path = require('path');
+const dotenv = require('dotenv');
+
+dotenv.config({ path: path.resolve(__dirname, '.env.vk.local') });
+dotenv.config({ path: path.resolve(__dirname, '../.env.vk.local') });
+dotenv.config({ path: path.resolve(__dirname, '.env.local') });
 
 const HEADED = process.env.HEADED === 'true';
 const SLOW_MO = Number.parseInt(process.env.SLOW_MO || '0', 10);
 const BROWSER_CHANNEL = process.env.PLAYWRIGHT_BROWSER_CHANNEL || (process.env.CI ? undefined : 'chrome');
 const FRONTEND_PORT = Number.parseInt(
-    process.env.PLAYWRIGHT_FRONTEND_PORT || process.env.TEST_FRONTEND_PORT || '3000',
+    process.env.PLAYWRIGHT_FRONTEND_PORT
+        || process.env.TEST_FRONTEND_PORT
+        || process.env.VK_FRONTEND_PORT
+        || '3000',
     10,
 );
-const BACKEND_PORT = Number.parseInt(process.env.TEST_BACKEND_PORT || '8000', 10);
+const BACKEND_PORT = Number.parseInt(process.env.TEST_BACKEND_PORT || process.env.VK_BACKEND_PORT || '8000', 10);
 const API_BASE = process.env.E2E_API_BASE || `http://127.0.0.1:${BACKEND_PORT}`;
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${FRONTEND_PORT}`;
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL
+    || process.env.VK_FRONTEND_BASE_URL
+    || `http://127.0.0.1:${FRONTEND_PORT}`;
 const E2E_BROWSER_USE = {
     ...devices['Desktop Chrome'],
     ...(BROWSER_CHANNEL ? { channel: BROWSER_CHANNEL } : {}),
