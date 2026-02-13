@@ -108,6 +108,7 @@ yarn-error.log*
 # 过程文档（本地维护，不纳入版本控制）
 /docs/内部参考/迭代需求/requirements.md
 /docs/内部参考/迭代需求/implementation_plan.md
+/docs/内部参考/迭代需求/fix_plan.md
 
 # 其他（按需扩展）
 *.swp

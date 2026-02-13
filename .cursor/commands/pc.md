@@ -90,7 +90,7 @@ description: 问题诊断：仅分析定位问题,产出修复计划,不修改�
 
 ## 阶段 4: 修复计划产出 (Fix Plan Output)
 
-**产出**: `fix_plan.md` (Artifact)
+**产出**: `docs/内部参考/迭代需求/fix_plan.md` (Artifact)
 
 **必须包含**:
 
@@ -137,7 +137,7 @@ description: 问题诊断：仅分析定位问题,产出修复计划,不修改�
 
 ## 阶段 5: 文档关联 (Documentation Link)
 
-在 `fix_plan.md` 中关联相关文档:
+在 `docs/内部参考/迭代需求/fix_plan.md` 中关联相关文档:
 
 - [ ] 需求文档: `docs/产品文档/<模块>需求.md`
 - [ ] 测试案例: `docs/开发文档/测试管理/<模块>测试案例.md`
@@ -147,7 +147,7 @@ description: 问题诊断：仅分析定位问题,产出修复计划,不修改�
 
 ## 阶段 6: 用户确认 (User Confirmation)
 
-产出 `fix_plan.md` 后:
+产出 `docs/内部参考/迭代需求/fix_plan.md` 后:
 
 1. **向用户展示修复计划**
 2. **询问用户**:
