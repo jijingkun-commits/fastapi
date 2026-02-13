@@ -183,6 +183,16 @@ function buildVegaSpec(
   } as TopLevelSpec;
 
   const yAxisLabelExpr = "abs(datum.value) >= 100000000 ? format(datum.value/100000000, ',.2f') + ' 亿' : abs(datum.value) >= 10000 ? format(datum.value/10000, ',.2f') + ' 万' : format(datum.value, ',.2f')";
+  const xAxis = chart.type === "bar" && xType === "nominal"
+    ? {
+        labelAngle: 0,
+        labelAlign: "center" as const,
+        labelBaseline: "top" as const,
+        labelLineHeight: 14,
+        labelPadding: 10,
+        labelExpr: "join(split(toString(datum.label), ''), '\\n')",
+      }
+    : undefined;
 
   if (chart.type === "pie") {
     return {
@@ -200,7 +210,12 @@ function buildVegaSpec(
   }
 
   const commonEncoding = {
-    x: { field: chart.x_key, type: xType, title: xLabel },
+    x: {
+      field: chart.x_key,
+      type: xType,
+      title: xLabel,
+      ...(xAxis ? { axis: xAxis } : {}),
+    },
     y: {
       field: chart.y_key,
       type: "quantitative" as const,
