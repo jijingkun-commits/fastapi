@@ -618,11 +618,12 @@ def convert_etl_to_select(request: ETLConvertRequest):
         raise HTTPException(status_code=400, detail="ETL 脚本不能为空")
 
     try:
-        from app.ai.llm_util import get_llm, _normalize_text_content
+        from app.ai.llm_util import get_scene_llm, _normalize_text_content
+        from app.core.config import MODEL_SCENE_SQL_GENERATION
         from langchain_core.messages import SystemMessage, HumanMessage
         import json
 
-        llm = get_llm(internal=True)
+        llm = get_scene_llm(scene=MODEL_SCENE_SQL_GENERATION, internal=True)
         messages = [
             SystemMessage(content=ETL_CONVERT_PROMPT),
             HumanMessage(content=request.etl_script),
@@ -817,11 +818,12 @@ def _batch_convert_ai_extract(db: Session, limit: int, dry_run: bool):
                          for r in pending[:20]]
         }
 
-    from app.ai.llm_util import get_llm, _normalize_text_content
+    from app.ai.llm_util import get_scene_llm, _normalize_text_content
+    from app.core.config import MODEL_SCENE_SQL_GENERATION
     from langchain_core.messages import SystemMessage, HumanMessage
     import json
 
-    llm = get_llm(internal=True)
+    llm = get_scene_llm(scene=MODEL_SCENE_SQL_GENERATION, internal=True)
     success = 0
     errors = []
 

@@ -565,12 +565,12 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 #### 按场景分类
 
 > **配置提示**: 
-> 下表中的 `SQL 生成`、`内部分析`、`意图分类`、`参数提取`、`评估` 等场景的模型配置，现在均已支持在 **后台管理 -> LLM 配置 -> 模型路由** 页面进行可视化配置。
+> 下表中的 `主对话默认模型`、`SQL 生成`、`内部分析`、`意图分类`、`参数提取`、`评估` 等场景的模型配置，现在均已支持在 **后台管理 -> LLM 配置 -> 模型路由** 页面进行可视化配置。
 > `Embedding` 和 `Vision` 模型则通过在 **模型列表** 中设置对应类型的默认模型来生效。
 
 | 场景 | 调用点 | 模型来源 | 配置项 | 推荐模型 |
 |------|--------|----------|--------|----------|
-| 主对话 | Supervisor / Agent 回复 | 用户前端选择 | State `model_id` | 用户自选 |
+| 主对话 | Supervisor / Agent 回复 | 固定配置 + 用户覆盖 | `model_routing.default_chat`（未选模型时） + State `model_id`（用户显式选择） | qwen-plus / deepseek-chat |
 | SQL 生成 | `vanna_client.submit_prompt` | 固定配置 | `model_routing.sql_generation` | 非推理模型（qwen-plus） |
 | 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 固定配置 | `model_routing.sql_generation` | qwen-plus |
 | 轻量任务（意图分类） | `intent_classifier.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
@@ -593,10 +593,33 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 
 | 配置项 | 对应路由 Key | 默认值 (环境变量) | 说明 |
 |--------|------|--------|------|
-| 数据库默认模型 | - | `qwen-plus` | 用户未选模型时的主力模型 |
+| 数据库默认模型 | - | `qwen-plus` | chat 类型默认模型（路由默认缺失时回退） |
+| `MODEL_NAME` | - | `glm-4.5-air` | 环境变量回退（数据库不可用时） |
+| `model_routing.default_chat` | `model_routing.default_chat` | 空（未配置） | 主对话默认模型（用户未显式选择模型时生效） |
 | `INTENT_CLASSIFIER_MODEL` | `model_routing.lightweight` | `qwen-plus` | 意图分类/评估/参数提取 (轻量任务) |
 | `SQL_GENERATION_MODEL` | `model_routing.sql_generation` | `qwen-plus` | Vanna SQL 生成 / 复杂意图分析 |
-| `MODEL_NAME` | - | `glm-4.5-air` | 环境变量回退（数据库不可用时） |
+
+#### 调用场景注册表（开发规范）
+
+> **开发者常见问题**：我自己写代码时，是否要先配置调用场景注册表？
+>
+> - **使用已有场景**（`default_chat` / `lightweight` / `sql_generation`）：不需要新增配置，直接调用 `get_scene_llm(scene=...)`。
+> - **新增场景**：必须先完成注册表配置，再编写业务调用代码。
+
+**当前场景注册表（权威）**：`app/core/config.py#get_scene_routing`
+
+| scene | 路由键 | 回退值 | 典型用途 |
+|------|--------|--------|----------|
+| `default_chat` | `model_routing.default_chat` | 空字符串（继续回退 chat 类型默认模型） | 主对话默认模型、兜底 |
+| `lightweight` | `model_routing.lightweight` | `INTENT_CLASSIFIER_MODEL` | 意图分类、参数提取、Judge、轻量文本加工 |
+| `sql_generation` | `model_routing.sql_generation` | `SQL_GENERATION_MODEL` | SQL 生成、ETL/SQL 模板转换、内部分析 |
+
+**新增场景的标准步骤**：
+
+1. 在 `app/core/config.py` 新增 `MODEL_SCENE_*` 常量，并在 `get_scene_routing(scene)` 中注册 `(routing_key, env_fallback)`。
+2. 若需要后台可视化管理，同时更新 `app/api/v1/endpoints/llm_admin_api.py` 的 `GET/PUT /llm-admin/model-routing`。
+3. 业务代码统一通过 `get_scene_llm(scene=..., model_id=...)` 获取模型，禁止在业务节点新增裸 `get_llm()` 默认分支。
+4. 补充单测（场景解析、回退策略、调用约束）并更新本文档。
 
 ---
 

@@ -24,7 +24,7 @@ from langgraph.types import interrupt
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.ai.llm_util import get_llm, _normalize_text_content
+from app.ai.llm_util import get_llm, get_scene_llm, _normalize_text_content
 from app.db.session import get_db_context  # 数据库上下文管理器
 from app.repositories.todo_repository import TodoRepository  # 待办仓库
 from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
@@ -1624,7 +1624,9 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
 def _merge_description(original: str, supplement: str) -> str:
     """使用 LLM 将原有描述和补充信息融合为完整描述。"""
     try:
-        llm = get_llm(internal=True)
+        from app.core.config import MODEL_SCENE_LIGHTWEIGHT
+
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, internal=True)
         prompt = (
             "将以下原始描述和补充信息融合为一段完整的任务描述。\n"
             "要求：语句通顺，保留所有关键信息，不要多余解释，直接输出融合后的描述。\n\n"

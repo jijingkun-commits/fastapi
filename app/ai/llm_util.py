@@ -118,6 +118,33 @@ def _resolve_reasoning_effort(extra_config: dict):
     return None
 
 
+def _resolve_scene_model_id(scene: str, model_id: str = None) -> str:
+    """按调用场景解析目标模型代码。
+
+    优先级：显式 model_id > 场景路由配置（t_system_config）> 环境变量回退。
+    """
+    if model_id:
+        return model_id
+
+    from app.core.config import get_scene_routing, get_routing_model
+
+    config_key, env_fallback = get_scene_routing(scene)
+    routed_model = get_routing_model(config_key, env_fallback)
+    return routed_model if routed_model else None
+
+
+def get_scene_llm(scene: str, model_id: str = None, **kwargs):
+    """按调用场景获取 LLM 实例。
+
+    Args:
+        scene: 调用场景（default_chat/lightweight/sql_generation）
+        model_id: 可选显式模型代码
+        **kwargs: 透传给 get_llm 的参数
+    """
+    resolved_model_id = _resolve_scene_model_id(scene=scene, model_id=model_id)
+    return get_llm(model_id=resolved_model_id, **kwargs)
+
+
 def _normalize_text_content(content) -> str:
     """将消息内容归一化为纯文本。
 
@@ -351,10 +378,19 @@ def get_llm(
             logger.info("使用数据库配置: model=%s, provider=%s", config.model_code, config.provider_code)
 
     if not model_id and not config:
-        default_code = LLMConfigService.get_default_model_code()
-        if default_code:
-            config = LLMConfigService.get_model_config(default_code)
-            logger.info("使用默认模型配置: %s", default_code)
+        routed_default_code = _resolve_scene_model_id("default_chat")
+        if routed_default_code:
+            config = LLMConfigService.get_model_config(routed_default_code)
+            if config:
+                logger.info("使用路由默认模型配置: %s", routed_default_code)
+            else:
+                logger.warning("模型路由默认模型未命中可用配置: %s，继续回退", routed_default_code)
+
+        if not config:
+            default_code = LLMConfigService.get_default_model_code()
+            if default_code:
+                config = LLMConfigService.get_model_config(default_code)
+                logger.info("使用默认模型配置: %s", default_code)
 
     if config:
         model_type = config.provider_code

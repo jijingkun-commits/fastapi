@@ -495,7 +495,7 @@ class ModelRouteItem(BaseModel):
     """模型路由项。"""
     scene: str           # 场景名称
     call_point: str      # 调用点
-    source: str          # 模型来源：user_select / fixed_config / db_type
+    source: str          # 模型来源：fixed_config / db_type
     config_key: Optional[str] = None  # 配置键名
     current_model: str   # 当前使用的模型代码
     recommended: str     # 推荐模型
@@ -506,6 +506,22 @@ class ModelRoutingUpdateRequest(BaseModel):
     """更新模型路由请求。"""
     config_key: str      # 配置键名
     model_code: str      # 新的模型代码
+
+
+def _get_chat_default_model_for_routing(db: Session) -> str:
+    """获取主对话默认模型（优先路由配置，其次 chat 类型默认）。"""
+    from app.core.config import MODEL_ROUTING_DEFAULT_CHAT, get_routing_model
+
+    configured = get_routing_model(MODEL_ROUTING_DEFAULT_CHAT, "")
+    if configured:
+        model = db.query(LLMModel).filter(
+            LLMModel.model_code == configured,
+            LLMModel.model_type == "chat",
+            LLMModel.is_active == True,
+        ).first()
+        if model:
+            return model.model_code
+    return _get_type_default_model(db, "chat")
 
 
 def _get_type_default_model(db: Session, model_type: str) -> str:
@@ -529,13 +545,14 @@ def get_model_routing(db: Session = Depends(get_db)):
     """获取模型路由总览表（按能力分层，5 行）。
     
     分层策略：
-    1. 主对话：用户在聊天页自选模型
+    1. 主对话：默认模型可配置，用户可在聊天页按需覆盖
     2. SQL 生成 / 内部分析：标准模型，需理解 schema 和业务语义
     3. 轻量任务：意图分类、参数提取、评估，轻量模型即可
     4. Embedding：向量化专用
     5. Vision：图像理解专用
     """
     from app.core.config import (
+        MODEL_ROUTING_DEFAULT_CHAT,
         INTENT_CLASSIFIER_MODEL, SQL_GENERATION_MODEL,
         MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_SQL_GENERATION,
         get_routing_model
@@ -544,16 +561,17 @@ def get_model_routing(db: Session = Depends(get_db)):
     # 获取固定配置的当前值（优先 t_system_config，回退环境变量）
     lightweight_model = get_routing_model(MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL)
     sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
+    default_chat_model = _get_chat_default_model_for_routing(db)
     
     routes = [
         ModelRouteItem(
             scene="主对话",
             call_point="Supervisor / Agent 回复",
-            source="user_select",
-            config_key=None,
-            current_model="聊天页模型选择器",
-            recommended="用户按需选择",
-            editable=False
+            source="fixed_config",
+            config_key=MODEL_ROUTING_DEFAULT_CHAT,
+            current_model=default_chat_model,
+            recommended="qwen-plus / deepseek-chat",
+            editable=True
         ),
         ModelRouteItem(
             scene="SQL 生成 / 内部分析",
@@ -601,17 +619,28 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
     """更新模型路由配置。
     
     仅支持更新 fixed_config 类型的路由：
+    - model_routing.default_chat：主对话默认模型（用户未显式选择时）
     - model_routing.lightweight：轻量任务（意图分类/参数提取/评估）
     - model_routing.sql_generation：SQL 生成 / 内部分析
     
     配置持久化到 t_system_config 表，无需重启服务。
     """
-    from app.core.config import MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION
+    from app.core.config import (
+        MODEL_ROUTING_DEFAULT_CHAT,
+        MODEL_ROUTING_INTENT_CLASSIFIER,
+        MODEL_ROUTING_LLM_JUDGE,
+        MODEL_ROUTING_SQL_GENERATION,
+    )
     from app.repositories import config_repo
     from app.services.system_config_service import SystemConfigService
     
     # 验证 config_key 合法性（INTENT_CLASSIFIER 和 LLM_JUDGE 共享同一配置键 model_routing.lightweight）
-    allowed_keys = {MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION}
+    allowed_keys = {
+        MODEL_ROUTING_DEFAULT_CHAT,
+        MODEL_ROUTING_INTENT_CLASSIFIER,
+        MODEL_ROUTING_LLM_JUDGE,
+        MODEL_ROUTING_SQL_GENERATION,
+    }
     if request.config_key not in allowed_keys:
         raise HTTPException(status_code=400, detail=f"不支持修改此配置项: {request.config_key}")
     
@@ -622,9 +651,13 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
     ).first()
     if not model:
         raise HTTPException(status_code=400, detail=f"模型不存在或未启用: {request.model_code}")
+
+    if request.config_key == MODEL_ROUTING_DEFAULT_CHAT and model.model_type != "chat":
+        raise HTTPException(status_code=400, detail="默认对话模型必须为 chat 类型")
     
     # 描述映射
     desc_map = {
+        MODEL_ROUTING_DEFAULT_CHAT: "主对话默认模型（用户未显式选择时）",
         MODEL_ROUTING_INTENT_CLASSIFIER: "轻量任务模型（意图分类/参数提取/评估）",
         MODEL_ROUTING_SQL_GENERATION: "SQL 生成 / 内部分析模型",
     }

@@ -75,13 +75,13 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
         >>> print(params.title)  # "开会"
         >>> print(params.due_date)  # datetime(2026, 1, 15, 15, 0)
     """
-    from app.ai.llm_util import get_llm
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_DEFAULT_CHAT, MODEL_SCENE_LIGHTWEIGHT
     
     try:
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
     except Exception:
-        llm = get_llm()
+        llm = get_scene_llm(scene=MODEL_SCENE_DEFAULT_CHAT)
     
     try:
         # 使用 with_structured_output 确保返回结构化数据
@@ -107,11 +107,11 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
 
 async def extract_query_params(message: str, model_id: str = None) -> QueryParams:
     """从用户消息中提取数据库查询参数。"""
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     
     try:
-        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(QueryParams)
         
         result = await structured_llm.ainvoke(
@@ -128,11 +128,11 @@ async def extract_query_params(message: str, model_id: str = None) -> QueryParam
 
 async def extract_chart_params(message: str, model_id: str = None) -> ChartParams:
     """从用户消息中提取图表绘制参数。"""
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     
     try:
-        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(ChartParams)
         
         result = await structured_llm.ainvoke(

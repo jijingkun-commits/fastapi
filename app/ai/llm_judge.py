@@ -77,14 +77,14 @@ async def evaluate_response(
         >>> print(result.score)  # "pass"
         >>> print(result.feedback)  # "回答准确完整..."
     """
-    from app.ai.llm_util import get_llm
-    
-    # 使用快速模型作为 Judge（优先从 t_system_config 读取，回退环境变量）
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_DEFAULT_CHAT, MODEL_SCENE_LIGHTWEIGHT
+
+    # 使用 lightweight 场景模型作为 Judge
     try:
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
     except Exception:
-        llm = get_llm()
+        llm = get_scene_llm(scene=MODEL_SCENE_DEFAULT_CHAT)
     
     try:
         structured_llm = llm.with_structured_output(JudgeResult)
@@ -117,11 +117,11 @@ async def evaluate_response_detailed(
     model_id: str = None
 ) -> DetailedJudgeResult:
     """详细评估 Agent 回复质量。"""
-    from app.ai.llm_util import get_llm
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     
     try:
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(DetailedJudgeResult)
         
         result = await structured_llm.ainvoke(
@@ -200,8 +200,8 @@ async def iterative_improvement(
 
 def evaluate_sql_response_sync(sql: str, result: str, model_id: str = None) -> JudgeResult:
     """同步版本的 SQL 评估（供同步节点使用）。"""
-    from app.ai.llm_util import get_llm
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     
     prompt = f"""评估 SQL 查询质量:
 
@@ -216,7 +216,7 @@ SQL: {sql}
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
     try:
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(JudgeResult)
         return structured_llm.invoke(prompt)
     except Exception as e:
@@ -226,7 +226,7 @@ SQL: {sql}
 
 async def evaluate_sql_response(sql: str, result: str, model_id: str = None) -> JudgeResult:
     """评估 SQL 查询结果。"""
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_scene_llm
     
     prompt = f"""评估 SQL 查询结果:
 
@@ -240,9 +240,9 @@ SQL: {sql}
 
 返回 JSON: {{"score": "pass|fail", "feedback": "..."}}"""
     
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     try:
-        llm = get_llm(model_id=get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT)
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:
@@ -252,8 +252,8 @@ SQL: {sql}
 
 async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
     """评估图表生成代码。"""
-    from app.ai.llm_util import get_llm
-    from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
+    from app.ai.llm_util import get_scene_llm
+    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
     
     prompt = f"""评估图表生成代码:
 
@@ -271,7 +271,7 @@ async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
     try:
-        llm = get_llm(model_id=get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT)
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:

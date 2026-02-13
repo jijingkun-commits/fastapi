@@ -170,9 +170,27 @@ SQL_GENERATION_MODEL = os.getenv("SQL_GENERATION_MODEL", "qwen-plus")
 # ==========================================
 # 模型路由配置键（t_system_config 中的 key）
 # ==========================================
+MODEL_ROUTING_DEFAULT_CHAT = "model_routing.default_chat"          # 默认对话模型：未显式传 model_id 时使用
 MODEL_ROUTING_INTENT_CLASSIFIER = "model_routing.lightweight"      # 轻量任务：意图分类
 MODEL_ROUTING_LLM_JUDGE = "model_routing.lightweight"              # 轻量任务：评估/参数提取（与意图分类共享同一配置）
 MODEL_ROUTING_SQL_GENERATION = "model_routing.sql_generation"      # SQL 生成 / 内部分析
+
+# 模型调用场景（供 get_scene_llm 使用）
+MODEL_SCENE_DEFAULT_CHAT = "default_chat"
+MODEL_SCENE_LIGHTWEIGHT = "lightweight"
+MODEL_SCENE_SQL_GENERATION = "sql_generation"
+
+
+def get_scene_routing(scene: str) -> tuple[str, str]:
+    """获取模型调用场景对应的路由键与环境变量回退值。"""
+    scene_map = {
+        MODEL_SCENE_DEFAULT_CHAT: (MODEL_ROUTING_DEFAULT_CHAT, ""),
+        MODEL_SCENE_LIGHTWEIGHT: (MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL),
+        MODEL_SCENE_SQL_GENERATION: (MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL),
+    }
+    if scene not in scene_map:
+        raise ValueError(f"不支持的模型调用场景: {scene}")
+    return scene_map[scene]
 
 
 def get_routing_model(config_key: str, env_fallback: str) -> str:
@@ -231,4 +249,3 @@ RAGFLOW_DATASET_ID: str = RAGFLOW_DATASET_IDS[0] if RAGFLOW_DATASET_IDS else ""
 RAGFLOW_SIMILARITY_THRESHOLD: float = float(os.getenv("RAGFLOW_SIMILARITY_THRESHOLD", "0.2"))
 RAGFLOW_TOP_K: int = int(os.getenv("RAGFLOW_TOP_K", "5"))
 RAGFLOW_VECTOR_WEIGHT: float = float(os.getenv("RAGFLOW_VECTOR_WEIGHT", "0.6"))
-
