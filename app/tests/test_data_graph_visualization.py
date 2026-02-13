@@ -7,6 +7,8 @@
 - 图表请求但空结果 -> 不生成 chart
 - 维度值重复/为空时 -> 图元仍与行数一致
 - 标识列为数字字符串时 -> 不误判为 y 轴指标
+- 日期数字列不应被误判为 y 轴指标
+- 图表字段语义契约（field_meta）稳定输出
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ def _setup_common_patches(monkeypatch, module, rows: List[Dict[str, Any]], colum
     monkeypatch.setattr(module, "get_vanna", lambda: _DummyVanna(rows=rows, columns=columns))
     monkeypatch.setattr(module, "_enrich_result_rows_if_needed", lambda result_data, cols: (result_data, cols))
     monkeypatch.setattr(module, "_load_column_display_name_map", lambda cols, sql: {})
+    monkeypatch.setattr(module, "_load_column_data_type_map", lambda cols, sql: {})
     monkeypatch.setattr(module, "_build_column_display_names", lambda cols, _: cols)
     monkeypatch.setattr(module, "_build_display_sql", lambda sql, _: sql)
     monkeypatch.setattr(module, "is_effectively_empty_result", lambda data: not data)
@@ -99,6 +102,12 @@ def test_sql_execute_builds_bar_chart_for_customer_amount(monkeypatch):
     assert chart["y_key"] == "贷款金额"
     assert len(chart["data"]) == 3
 
+    field_meta = chart.get("field_meta") or {}
+    assert field_meta["客户名称"]["role"] == "dimension"
+    assert field_meta["客户名称"]["axis_hint"] == "x"
+    assert field_meta["贷款金额"]["role"] == "measure"
+    assert field_meta["贷款金额"]["axis_hint"] == "y"
+
 
 def test_sql_execute_builds_line_chart_for_date_amount(monkeypatch):
     """viz_type=折线图 + 日期/金额两列，生成 line 图表。"""
@@ -130,6 +139,11 @@ def test_sql_execute_builds_line_chart_for_date_amount(monkeypatch):
     assert chart["x_key"] == "data_dt"
     assert chart["y_key"] == "贷款金额"
     assert len(chart["data"]) == 3
+
+    field_meta = chart.get("field_meta") or {}
+    assert field_meta["data_dt"]["semantic_type"] == "temporal"
+    assert field_meta["data_dt"]["axis_hint"] == "x"
+    assert field_meta["贷款金额"]["semantic_type"] == "numeric"
 
 
 def test_sql_execute_skips_chart_when_no_numeric_column(monkeypatch):
@@ -232,3 +246,72 @@ def test_pick_chart_axes_keeps_identifier_column_as_dimension():
     x_key, y_key = module._pick_chart_axes(columns, rows)
     assert x_key == "客户编号"
     assert y_key == "value"
+
+
+def test_pick_chart_axes_avoids_date_like_numeric_column_as_measure():
+    """YYYYMMDD 数字日期列不应被选为 y 轴度量。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [
+        {"业务日期": 20250630, "机构号": "CF001", "年日均余额": 2375.35},
+        {"业务日期": 20250630, "机构号": "CF002", "年日均余额": 7183.53},
+        {"业务日期": 20250630, "机构号": "CF003", "年日均余额": 4594.55},
+    ]
+    columns = ["业务日期", "机构号", "年日均余额"]
+
+    x_key, y_key = module._pick_chart_axes(columns, rows)
+    assert x_key == "机构号"
+    assert y_key == "年日均余额"
+
+
+def test_sql_execute_outputs_field_meta_for_temporal_guardrail(monkeypatch):
+    """固定单日场景输出 field_meta，且日期列不进入 y 轴。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [
+        {"业务日期": 20250630, "机构号": "CF001", "年日均余额": 2375.35},
+        {"业务日期": 20250630, "机构号": "CF002", "年日均余额": 7183.53},
+        {"业务日期": 20250630, "机构号": "CF003", "年日均余额": 4594.55},
+    ]
+    columns = ["业务日期", "机构号", "年日均余额"]
+
+    _setup_common_patches(monkeypatch, module, rows=rows, columns=columns)
+
+    state = {
+        "generated_sql": "SELECT 业务日期, 机构号, 年日均余额 FROM t_demo",
+        "query_context": {"original_question": "2025-06-30按机构看年日均余额"},
+        "data_intent": "visualization",
+        "viz_type": "柱状图",
+        "sql_source": "vanna_rag",
+        "iterations": 1,
+    }
+
+    output = module.sql_execute(state)
+    chart = _extract_chart_from_sql_execute_output(output)
+
+    assert chart is not None
+    assert chart["x_key"] == "机构号"
+    assert chart["y_key"] == "年日均余额"
+
+    field_meta = chart.get("field_meta") or {}
+    assert field_meta["业务日期"]["role"] == "time"
+    assert field_meta["业务日期"]["semantic_type"] == "temporal"
+    assert field_meta["业务日期"]["axis_hint"] == "none"
+    assert field_meta["年日均余额"]["role"] == "measure"
+    assert field_meta["年日均余额"]["axis_hint"] == "y"
+
+
+def test_pick_chart_axes_prefers_multi_point_date_dimension_for_trend():
+    """存在多日期点时，日期维度可作为 x 轴（趋势语义）。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [
+        {"业务日期": 20250628, "贷款余额": 100.0},
+        {"业务日期": 20250629, "贷款余额": 110.0},
+        {"业务日期": 20250630, "贷款余额": 120.0},
+    ]
+    columns = ["业务日期", "贷款余额"]
+
+    x_key, y_key = module._pick_chart_axes(columns, rows)
+    assert x_key == "业务日期"
+    assert y_key == "贷款余额"

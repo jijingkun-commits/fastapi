@@ -124,7 +124,23 @@ function isDateLike(value: unknown): boolean {
   return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(text) || /^\d{8}$/.test(text);
 }
 
+function inferXTypeByFieldMeta(chart: SqlResultChartData): "temporal" | "nominal" | null {
+  const semanticType = chart.field_meta?.[chart.x_key]?.semantic_type;
+  if (semanticType === "temporal") {
+    return "temporal";
+  }
+  if (semanticType === "numeric" || semanticType === "categorical") {
+    return "nominal";
+  }
+  return null;
+}
+
 function inferXType(chart: SqlResultChartData): "temporal" | "nominal" {
+  const semanticType = inferXTypeByFieldMeta(chart);
+  if (semanticType) {
+    return semanticType;
+  }
+
   const samples = chart.data.slice(0, 10).map((item) => item[chart.x_key]);
   if (samples.length === 0) return "nominal";
   const dateLikeCount = samples.filter((value) => isDateLike(value)).length;

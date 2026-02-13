@@ -497,6 +497,34 @@ def _pick_most_common_stable(values: List[str]) -> Optional[str]:
     return values[0]
 
 
+
+def _normalize_column_data_type(data_type: Any) -> str:
+    """规范化字段类型字符串。"""
+    return re.sub(r"\s+", "", str(data_type or "")).lower()
+
+
+def _is_temporal_data_type(data_type: str) -> bool:
+    """判断字段类型是否为时间类型。"""
+    normalized = _normalize_column_data_type(data_type)
+    if not normalized:
+        return False
+
+    temporal_exact = {
+        "date",
+        "datetime",
+        "timestamp",
+        "timestamptz",
+        "timestampwithouttimezone",
+        "timestampwithtimezone",
+        "time",
+        "timetz",
+    }
+    if normalized in temporal_exact:
+        return True
+
+    temporal_tokens = ("date", "time", "timestamp", "datetime", "日期", "时间", "年月", "year", "month", "day")
+    return any(token in normalized for token in temporal_tokens)
+
 def _load_column_display_name_map(
     columns: List[str],
     sql: Optional[str],
@@ -576,6 +604,86 @@ def _load_column_display_name_map(
             mapping[column_key] = picked
 
     return mapping
+
+def _load_column_data_type_map(
+    columns: List[str],
+    sql: Optional[str],
+) -> Dict[str, str]:
+    """加载字段类型映射（优先按 SQL 涉及表过滤，未命中则全局回退）。"""
+    normalized_columns = list(
+        dict.fromkeys(
+            [
+                _normalize_column_key(col)
+                for col in columns
+                if str(col or "").strip()
+            ]
+        )
+    )
+    if not normalized_columns:
+        return {}
+
+    sql_tables: List[str] = []
+    if sql:
+        try:
+            sql_tables = sorted(extract_tables_from_sql(sql))
+        except Exception as e:
+            logger.debug("提取 SQL 涉及表失败，字段类型映射降级: %s", e)
+
+    from sqlalchemy import text
+
+    def _query_candidates(table_filter: Optional[List[str]]) -> List[Tuple[str, str]]:
+        table_clause = ""
+        params: Dict[str, Any] = {"column_names": normalized_columns}
+        if table_filter:
+            table_clause = (
+                " AND LOWER(COALESCE(t.schema_name, 'public') || '.' || t.table_name) = ANY(:table_names)"
+            )
+            params["table_names"] = table_filter
+
+        query = text(
+            """
+            SELECT c.column_name, c.data_type
+            FROM t_meta_columns c
+            JOIN t_meta_tables t ON t.id = c.table_id
+            WHERE c.data_type IS NOT NULL
+              AND c.data_type <> ''
+              AND LOWER(c.column_name) = ANY(:column_names)
+            """
+            + table_clause
+        )
+
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(query, params).fetchall()
+        except Exception as e:
+            logger.debug("加载字段类型映射失败(table_filter=%s): %s", bool(table_filter), e)
+            return []
+
+        return [
+            (str(row.column_name or "").strip(), str(row.data_type or "").strip())
+            for row in rows
+            if str(row.column_name or "").strip() and str(row.data_type or "").strip()
+        ]
+
+    filtered_candidates = _query_candidates(sql_tables if sql_tables else None)
+    all_candidates = filtered_candidates if filtered_candidates else _query_candidates(None)
+    if not all_candidates:
+        return {}
+
+    grouped: Dict[str, List[str]] = {}
+    for column_name, data_type in all_candidates:
+        key = _normalize_column_key(column_name)
+        if key in normalized_columns:
+            grouped.setdefault(key, []).append(data_type)
+
+    mapping: Dict[str, str] = {}
+    for column_key, data_types in grouped.items():
+        picked = _pick_most_common_stable(data_types)
+        if picked:
+            mapping[column_key] = picked
+
+    return mapping
+
 
 
 def _build_column_display_names(columns: List[str], display_map: Dict[str, str]) -> List[str]:
@@ -2445,8 +2553,151 @@ def _coerce_chart_number(value: Any) -> Optional[float]:
     return None
 
 
-def _is_numeric_column(rows: List[Dict[str, Any]], column: str) -> bool:
+def _is_valid_yyyymmdd_number(value: int) -> bool:
+    """判断整数是否符合 YYYYMMDD 形式。"""
+    if value < 19000101 or value > 29991231:
+        return False
+
+    year = value // 10000
+    month = (value // 100) % 100
+    day = value % 100
+    if year < 1900 or year > 2999:
+        return False
+    if month < 1 or month > 12:
+        return False
+    if day < 1 or day > 31:
+        return False
+    return True
+
+
+def _is_valid_yyyymm_number(value: int) -> bool:
+    """判断整数是否符合 YYYYMM 形式。"""
+    if value < 190001 or value > 299912:
+        return False
+
+    year = value // 100
+    month = value % 100
+    if year < 1900 or year > 2999:
+        return False
+    if month < 1 or month > 12:
+        return False
+    return True
+
+
+def _is_date_like_value(value: Any) -> bool:
+    """判断值是否呈现时间语义。"""
+    if value is None:
+        return False
+    if isinstance(value, (date, datetime)):
+        return True
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, Number):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return False
+        if not numeric.is_integer():
+            return False
+
+        int_value = int(numeric)
+        if 1900 <= int_value <= 2999:
+            return True
+        if _is_valid_yyyymm_number(int_value):
+            return True
+        if _is_valid_yyyymmdd_number(int_value):
+            return True
+        return False
+
+    text = str(value).strip()
+    if not text:
+        return False
+
+    if re.fullmatch(r"\d{8}", text):
+        return _is_valid_yyyymmdd_number(int(text))
+    if re.fullmatch(r"\d{6}", text):
+        return _is_valid_yyyymm_number(int(text))
+    if re.fullmatch(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", text):
+        return True
+    if re.fullmatch(r"\d{4}[-/]\d{1,2}", text):
+        return True
+    if re.fullmatch(r"\d{4}年\d{1,2}月\d{1,2}日?", text):
+        return True
+    if re.fullmatch(r"\d{4}年\d{1,2}月", text):
+        return True
+
+    return False
+
+
+def _count_distinct_non_null_dimension_values(rows: List[Dict[str, Any]], column: str) -> int:
+    """统计维度列非空去重值数量（样本上限 50）。"""
+    values = set()
+    for row in rows[:50]:
+        if not isinstance(row, dict) or column not in row:
+            continue
+
+        raw_value = row.get(column)
+        if raw_value is None:
+            continue
+
+        text = str(raw_value).strip()
+        if not text:
+            continue
+        values.add(text)
+
+    return len(values)
+
+
+def _is_likely_temporal_column(
+    rows: List[Dict[str, Any]],
+    column: str,
+    column_data_type_map: Optional[Dict[str, str]] = None,
+) -> bool:
+    """判断列是否具备时间语义。"""
+    column_key = _normalize_column_key(column)
+    if column_data_type_map:
+        mapped_data_type = column_data_type_map.get(column_key, "")
+        if _is_temporal_data_type(mapped_data_type):
+            return True
+
+    sample_rows = rows[:50]
+    non_null_count = 0
+    date_like_count = 0
+
+    for row in sample_rows:
+        if not isinstance(row, dict) or column not in row:
+            continue
+
+        raw_value = row.get(column)
+        if raw_value is None:
+            continue
+
+        non_null_count += 1
+        if _is_date_like_value(raw_value):
+            date_like_count += 1
+
+    if non_null_count == 0:
+        return False
+
+    ratio = date_like_count / non_null_count
+    if ratio >= 0.6:
+        return True
+
+    if _is_date_like_column(column) and ratio >= 0.3:
+        return True
+
+    return False
+
+
+def _is_numeric_column(
+    rows: List[Dict[str, Any]],
+    column: str,
+    column_data_type_map: Optional[Dict[str, str]] = None,
+) -> bool:
     """判断列是否可作为数值轴。"""
+    if _is_likely_temporal_column(rows, column, column_data_type_map):
+        return False
+
     sample_rows = rows[:50]
     numeric_count = 0
     non_null_count = 0
@@ -2511,7 +2762,7 @@ def _pick_preferred_y_column(numeric_columns: List[str]) -> str:
         return ""
 
     preferred_tokens = (
-        "余额", "金额", "金额", "占比", "比率", "率", "数量", "笔数",
+        "余额", "金额", "占比", "比率", "率", "数量", "笔数",
         "balance", "amount", "amt", "sum", "total", "count", "avg", "ratio", "pct",
     )
 
@@ -2523,19 +2774,41 @@ def _pick_preferred_y_column(numeric_columns: List[str]) -> str:
     return numeric_columns[0]
 
 
-def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[str, str]:
-    """选择图表 x/y 轴字段（优先维度列 + 数值列）。"""
-    if not columns:
-        return "", ""
-    if not rows:
-        return "", ""
+def _build_chart_semantic_flags(
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    column_data_type_map: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, bool], Dict[str, bool], Dict[str, bool]]:
+    """构建字段语义标记（时间/数值/标识）。"""
+    temporal_flags = {
+        column: _is_likely_temporal_column(rows, column, column_data_type_map)
+        for column in columns
+    }
+    numeric_flags = {
+        column: _is_numeric_column(rows, column, column_data_type_map)
+        for column in columns
+    }
+    identifier_flags = {
+        column: _is_identifier_column(column)
+        for column in columns
+    }
+    return temporal_flags, numeric_flags, identifier_flags
 
-    numeric_flags = {column: _is_numeric_column(rows, column) for column in columns}
 
+def _pick_chart_axes_from_flags(
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    temporal_flags: Dict[str, bool],
+    numeric_flags: Dict[str, bool],
+    identifier_flags: Dict[str, bool],
+) -> Tuple[str, str]:
+    """根据字段语义标记选择图表 x/y 轴。"""
     numeric_columns = [
         column
         for column in columns
-        if numeric_flags.get(column) and not _is_identifier_column(column)
+        if numeric_flags.get(column)
+        and not temporal_flags.get(column)
+        and not identifier_flags.get(column)
     ]
     if not numeric_columns:
         return "", ""
@@ -2550,23 +2823,115 @@ def _pick_chart_axes(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[st
     ]
 
     if dimension_columns:
-        date_like_columns = [column for column in dimension_columns if _is_date_like_column(column)]
-        if date_like_columns:
-            return date_like_columns[0], y_key
+        date_like_columns = [
+            column
+            for column in dimension_columns
+            if temporal_flags.get(column) or _is_date_like_column(column)
+        ]
+        multi_point_date_columns = [
+            column
+            for column in date_like_columns
+            if _count_distinct_non_null_dimension_values(rows, column) > 1
+        ]
+        if multi_point_date_columns:
+            return multi_point_date_columns[0], y_key
+
+        non_date_columns = [column for column in dimension_columns if column not in date_like_columns]
+        if non_date_columns:
+            return non_date_columns[0], y_key
+
         return dimension_columns[0], y_key
 
     identifier_columns = [
         column for column in columns
-        if column != y_key and _is_identifier_column(column)
+        if column != y_key and identifier_flags.get(column)
     ]
     if identifier_columns:
         return identifier_columns[0], y_key
 
-    fallback_columns = [column for column in columns if column != y_key]
+    fallback_columns = [
+        column
+        for column in columns
+        if column != y_key and not temporal_flags.get(column)
+    ]
     if fallback_columns:
         return fallback_columns[0], y_key
 
+    temporal_fallback_columns = [column for column in columns if column != y_key]
+    if temporal_fallback_columns:
+        return temporal_fallback_columns[0], y_key
+
     return "", ""
+
+
+def _build_chart_field_meta(
+    columns: List[str],
+    x_key: str,
+    y_key: str,
+    temporal_flags: Dict[str, bool],
+    numeric_flags: Dict[str, bool],
+    identifier_flags: Dict[str, bool],
+) -> Dict[str, Dict[str, str]]:
+    """构建图表字段语义契约（field_meta）。"""
+    field_meta: Dict[str, Dict[str, str]] = {}
+
+    for column in columns:
+        axis_hint = "none"
+        if column == x_key:
+            axis_hint = "x"
+        elif column == y_key:
+            axis_hint = "y"
+
+        role = "dimension"
+        if column == y_key:
+            role = "measure"
+        elif identifier_flags.get(column):
+            role = "identifier"
+        elif temporal_flags.get(column):
+            role = "time"
+        elif numeric_flags.get(column):
+            role = "measure"
+
+        semantic_type = "categorical"
+        if temporal_flags.get(column):
+            semantic_type = "temporal"
+        elif numeric_flags.get(column) or column == y_key:
+            semantic_type = "numeric"
+
+        field_meta[column] = {
+            "role": role,
+            "semantic_type": semantic_type,
+            "axis_hint": axis_hint,
+            "agg": "none",
+        }
+
+    return field_meta
+
+
+def _pick_chart_axes(
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    column_data_type_map: Optional[Dict[str, str]] = None,
+) -> Tuple[str, str]:
+    """选择图表 x/y 轴字段（优先维度列 + 数值列）。"""
+    if not columns:
+        return "", ""
+    if not rows:
+        return "", ""
+
+    temporal_flags, numeric_flags, identifier_flags = _build_chart_semantic_flags(
+        columns=columns,
+        rows=rows,
+        column_data_type_map=column_data_type_map,
+    )
+
+    return _pick_chart_axes_from_flags(
+        columns=columns,
+        rows=rows,
+        temporal_flags=temporal_flags,
+        numeric_flags=numeric_flags,
+        identifier_flags=identifier_flags,
+    )
 
 
 def _serialize_chart_dimension_value(value: Any) -> str:
@@ -2650,6 +3015,7 @@ def _ensure_chart_dimension_uniqueness(
 def _build_sql_result_chart_payload(
     state: DataAgentState,
     question: str,
+    sql: Optional[str],
     columns: List[str],
     column_display_names: List[str],
     rows: List[Dict[str, Any]],
@@ -2663,7 +3029,19 @@ def _build_sql_result_chart_payload(
         return None
 
     chart_type = _resolve_chart_type(str(state.get("viz_type") or ""), columns, rows)
-    x_key, y_key = _pick_chart_axes(columns, rows)
+    column_data_type_map = _load_column_data_type_map(columns, sql)
+    temporal_flags, numeric_flags, identifier_flags = _build_chart_semantic_flags(
+        columns=columns,
+        rows=rows,
+        column_data_type_map=column_data_type_map,
+    )
+    x_key, y_key = _pick_chart_axes_from_flags(
+        columns=columns,
+        rows=rows,
+        temporal_flags=temporal_flags,
+        numeric_flags=numeric_flags,
+        identifier_flags=identifier_flags,
+    )
     if not x_key or not y_key:
         return None
 
@@ -2707,6 +3085,15 @@ def _build_sql_result_chart_payload(
     else:
         title = f"{display_name_map.get(y_key, y_key)}图表"
 
+    field_meta = _build_chart_field_meta(
+        columns=columns,
+        x_key=x_key,
+        y_key=y_key,
+        temporal_flags=temporal_flags,
+        numeric_flags=numeric_flags,
+        identifier_flags=identifier_flags,
+    )
+
     return {
         "type": chart_type,
         "title": title,
@@ -2715,6 +3102,7 @@ def _build_sql_result_chart_payload(
         "y_key": y_key,
         "y_label": display_name_map.get(y_key, y_key),
         "series_name": display_name_map.get(y_key, y_key),
+        "field_meta": field_meta,
         "data": chart_rows,
     }
 
@@ -2853,6 +3241,7 @@ def sql_execute(state: DataAgentState) -> Dict:
         chart_payload = _build_sql_result_chart_payload(
             state=state,
             question=question,
+            sql=sql,
             columns=columns,
             column_display_names=column_display_names,
             rows=result_data,

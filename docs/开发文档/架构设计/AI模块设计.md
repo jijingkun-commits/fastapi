@@ -1093,7 +1093,7 @@ sequenceDiagram
 
 - `column_display_names`: 与 `columns` 索引对齐的表头显示名列表
 - `display_sql`: SQL 折叠区展示字符串（可能包含中文别名）
-- `chart`（可选）: 前端交互图规格（`type/x_key/y_key/data`），用于“图表补充回合”直出图形
+- `chart`（可选）: 前端交互图规格（`type/x_key/y_key/data/field_meta`），用于“图表补充回合”直出图形
 
 设计原则：
 
@@ -1101,6 +1101,7 @@ sequenceDiagram
 2. `rows` 键名保持原字段名，不做改写。
 3. 展示层改写失败时回退原值，不影响主链路。
 4. `chart` 仅作为展示增强字段，可推导失败时降级为仅表格展示。
+5. 前端优先消费 `chart.field_meta` 的语义标注；仅在缺失时启用本地启发式回退。
 
 `chart` 生成约束（v1）：
 
@@ -1109,6 +1110,20 @@ sequenceDiagram
 - 优先“首个非数值列 + 首个数值列”作为 `x/y` 轴；标识列（如 `客户号/编号/id/no/code`）即使可解析为数值，也保留为维度候选；
 - `pie` 仍使用同一组 `x/y` 字段，不新增协议类型；
 - 无可用数值列时不输出 `chart`，保留 `sql_result` 表格输出。
+
+时间语义护栏（2026-02-13）：
+
+- 时间字段识别优先级：`t_meta_columns.data_type` > 值样本模式（如 `YYYYMMDD`）> 列名关键词；
+- 命中时间语义的字段不会进入 `y_key` 度量候选，避免“业务日期被画成金额轴”；
+- 当存在日期维度和其他维度时，仅在“多时间点趋势”场景优先日期维度；固定单日查询优先非日期维度（如机构/客户）。
+
+字段语义契约（2026-02-13）：
+
+- `chart.field_meta` 为字段级契约，键为原始列名，值包含 `role/semantic_type/axis_hint/agg`；
+- `role` 取值：`dimension | measure | time | identifier`；
+- `semantic_type` 取值：`categorical | numeric | temporal`；
+- `axis_hint` 取值：`x | y | series | none`，由后端轴选择器一次性给出；
+- `agg` 当前固定 `none`，保留后续聚合策略扩展位。
 
 维度唯一性约束（2026-02-13）：
 

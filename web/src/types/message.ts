@@ -141,6 +141,19 @@ export interface ResultEventData {
     message?: string;
 }
 
+export type SqlChartFieldRole = "dimension" | "measure" | "time" | "identifier";
+
+export type SqlChartFieldSemanticType = "categorical" | "numeric" | "temporal";
+
+export type SqlChartAxisHint = "x" | "y" | "series" | "none";
+
+export interface SqlResultChartFieldMeta {
+    role: SqlChartFieldRole;
+    semantic_type: SqlChartFieldSemanticType;
+    axis_hint: SqlChartAxisHint;
+    agg: "none" | "sum" | "avg" | "count";
+}
+
 /**
  * 问数 SQL 结果中的可选图表载荷
  */
@@ -152,6 +165,7 @@ export interface SqlResultChartData {
     y_key: string;
     y_label?: string;
     series_name?: string;
+    field_meta?: Record<string, SqlResultChartFieldMeta>;
     data: Array<Record<string, string | number>>;
 }
 
