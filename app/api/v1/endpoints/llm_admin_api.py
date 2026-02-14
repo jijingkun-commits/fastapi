@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/llm-admin", tags=["LLM 配置管理"])
 
+VISION_ROUTE_KEY = "vision"
+
 
 # ==================== Schemas ====================
 
@@ -563,6 +565,8 @@ def get_model_routing(db: Session = Depends(get_db)):
     sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
     default_chat_model = _get_chat_default_model_for_routing(db)
     
+    vision_default_model = _get_type_default_model(db, "vision")
+
     routes = [
         ModelRouteItem(
             scene="主对话",
@@ -604,10 +608,10 @@ def get_model_routing(db: Session = Depends(get_db)):
             scene="Vision",
             call_point="vision_tool.py",
             source="db_type",
-            config_key="vision",
-            current_model=_get_type_default_model(db, "vision"),
+            config_key=VISION_ROUTE_KEY,
+            current_model=vision_default_model,
             recommended="glm-4v-flash",
-            editable=False
+            editable=vision_default_model != "未配置"
         ),
     ]
     
@@ -618,12 +622,15 @@ def get_model_routing(db: Session = Depends(get_db)):
 def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depends(get_db)):
     """更新模型路由配置。
     
-    仅支持更新 fixed_config 类型的路由：
+    支持更新以下路由：
     - model_routing.default_chat：主对话默认模型（用户未显式选择时）
     - model_routing.lightweight：轻量任务（意图分类/参数提取/评估）
     - model_routing.sql_generation：SQL 生成 / 内部分析
+    - vision：Vision 模型（更新 t_llm_model 中 vision 类型默认模型）
     
-    配置持久化到 t_system_config 表，无需重启服务。
+    fixed_config 路由持久化到 t_system_config 表；
+    vision 路由通过切换 t_llm_model(vision) 的默认模型生效。
+    更新后统一刷新缓存，无需重启服务。
     """
     from app.core.config import (
         MODEL_ROUTING_DEFAULT_CHAT,
@@ -633,13 +640,14 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
     )
     from app.repositories import config_repo
     from app.services.system_config_service import SystemConfigService
-    
+
     # 验证 config_key 合法性（INTENT_CLASSIFIER 和 LLM_JUDGE 共享同一配置键 model_routing.lightweight）
     allowed_keys = {
         MODEL_ROUTING_DEFAULT_CHAT,
         MODEL_ROUTING_INTENT_CLASSIFIER,
         MODEL_ROUTING_LLM_JUDGE,
         MODEL_ROUTING_SQL_GENERATION,
+        VISION_ROUTE_KEY,
     }
     if request.config_key not in allowed_keys:
         raise HTTPException(status_code=400, detail=f"不支持修改此配置项: {request.config_key}")
@@ -654,6 +662,28 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
 
     if request.config_key == MODEL_ROUTING_DEFAULT_CHAT and model.model_type != "chat":
         raise HTTPException(status_code=400, detail="默认对话模型必须为 chat 类型")
+    if request.config_key == VISION_ROUTE_KEY and model.model_type != "vision":
+        raise HTTPException(status_code=400, detail="Vision 路由必须为 vision 类型模型")
+
+    # Vision 走模型类型默认值（写 t_llm_model.is_default）
+    if request.config_key == VISION_ROUTE_KEY:
+        db.query(LLMModel).filter(
+            LLMModel.model_type == "vision",
+            LLMModel.is_default == True,
+        ).update({"is_default": False})
+
+        model.is_default = True
+        db.commit()
+
+        # Vision 工具读取的是类型默认模型，需刷新 LLM 配置缓存
+        LLMConfigService.refresh_cache(db)
+
+        logger.info("更新模型路由: vision -> %s", request.model_code)
+        return {
+            "message": "模型路由已更新",
+            "config_key": request.config_key,
+            "model_code": request.model_code,
+        }
     
     # 描述映射
     desc_map = {

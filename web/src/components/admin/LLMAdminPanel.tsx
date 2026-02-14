@@ -476,8 +476,18 @@ export function LLMAdminPanel() {
                 </TableHeader>
                 <TableBody>
                   {modelRoutes.map((route, index) => {
-                    const isEditing = route.editable && route.config_key && editingRoutes[route.config_key] !== undefined;
+                    const routeModelType = route.config_key === "vision" ? "vision" : "chat";
+                    const routeModels = models.filter(
+                      (m) => m.is_active && m.model_type === routeModelType
+                    );
+                    const canSelectModel = Boolean(route.editable && route.config_key && routeModels.length > 0);
+                    const isEditing = Boolean(
+                      canSelectModel && route.config_key && editingRoutes[route.config_key] !== undefined
+                    );
                     const isSaving = savingRoute === route.config_key;
+                    const sourceLabel = route.source === "user_select" ? "用户选择" :
+                      route.source === "fixed_config" ? "可配置" :
+                      route.editable ? "专用模型（可选）" : "专用模型";
                     
                     return (
                       <TableRow key={index} className={!route.editable ? "opacity-75" : ""}>
@@ -491,19 +501,17 @@ export function LLMAdminPanel() {
                             route.source === "fixed_config" ? "default" :
                             "secondary"
                           }>
-                            {route.source === "user_select" ? "用户选择" :
-                             route.source === "fixed_config" ? "可配置" :
-                             "专用模型"}
+                            {sourceLabel}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {route.editable && route.config_key ? (
+                          {canSelectModel && route.config_key ? (
                             <Select
                               value={editingRoutes[route.config_key] ?? route.current_model}
                               onValueChange={(value) => {
                                 setEditingRoutes(prev => ({
                                   ...prev,
-                                  [route.config_key!]: value
+                                  [route.config_key]: value
                                 }));
                               }}
                             >
@@ -511,13 +519,11 @@ export function LLMAdminPanel() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {models
-                                  .filter(m => m.is_active && m.model_type === "chat")
-                                  .map(m => (
-                                    <SelectItem key={m.model_code} value={m.model_code}>
-                                      {m.model_name || m.model_code}
-                                    </SelectItem>
-                                  ))}
+                                {routeModels.map((m) => (
+                                  <SelectItem key={m.model_code} value={m.model_code}>
+                                    {m.model_name || m.model_code}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           ) : (
