@@ -176,9 +176,9 @@
 
 ### 10.1 WS-G1 结果
 
-- `docs_guard`：待执行
-- 路径抽检：待执行
-- 责任归因：待执行
+- `docs_guard`：通过（2026-02-14，`python3 scripts/docs_guard.py --strict` -> `errors=0`，`warnings=0`，`summary_coverage=104/104`）
+- 路径抽检：通过（`app/ai/workflow/data_graph.py` 命中 2 处；`示例占位` 命中 2 处）
+- 责任归因：完成（DOC-GATE-001/003/004 -> WS-04；DOC-GATE-002 -> WS-03）
 
 ### 10.2 WS-G2 预期动作
 
@@ -190,6 +190,6 @@
 
 ## 11. Gate 收口结果
 
-1. `WS-G1` 已执行：否
+1. `WS-G1` 已执行：是（2026-02-14）
 2. `WS-G2` 已执行：否
-3. Gate 结论：待执行
+3. Gate 结论：G1 已通过，待 `WS-G2` 完成终稿门禁后收口。

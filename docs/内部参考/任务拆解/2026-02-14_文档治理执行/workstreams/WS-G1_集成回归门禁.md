@@ -70,10 +70,10 @@
 
 | TC-ID | 门禁命令/检查项 | 自动化脚本或 nodeid | 本次结果 | 责任 WS | 豁免/缺陷单 |
 |---|---|---|---|---|---|
-| DOC-GATE-001 | docs_guard 严格门禁 | `python3 scripts/docs_guard.py --strict` | 待执行 | WS-04 | |
-| DOC-GATE-002 | 多智能体路径引用抽检 | `rg -n 'app/ai/workflow/data_graph.py' .../多智能体工作流.md` | 待执行 | WS-03 | |
-| DOC-GATE-003 | 模板占位标记抽检 | `rg -n '示例占位' .../开发工作流.md` | 待执行 | WS-04 | |
-| DOC-GATE-004 | 迭代需求索引完整性 | `docs/SUMMARY.md` 人工审阅 | 待执行 | WS-04 | |
+| DOC-GATE-001 | docs_guard 严格门禁 | `python3 scripts/docs_guard.py --strict` | 通过（`errors=0`，`warnings=0`，`summary_coverage=104/104`） | WS-04 | - |
+| DOC-GATE-002 | 多智能体路径引用抽检 | `rg -n 'app/ai/workflow/data_graph.py' .../多智能体工作流.md` | 通过（命中 2 处：line 54、142） | WS-03 | - |
+| DOC-GATE-003 | 模板占位标记抽检 | `rg -n '示例占位' .../开发工作流.md` | 通过（命中 2 处：line 156、226） | WS-04 | - |
+| DOC-GATE-004 | 迭代需求索引完整性 | `docs/SUMMARY.md` 人工审阅 | 通过（迭代需求与本拆解索引均可达，`summary_broken_targets=0`） | WS-04 | - |
 
 ### 5.2 浏览器测试（触发式）
 
@@ -95,10 +95,16 @@
 ## 7. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
-- 是否修改了白名单外文件（是/否）：
+  - `docs/内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md`
+  - `docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md`
+- 是否修改了白名单外文件（是/否）：否
 - 测试命令与结果：
-- 已知风险点：
-- 回滚建议：
+  - `python3 scripts/docs_guard.py --strict` -> 通过（`errors=0`，`warnings=0`，`summary_coverage=104/104`）
+  - `rg -n 'app/ai/workflow/data_graph.py' docs/开发文档/代码解读/多智能体工作流.md` -> 通过（命中 2 处）
+  - `rg -n '示例占位' docs/开发文档/工作流/开发工作流.md` -> 通过（命中 2 处）
+  - `rg -n '内部参考/迭代需求|2026-02-14_文档治理执行' docs/SUMMARY.md` -> 通过（索引入口存在）
+- 已知风险点：当前抽检覆盖关键路径与占位标记，未扩展到全文语义一致性复核。
+- 回滚建议：回滚 `parallel_plan.md` 与本文件中的 Gate 回填区块后重跑门禁。
 
 ---
 
