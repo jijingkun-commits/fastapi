@@ -1,0 +1,196 @@
+{
+  "task_key": "PP-20260214-DOCS-GOVERNANCE",
+  "task_split_dir": "2026-02-14_文档治理执行",
+  "plan_title": "文档治理执行",
+  "generated_at": "2026-02-14",
+  "source_files": {
+    "parallel_plan": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-00_G0_治理协议冻结.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-01_P0准确性修正.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-02_命令权威源与百科校准.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-03_架构设计与代码解读边界收敛.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-04_迭代需求命名规范与索引治理.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md",
+      "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md"
+    ]
+  },
+  "cards": [
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-01",
+      "title": "WS-01 P0 准确性修正 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "parallel",
+        "lane-docs-accuracy"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/README.md",
+        "docs/开发文档/架构设计/待办Agent设计.md",
+        "docs/开发文档/架构设计/数据库设计.md",
+        "docs/开发文档/测试管理/测试指南与环境配置.md"
+      ],
+      "dod": [
+        "P0 失准项在本 WS 白名单范围内修复完成"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict",
+        "rg -n 'app/models/todo.py|app/models/llm_provider.py|app/models/llm_model.py' docs/开发文档/架构设计/数据库设计.md"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-01_P0准确性修正.md"
+    },
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-02",
+      "title": "WS-02 命令权威源与百科校准 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "parallel",
+        "lane-docs-workflow"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/开发文档/技巧与速查/vibe-coding开发技巧.md",
+        "docs/开发文档/技巧与速查/AI协作速查表.md",
+        "docs/开发文档/工作流/VibeKanban多Worktree本机开发测试.md"
+      ],
+      "dod": [
+        "命令口径与权威源一致且百科定位保留"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict",
+        "rg -n '/vkplan|/vktodo|/vkkb|/imp-ws' docs/开发文档/技巧与速查/AI协作速查表.md"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-02_命令权威源与百科校准.md"
+    },
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-03",
+      "title": "WS-03 架构设计与代码解读边界收敛 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "parallel",
+        "lane-docs-boundary"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/开发文档/代码解读/多智能体工作流.md",
+        "docs/开发文档/代码解读/多智能体系统详解.md",
+        "docs/开发文档/架构设计/AI模块设计.md"
+      ],
+      "dod": [
+        "权威源与辅助源边界清晰且路径引用正确"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict",
+        "rg -n 'app/ai/workflow/data_graph.py' docs/开发文档/代码解读/多智能体工作流.md"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-03_架构设计与代码解读边界收敛.md"
+    },
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-04",
+      "title": "WS-04 迭代需求命名规范与索引治理 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "parallel",
+        "lane-docs-index"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [
+        "WS-02",
+        "WS-03"
+      ],
+      "file_scope": [
+        "docs/开发文档/工作流/开发工作流.md",
+        "docs/内部参考/迭代需求/README.md",
+        "docs/SUMMARY.md",
+        "docs/文档梳理与重构方案_2026-02-13.md"
+      ],
+      "dod": [
+        "命名规范与索引规则落地且门禁通过"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict",
+        "rg -n '示例占位' docs/开发文档/工作流/开发工作流.md"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-04_迭代需求命名规范与索引治理.md"
+    },
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-G1",
+      "title": "WS-G1 集成回归门禁 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "gate",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "WS-01",
+        "WS-02",
+        "WS-03",
+        "WS-04"
+      ],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md"
+      ],
+      "dod": [
+        "G1 门禁执行并完成责任 WS 归因"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict",
+        "rg -n 'app/ai/workflow/data_graph.py' docs/开发文档/代码解读/多智能体工作流.md",
+        "rg -n '示例占位' docs/开发文档/工作流/开发工作流.md"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md"
+    },
+    {
+      "id": "PP-20260214-DOCS-GOVERNANCE::WS-G2",
+      "title": "WS-G2 文档终稿门禁 [PP-20260214-DOCS-GOVERNANCE]",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "PP-20260214-DOCS-GOVERNANCE",
+        "2026-02-14_文档治理执行",
+        "gate",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "WS-G1"
+      ],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/文档梳理与重构方案_2026-02-13.md",
+        "docs/SUMMARY.md",
+        "docs/内部参考/迭代需求/docs_governance_requirements.md",
+        "docs/内部参考/迭代需求/docs_governance_implementation_plan.md",
+        "docs/内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md"
+      ],
+      "dod": [
+        "文档终稿门禁通过并完成收口回填"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md"
+    }
+  ]
+}
