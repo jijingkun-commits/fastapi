@@ -1268,9 +1268,10 @@ flowchart TB
     end
     
     subgraph Enforcement [权限执行]
-        SchemaFilter[Schema过滤\n已实现]
+        SchemaFilter[Schema过滤\n系统黑名单+分析白名单]
         SQLRewriter[SQL重写器\n注入WHERE条件]
         ColumnMasker[字段脱敏\n敏感列处理]
+        PolicyDecision[统一策略决策\ndeny_overrides_allow]
     end
     
     User --> Role
@@ -1285,6 +1286,9 @@ flowchart TB
     TableLevel --> SchemaFilter
     RowLevel --> SQLRewriter
     ColumnLevel --> ColumnMasker
+    SchemaFilter --> PolicyDecision
+    SQLRewriter --> PolicyDecision
+    ColumnMasker --> PolicyDecision
 ```
 
 **三层权限模型**：
@@ -1325,23 +1329,33 @@ def rewrite_sql_with_permissions(
     pass
 ```
 
-**集成到 Data Graph**（`execute_sql` 节点）：
+**统一策略决策器**（新文件 `app/ai/utils/sql_policy_decision.py`）：
 
 ```python
-def execute_sql(state: DataAgentState) -> Dict:
-    # 1. 获取用户权限上下文
-    user_context = get_user_permission_context(state["user_id"])
-    
-    # 2. SQL 重写（注入权限过滤）
-    sql = state["generated_sql"]
-    rewritten_sql, is_allowed, error = rewrite_sql_with_permissions(sql, user_context)
-    
-    if not is_allowed:
-        return {"last_error": error}
-    
-    # 3. 执行重写后的 SQL
-    result = execute_query(rewritten_sql)
-    return {"sql_result": result}
+def evaluate_sql_policy(sql: str, user_id: Optional[int], *, auto_limit: bool = True) -> SqlPolicyDecision:
+    """
+    1. SQL 安全检查（只读、危险关键词、系统 Schema 黑名单、分析 Schema 白名单）
+    2. 用户权限重写（表级拒绝 + RLS + 列脱敏）
+    3. 决策合并：deny_overrides_allow
+    """
+    pass
+```
+
+**集成到 Data Graph**（`sql_safety_check` 节点）：
+
+```python
+def sql_safety_check(state: DataAgentState) -> Dict:
+    sql = state.get("pending_sql") or state.get("generated_sql")
+    decision = evaluate_sql_policy(sql, state.get("user_id"), auto_limit=True)
+
+    if not decision.is_allowed:
+        return {"clarification_needed": f"查询被拒绝：{decision.reason}"}
+
+    return {
+        "generated_sql": decision.rewritten_sql,
+        "pending_sql": decision.rewritten_sql,
+        "sql_approved": True,
+    }
 ```
 
 **与现有模块集成**：
@@ -1358,17 +1372,19 @@ flowchart LR
         PermCtx[permission_context.py\n权限上下文]
         SqlRewriter[sql_rewriter.py\nSQL重写]
         PermService[permission_service.py\n权限服务]
+        PolicyDecision[sql_policy_decision.py\n统一策略决策]
     end
-    
-    SqlSafety --> PermCtx
+
+    SqlSafety --> PolicyDecision
     SchemaRouter --> PermCtx
     PermCtx --> SqlRewriter
-    SqlRewriter --> VannaClient
+    SqlRewriter --> PolicyDecision
+    PolicyDecision --> VannaClient
 ```
 
 关键集成点：
-- **sql_safety.py**：扩展 `SENSITIVE_TABLES` 为动态加载（基于用户角色）
-- **schema_router.py**：扩展 `ANALYTICS_SCHEMAS` 为用户级别白名单
+- **sql_safety.py**：Schema 判定拆分为 `askdata.analytics_schema_allowlist` + `askdata.system_schema_blacklist`
+- **sql_policy_decision.py**：统一聚合安全检查与权限重写，强制 `deny_overrides_allow`
 - **vanna_client.py**：`get_related_ddl()` 按用户权限过滤可见表
 
 > 权限配置表结构详见 [数据库设计 - 问数权限控制表](./数据库设计.md#问数权限控制表)

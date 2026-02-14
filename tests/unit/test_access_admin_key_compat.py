@@ -88,33 +88,52 @@ def test_get_config_value_reads_legacy_when_primary_missing():
 
 
 def test_get_config_value_schema_reads_askdata_legacy_key_first():
-    """schema 配置主键缺失时应先兼容 askdata.schema_whitelist。"""
+    """分析 schema 白名单主键缺失时应先兼容 askdata.schema_whitelist。"""
 
-    legacy_config = SimpleNamespace(config_value="pg_catalog,information_schema")
+    legacy_config = SimpleNamespace(config_value="fdmdata,sdmdata")
     db, filter_obj = _build_db_mock([None, legacy_config])
 
-    value = access_admin_api._get_config_value(db, access_admin_api.CONFIG_KEY_SCHEMA_WHITELIST)
+    value = access_admin_api._get_config_value(db, access_admin_api.CONFIG_KEY_SCHEMA_ALLOWLIST)
 
-    assert value == "pg_catalog,information_schema"
+    assert value == "fdmdata,sdmdata"
     assert filter_obj.first.call_count == 2
 
 
 @patch("app.repositories.config_repo.get_config_value")
-def test_load_schema_blacklist_fallback_to_askdata_schema_whitelist(
+def test_load_system_schema_blacklist_fallback_to_legacy_key(
     mock_get_config_value, monkeypatch
 ):
-    """问数访问控制应兼容 askdata.schema_whitelist 历史键。"""
+    """系统 schema 黑名单主键缺失时应兼容 askdata.schema_blacklist。"""
 
     monkeypatch.setattr(data_access_control, "get_db_context", _fake_db_context)
     mock_get_config_value.side_effect = [None, "pg_catalog,information_schema"]
 
     result = data_access_control._load_config_from_db(
-        data_access_control.ASKDATA_SCHEMA_BLACKLIST_KEY,
+        data_access_control.ASKDATA_SYSTEM_SCHEMA_BLACKLIST_KEY,
         {"default_schema"},
-        aliases=data_access_control.ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS,
+        aliases=data_access_control.ASKDATA_SYSTEM_SCHEMA_BLACKLIST_LEGACY_KEYS,
     )
 
     assert result == {"pg_catalog", "information_schema"}
+    assert mock_get_config_value.call_count == 2
+
+
+@patch("app.repositories.config_repo.get_config_value")
+def test_load_analytics_schema_allowlist_fallback_to_legacy_whitelist(
+    mock_get_config_value, monkeypatch
+):
+    """分析 schema 白名单主键缺失时应兼容 askdata.schema_whitelist。"""
+
+    monkeypatch.setattr(data_access_control, "get_db_context", _fake_db_context)
+    mock_get_config_value.side_effect = [None, "fdmdata,sdmdata"]
+
+    result = data_access_control._load_config_from_db(
+        data_access_control.ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_KEY,
+        {"default_schema"},
+        aliases=data_access_control.ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_LEGACY_KEYS,
+    )
+
+    assert result == {"fdmdata", "sdmdata"}
     assert mock_get_config_value.call_count == 2
 
 
@@ -161,7 +180,7 @@ def test_set_config_value_updates_existing_record_without_create():
 
 
 def test_schema_whitelist_endpoint_maps_to_schema_blacklist_key():
-    """历史 schema-whitelist 接口应写入 askdata.schema_blacklist。"""
+    """历史 schema-whitelist 接口应写入分析 schema 白名单主键。"""
 
     request = access_admin_api.UpdateSchemaWhitelistRequest(
         schemas=["pg_catalog", "information_schema"]
@@ -173,6 +192,24 @@ def test_schema_whitelist_endpoint_maps_to_schema_blacklist_key():
 
     mock_set_config.assert_called_once()
     _, key, stored_value, _ = mock_set_config.call_args.args
-    assert key == access_admin_api.CONFIG_KEY_SCHEMA_WHITELIST
+    assert key == access_admin_api.CONFIG_KEY_SCHEMA_ALLOWLIST
+    assert stored_value == "information_schema,pg_catalog"
+    assert resp["schemas"] == ["information_schema", "pg_catalog"]
+
+
+def test_system_schema_blacklist_endpoint_maps_to_system_blacklist_key():
+    """系统 schema 黑名单接口应写入 askdata.system_schema_blacklist。"""
+
+    request = access_admin_api.UpdateSchemaWhitelistRequest(
+        schemas=["pg_catalog", "information_schema"]
+    )
+    db = MagicMock()
+
+    with patch("app.api.v1.endpoints.access_admin_api._set_config_value") as mock_set_config:
+        resp = access_admin_api.update_system_schema_blacklist(request, db)
+
+    mock_set_config.assert_called_once()
+    _, key, stored_value, _ = mock_set_config.call_args.args
+    assert key == access_admin_api.CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST
     assert stored_value == "information_schema,pg_catalog"
     assert resp["schemas"] == ["information_schema", "pg_catalog"]

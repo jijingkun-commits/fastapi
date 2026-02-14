@@ -138,11 +138,18 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         default="t_user,t_chat_message,t_chat_feedback,t_chat_asset,t_todo,t_llm_model,t_agent_skills,t_system_config,t_metric_definitions",
         aliases=("data_access.table_blacklist",),
     ),
-    "askdata.schema_blacklist": ConfigSpec(
-        key="askdata.schema_blacklist",
+    "askdata.analytics_schema_allowlist": ConfigSpec(
+        key="askdata.analytics_schema_allowlist",
+        source="db-dynamic",
+        value_type="string",
+        default="fdmdata,sdmdata,public",
+        aliases=("askdata.schema_whitelist", "data_access.schema_whitelist"),
+    ),
+    "askdata.system_schema_blacklist": ConfigSpec(
+        key="askdata.system_schema_blacklist",
         source="db-dynamic",
         value_type="string",
         default="pg_catalog,information_schema",
-        aliases=("askdata.schema_whitelist", "data_access.schema_whitelist"),
+        aliases=("askdata.schema_blacklist",),
     ),
 }

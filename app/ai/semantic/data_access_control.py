@@ -9,10 +9,9 @@
 import logging
 import time
 from typing import List, Optional, Dict, Set, Tuple
-from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.db.session import get_db_context
+from app.core.config import ANALYTICS_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +85,17 @@ ASKDATA_TABLE_WHITELIST_KEY = "askdata.table_whitelist"
 ASKDATA_TABLE_WHITELIST_LEGACY_KEY = "data_access.table_whitelist"
 ASKDATA_TABLE_BLACKLIST_KEY = "askdata.table_blacklist"
 ASKDATA_TABLE_BLACKLIST_LEGACY_KEY = "data_access.table_blacklist"
-ASKDATA_SCHEMA_BLACKLIST_KEY = "askdata.schema_blacklist"
-ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS = (
+ASKDATA_SYSTEM_SCHEMA_BLACKLIST_KEY = "askdata.system_schema_blacklist"
+ASKDATA_SYSTEM_SCHEMA_BLACKLIST_LEGACY_KEYS = ("askdata.schema_blacklist",)
+ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_KEY = "askdata.analytics_schema_allowlist"
+ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_LEGACY_KEYS = (
     "askdata.schema_whitelist",
     "data_access.schema_whitelist",
 )
+
+# 向后兼容常量别名（仅保留名称，不再混用白名单语义）
+ASKDATA_SCHEMA_BLACKLIST_KEY = ASKDATA_SYSTEM_SCHEMA_BLACKLIST_KEY
+ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS = ASKDATA_SYSTEM_SCHEMA_BLACKLIST_LEGACY_KEYS
 
 
 def _load_config_from_db(config_key: str, default: Set[str], aliases: Tuple[str, ...] = ()) -> Set[str]:
@@ -122,14 +127,38 @@ def _load_config_from_db(config_key: str, default: Set[str], aliases: Tuple[str,
     return default_lower
 
 
-def get_schema_blacklist() -> Set[str]:
-    """获取 Schema 黑名单（主键 askdata.*，兼容 data_access.*）。"""
+def get_system_schema_blacklist() -> Set[str]:
+    """获取系统 Schema 黑名单（主键 askdata.system_schema_blacklist）。"""
 
     return _load_config_from_db(
-        ASKDATA_SCHEMA_BLACKLIST_KEY,
+        ASKDATA_SYSTEM_SCHEMA_BLACKLIST_KEY,
         DEFAULT_SCHEMA_BLACKLIST,
-        aliases=ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS,
+        aliases=ASKDATA_SYSTEM_SCHEMA_BLACKLIST_LEGACY_KEYS,
     )
+
+
+def get_analytics_schema_allowlist() -> Set[str]:
+    """获取分析 Schema 白名单（主键 askdata.analytics_schema_allowlist）。"""
+
+    default_allowlist = {
+        str(schema).strip().lower()
+        for schema in ANALYTICS_SCHEMAS
+        if str(schema).strip()
+    }
+    if not default_allowlist:
+        default_allowlist = {"fdmdata", "sdmdata", "public"}
+
+    return _load_config_from_db(
+        ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_KEY,
+        default_allowlist,
+        aliases=ASKDATA_ANALYTICS_SCHEMA_ALLOWLIST_LEGACY_KEYS,
+    )
+
+
+def get_schema_blacklist() -> Set[str]:
+    """兼容函数：返回系统 Schema 黑名单。"""
+
+    return get_system_schema_blacklist()
 
 
 def get_table_blacklist() -> Set[str]:
@@ -185,16 +214,21 @@ class DataAccessControl:
             logger.debug(f"允许访问元数据视图: {table_name}")
             return True
         
-        # 获取最新的黑名单配置
-        schema_blacklist = get_schema_blacklist()
+        # 获取最新的 Schema 策略配置
+        system_schema_blacklist = get_system_schema_blacklist()
+        analytics_schema_allowlist = get_analytics_schema_allowlist()
         table_blacklist = get_table_blacklist()
-        
+
         # 检查是否为系统 schema 的表（如 information_schema.tables）
         if '.' in table_lower:
             schema = table_lower.split('.')[0]
             # 检查 schema 黑名单（禁止访问系统 schema）
-            if schema in schema_blacklist:
+            if schema in system_schema_blacklist:
                 logger.warning(f"表访问被拒绝（系统 Schema 黑名单）: {table_name}")
+                return False
+            # 检查分析 schema 白名单
+            if analytics_schema_allowlist and schema not in analytics_schema_allowlist:
+                logger.warning(f"表访问被拒绝（Schema 不在分析白名单）: {table_name}")
                 return False
             # 提取纯表名用于后续检查
             pure_table = table_lower.split('.')[-1]
@@ -366,6 +400,8 @@ __all__ = [
     "DataAccessControl", 
     "get_access_control", 
     "get_schema_blacklist",
+    "get_system_schema_blacklist",
+    "get_analytics_schema_allowlist",
     "get_table_blacklist",
     "DEFAULT_TABLE_WHITELIST", 
     "DEFAULT_TABLE_BLACKLIST", 

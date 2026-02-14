@@ -85,13 +85,32 @@ def get_sensitive_tables() -> Set[str]:
 def get_system_schemas() -> Set[str]:
     """获取系统 Schema 黑名单（从数据库配置读取）。"""
     try:
-        from app.ai.semantic.data_access_control import get_schema_blacklist
-        db_blacklist = get_schema_blacklist()
+        from app.ai.semantic.data_access_control import get_system_schema_blacklist
+        db_blacklist = get_system_schema_blacklist()
         # 合并默认值和数据库配置
         return DEFAULT_SYSTEM_SCHEMAS | db_blacklist
     except Exception as e:
         logger.warning(f"获取系统 Schema 配置失败，使用默认值: {e}")
         return DEFAULT_SYSTEM_SCHEMAS
+
+
+def get_analytics_schema_allowlist() -> Set[str]:
+    """获取分析 Schema 白名单（环境变量与数据库配置取交集）。"""
+
+    env_allowlist = {s.lower() for s in ANALYTICS_SCHEMAS}
+
+    try:
+        from app.ai.semantic.data_access_control import get_analytics_schema_allowlist as _load_allowlist
+
+        db_allowlist = {s.lower() for s in _load_allowlist()}
+        if not db_allowlist:
+            return env_allowlist
+        if not env_allowlist:
+            return db_allowlist
+        return env_allowlist & db_allowlist
+    except Exception as e:
+        logger.warning(f"获取分析 Schema 白名单失败，使用环境变量配置: {e}")
+        return env_allowlist
 
 # 默认查询结果限制
 DEFAULT_LIMIT = 1000
@@ -207,7 +226,7 @@ def check_sensitive_tables(sql: str) -> Tuple[bool, Optional[str]]:
 def check_schema_whitelist(sql: str) -> Tuple[bool, Optional[str]]:
     """检查 SQL 访问的 Schema 是否在白名单中。
     
-    只允许访问 ANALYTICS_SCHEMAS 中配置的 Schema。
+    仅允许访问分析 Schema 白名单（环境变量与数据库配置交集）。
     系统 Schema 黑名单从数据库配置动态读取。
     特例：允许访问 ALLOWED_METADATA_VIEWS 中的元数据视图。
     
@@ -221,7 +240,7 @@ def check_schema_whitelist(sql: str) -> Tuple[bool, Optional[str]]:
     tables = extract_tables_from_sql(sql)
     
     # 标准化允许的 Schema（小写）
-    allowed_schemas = {s.lower() for s in ANALYTICS_SCHEMAS}
+    allowed_schemas = get_analytics_schema_allowlist()
     # 从数据库获取最新的系统 Schema 黑名单
     system_schemas = get_system_schemas()
     system_schemas_lower = {s.lower() for s in system_schemas}
@@ -348,6 +367,7 @@ __all__ = [
     "sanitize_sql",
     "get_sensitive_tables",
     "get_system_schemas",
+    "get_analytics_schema_allowlist",
     "DANGEROUS_KEYWORDS",
     "DEFAULT_SENSITIVE_TABLES",
     "DEFAULT_SYSTEM_SCHEMAS",

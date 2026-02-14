@@ -2457,34 +2457,43 @@ def _extract_sql_from_response(response: str) -> Optional[str]:
 def sql_safety_check(state: DataAgentState) -> Dict:
     """SQL 安全检查节点。
     
-    使用统一的 SQL 安全检查工具，检查：
+    使用统一策略决策模块，执行：
     1. 是否为只读查询
     2. 是否包含危险操作关键词
     3. 是否访问敏感表
-    4. 是否包含多条语句
-    5. 自动添加 LIMIT 防止超大结果集
+    4. Schema 白名单/黑名单检查
+    5. 用户权限重写（表级、行级、列级）
+    6. 自动添加 LIMIT 防止超大结果集
     """
     logger.info("=== sql_safety_check 节点 ===")
     
-    from app.ai.utils.sql_safety import sanitize_sql
+    from app.ai.utils.sql_policy_decision import evaluate_sql_policy
     
     sql = state.get("pending_sql") or state.get("generated_sql")
     if not sql:
         return {}
     
-    # 使用统一的安全检查和处理
-    processed_sql, is_safe, error = sanitize_sql(sql, auto_limit=True, limit=1000)
-    
-    if not is_safe:
-        logger.warning(f"SQL 安全检查失败: {error}")
+    user_id = state.get("user_id")
+    decision = evaluate_sql_policy(sql, user_id=user_id, auto_limit=True, limit=1000)
+
+    if not decision.is_allowed:
+        logger.warning(
+            "SQL 策略决策拒绝: stage=%s, code=%s, reason=%s",
+            decision.denied_stage,
+            decision.reason_code,
+            decision.reason,
+        )
         return {
-            "clarification_needed": f"查询被拒绝：{error}",
+            "clarification_needed": f"查询被拒绝：{decision.reason}",
+            "last_error": decision.reason,
             "pending_sql": None
         }
-    
-    # 如果 SQL 被修改（添加了 LIMIT），更新状态
+
+    processed_sql = decision.rewritten_sql
+
+    # 如果 SQL 被修改（添加 LIMIT 或权限重写），更新状态
     if processed_sql != sql:
-        logger.info("SQL 已自动添加 LIMIT 1000")
+        logger.info("SQL 已通过策略决策重写: 原始长度=%s, 新长度=%s", len(sql), len(processed_sql))
         return {
             "generated_sql": processed_sql,
             "pending_sql": processed_sql,
@@ -3130,38 +3139,10 @@ def sql_execute(state: DataAgentState) -> Dict:
     sql = state.get("generated_sql")
     iterations = state.get("iterations", 1)
     sql_history = state.get("sql_history", [])
-    user_id = state.get("user_id")
     
     if not sql:
         emit_error(writer, "没有可执行的 SQL", node="sql_execute")
         return {"messages": [create_ai_message("❌ 没有可执行的 SQL")]}
-    
-    # === 权限检查与 SQL 重写 ===
-    if user_id:
-        try:
-            from app.ai.utils.sql_rewriter import check_and_rewrite_sql
-            
-            rewritten_sql, is_allowed, perm_error = check_and_rewrite_sql(sql, user_id)
-            
-            if not is_allowed:
-                logger.warning(f"SQL 权限检查失败: user_id={user_id}, error={perm_error}")
-                emit_error(writer, f"权限不足: {perm_error}", node="sql_execute")
-                return {
-                    "messages": [create_ai_message(f"❌ 权限不足：{perm_error}")],
-                    "last_error": perm_error,
-                }
-            
-            if rewritten_sql != sql:
-                logger.info(f"SQL 已被权限重写: 原始长度={len(sql)}, 重写后={len(rewritten_sql)}")
-                sql = rewritten_sql
-                
-        except Exception as e:
-            logger.error(f"权限检查异常，拒绝执行: {e}", exc_info=True)
-            emit_error(writer, "权限检查失败，请稍后重试", node="sql_execute")
-            return {
-                "messages": [create_ai_message("❌ 权限检查失败，请稍后重试")],
-                "last_error": f"权限检查异常: {str(e)}",
-            }
     
     rewrite_note = None
 

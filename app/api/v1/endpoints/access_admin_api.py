@@ -3,7 +3,8 @@
 提供：
 - 表白名单管理
 - 表黑名单管理
-- Schema 白名单管理
+- 分析 Schema 白名单管理
+- 系统 Schema 黑名单管理
 - SQL 权限测试
 """
 import logging
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.models.system_config import SystemConfig
+from app.core.config import ANALYTICS_SCHEMAS
 from app.ai.semantic.data_access_control import (
     DataAccessControl,
     DEFAULT_TABLE_WHITELIST,
@@ -42,6 +44,12 @@ class TableBlacklistResponse(BaseModel):
 
 class SchemaWhitelistResponse(BaseModel):
     """Schema 白名单响应。"""
+    schemas: List[str]
+
+
+class SystemSchemaBlacklistResponse(BaseModel):
+    """系统 Schema 黑名单响应。"""
+
     schemas: List[str]
 
 
@@ -80,18 +88,24 @@ class AccessConfigResponse(BaseModel):
     whitelist_source: str
     blacklist: List[str]
     schema_whitelist: List[str]
+    system_schema_blacklist: List[str]
 
 
 # ==================== 配置键常量 ====================
 
 CONFIG_KEY_WHITELIST = "askdata.table_whitelist"
 CONFIG_KEY_BLACKLIST = "askdata.table_blacklist"
-CONFIG_KEY_SCHEMA_WHITELIST = "askdata.schema_blacklist"
+CONFIG_KEY_SCHEMA_ALLOWLIST = "askdata.analytics_schema_allowlist"
+CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST = "askdata.system_schema_blacklist"
+
+# 向后兼容常量名
+CONFIG_KEY_SCHEMA_WHITELIST = CONFIG_KEY_SCHEMA_ALLOWLIST
 
 CONFIG_KEY_ALIASES = {
     CONFIG_KEY_WHITELIST: ("data_access.table_whitelist",),
     CONFIG_KEY_BLACKLIST: ("data_access.table_blacklist",),
-    CONFIG_KEY_SCHEMA_WHITELIST: ("askdata.schema_whitelist", "data_access.schema_whitelist"),
+    CONFIG_KEY_SCHEMA_ALLOWLIST: ("askdata.schema_whitelist", "data_access.schema_whitelist"),
+    CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST: ("askdata.schema_blacklist",),
 }
 
 
@@ -159,18 +173,26 @@ def get_access_config(db: Session = Depends(get_db)):
     else:
         blacklist = list(DEFAULT_TABLE_BLACKLIST)
     
-    # Schema 白名单
-    schema_str = _get_config_value(db, CONFIG_KEY_SCHEMA_WHITELIST)
-    if schema_str:
-        schema_whitelist = _parse_list_config(schema_str)
+    # 分析 Schema 白名单
+    schema_allowlist_str = _get_config_value(db, CONFIG_KEY_SCHEMA_ALLOWLIST)
+    if schema_allowlist_str:
+        schema_whitelist = _parse_list_config(schema_allowlist_str)
     else:
-        schema_whitelist = list(DEFAULT_SCHEMA_BLACKLIST)
+        schema_whitelist = list(ANALYTICS_SCHEMAS)
+
+    # 系统 Schema 黑名单
+    system_schema_blacklist_str = _get_config_value(db, CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST)
+    if system_schema_blacklist_str:
+        system_schema_blacklist = _parse_list_config(system_schema_blacklist_str)
+    else:
+        system_schema_blacklist = list(DEFAULT_SCHEMA_BLACKLIST)
     
     return AccessConfigResponse(
         whitelist=sorted(whitelist),
         whitelist_source=whitelist_source,
         blacklist=sorted(blacklist),
-        schema_whitelist=sorted(schema_whitelist)
+        schema_whitelist=sorted(schema_whitelist),
+        system_schema_blacklist=sorted(system_schema_blacklist),
     )
 
 
@@ -269,12 +291,12 @@ def update_table_blacklist(request: UpdateBlacklistRequest, db: Session = Depend
 @router.get("/schema-whitelist", response_model=SchemaWhitelistResponse)
 def get_schema_whitelist(db: Session = Depends(get_db)):
     """获取 Schema 白名单。"""
-    schema_str = _get_config_value(db, CONFIG_KEY_SCHEMA_WHITELIST)
+    schema_str = _get_config_value(db, CONFIG_KEY_SCHEMA_ALLOWLIST)
     
     if schema_str:
         schemas = _parse_list_config(schema_str)
     else:
-        schemas = list(DEFAULT_SCHEMA_BLACKLIST)
+        schemas = list(ANALYTICS_SCHEMAS)
     
     return SchemaWhitelistResponse(schemas=sorted(schemas))
 
@@ -283,7 +305,7 @@ def get_schema_whitelist(db: Session = Depends(get_db)):
 def update_schema_whitelist(request: UpdateSchemaWhitelistRequest, db: Session = Depends(get_db)):
     """更新 Schema 白名单。"""
     value = _serialize_list_config(request.schemas)
-    _set_config_value(db, CONFIG_KEY_SCHEMA_WHITELIST, value, "数据访问控制-Schema白名单")
+    _set_config_value(db, CONFIG_KEY_SCHEMA_ALLOWLIST, value, "数据访问控制-分析Schema白名单")
     
     logger.info(f"Schema 白名单已更新: {request.schemas}")
     
@@ -291,6 +313,44 @@ def update_schema_whitelist(request: UpdateSchemaWhitelistRequest, db: Session =
         "message": "Schema 白名单已更新",
         "schemas": sorted(request.schemas),
         "count": len(request.schemas)
+    }
+
+
+@router.get("/system-schema-blacklist", response_model=SystemSchemaBlacklistResponse)
+def get_system_schema_blacklist(db: Session = Depends(get_db)):
+    """获取系统 Schema 黑名单。"""
+
+    schema_str = _get_config_value(db, CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST)
+
+    if schema_str:
+        schemas = _parse_list_config(schema_str)
+    else:
+        schemas = list(DEFAULT_SCHEMA_BLACKLIST)
+
+    return SystemSchemaBlacklistResponse(schemas=sorted(schemas))
+
+
+@router.put("/system-schema-blacklist")
+def update_system_schema_blacklist(
+    request: UpdateSchemaWhitelistRequest,
+    db: Session = Depends(get_db),
+):
+    """更新系统 Schema 黑名单。"""
+
+    value = _serialize_list_config(request.schemas)
+    _set_config_value(
+        db,
+        CONFIG_KEY_SYSTEM_SCHEMA_BLACKLIST,
+        value,
+        "数据访问控制-系统Schema黑名单",
+    )
+
+    logger.info(f"系统 Schema 黑名单已更新: {request.schemas}")
+
+    return {
+        "message": "系统 Schema 黑名单已更新",
+        "schemas": sorted(request.schemas),
+        "count": len(request.schemas),
     }
 
 
