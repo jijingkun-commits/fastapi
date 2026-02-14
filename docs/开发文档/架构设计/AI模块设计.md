@@ -36,12 +36,12 @@ app/ai/
 │   └── summarize_node.py      # 摘要节点
 ├── tools/
 │   ├── todo_tools.py          # 待办工具集
-│   ├── batch_todo_tools.py    # 批量待办工具
 │   ├── chatTools.py           # MCP 数据库工具
+│   ├── data_query_tools.py    # 问数查询入口工具
 │   ├── file_tools.py          # 文件读取工具
 │   ├── vision_tool.py         # 图片分析工具
 │   ├── ragflow_tool.py        # 知识库检索工具
-│   └── embedding_util.py      # [New] 嵌入向量生成工具
+│   └── ...
 ├── skills/                    # 技能知识库（启动时自动同步到数据库）
 │   ├── knowledge-search/      # 知识库检索
 │   ├── sql-expert/            # SQL 专家
@@ -594,7 +594,7 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 | 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 固定配置 | `model_routing.sql_generation` | qwen-plus |
 | 轻量任务（意图分类） | `intent_classifier.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
 | 轻量任务（评估/提取） | `llm_judge.py`, `parameter_extractor.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
-| Embedding | `embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
+| Embedding | `app/ai/utils/embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
 | Vision | `vision_tool.py` | 数据库 `type=vision` | `t_llm_model` | glm-4v-flash |
 
 #### 按模型类型分类

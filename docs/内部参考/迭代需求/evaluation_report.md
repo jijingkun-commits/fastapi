@@ -5,8 +5,8 @@
 
 ## 当前状态
 - 状态：已更新（2026-02-13）
-- 关联需求：`docs/内部参考/迭代需求/requirements.md`
-- 关联实施方案：`docs/内部参考/迭代需求/implementation_plan.md`
+- 关联计划：`docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md`
+- 关联工作包：`docs/内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-04_可观测与离线评测.md`
 - 关联工作包：`PP-20260213-SKILL-RETRIEVAL-MVP::WS-04`
 
 ## 目标达成度评估

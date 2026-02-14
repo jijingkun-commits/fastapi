@@ -28,12 +28,38 @@ REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
 FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+INLINE_PATH_RE = re.compile(r"`((?:app|web|scripts|install|config|alembic)/[^`\n]+)`")
 
 MAIN_REPORT_RE = re.compile(r"^[^/]+测试报告\.md$")
 ARCHIVE_REPORT_RE = re.compile(r"^[^/]+测试报告_\d{8}_.+\.md$")
 ARCHIVE_REPORT_DASH_RE = re.compile(r"^[^/]+测试报告_\d{4}-\d{2}-\d{2}_.+\.md$")
 COMPAT_SCENE_REPORT_RE = re.compile(r"^测试报告_[^_]+_\d{8}\.md$")
 COMPAT_MODULE_DATED_RE = re.compile(r"^[^/]+测试报告_\d{4}-\d{2}-\d{2}\.md$")
+
+PATH_CHECK_INCLUDE = (
+    DOCS_DIR / "README.md",
+    DOCS_DIR / "API文档",
+    DOCS_DIR / "产品文档",
+    DOCS_DIR / "开发文档",
+)
+
+PATH_CHECK_IGNORE_TARGETS = {
+    "web/node_modules",
+    "web/playwright-report/",
+    "web/test-results/",
+    "web/test-results/results.json",
+    "web/frontend-deploy.tar.gz",
+}
+PATH_CHECK_IGNORE_NORMALIZED = {item.rstrip("/") for item in PATH_CHECK_IGNORE_TARGETS}
+
+PATH_CHECK_PLACEHOLDER_TOKENS = (
+    "...",
+    "xxx_",
+    "MyComponent",
+    "my-new-skill",
+    "<topic>",
+    "<WS-ID>",
+)
 
 
 @dataclass
@@ -247,6 +273,81 @@ def check_blacklist_vars(findings: list[Finding]) -> int:
     return count
 
 
+def iter_path_check_docs() -> Iterable[Path]:
+    for root in PATH_CHECK_INCLUDE:
+        if root.is_file():
+            yield root
+            continue
+        if not root.exists():
+            continue
+        for md_file in sorted(root.rglob("*.md")):
+            if is_archived_doc(md_file):
+                continue
+            yield md_file
+
+
+def should_skip_path_target(target: str) -> bool:
+    if not target:
+        return True
+    if any(token in target for token in ("*", "{", "}", "$", "<", ">")):
+        return True
+    if any(token in target for token in PATH_CHECK_PLACEHOLDER_TOKENS):
+        return True
+    if target in PATH_CHECK_IGNORE_TARGETS:
+        return True
+    if target.rstrip("/") in PATH_CHECK_IGNORE_NORMALIZED:
+        return True
+    return False
+
+
+def normalize_path_target(raw_target: str) -> str:
+    target = raw_target.strip().rstrip(".,;:)")
+    target = target.split("#", 1)[0].strip()
+    if re.search(r":\d+:\d+$", target):
+        target = re.sub(r":\d+:\d+$", "", target)
+    elif re.search(r":\d+$", target):
+        target = re.sub(r":\d+$", "", target)
+    return target
+
+
+def check_inline_path_refs(findings: list[Finding]) -> int:
+    count = 0
+    seen: set[tuple[str, str]] = set()
+
+    for md_file in iter_path_check_docs():
+        text = read_text(md_file)
+        text_wo_fenced = FENCED_CODE_RE.sub("", text)
+
+        for idx, line in enumerate(text_wo_fenced.splitlines(), start=1):
+            for match in INLINE_PATH_RE.finditer(line):
+                raw_target = match.group(1)
+                target = normalize_path_target(raw_target)
+
+                if should_skip_path_target(target):
+                    continue
+
+                target_path = (ROOT / target).resolve()
+                if target_path.exists():
+                    continue
+
+                key = (str(md_file.relative_to(ROOT)), target)
+                if key in seen:
+                    continue
+                seen.add(key)
+                count += 1
+
+                findings.append(
+                    Finding(
+                        category="path_reference_missing",
+                        level="warning",
+                        file=f"{md_file.relative_to(ROOT)}:{idx}",
+                        detail=f"{raw_target} -> {target}",
+                    )
+                )
+
+    return count
+
+
 def summarize(findings: list[Finding], covered: int, total: int, stats: dict[str, int]) -> dict:
     errors = sum(1 for finding in findings if finding.level == "error")
     warnings = sum(1 for finding in findings if finding.level == "warning")
@@ -280,6 +381,7 @@ def print_human_report(report: dict) -> None:
     )
     print(f"report_naming_errors: {stats['report_naming_errors']}")
     print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
+    print(f"path_reference_missing: {stats['path_reference_missing']}")
     print(f"errors: {stats['errors']} | warnings: {stats['warnings']}")
 
     if report["findings"]:
@@ -294,6 +396,11 @@ def print_human_report(report: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="docs 文档治理检查")
     parser.add_argument("--strict", action="store_true", help="发现 error 时返回非零退出码")
+    parser.add_argument(
+        "--check-paths",
+        action="store_true",
+        help="检查核心文档中的内联代码路径是否存在（结果以 warning 输出）",
+    )
     parser.add_argument("--json-out", type=str, default="", help="输出 JSON 报告路径")
     args = parser.parse_args()
 
@@ -304,6 +411,7 @@ def main() -> int:
         "summary_broken_targets": check_summary_targets(findings),
         "report_naming_errors": check_report_naming(findings),
         "blacklist_var_hits": check_blacklist_vars(findings),
+        "path_reference_missing": check_inline_path_refs(findings) if args.check_paths else 0,
     }
     covered, total = check_summary_coverage(findings)
 

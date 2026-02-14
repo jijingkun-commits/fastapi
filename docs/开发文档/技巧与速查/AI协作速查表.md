@@ -40,7 +40,7 @@
 
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
-| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | `requirements.md` + `implementation_plan.md`（`parallel` 模式含 `task_key/card_seed`） | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
+| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | 默认 `requirements.md` + `implementation_plan.md`（或按命名规范落到 `<topic>_requirements.md` + `<topic>_implementation_plan.md`） | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
 | 2. 并行拆解 | `/vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
 | 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
 | 4. 子任务执行 | `/imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
@@ -89,8 +89,8 @@
 
 | 场景 | 必须引用 | 可选引用 |
 |------|---------|---------|
-| 并行规划 | `@docs/内部参考/迭代需求/requirements.md` | `@implementation_plan.md` |
-| 并行拆解 | `@implementation_plan.md` | `@requirements.md` |
+| 并行规划 | `@docs/内部参考/迭代需求/<topic>_requirements.md` | `@<topic>_implementation_plan.md` |
+| 并行拆解 | `@<topic>_implementation_plan.md` | `@<topic>_requirements.md` |
 | 执行 WS | `@workstreams/WS-*.md` | `@parallel_plan.md` |
 | 修 Bug | `@错误日志` + `@疑似代码` | `@需求文档` |
 
