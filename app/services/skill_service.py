@@ -17,7 +17,7 @@ from app.ai.utils.embedding_util import get_embedding
 from app.core.config import SKILL_SIMILARITY_THRESHOLD
 from app.db.session import get_db_context
 from app.models.agent_skill import AgentSkill
-from app.services.system_config_service import SystemConfigService
+from app.services.config_resolver import ConfigResolver
 
 logger = logging.getLogger(__name__)
 
@@ -830,9 +830,9 @@ class SkillService:
         candidates = list(merged.values())
         max_lexical = max((item.get("lexical_score", 0.0) for item in candidates), default=0.0)
 
-        vector_weight = SystemConfigService.get_float("skill.hybrid.vector_weight", 0.65)
-        lexical_weight = SystemConfigService.get_float("skill.hybrid.lexical_weight", 0.25)
-        trigger_weight = SystemConfigService.get_float("skill.hybrid.trigger_weight", 0.10)
+        vector_weight = ConfigResolver.get_float("skill.hybrid.vector_weight", 0.65)
+        lexical_weight = ConfigResolver.get_float("skill.hybrid.lexical_weight", 0.25)
+        trigger_weight = ConfigResolver.get_float("skill.hybrid.trigger_weight", 0.10)
 
         for item in candidates:
             lexical_score = item.get("lexical_score", 0.0)
@@ -1019,17 +1019,17 @@ class SkillService:
             logger.info("技能检索日志: %s", json.dumps(retrieval_log, ensure_ascii=False, sort_keys=True))
             return [], {"reason": "empty_query", "retrieval_log": retrieval_log}
 
-        configured_top_k = SystemConfigService.get_int("skill.top_k", top_k)
+        configured_top_k = ConfigResolver.get_int("skill.top_k", top_k)
         final_top_k = top_k if top_k > 0 else max(1, configured_top_k)
 
         base_threshold = (
             float(threshold)
             if threshold is not None
-            else SystemConfigService.get_float("skill_similarity_threshold", SKILL_SIMILARITY_THRESHOLD)
+            else ConfigResolver.get_float("skill_similarity_threshold", SKILL_SIMILARITY_THRESHOLD)
         )
-        retrieval_mode = SystemConfigService.get_string("skill.retrieval_mode", "hybrid").lower()
-        candidate_multiplier = max(2, SystemConfigService.get_int("skill.hybrid.candidate_multiplier", 3))
-        section_max_count = max(1, SystemConfigService.get_int("skill.section_max_count", 2))
+        retrieval_mode = ConfigResolver.get_string("skill.retrieval_mode", "hybrid").lower()
+        candidate_multiplier = max(2, ConfigResolver.get_int("skill.hybrid.candidate_multiplier", 3))
+        section_max_count = max(1, ConfigResolver.get_int("skill.section_max_count", 2))
 
         vector_candidates: List[Dict[str, Any]] = []
         lexical_candidates: List[Dict[str, Any]] = []
@@ -1079,7 +1079,7 @@ class SkillService:
         )
 
         skills: List[AgentSkill] = []
-        context_max_length = max(800, SystemConfigService.get_int("skill.context_max_length", 2400))
+        context_max_length = max(800, ConfigResolver.get_int("skill.context_max_length", 2400))
 
         for item in selected:
             skill = AgentSkill(
@@ -1340,7 +1340,7 @@ class SkillService:
     ) -> Tuple[str, Dict[str, Any]]:
         """将技能列表格式化为注入上下文，并返回预算使用元信息。"""
 
-        configured_max_length = SystemConfigService.get_int("skill.context_max_length", max_length)
+        configured_max_length = ConfigResolver.get_int("skill.context_max_length", max_length)
         final_limit = min(max_length, configured_max_length) if max_length > 0 else configured_max_length
         if final_limit <= 0:
             final_limit = configured_max_length if configured_max_length > 0 else 2000

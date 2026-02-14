@@ -7,7 +7,7 @@
 - SQL 权限测试
 """
 import logging
-from typing import List, Optional, Set
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -17,8 +17,9 @@ from app.models.system_config import SystemConfig
 from app.ai.semantic.data_access_control import (
     DataAccessControl,
     DEFAULT_TABLE_WHITELIST,
-    TABLE_BLACKLIST,
-    SYSTEM_SCHEMA_WHITELIST,
+    DEFAULT_TABLE_BLACKLIST,
+    DEFAULT_SCHEMA_BLACKLIST,
+    invalidate_config_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,21 +84,33 @@ class AccessConfigResponse(BaseModel):
 
 # ==================== 配置键常量 ====================
 
-CONFIG_KEY_WHITELIST = "data_access.table_whitelist"
-CONFIG_KEY_BLACKLIST = "data_access.table_blacklist"
-CONFIG_KEY_SCHEMA_WHITELIST = "data_access.schema_whitelist"
+CONFIG_KEY_WHITELIST = "askdata.table_whitelist"
+CONFIG_KEY_BLACKLIST = "askdata.table_blacklist"
+CONFIG_KEY_SCHEMA_WHITELIST = "askdata.schema_blacklist"
+
+CONFIG_KEY_ALIASES = {
+    CONFIG_KEY_WHITELIST: ("data_access.table_whitelist",),
+    CONFIG_KEY_BLACKLIST: ("data_access.table_blacklist",),
+    CONFIG_KEY_SCHEMA_WHITELIST: ("askdata.schema_whitelist", "data_access.schema_whitelist"),
+}
 
 
 # ==================== 辅助函数 ====================
 
 def _get_config_value(db: Session, key: str) -> Optional[str]:
-    """从数据库获取配置值。"""
-    config = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
-    return config.config_value if config else None
+    """从数据库获取配置值（主键优先，兼容旧键）。"""
+
+    lookup_keys = (key, *CONFIG_KEY_ALIASES.get(key, ()))
+    for lookup_key in lookup_keys:
+        config = db.query(SystemConfig).filter(SystemConfig.config_key == lookup_key).first()
+        if config is not None:
+            return config.config_value
+    return None
 
 
 def _set_config_value(db: Session, key: str, value: str, description: str = ""):
-    """设置数据库配置值。"""
+    """设置数据库配置值（仅写入主键）。"""
+
     config = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
     if config:
         config.config_value = value
@@ -105,10 +118,12 @@ def _set_config_value(db: Session, key: str, value: str, description: str = ""):
         config = SystemConfig(
             config_key=key,
             config_value=value,
-            description=description
+            description=description,
+            category="askdata",
         )
         db.add(config)
     db.commit()
+    invalidate_config_cache()
 
 
 def _parse_list_config(value: Optional[str]) -> List[str]:
@@ -142,14 +157,14 @@ def get_access_config(db: Session = Depends(get_db)):
     if blacklist_str:
         blacklist = _parse_list_config(blacklist_str)
     else:
-        blacklist = list(TABLE_BLACKLIST)
+        blacklist = list(DEFAULT_TABLE_BLACKLIST)
     
     # Schema 白名单
     schema_str = _get_config_value(db, CONFIG_KEY_SCHEMA_WHITELIST)
     if schema_str:
         schema_whitelist = _parse_list_config(schema_str)
     else:
-        schema_whitelist = list(SYSTEM_SCHEMA_WHITELIST)
+        schema_whitelist = list(DEFAULT_SCHEMA_BLACKLIST)
     
     return AccessConfigResponse(
         whitelist=sorted(whitelist),
@@ -231,7 +246,7 @@ def get_table_blacklist(db: Session = Depends(get_db)):
     if blacklist_str:
         tables = _parse_list_config(blacklist_str)
     else:
-        tables = list(TABLE_BLACKLIST)
+        tables = list(DEFAULT_TABLE_BLACKLIST)
     
     return TableBlacklistResponse(tables=sorted(tables))
 
@@ -259,7 +274,7 @@ def get_schema_whitelist(db: Session = Depends(get_db)):
     if schema_str:
         schemas = _parse_list_config(schema_str)
     else:
-        schemas = list(SYSTEM_SCHEMA_WHITELIST)
+        schemas = list(DEFAULT_SCHEMA_BLACKLIST)
     
     return SchemaWhitelistResponse(schemas=sorted(schemas))
 

@@ -100,6 +100,8 @@ app/ai/
 | `skill.hybrid.lexical_weight` | 0.25 | Hybrid 关键词分权重 |
 | `skill.hybrid.trigger_weight` | 0.10 | trigger phrase 加权 |
 
+> **配置读取约定（2026-02）**：Skill 检索参数统一通过 `app/services/config_resolver.py` 读取，优先使用 `t_system_config`，缺失时按契约回退环境变量/默认值，避免业务代码散读环境变量。
+
 > **调试日志**：检索日志会输出 mode/scope/候选分/淘汰原因，便于排查误召回与漏召回。
 
 ```mermaid

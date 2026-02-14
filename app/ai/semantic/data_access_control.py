@@ -81,52 +81,65 @@ ALLOWED_METADATA_VIEWS: Set[str] = {
 _config_cache: Dict[str, Tuple[Set[str], float]] = {}  # key -> (value_set, timestamp)
 _CACHE_TTL = 300  # 缓存 5 分钟
 
+# 主键与兼容键定义（配置治理收敛）
+ASKDATA_TABLE_WHITELIST_KEY = "askdata.table_whitelist"
+ASKDATA_TABLE_WHITELIST_LEGACY_KEY = "data_access.table_whitelist"
+ASKDATA_TABLE_BLACKLIST_KEY = "askdata.table_blacklist"
+ASKDATA_TABLE_BLACKLIST_LEGACY_KEY = "data_access.table_blacklist"
+ASKDATA_SCHEMA_BLACKLIST_KEY = "askdata.schema_blacklist"
+ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS = (
+    "askdata.schema_whitelist",
+    "data_access.schema_whitelist",
+)
 
-def _load_config_from_db(config_key: str, default: Set[str]) -> Set[str]:
-    """从数据库加载配置，带缓存。
-    
-    Args:
-        config_key: t_system_config 中的配置键
-        default: 默认值
-        
-    Returns:
-        配置值集合
-    """
+
+def _load_config_from_db(config_key: str, default: Set[str], aliases: Tuple[str, ...] = ()) -> Set[str]:
+    """从数据库加载配置，带缓存并兼容旧键。"""
     global _config_cache
-    
-    # 检查缓存
-    if config_key in _config_cache:
-        cached_value, cached_time = _config_cache[config_key]
+
+    cache_key = "|".join((config_key, *aliases))
+    if cache_key in _config_cache:
+        cached_value, cached_time = _config_cache[cache_key]
         if time.time() - cached_time < _CACHE_TTL:
             return cached_value
-    
-    # 从数据库加载
+
     try:
         from app.repositories import config_repo
+
         with get_db_context() as db:
-            value = config_repo.get_config_value(db, config_key)
-            if value:
-                result = {s.strip().lower() for s in value.split(",") if s.strip()}
-                _config_cache[config_key] = (result, time.time())
-                logger.debug(f"从数据库加载配置 {config_key}: {result}")
-                return result
+            for lookup_key in (config_key, *aliases):
+                value = config_repo.get_config_value(db, lookup_key)
+                if value:
+                    result = {s.strip().lower() for s in value.split(",") if s.strip()}
+                    _config_cache[cache_key] = (result, time.time())
+                    logger.debug("从数据库加载配置 %s (lookup=%s): %s", config_key, lookup_key, result)
+                    return result
     except Exception as e:
         logger.warning(f"加载配置 {config_key} 失败，使用默认值: {e}")
-    
-    # 返回默认值并缓存（统一转小写）
+
     default_lower = {s.lower() for s in default}
-    _config_cache[config_key] = (default_lower, time.time())
+    _config_cache[cache_key] = (default_lower, time.time())
     return default_lower
 
 
 def get_schema_blacklist() -> Set[str]:
-    """获取 Schema 黑名单（从数据库配置读取）。"""
-    return _load_config_from_db("askdata.schema_blacklist", DEFAULT_SCHEMA_BLACKLIST)
+    """获取 Schema 黑名单（主键 askdata.*，兼容 data_access.*）。"""
+
+    return _load_config_from_db(
+        ASKDATA_SCHEMA_BLACKLIST_KEY,
+        DEFAULT_SCHEMA_BLACKLIST,
+        aliases=ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS,
+    )
 
 
 def get_table_blacklist() -> Set[str]:
-    """获取表黑名单（从数据库配置读取）。"""
-    return _load_config_from_db("askdata.table_blacklist", DEFAULT_TABLE_BLACKLIST)
+    """获取表黑名单（主键 askdata.*，兼容 data_access.*）。"""
+
+    return _load_config_from_db(
+        ASKDATA_TABLE_BLACKLIST_KEY,
+        DEFAULT_TABLE_BLACKLIST,
+        aliases=(ASKDATA_TABLE_BLACKLIST_LEGACY_KEY,),
+    )
 
 
 class DataAccessControl:
@@ -148,27 +161,13 @@ class DataAccessControl:
         self._whitelist = self._load_whitelist()
     
     def _load_whitelist(self) -> Set[str]:
-        """从数据库加载表白名单。
-        
-        优先从 t_system_config 读取，如果没有则使用默认值。
-        """
-        try:
-            from app.models.system_config import SystemConfig
-            
-            with get_db_context() as db:
-                config = db.query(SystemConfig).filter(
-                    SystemConfig.config_key == "data_access.table_whitelist"
-                ).first()
-                
-                if config and config.config_value:
-                    tables = [t.strip() for t in config.config_value.split(",") if t.strip()]
-                    if tables:
-                        logger.debug(f"从数据库加载表白名单: {tables}")
-                        return set(tables)
-        except Exception as e:
-            logger.warning(f"加载表白名单失败，使用默认值: {e}")
-        
-        return DEFAULT_TABLE_WHITELIST.copy()
+        """从数据库加载表白名单（主键 askdata.*，兼容 data_access.*）。"""
+
+        return _load_config_from_db(
+            ASKDATA_TABLE_WHITELIST_KEY,
+            DEFAULT_TABLE_WHITELIST,
+            aliases=(ASKDATA_TABLE_WHITELIST_LEGACY_KEY,),
+        )
     
     def check_table_access(self, table_name: str) -> bool:
         """检查表访问权限。
@@ -339,6 +338,12 @@ class DataAccessControl:
             logger.error(f"查询日志记录失败: {e}", exc_info=True)
 
 
+def invalidate_config_cache() -> None:
+    """清理访问控制配置缓存。"""
+
+    _config_cache.clear()
+
+
 # 全局访问控制实例工厂
 def get_access_control(user_id: Optional[int] = None) -> DataAccessControl:
     """获取数据访问控制实例。
@@ -368,4 +373,5 @@ __all__ = [
     "ALLOWED_METADATA_VIEWS",
     "TABLE_BLACKLIST",
     "SYSTEM_SCHEMA_WHITELIST",
+    "invalidate_config_cache",
 ]

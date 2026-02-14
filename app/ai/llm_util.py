@@ -8,6 +8,7 @@ import logging
 from langchain.chat_models import init_chat_model
 
 from app.ai import config as ai_config
+from app.services.config_resolver import ConfigResolver
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,7 @@ PROXY_EXPERIMENT_PROVIDERS_KEY = "feature.proxy_experiment_providers"
 def _is_proxy_experiment_master_enabled() -> bool:
     """读取中转实验统一总开关（数据库优先，环境变量兜底）。"""
     try:
-        from app.services.system_config_service import SystemConfigService
-
-        return SystemConfigService.get_bool(
+        return ConfigResolver.get_bool(
             PROXY_EXPERIMENT_SWITCH_KEY,
             ai_config.ENABLE_PROXY_EXPERIMENT,
         )
@@ -34,9 +33,7 @@ def _get_proxy_experiment_provider_whitelist() -> set[str]:
     """读取中转实验 provider 白名单（数据库优先，环境变量兜底）。"""
     env_fallback = set(ai_config.PROXY_EXPERIMENT_PROVIDERS)
     try:
-        from app.services.system_config_service import SystemConfigService
-
-        raw_codes = SystemConfigService.get(PROXY_EXPERIMENT_PROVIDERS_KEY, None)
+        raw_codes = ConfigResolver.get(PROXY_EXPERIMENT_PROVIDERS_KEY, None)
         if raw_codes is None:
             return env_fallback
 

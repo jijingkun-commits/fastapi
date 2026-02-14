@@ -195,17 +195,18 @@ def get_scene_routing(scene: str) -> tuple[str, str]:
 
 def get_routing_model(config_key: str, env_fallback: str) -> str:
     """获取模型路由配置（优先 t_system_config，回退环境变量）。
-    
+
     Args:
         config_key: t_system_config 中的配置键
         env_fallback: 环境变量回退值
-        
+
     Returns:
         模型代码
     """
-    from app.services.system_config_service import SystemConfigService
-    val = SystemConfigService.get_string(config_key, "")
-    return val if val else env_fallback
+    from app.services.config_resolver import ConfigResolver
+
+    value = ConfigResolver.get_string(config_key, env_fallback)
+    return value if value else env_fallback
 
 # MCP Chart
 MCP_CHART_SERVER_URL = os.getenv("MCP_CHART_SERVER_URL", "http://127.0.0.1:1122/sse")

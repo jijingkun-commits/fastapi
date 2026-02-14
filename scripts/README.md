@@ -35,6 +35,7 @@ scripts/                    # 运维和数据脚本
 ├── migrate_user_management.py  # 用户管理模块迁移
 ├── migrate_todo_tables.py # 待办表迁移
 ├── migrate_vector_dim.py  # 向量维度迁移
+├── migrate_access_admin_keys.py # askdata/data_access 历史键迁移
 │
 ├── # === 数据维护 ===
 ├── cleanup_chat_db.py     # 清理聊天历史
@@ -48,6 +49,7 @@ scripts/                    # 运维和数据脚本
 ├── validate_metric_coverage.py  # 验证指标覆盖率
 ├── skill_offline_evaluation.py  # ★ Skill 检索离线评测与基线对比
 ├── inspect_data_files.py  # 检查数据文件
+├── config_doctor.py       # 配置契约健康检查（DB/ENV 差异）
 │
 ├── # === 工具脚本 ===
 ├── extract_metric_sql.py  # 提取指标 SQL
@@ -85,9 +87,13 @@ python scripts/sync_database.py
 # 或手动执行特定迁移
 python scripts/migrate_user_management.py
 python scripts/migrate_todo_tables.py
+python scripts/migrate_access_admin_keys.py --dry-run
+python scripts/migrate_access_admin_keys.py
 ```
 
 > **说明**：`sync_database.py` 会自动创建缺失的表、列和索引，无需手动写 SQL。索引定义在模型的 `__table_args__` 中。
+>
+> **askdata 键迁移**：`migrate_access_admin_keys.py` 仅连接 `DATABASE_URL`（chat_db），用于一次性合并历史 `data_access.*` 配置键。
 
 ### 部署初始化
 
@@ -120,6 +126,8 @@ python scripts/skill_offline_evaluation.py
 # 检查数据状态
 python scripts/check_counts.py
 python scripts/validate_metric_coverage.py
+python scripts/config_doctor.py
+python scripts/config_doctor.py --strict
 ```
 
 ### Vibe Kanban 多 worktree（本机命令）
