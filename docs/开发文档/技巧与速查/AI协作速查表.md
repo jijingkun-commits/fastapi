@@ -4,6 +4,8 @@
 
 本文定位：开发人员一页速查卡。若需命令/技能/规则细节，请配合阅读 `vibe-coding开发技巧.md` 与 `.cursor/commands/*.md`。
 
+> 命令权威源：`.cursor/commands/*.md`。当速查表、工作流文档与命令文档冲突时，一律以命令文档为准。
+
 ---
 
 ## 1. 核心工作流
@@ -17,7 +19,7 @@
 ### 1.2 并行开发（多 AI / 多 worktree）
 
 ```text
-想法 -> /clarify -> /plan -> /vkplan
+想法 -> /clarify -> /plan parallel（或 /plan core） -> /vkplan
      -> /vkkb <任务拆解目录>（或 /vktodo <任务拆解目录>）
      -> /imp-ws @workstreams/WS-01...WS-N（并行层）
      -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
@@ -38,7 +40,7 @@
 
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
-| 1. 需求与方案 | `/plan` | `requirements.md` + `implementation_plan.md`（含 `task_key/card_seed`） | `task_key` 全局唯一，`card_seed` 字段完整 |
+| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | `requirements.md` + `implementation_plan.md`（`parallel` 模式含 `task_key/card_seed`） | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
 | 2. 并行拆解 | `/vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
 | 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
 | 4. 子任务执行 | `/imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
@@ -52,7 +54,7 @@
 |---|---|---|
 | 快速澄清需求 | `/clarify` | 只问答，不落文档 |
 | 规划（不拆卡） | `/plan` 或 `/plan core` | 只产出需求与技术方案 |
-| 规划 + 并行拆解（推荐） | `/plan -> /vkplan` | 含 G0 冻结与落卡前产物 |
+| 规划 + 并行拆解（推荐） | `/plan parallel -> /vkplan`（或 `/plan core -> /vkplan`） | 含 G0 冻结与落卡前产物 |
 | 基线同步（调试） | `/vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
 | 看板一体落地（推荐） | `/vkkb <任务拆解目录>` | 自动补导出并落卡 |
 | 看板落卡（兼容） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
@@ -105,7 +107,7 @@
 
 ## 6.1 `/vktodo` 最简用法（新增）
 
-1. 先执行 `/plan -> /vkplan`，产出 `vk_cards.json`。
+1. 推荐执行 `/plan parallel -> /vkplan`（或 `/plan core -> /vkplan`），产出 `vk_cards.json`。
 2. 建卡可直接用路径直传：
 
 ```text

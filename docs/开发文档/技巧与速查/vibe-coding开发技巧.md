@@ -4,6 +4,15 @@
 
 **本文定位**：完整手册，详解 Skills、Commands、Rules 的原理、用法和项目配置。如果只需快速查阅命令列表，请看 [AI 协作速查表](AI协作速查表.md)。
 
+## 0. 命令权威源与统计口径（2026-02-14 校准）
+
+为保持“全量百科”定位且避免命令口径漂移，本文固定采用以下规则：
+
+1. 命令细节权威源：`.cursor/commands/*.md`（对应 `authority_rule.commands_detail`）。
+2. 本文职责：保留命令百科、场景建议与链路示例，不替代权威命令文档。
+3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-02-14`，当前共 `26` 个命令文件。
+4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
+
 ## 1. Cursor Skills 使用指南
 
 ### 1.1 已安装的 Skills
@@ -423,6 +432,25 @@ description: 命令的简短描述
 | `/api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/api-docs @app/api/v1/endpoints/` |
 | `/doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/doc-check`（建议在 git commit 前执行） |
 
+### 7.7 并行与看板协作
+
+用于多 AI / 多 worktree 并行开发，核心链路为 `/plan -> /vkplan -> /vktodo（或 /vkkb） -> /imp-ws`。
+
+| 命令 | 说明 | 使用示例 |
+|------|------|----------|
+| `/vkplan` | 并行拆解入口 - 在 `/plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/vkplan` |
+| `/vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/vksync 2026-02-14_文档治理执行 check` |
+| `/vk` | 看板导出 - 审阅 `card_export` 组装结果（默认 `strict`） | `/vk 2026-02-14_文档治理执行` |
+| `/vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/vktodo 2026-02-14_文档治理执行 move Doing` |
+| `/vkkb` | 看板一体命令 - 自动补导出并调用 `/vktodo` 落卡 | `/vkkb 2026-02-14_文档治理执行` |
+| `/imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
+
+### 7.8 问题诊断（只分析不改码）
+
+| 命令 | 说明 | 使用示例 |
+|------|------|----------|
+| `/pc` | 问题诊断 - 只做根因分析并产出 `fix_plan.md`，不改代码（命令文档内示例触发词为 `/diagnose`） | `/pc 生产环境出现 500 错误` |
+
 ---
 
 ## 8. 快捷命令总览
@@ -444,6 +472,15 @@ npx ai-agent-skills update --all    # 更新全部
 /debug         # 重现、定位、修复、记录的标准排查流程
 /review        # 检查代码质量、文档同步、规范遵循
 /feature       # 一站式完成从需求到交付的全流程
+/pc            # 仅诊断并输出 fix_plan（命令文档示例触发词 /diagnose）
+
+# 并行与看板 - 多 worktree 协作
+/vkplan        # 在 /plan 后执行并行拆解并产出 vk_cards.json
+/vkkb          # 一条命令完成导出 + 落卡（可选继续 move）
+/vktodo        # 批量建卡/推进，默认执行基线硬拦截
+/vksync        # 手动执行 G0 基线同步检查（check/apply）
+/vk            # 导出看板 payload（strict/auto）
+/imp-ws        # 按单个 WS 白名单执行实现与回填
 
 # Git 工作流 - 标准化的版本控制操作
 /git-commit    # 自动分析变更并生成规范提交信息
@@ -490,7 +527,7 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（19 个）
+### 9.2 Commands（26 个）
 
 ```
 .cursor/commands/
@@ -504,27 +541,36 @@ npx ai-agent-skills update --all    # 更新全部
 ├── error-handling.md  # 添加错误处理
 ├── feature.md         # 全流程开发
 ├── git-commit.md      # 规范化提交
+├── imp-ws.md          # 子任务实现（WS）
 ├── imp.md             # 实现代码
 ├── lint.md            # 代码规范检查
 ├── migration.md       # 数据库迁移
 ├── optimize.md        # 性能优化
+├── pc.md              # 问题诊断（命令文档示例触发词 /diagnose）
 ├── plan.md            # 需求规划
 ├── refactor.md        # 代码重构
 ├── review.md          # 代码审查
 ├── security-audit.md  # 安全审计
-└── test.md            # 运行测试
+├── test.md            # 运行测试
+├── vk.md              # 看板导出
+├── vkkb.md            # 看板一体落地
+├── vkplan.md          # 并行拆解
+├── vksync.md          # 基线同步检查
+└── vktodo.md          # 批量建卡/推进
 ```
 
-### 9.3 Rules（6 个）
+### 9.3 Rules（8 个）
 
 ```
 .cursor/rules/
-├── core.mdc                # 核心原则和技术栈
-├── python_style.mdc        # Python 代码规范
-├── typescript_style.mdc    # TypeScript 代码规范
-├── langgraph.mdc           # Agent 开发规范
+├── banking-context.mdc     # 银行业务上下文约束
 ├── conversation_safety.mdc # 会话处理规范
-└── doc_sync.mdc            # 代码文档同步规则
+├── core.mdc                # 核心原则和技术栈
+├── doc_sync.mdc            # 代码文档同步规则
+├── dual-database.mdc       # 双数据库边界约束
+├── langgraph.mdc           # Agent 开发规范
+├── python_style.mdc        # Python 代码规范
+└── typescript_style.mdc    # TypeScript 代码规范
 ```
 
 ---
