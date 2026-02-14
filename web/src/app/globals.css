@@ -93,7 +93,9 @@
   --admin-canvas-bottom: oklch(1 0 0);
   --admin-content-surface: oklch(1 0 0);
   --admin-content-border: oklch(0.91 0 0 / 0.75);
-  --admin-content-max-width: 1280px;
+  --admin-content-max-width: 1360px;
+  --admin-page-padding-x: clamp(14px, 1.9vw, 26px);
+  --admin-page-padding-y: clamp(14px, 2vw, 26px);
 }
 
 .dark {
@@ -246,8 +248,8 @@
     margin-inline: auto;
     width: 100%;
     max-width: var(--admin-content-max-width);
-    padding-inline: clamp(16px, 2.3vw, 32px);
-    padding-block: clamp(20px, 2.6vw, 36px);
+    padding-inline: var(--admin-page-padding-x);
+    padding-block: var(--admin-page-padding-y);
   }
 
   .admin-surface {
@@ -311,8 +313,8 @@
 
   @media (max-width: 640px) {
     .admin-page-content {
-      padding-inline: 14px;
-      padding-block: 18px;
+      padding-inline: 12px;
+      padding-block: 14px;
     }
   }
 }

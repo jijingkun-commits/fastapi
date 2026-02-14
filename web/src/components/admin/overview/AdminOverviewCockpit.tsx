@@ -290,7 +290,7 @@ function RealtimeBadge({ status }: { status: AdminOverviewRealtimeStatus }) {
     <div
       data-testid="admin-overview-realtime-status"
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
         meta.className,
       )}
       title={`${status.message}（更新时间: ${formatDateTime(status.updatedAt)}）`}
@@ -350,15 +350,15 @@ function OverviewCard({
   return (
     <section
       data-testid={testId}
-      className={cn("admin-surface flex h-full flex-col p-5", className)}
+      className={cn("admin-surface flex h-full flex-col p-4", className)}
     >
-      <header className="mb-4 flex items-start justify-between gap-3">
+      <header className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+          <h2 className="text-sm font-semibold leading-none text-foreground">{title}</h2>
           <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
         </div>
-        <div className="rounded-lg border border-border/60 bg-background/70 p-2">
-          <Icon className="h-4 w-4 text-[var(--color-brand-700)]" />
+        <div className="rounded-lg border border-border/60 bg-background/70 p-1.5">
+          <Icon className="h-3.5 w-3.5 text-[var(--color-brand-700)]" />
         </div>
       </header>
       <div className="flex-1">{children}</div>
@@ -368,9 +368,9 @@ function OverviewCard({
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2.5 last:border-b-0">
+    <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2 last:border-b-0">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium text-foreground">{value}</span>
+      <span className="text-xs font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -397,16 +397,16 @@ function TrendChart({
 
   if (data.length === 0) {
     return (
-      <div className="flex h-[120px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-xs text-muted-foreground">
+      <div className="flex h-[104px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-xs text-muted-foreground">
         暂无趋势数据
       </div>
     );
   }
 
   return (
-    <div className="h-[120px] w-full">
+    <div className="h-[104px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 4, right: 6, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" opacity={0.35} />
           <XAxis
             dataKey="label"
@@ -447,18 +447,18 @@ function TrendChart({
 
 function CockpitSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12" data-testid="admin-overview-skeleton">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-12" data-testid="admin-overview-skeleton">
       {Array.from({ length: 8 }).map((_, index) => (
         <div
           key={index}
           className={cn(
-            "admin-surface animate-pulse p-5",
+            "admin-surface animate-pulse p-4",
             index < 4 ? "xl:col-span-3" : "xl:col-span-4",
           )}
         >
           <div className="h-4 w-24 rounded bg-muted/60" />
           <div className="mt-3 h-8 w-1/2 rounded bg-muted/60" />
-          <div className="mt-4 h-24 rounded bg-muted/40" />
+          <div className="mt-3 h-20 rounded bg-muted/40" />
         </div>
       ))}
     </div>
@@ -674,7 +674,7 @@ export function AdminOverviewCockpit() {
 
   if (viewState === "loading") {
     return (
-      <div className="admin-page-content space-y-5">
+      <div className="admin-page-content space-y-4">
         <header>
           <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
           <p className="mt-1 text-sm text-muted-foreground">正在准备实时运行态数据...</p>
@@ -686,7 +686,7 @@ export function AdminOverviewCockpit() {
 
   if (viewState === "error" && !hasRealSnapshot(snapshot)) {
     return (
-      <div className="admin-page-content space-y-5">
+      <div className="admin-page-content space-y-4">
         <header>
           <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
           <p className="mt-1 text-sm text-muted-foreground">实时总览暂不可用，可稍后重试</p>
@@ -705,9 +705,9 @@ export function AdminOverviewCockpit() {
   }
 
   return (
-    <div className="admin-page-content space-y-5" data-testid="admin-overview-cockpit">
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="admin-page-content space-y-4" data-testid="admin-overview-cockpit">
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -752,7 +752,7 @@ export function AdminOverviewCockpit() {
         </div>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-12">
         <OverviewCard
           title="健康总分"
           subtitle="全局健康态势与 1 小时趋势"
@@ -767,7 +767,7 @@ export function AdminOverviewCockpit() {
             <LevelBadge level={snapshot.health_level} />
           </div>
           <p className="mt-1 text-xs text-muted-foreground">数据源：{snapshot.source || "--"}</p>
-          <div className="mt-4">
+          <div className="mt-3">
             <TrendChart
               window="1h"
               trends={trends}
@@ -785,8 +785,8 @@ export function AdminOverviewCockpit() {
           testId="overview-card-request-quality"
           className="xl:col-span-3"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xl font-semibold text-foreground">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-lg font-semibold text-foreground">
               {formatNumber(snapshot.request_quality.score, 1)}
             </p>
             <LevelBadge level={snapshot.request_quality.status} />
@@ -813,8 +813,8 @@ export function AdminOverviewCockpit() {
           testId="overview-card-stability"
           className="xl:col-span-3"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xl font-semibold text-foreground">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-lg font-semibold text-foreground">
               {formatNumber(snapshot.stability.score, 1)}
             </p>
             <LevelBadge level={snapshot.stability.status} />
@@ -822,7 +822,7 @@ export function AdminOverviewCockpit() {
           <MetricRow label="严重告警" value={formatNumber(snapshot.stability.critical_alerts, 0)} />
           <MetricRow label="预警告警" value={formatNumber(snapshot.stability.warning_alerts, 0)} />
           <MetricRow label="模块稳定分" value={formatNumber(snapshot.stability.module_score, 1)} />
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-2 text-xs text-muted-foreground">
             异常项支持一键跳转到对应管理模块。
           </p>
         </OverviewCard>
@@ -834,8 +834,8 @@ export function AdminOverviewCockpit() {
           testId="overview-card-capacity-cost"
           className="xl:col-span-3"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xl font-semibold text-foreground">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-lg font-semibold text-foreground">
               {formatNumber(snapshot.capacity_cost.score, 1)}
             </p>
             <LevelBadge level={snapshot.capacity_cost.status} />
@@ -849,7 +849,7 @@ export function AdminOverviewCockpit() {
             label="预算占用"
             value={formatPercent(snapshot.capacity_cost.budget_usage_pct, 1)}
           />
-          <div className="mt-3">
+          <div className="mt-2">
             <TrendChart
               window="24h"
               trends={trends}
@@ -868,7 +868,7 @@ export function AdminOverviewCockpit() {
           className="xl:col-span-4"
         >
           {snapshot.alerts.length === 0 ? (
-            <div className="flex h-full min-h-[160px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
+            <div className="flex h-full min-h-[136px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
               当前无告警
             </div>
           ) : (
@@ -878,9 +878,9 @@ export function AdminOverviewCockpit() {
                 return (
                   <div
                     key={`${alert.code}-${index}`}
-                    className="rounded-lg border border-border/70 bg-background/60 p-3"
+                    className="rounded-lg border border-border/70 bg-background/60 p-2.5"
                   >
-                    <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
                       <SeverityBadge severity={alert.severity} />
                       <span className="text-[11px] text-muted-foreground">{alert.code}</span>
                     </div>
@@ -909,8 +909,8 @@ export function AdminOverviewCockpit() {
           testId="overview-card-freshness"
           className="xl:col-span-4"
         >
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xl font-semibold text-foreground">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-lg font-semibold text-foreground">
               {snapshot.freshness.delay_sec == null
                 ? "--"
                 : `${formatNumber(snapshot.freshness.delay_sec, 0)} s`}
@@ -938,7 +938,7 @@ export function AdminOverviewCockpit() {
           className="xl:col-span-4"
         >
           {snapshot.module_matrix.length === 0 ? (
-            <div className="flex h-full min-h-[160px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
+            <div className="flex h-full min-h-[136px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
               暂无模块评分
             </div>
           ) : (
@@ -951,9 +951,9 @@ export function AdminOverviewCockpit() {
                 return (
                   <div
                     key={moduleItem.key}
-                    className="rounded-lg border border-border/70 bg-background/60 p-3"
+                    className="rounded-lg border border-border/70 bg-background/60 p-2.5"
                   >
-                    <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-foreground">{moduleItem.label}</p>
                       <span
                         className={cn(
@@ -996,7 +996,7 @@ export function AdminOverviewCockpit() {
           className="xl:col-span-12"
         >
           {snapshot.change_feed.length === 0 ? (
-            <div className="flex min-h-[100px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
+            <div className="flex min-h-[84px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
               暂无关键变更记录
             </div>
           ) : (
@@ -1008,7 +1008,7 @@ export function AdminOverviewCockpit() {
                 return (
                   <article
                     key={changeItem.id}
-                    className="rounded-lg border border-border/70 bg-background/60 p-3"
+                    className="rounded-lg border border-border/70 bg-background/60 p-2.5"
                   >
                     <div className="mb-1 flex items-center justify-between gap-2">
                       <span className={cn("text-[11px]", meta.badgeClass, "rounded-full border px-2 py-0.5")}>{
@@ -1018,7 +1018,7 @@ export function AdminOverviewCockpit() {
                         {formatDateTime(changeItem.occurred_at)}
                       </span>
                     </div>
-                    <p className="text-sm leading-6 text-foreground">{changeItem.title}</p>
+                    <p className="text-sm leading-5 text-foreground">{changeItem.title}</p>
                   </article>
                 );
               })}
