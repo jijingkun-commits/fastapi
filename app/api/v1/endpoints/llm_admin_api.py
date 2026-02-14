@@ -16,12 +16,13 @@ from app.db.session import get_db
 from app.models.llm_provider import LLMProvider
 from app.models.llm_model import LLMModel
 from app.services.llm_config_service import LLMConfigService
+from app.core.config import MODEL_ROUTING_VISION
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/llm-admin", tags=["LLM 配置管理"])
 
-VISION_ROUTE_KEY = "vision"
+VISION_ROUTE_KEY = MODEL_ROUTING_VISION
 
 
 # ==================== Schemas ====================
@@ -542,6 +543,36 @@ def _get_type_default_model(db: Session, model_type: str) -> str:
     return first.model_code if first else "未配置"
 
 
+def _is_supported_vision_route_model(model: LLMModel) -> bool:
+    """判断模型是否可绑定到 Vision 路由。"""
+    return (model.model_type or "chat") in {"vision", "chat", "reasoning"}
+
+
+def _has_vision_route_candidates(db: Session) -> bool:
+    """检查是否存在可用于 Vision 路由的候选模型。"""
+    candidate = db.query(LLMModel).filter(
+        LLMModel.is_active == True,
+        LLMModel.model_type.in_(["vision", "chat", "reasoning"]),
+    ).first()
+    return candidate is not None
+
+
+def _get_vision_model_for_routing(db: Session) -> str:
+    """获取 Vision 路由当前模型（优先显式路由，回退 vision 类型默认）。"""
+    from app.core.config import get_routing_model
+
+    configured = get_routing_model(VISION_ROUTE_KEY, "")
+    if configured:
+        model = db.query(LLMModel).filter(
+            LLMModel.model_code == configured,
+            LLMModel.is_active == True,
+        ).first()
+        if model and _is_supported_vision_route_model(model):
+            return model.model_code
+
+    return _get_type_default_model(db, "vision")
+
+
 @router.get("/model-routing", response_model=List[ModelRouteItem])
 def get_model_routing(db: Session = Depends(get_db)):
     """获取模型路由总览表（按能力分层，5 行）。
@@ -565,7 +596,8 @@ def get_model_routing(db: Session = Depends(get_db)):
     sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
     default_chat_model = _get_chat_default_model_for_routing(db)
     
-    vision_default_model = _get_type_default_model(db, "vision")
+    vision_route_model = _get_vision_model_for_routing(db)
+    vision_route_editable = _has_vision_route_candidates(db)
 
     routes = [
         ModelRouteItem(
@@ -609,9 +641,9 @@ def get_model_routing(db: Session = Depends(get_db)):
             call_point="vision_tool.py",
             source="db_type",
             config_key=VISION_ROUTE_KEY,
-            current_model=vision_default_model,
-            recommended="glm-4v-flash",
-            editable=vision_default_model != "未配置"
+            current_model=vision_route_model,
+            recommended="glm-4v-flash / gpt-5.2",
+            editable=vision_route_editable
         ),
     ]
     
@@ -626,10 +658,11 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
     - model_routing.default_chat：主对话默认模型（用户未显式选择时）
     - model_routing.lightweight：轻量任务（意图分类/参数提取/评估）
     - model_routing.sql_generation：SQL 生成 / 内部分析
-    - vision：Vision 模型（更新 t_llm_model 中 vision 类型默认模型）
-    
+    - vision：Vision 多模态模型（支持 vision/chat/reasoning）
+
     fixed_config 路由持久化到 t_system_config 表；
-    vision 路由通过切换 t_llm_model(vision) 的默认模型生效。
+    vision 路由优先写入 t_system_config(vision)，若选择 vision 类型模型则同步更新
+    t_llm_model(vision) 默认值，兼容历史读取链路。
     更新后统一刷新缓存，无需重启服务。
     """
     from app.core.config import (
@@ -662,20 +695,35 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
 
     if request.config_key == MODEL_ROUTING_DEFAULT_CHAT and model.model_type != "chat":
         raise HTTPException(status_code=400, detail="默认对话模型必须为 chat 类型")
-    if request.config_key == VISION_ROUTE_KEY and model.model_type != "vision":
-        raise HTTPException(status_code=400, detail="Vision 路由必须为 vision 类型模型")
+    if request.config_key == VISION_ROUTE_KEY and not _is_supported_vision_route_model(model):
+        raise HTTPException(
+            status_code=400,
+            detail="Vision 路由仅支持 vision/chat/reasoning 类型模型",
+        )
 
-    # Vision 走模型类型默认值（写 t_llm_model.is_default）
+    # Vision 路由支持多模态模型显式绑定：
+    # - 始终写入 t_system_config("vision")，供运行时优先读取。
+    # - 若绑定的是 vision 类型模型，同时同步该类型默认值，保持旧逻辑兼容。
     if request.config_key == VISION_ROUTE_KEY:
-        db.query(LLMModel).filter(
-            LLMModel.model_type == "vision",
-            LLMModel.is_default == True,
-        ).update({"is_default": False})
+        if model.model_type == "vision":
+            db.query(LLMModel).filter(
+                LLMModel.model_type == "vision",
+                LLMModel.is_default == True,
+            ).update({"is_default": False})
+            model.is_default = True
 
-        model.is_default = True
+        config_repo.upsert_config(
+            db=db,
+            key=request.config_key,
+            value=request.model_code,
+            value_type="string",
+            category="model_routing",
+            description="Vision 多模态模型路由（优先，支持 vision/chat/reasoning）",
+        )
         db.commit()
 
-        # Vision 工具读取的是类型默认模型，需刷新 LLM 配置缓存
+        # Vision 既依赖系统配置，也可能依赖类型默认模型，两个缓存都要刷新。
+        SystemConfigService.refresh_cache(db)
         LLMConfigService.refresh_cache(db)
 
         logger.info("更新模型路由: vision -> %s", request.model_code)

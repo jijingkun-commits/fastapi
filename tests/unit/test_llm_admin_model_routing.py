@@ -29,28 +29,24 @@ class _FakeQuery:
         return 1
 
 
-def _mock_get_type_default(_db, model_type: str) -> str:
-    """按模型类型返回默认模型代码。"""
-
-    mapping = {
-        "embedding": "embedding-3",
-        "vision": "qwen3-vl-flash-2026-01-22",
-    }
-    return mapping[model_type]
-
-
 @patch("app.core.config.get_routing_model")
+@patch("app.api.v1.endpoints.llm_admin_api._has_vision_route_candidates")
+@patch("app.api.v1.endpoints.llm_admin_api._get_vision_model_for_routing")
 @patch("app.api.v1.endpoints.llm_admin_api._get_type_default_model")
 @patch("app.api.v1.endpoints.llm_admin_api._get_chat_default_model_for_routing")
 def test_get_model_routing_marks_vision_as_editable_when_configured(
     mock_get_chat_default,
     mock_get_type_default,
+    mock_get_vision_model,
+    mock_has_vision_candidates,
     mock_get_routing_model,
 ):
-    """Vision 已配置默认模型时，路由表应允许在该行切换。"""
+    """Vision 路由存在候选模型时应允许编辑。"""
 
     mock_get_chat_default.return_value = "gpt-5.2"
-    mock_get_type_default.side_effect = _mock_get_type_default
+    mock_get_type_default.return_value = "embedding-3"
+    mock_get_vision_model.return_value = "qwen3-vl-flash-2026-01-22"
+    mock_has_vision_candidates.return_value = True
     mock_get_routing_model.side_effect = lambda key, fallback: {
         "model_routing.lightweight": "gpt-5.2-mini",
         "model_routing.sql_generation": "gpt-5.2",
@@ -65,17 +61,23 @@ def test_get_model_routing_marks_vision_as_editable_when_configured(
 
 
 @patch("app.core.config.get_routing_model")
+@patch("app.api.v1.endpoints.llm_admin_api._has_vision_route_candidates")
+@patch("app.api.v1.endpoints.llm_admin_api._get_vision_model_for_routing")
 @patch("app.api.v1.endpoints.llm_admin_api._get_type_default_model")
 @patch("app.api.v1.endpoints.llm_admin_api._get_chat_default_model_for_routing")
-def test_get_model_routing_disables_vision_when_unconfigured(
+def test_get_model_routing_disables_vision_when_no_candidates(
     mock_get_chat_default,
     mock_get_type_default,
+    mock_get_vision_model,
+    mock_has_vision_candidates,
     mock_get_routing_model,
 ):
-    """Vision 未配置时，路由表应显示不可编辑。"""
+    """Vision 无候选模型时，路由应显示不可编辑。"""
 
     mock_get_chat_default.return_value = "gpt-5.2"
-    mock_get_type_default.side_effect = lambda _db, model_type: "未配置" if model_type == "vision" else "embedding-3"
+    mock_get_type_default.return_value = "embedding-3"
+    mock_get_vision_model.return_value = "未配置"
+    mock_has_vision_candidates.return_value = False
     mock_get_routing_model.side_effect = lambda _key, fallback: fallback
 
     routes = llm_admin_api.get_model_routing(db=MagicMock())
@@ -93,7 +95,7 @@ def test_update_model_routing_supports_vision_default_switch(
     mock_upsert_config,
     mock_refresh_system_cache,
 ):
-    """更新 vision 路由时应切换 vision 类型默认模型而非写入 t_system_config。"""
+    """vision 类型模型绑定 Vision 路由时应同步刷新类型默认。"""
 
     request = llm_admin_api.ModelRoutingUpdateRequest(
         config_key="vision",
@@ -121,24 +123,66 @@ def test_update_model_routing_supports_vision_default_switch(
     assert vision_model.is_default is True
     db.commit.assert_called_once()
     mock_refresh_llm_cache.assert_called_once_with(db)
-    mock_upsert_config.assert_not_called()
-    mock_refresh_system_cache.assert_not_called()
+    mock_refresh_system_cache.assert_called_once_with(db)
+    mock_upsert_config.assert_called_once()
 
 
-def test_update_model_routing_rejects_non_vision_model_for_vision_key():
-    """vision 路由只能绑定 vision 类型模型。"""
+@patch("app.services.system_config_service.SystemConfigService.refresh_cache")
+@patch("app.repositories.config_repo.upsert_config")
+@patch("app.api.v1.endpoints.llm_admin_api.LLMConfigService.refresh_cache")
+def test_update_model_routing_accepts_chat_model_for_vision_key(
+    mock_refresh_llm_cache,
+    mock_upsert_config,
+    mock_refresh_system_cache,
+):
+    """Vision 路由应允许绑定具备多模态能力的 chat 类型模型。"""
 
     request = llm_admin_api.ModelRoutingUpdateRequest(
         config_key="vision",
-        model_code="qwen-plus",
+        model_code="gpt-5.2",
     )
-    chat_model = SimpleNamespace(model_code="qwen-plus", model_type="chat", is_default=False)
+    chat_model = SimpleNamespace(
+        model_code="gpt-5.2",
+        model_type="chat",
+        is_default=False,
+    )
 
     db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = chat_model
+    find_model_query = _FakeQuery(first_result=chat_model)
+    db.query.side_effect = [find_model_query]
+
+    resp = llm_admin_api.update_model_routing(request, db)
+
+    assert resp == {
+        "message": "模型路由已更新",
+        "config_key": "vision",
+        "model_code": "gpt-5.2",
+    }
+    assert chat_model.is_default is False
+    db.commit.assert_called_once()
+    mock_refresh_llm_cache.assert_called_once_with(db)
+    mock_refresh_system_cache.assert_called_once_with(db)
+    mock_upsert_config.assert_called_once()
+
+
+def test_update_model_routing_rejects_embedding_model_for_vision_key():
+    """Vision 路由应拒绝非多模态类型模型。"""
+
+    request = llm_admin_api.ModelRoutingUpdateRequest(
+        config_key="vision",
+        model_code="embedding-3",
+    )
+    embedding_model = SimpleNamespace(
+        model_code="embedding-3",
+        model_type="embedding",
+        is_default=False,
+    )
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = embedding_model
 
     with pytest.raises(HTTPException) as exc:
         llm_admin_api.update_model_routing(request, db)
 
     assert exc.value.status_code == 400
-    assert "vision 类型" in exc.value.detail
+    assert "vision/chat/reasoning" in exc.value.detail

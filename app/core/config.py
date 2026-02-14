@@ -174,6 +174,7 @@ MODEL_ROUTING_DEFAULT_CHAT = "model_routing.default_chat"          # 默认对�
 MODEL_ROUTING_INTENT_CLASSIFIER = "model_routing.lightweight"      # 轻量任务：意图分类
 MODEL_ROUTING_LLM_JUDGE = "model_routing.lightweight"              # 轻量任务：评估/参数提取（与意图分类共享同一配置）
 MODEL_ROUTING_SQL_GENERATION = "model_routing.sql_generation"      # SQL 生成 / 内部分析
+MODEL_ROUTING_VISION = "vision"                                    # Vision 多模态路由（优先于 type=vision 默认模型）
 
 # 模型调用场景（供 get_scene_llm 使用）
 MODEL_SCENE_DEFAULT_CHAT = "default_chat"

@@ -52,6 +52,13 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         default="qwen-plus",
         env_key="SQL_GENERATION_MODEL",
     ),
+    "vision": ConfigSpec(
+        key="vision",
+        source="db-dynamic",
+        value_type="string",
+        default="",
+        aliases=("model_routing.vision",),
+    ),
     # ==================== 实验开关 ====================
     "feature.proxy_experiment_enabled": ConfigSpec(
         key="feature.proxy_experiment_enabled",

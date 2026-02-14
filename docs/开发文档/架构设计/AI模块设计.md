@@ -585,7 +585,7 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 
 > **配置提示**: 
 > 下表中的 `主对话默认模型`、`SQL 生成`、`内部分析`、`意图分类`、`参数提取`、`评估` 等场景的模型配置，现在均已支持在 **后台管理 -> LLM 配置 -> 模型路由** 页面进行可视化配置。
-> `Embedding` 模型通过在 **模型列表** 中设置 `type=embedding` 默认模型生效；`Vision` 模型可在 **模型路由** 页面直接切换（本质是更新 `type=vision` 默认模型），也可在模型列表中设置。
+> `Embedding` 模型通过在 **模型列表** 中设置 `type=embedding` 默认模型生效；`Vision` 模型优先读取路由键 `vision`（支持绑定 `vision/chat/reasoning` 类型的多模态模型），未配置时回退 `type=vision` 默认模型。
 
 | 场景 | 调用点 | 模型来源 | 配置项 | 推荐模型 |
 |------|--------|----------|--------|----------|
@@ -595,7 +595,7 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 | 轻量任务（意图分类） | `intent_classifier.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
 | 轻量任务（评估/提取） | `llm_judge.py`, `parameter_extractor.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
 | Embedding | `app/ai/utils/embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
-| Vision | `vision_tool.py` | 数据库 `type=vision` | `t_llm_model` | glm-4v-flash |
+| Vision | `vision_tool.py` | 路由优先 + 类型回退 | `vision`（优先） + `t_llm_model(type=vision)`（回退） | glm-4v-flash / gpt-5.2 |
 
 #### 按模型类型分类
 
@@ -617,6 +617,7 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 | `model_routing.default_chat` | `model_routing.default_chat` | 空（未配置） | 主对话默认模型（用户未显式选择模型时生效） |
 | `INTENT_CLASSIFIER_MODEL` | `model_routing.lightweight` | `qwen-plus` | 意图分类/评估/参数提取 (轻量任务) |
 | `SQL_GENERATION_MODEL` | `model_routing.sql_generation` | `qwen-plus` | Vanna SQL 生成 / 复杂意图分析 |
+| `vision` | `vision` | 空（未配置） | Vision 多模态路由（可绑定 vision/chat/reasoning，未配置回退 type=vision 默认） |
 
 #### 调用场景注册表（开发规范）
 

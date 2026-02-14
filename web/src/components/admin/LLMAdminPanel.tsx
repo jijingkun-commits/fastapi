@@ -476,10 +476,14 @@ export function LLMAdminPanel() {
                 </TableHeader>
                 <TableBody>
                   {modelRoutes.map((route, index) => {
-                    const routeModelType = route.config_key === "vision" ? "vision" : "chat";
-                    const routeModels = models.filter(
-                      (m) => m.is_active && m.model_type === routeModelType
-                    );
+                    const isVisionRoute = route.config_key === "vision";
+                    const routeModels = models.filter((m) => {
+                      if (!m.is_active) return false;
+                      if (isVisionRoute) {
+                        return ["vision", "chat", "reasoning"].includes(m.model_type);
+                      }
+                      return m.model_type === "chat";
+                    });
                     const canSelectModel = Boolean(route.editable && route.config_key && routeModels.length > 0);
                     const isEditing = Boolean(
                       canSelectModel && route.config_key && editingRoutes[route.config_key] !== undefined

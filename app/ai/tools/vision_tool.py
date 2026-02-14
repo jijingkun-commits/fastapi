@@ -1,7 +1,7 @@
 """Vision 图片理解工具（中文注释）。
 
-提供图片理解能力，支持配置化的 Vision 模型。
-从 LLMConfigService 获取 model_type='vision' 的模型配置。
+提供图片理解能力，支持配置化的多模态模型路由。
+优先读取路由键 vision，未配置时回退 model_type='vision' 的默认模型。
 """
 import httpx
 import logging
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 
 from app.services.llm_config_service import LLMConfigService
+from app.schemas.llm import LLMModelConfig
 from app.core import config as ai_config
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,30 @@ class ImageAnalysisInput(BaseModel):
     )
 
 
+def _is_supported_vision_route_model_type(model_type: Optional[str]) -> bool:
+    """检查模型类型是否可用于 Vision 路由。"""
+    return (model_type or "chat") in {"vision", "chat", "reasoning"}
+
+
+def _get_vision_model_config() -> Optional[LLMModelConfig]:
+    """获取 Vision 工具使用的模型配置（优先显式路由，回退类型默认）。"""
+    routed_model_code = ai_config.get_routing_model(ai_config.MODEL_ROUTING_VISION, "")
+    if routed_model_code:
+        routed_config = LLMConfigService.get_model_config(routed_model_code)
+        if routed_config and _is_supported_vision_route_model_type(routed_config.model_type):
+            return routed_config
+        logger.warning(
+            "Vision 路由模型不可用，回退类型默认: code=%s",
+            routed_model_code,
+        )
+
+    return LLMConfigService.get_model_by_type("vision")
+
+
 def _call_vision_model(image_url: str, question: str) -> str:
     """调用 Vision 模型分析图片。
     
-    从 LLMConfigService 获取 vision 类型的模型配置。
+    优先读取 vision 路由配置，未命中时回退到 vision 类型默认模型。
     
     Args:
         image_url: 图片 URL
@@ -36,9 +57,9 @@ def _call_vision_model(image_url: str, question: str) -> str:
     Returns:
         模型回答
     """
-    config = LLMConfigService.get_model_by_type("vision")
+    config = _get_vision_model_config()
     if not config:
-        return "⚠️ Vision 模型未配置，请在数据库中添加 model_type='vision' 的模型"
+        return "⚠️ Vision 模型未配置，请在模型路由中设置 vision，或添加 model_type='vision' 的模型"
     
     if not config.api_key:
         return f"⚠️ Vision 模型 {config.model_code} 的 API Key 未配置"
@@ -153,7 +174,7 @@ def analyze_image(image_url: str, question: str = "请描述这张图片的内�
     返回图片分析结果和问题的回答。
     """
     if not is_vision_configured():
-        return "⚠️ 图片分析功能未配置：请在模型管理中添加 Vision 类型的模型"
+        return "⚠️ 图片分析功能未配置：请在模型路由中设置 vision，或添加 Vision 类型模型"
     
     try:
         logger.info("分析图片: url=%s, question=%s", image_url[:50], question[:30])
@@ -175,5 +196,5 @@ def analyze_image(image_url: str, question: str = "请描述这张图片的内�
 
 
 def is_vision_configured() -> bool:
-    """检查 Vision 模型是否已配置。"""
-    return LLMConfigService.is_type_configured("vision")
+    """检查 Vision 路由是否已配置可用模型。"""
+    return _get_vision_model_config() is not None
