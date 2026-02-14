@@ -67,8 +67,7 @@ app/ai/
 │   ├── resolve_node.py            # 实体解析节点
 │   └── todo_enhanced_nodes.py     # 增强节点（澄清/冲突检测/任务拆解）
 ├── tools/
-│   ├── todo_tools.py              # 待办工具函数
-│   └── batch_todo_tools.py        # 批量操作工具
+│   └── todo_tools.py              # 待办工具函数
 ├── prompts/
 │   └── todo_prompts.py            # 提示词定义
 ├── config/
@@ -913,11 +912,7 @@ def get_progressive_strategy(round_count: int, user_confirmed: bool, quick_mode:
 
 > `location` 参数当前不单独落库，会在工具层拼接到 `description` 字段中。
 
-**文件**: `app/ai/tools/batch_todo_tools.py`
-
-| 工具 | 说明 | 参数 |
-|-----|------|------|
-| `batch_complete_todos` | 批量完成 | todo_ids |
+当前版本未提供独立的批量工具文件；批量创建能力已在工作流层标记为废弃（2026-02-01）。
 
 ### 9.2 工具输入模型
 
