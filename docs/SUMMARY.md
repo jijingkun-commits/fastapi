@@ -20,6 +20,7 @@
 * [用户管理需求](产品文档/用户管理需求.md)
 * [模型路由需求](产品文档/模型路由需求.md)
 * [技能系统需求](产品文档/技能系统需求.md)
+* [配置治理需求](产品文档/配置治理需求.md)
 
 ---
 
@@ -137,13 +138,12 @@
 
 ### 迭代需求
 
-* [当前需求（Skill检索能力对齐）](内部参考/迭代需求/requirements.md)
-* [实施方案（Skill检索能力对齐）](内部参考/迭代需求/implementation_plan.md)
-* [当前需求（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
+* [目录说明与命名规范](内部参考/迭代需求/README.md)
+* [需求基线（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
 * [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
-* [评估报告](内部参考/迭代需求/evaluation_report.md)
 * [需求基线（文档治理执行）](内部参考/迭代需求/docs_governance_requirements.md)
 * [实施方案（文档治理执行）](内部参考/迭代需求/docs_governance_implementation_plan.md)
+* [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解
 
