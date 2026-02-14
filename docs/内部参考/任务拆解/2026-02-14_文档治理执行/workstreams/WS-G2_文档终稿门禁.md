@@ -69,9 +69,9 @@
 
 | TC-ID | 门禁命令/检查项 | 自动化脚本或 nodeid | 本次结果 | 责任 WS | 豁免/缺陷单 |
 |---|---|---|---|---|---|
-| DOC-FINAL-001 | 终稿门禁 | `python3 scripts/docs_guard.py --strict` | 待执行 | WS-G2 | |
-| DOC-FINAL-002 | 执行状态回填 | `docs/文档梳理与重构方案_2026-02-13.md` 人工审阅 | 待执行 | WS-G2 | |
-| DOC-FINAL-003 | 拆解索引完整性 | `docs/SUMMARY.md` 人工审阅 | 待执行 | WS-G2 | |
+| DOC-FINAL-001 | 终稿门禁 | `python3 scripts/docs_guard.py --strict` | 通过（`errors=0`，`warnings=0`，`summary_coverage=104/104`） | WS-G2 | - |
+| DOC-FINAL-002 | 执行状态回填 | `docs/文档梳理与重构方案_2026-02-13.md` 人工审阅 | 通过（第 9 节已回填追溯链路、校验结果、发布摘要） | WS-G2 | - |
+| DOC-FINAL-003 | 拆解索引完整性 | `docs/SUMMARY.md` 人工审阅 | 通过（`rg` 命中 10 处：迭代需求 2 处 + 拆解目录 8 处） | WS-G2 | - |
 
 ### 5.2 浏览器测试（触发式）
 
@@ -93,10 +93,16 @@
 ## 7. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
-- 是否修改了白名单外文件（是/否）：
+  - `docs/文档梳理与重构方案_2026-02-13.md`
+  - `docs/内部参考/迭代需求/docs_governance_implementation_plan.md`
+  - `docs/内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md`
+  - `docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md`
+- 是否修改了白名单外文件（是/否）：否
 - 测试命令与结果：
-- 已知风险点：
-- 回滚建议：
+  - `python3 scripts/docs_guard.py --strict` -> 通过（`errors=0`，`warnings=0`，`summary_coverage=104/104`）
+  - `rg -n '2026-02-14_文档治理执行|docs_governance_(requirements|implementation_plan)' docs/SUMMARY.md` -> 通过（命中 10 处）
+- 已知风险点：当前门禁以结构一致性与索引可达性为主，语义层面的长期漂移仍需后续月度校准机制持续覆盖。
+- 回滚建议：回滚本 WS 回填文件后重跑 `python3 scripts/docs_guard.py --strict`，再按 Gate 流程重新收口。
 
 ---
 
