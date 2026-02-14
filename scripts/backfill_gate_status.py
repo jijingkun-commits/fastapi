@@ -47,6 +47,56 @@ def run_command(command: str, cwd: Path | None = None) -> CommandResult:
     )
 
 
+def resolve_baseline_branch(project_root: Path, preferred_branch: str | None = None) -> str:
+    candidates = [preferred_branch] if preferred_branch else ["main", "master"]
+    for branch in candidates:
+        if not branch:
+            continue
+        result = run_command(f"git rev-parse --verify {branch}", cwd=project_root)
+        if result.return_code == 0:
+            return branch
+
+    expected = preferred_branch or "main/master"
+    raise SystemExit(
+        f"无法定位基线分支（{expected}）。请先同步本地分支，或使用 --baseline-branch 显式指定。"
+    )
+
+
+def ensure_head_contains_baseline(project_root: Path, baseline_branch: str) -> None:
+    baseline_head_result = run_command(
+        f"git rev-parse --verify {baseline_branch}",
+        cwd=project_root,
+    )
+    if baseline_head_result.return_code != 0:
+        raise SystemExit(
+            f"无法读取基线分支 `{baseline_branch}` HEAD：{baseline_head_result.output or 'unknown error'}"
+        )
+
+    baseline_head = baseline_head_result.stdout.strip()
+    contains_result = run_command(
+        f"git merge-base --is-ancestor {baseline_head} HEAD",
+        cwd=project_root,
+    )
+
+    if contains_result.return_code == 0:
+        short_sha = baseline_head[:8]
+        print(f"基线检查通过：HEAD 已包含 `{baseline_branch}`@{short_sha}")
+        return
+
+    if contains_result.return_code == 1:
+        short_sha = baseline_head[:8]
+        raise SystemExit(
+            "Gate 硬拦截：当前分支未包含基线最新提交 "
+            f"`{baseline_branch}`@{short_sha}。请先 rebase/merge 后重试；"
+            "若确需跳过，请显式传入 --skip-baseline-check。"
+        )
+
+    raise SystemExit(
+        "基线祖先检查执行失败："
+        f"{contains_result.output or f'exit={contains_result.return_code}'}"
+    )
+
+
 def parse_pytest_summary(output: str) -> tuple[str, dict[str, int]]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     summary_line = ""
@@ -215,6 +265,16 @@ def main() -> None:
         help="docs_guard 命令（会自动附加 --json-out）",
     )
     parser.add_argument(
+        "--baseline-branch",
+        default="",
+        help="基线分支名（默认自动探测 main/master）",
+    )
+    parser.add_argument(
+        "--skip-baseline-check",
+        action="store_true",
+        help="跳过 Gate 基线硬拦截（不推荐）",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="仅打印结果，不回写文件",
@@ -227,6 +287,15 @@ def main() -> None:
         raise FileNotFoundError(f"parallel_plan.md 不存在: {plan_path}")
 
     project_root = Path.cwd()
+
+    if not args.skip_baseline_check:
+        baseline_branch = resolve_baseline_branch(
+            project_root=project_root,
+            preferred_branch=args.baseline_branch.strip() or None,
+        )
+        ensure_head_contains_baseline(project_root=project_root, baseline_branch=baseline_branch)
+    else:
+        print("警告：已跳过 Gate 基线硬拦截（--skip-baseline-check）")
 
     pytest_result = run_command(args.pytest_cmd, cwd=project_root)
     tsc_result = run_command(args.tsc_cmd, cwd=project_root / "web")

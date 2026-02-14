@@ -42,6 +42,7 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 7. Gate 层 WS 必须串行执行：`WS-G1 -> WS-G2`。
 8. `WS-G2` 启动前提：`WS-G1` 已完成且门禁结论已回填。
 9. 若 `WS-G1` 未通过且无批准豁免，不得执行 `WS-G2`。
+10. 执行 Gate WS 前必须通过基线硬拦截：当前 `HEAD` 必须包含本地 `main/master` 最新提交。
 
 ### 2.1 Foundation/Gate 执行顺序（固定）
 
@@ -52,6 +53,7 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 3. 再执行并行层 `WS-01 ... WS-N`
 4. 并行层完成后执行 `WS-G1_集成回归门禁.md`
 5. 最后执行 `WS-G2_文档终稿门禁.md`
+6. Gate 执行分支必须先与 `main/master` 对齐（rebase 或 merge），未对齐直接中止。
 
 不允许并行执行 `WS-G1/WS-G2`，也不允许跳过 `WS-G1` 直接进入 `WS-G2`。
 
@@ -118,8 +120,10 @@ venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务�
 
 规则：
 1. 脚本会自动执行 `pytest/tsc/lint/docs_guard` 并回写 `parallel_plan.md` 的 Gate 区块。
-2. 若任一命令失败，脚本返回非零退出码，Gate 判定失败。
-3. 若需只预览不落盘，使用 `--dry-run`。
+2. 脚本默认执行“基线硬拦截”（`HEAD` 必须包含 `main/master` 最新提交）；未通过直接失败。
+3. 若任一命令失败，脚本返回非零退出码，Gate 判定失败。
+4. 若需只预览不落盘，使用 `--dry-run`。
+5. 仅应急场景可使用 `--skip-baseline-check` 跳过拦截，并在 WS 文档记录批准人与原因。
 
 ## 5. 交接
 

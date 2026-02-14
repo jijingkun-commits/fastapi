@@ -53,7 +53,7 @@ description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
 
 推荐极简链路：`/plan -> /vkplan -> /vktodo（或 /vkkb） -> /imp-ws`
 
-- `/vktodo`：直接落卡/推进（多 worktree 场景建议先手动执行 `/vksync`）
+- `/vktodo`：直接落卡/推进（多 worktree 场景默认执行 `/vksync` 硬拦截）
 - `/imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
 
 手工分步链路（调试用）：`/plan -> /rwfj -> /vksync -> /vk -> /vktodo`

@@ -1,5 +1,5 @@
 ---
-description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动切本地后端兜底
+description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP（issue API），502 时自动切本地后端兜底
 ---
 
 # VK Todo 工作流 (VK Todo Workflow)
@@ -16,7 +16,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 | 需要把一批卡片推进到 Doing/Review/Gate/Done | `/vktodo` ✅ |
 | 仅查看卡片列表 | 直接用 `list_issues` |
 
-> 多 worktree 场景：建议先执行 `/vksync`；`/vktodo` 默认不再因未同步 worktree 强制拦截。
+> 多 worktree 场景：`/vktodo` 默认执行基线硬拦截；存在未同步 worktree 时直接失败。
 
 ---
 
@@ -40,6 +40,7 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
    - 或显式列表：如 `["PP-20260213::WS-01", "PP-20260213::WS-02"]`
 5. `status`：目标列（如 `Backlog/Doing/Review/Gate/Done`）
 6. `move_filter`：推进时筛选条件（如 `prefix:PP-20260213,top:5`）
+7. `allow_not_ready`：是否允许跳过基线硬拦截（`false|true`，默认 `false`，仅应急使用）
 
 ### 3) 自动推断规则（新增）
 
@@ -62,10 +63,12 @@ description: VK Todo 批量建卡：优先走 MCP（issue API），502 时自动
 
 ## 执行步骤
 
-### Step 0: G0 基线前置校验（可选）
+### Step 0: G0 基线前置校验（必做）
 
-1. 多 worktree 场景可先执行 `/vksync` 进行基线一致性检查。
-2. 若存在 `NOT_READY`，输出告警并继续落卡；由协作者自行承担后续合并风险。
+1. 执行 `/vksync <task_split_dir_or_path> check`，获取 READY / NOT_READY 清单。
+2. 默认行为：若存在 `NOT_READY`，立即失败并停止 `/vktodo`。
+3. 仅当显式传入 `allow_not_ready=true` 时，允许继续；输出“风险确认”并记录跳过原因。
+4. 未显式确认风险时，不得创建/推进任何卡片。
 
 ### Step 1: 解析来源目录、项目与基线
 
