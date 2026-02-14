@@ -47,6 +47,41 @@ def test_collect_returns_observed_metrics_when_has_recent_events() -> None:
     assert any(item["key"] == "data" for item in snapshot["modules"])
 
 
+def test_collect_excludes_admin_overview_requests_from_runtime_metrics() -> None:
+    """总览接口自身请求不应计入请求总量与模块矩阵。"""
+
+    fixed_now = datetime(2026, 2, 14, 10, 3, 0, tzinfo=timezone.utc)
+    store = RuntimeRequestMetricsStore(now_provider=lambda: fixed_now)
+
+    store.record(
+        path="/api/v1/admin-overview/summary",
+        status_code=200,
+        duration_ms=35,
+        recorded_at=fixed_now - timedelta(seconds=20),
+    )
+    store.record(
+        path="/api/v1/admin-overview/stream",
+        status_code=200,
+        duration_ms=12,
+        recorded_at=fixed_now - timedelta(seconds=15),
+    )
+    store.record(
+        path="/api/v1/chat/completions",
+        status_code=200,
+        duration_ms=410,
+        recorded_at=fixed_now - timedelta(seconds=10),
+    )
+
+    collector = RuntimeOverviewMetricCollector(store=store)
+    snapshot = collector.collect()
+
+    assert snapshot["request_total"] == 1
+    assert snapshot["request_success"] == 1
+    assert snapshot["request_5xx"] == 0
+    assert len(snapshot["modules"]) == 1
+    assert snapshot["modules"][0]["key"] == "chat"
+
+
 def test_collect_returns_no_traffic_hint_when_window_is_empty() -> None:
     """无流量时应返回提示性告警，避免全空卡片。"""
 
@@ -57,6 +92,28 @@ def test_collect_returns_no_traffic_hint_when_window_is_empty() -> None:
     snapshot = collector.collect()
 
     assert snapshot["snapshot_at"].endswith("Z")
+    assert "request_total" not in snapshot
+    assert snapshot["modules"] == []
+    assert len(snapshot["alerts"]) == 1
+    assert snapshot["alerts"][0]["code"] == "overview.runtime.no_traffic"
+
+
+def test_collect_returns_no_traffic_hint_when_only_admin_overview_requests() -> None:
+    """窗口内仅总览自身请求时应视为无业务流量。"""
+
+    fixed_now = datetime(2026, 2, 14, 10, 7, 0, tzinfo=timezone.utc)
+    store = RuntimeRequestMetricsStore(now_provider=lambda: fixed_now)
+
+    store.record(
+        path="/api/v1/admin-overview/summary",
+        status_code=200,
+        duration_ms=25,
+        recorded_at=fixed_now - timedelta(seconds=6),
+    )
+
+    collector = RuntimeOverviewMetricCollector(store=store)
+    snapshot = collector.collect()
+
     assert "request_total" not in snapshot
     assert snapshot["modules"] == []
     assert len(snapshot["alerts"]) == 1

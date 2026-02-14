@@ -61,6 +61,9 @@ class RuntimeOverviewMetricCollector:
     WINDOW_SEC = 300
     COST_PER_REQUEST = 0.015
     BUDGET_PER_MINUTE = 100.0
+    EXCLUDED_PATH_PREFIXES: tuple[str, ...] = (
+        "/api/v1/admin-overview",
+    )
 
     def __init__(self, store=runtime_request_metrics_store) -> None:
         self._store = store
@@ -71,17 +74,26 @@ class RuntimeOverviewMetricCollector:
                 return rule.key, rule.label
         return "system", "系统接口"
 
+    def _is_countable_path(self, path: str) -> bool:
+        """判断请求是否计入总览运行时指标。"""
+
+        for prefix in self.EXCLUDED_PATH_PREFIXES:
+            if path.startswith(prefix):
+                return False
+        return True
+
     def collect(self) -> dict[str, Any]:
         now, events = self._store.list_recent(window_sec=self.WINDOW_SEC)
+        observed_events = [event for event in events if self._is_countable_path(event.path)]
 
-        if not events:
+        if not observed_events:
             return {
                 "snapshot_at": _to_iso8601(now),
                 "alerts": [
                     {
                         "code": "overview.runtime.no_traffic",
                         "severity": "info",
-                        "message": "最近 5 分钟暂无 API 请求，指标待下一轮流量进入后更新",
+                        "message": "最近 5 分钟暂无业务 API 请求，指标待下一轮流量进入后更新",
                         "status": "active",
                     }
                 ],
@@ -89,21 +101,21 @@ class RuntimeOverviewMetricCollector:
                 "changes": [],
             }
 
-        request_total = len(events)
-        request_5xx = sum(1 for event in events if event.status_code >= 500)
+        request_total = len(observed_events)
+        request_5xx = sum(1 for event in observed_events if event.status_code >= 500)
         request_success = request_total - request_5xx
 
-        latency_values = [event.duration_ms for event in events]
+        latency_values = [event.duration_ms for event in observed_events]
         latency_p95_ms = _percentile(latency_values, 0.95)
 
         qps = request_total / max(self.WINDOW_SEC, 1)
         cost_per_minute = qps * 60.0 * self.COST_PER_REQUEST
         budget_per_minute = max(self.BUDGET_PER_MINUTE, cost_per_minute)
 
-        latest_event_time = max(event.recorded_at for event in events)
+        latest_event_time = max(event.recorded_at for event in observed_events)
         data_delay_sec = max(0.0, (now - latest_event_time).total_seconds())
 
-        modules = self._build_modules(now=now, events=events)
+        modules = self._build_modules(now=now, events=observed_events)
         alerts = self._build_alerts(
             request_total=request_total,
             request_5xx=request_5xx,
