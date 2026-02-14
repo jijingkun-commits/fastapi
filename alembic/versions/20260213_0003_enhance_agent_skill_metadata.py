@@ -86,9 +86,31 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             """
-            CREATE INDEX IF NOT EXISTS idx_agent_skills_embedding_ivfflat
-            ON t_agent_skills USING ivfflat (embedding vector_cosine_ops)
-            WITH (lists = 100)
+            DO $$
+            DECLARE
+                embedding_dims integer;
+            BEGIN
+                SELECT a.atttypmod
+                INTO embedding_dims
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                WHERE c.relname = 't_agent_skills'
+                  AND a.attname = 'embedding'
+                  AND a.attnum > 0
+                  AND NOT a.attisdropped
+                LIMIT 1;
+
+                IF embedding_dims IS NOT NULL AND embedding_dims <= 2000 THEN
+                    EXECUTE '
+                        CREATE INDEX IF NOT EXISTS idx_agent_skills_embedding_ivfflat
+                        ON t_agent_skills USING ivfflat (embedding vector_cosine_ops)
+                        WITH (lists = 100)
+                    ';
+                ELSE
+                    RAISE NOTICE 'Skip idx_agent_skills_embedding_ivfflat: embedding dims is %, ivfflat requires <= 2000', embedding_dims;
+                END IF;
+            END
+            $$;
             """
         )
     )
