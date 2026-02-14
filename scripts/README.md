@@ -149,6 +149,8 @@ bash scripts/vk_cleanup.sh
 > 主分支默认 8000/3000；子任务分支按 worktree 自动分配端口。
 >
 > 共享 venv 建议：`VK_SHARED_VENV_MODE=auto`（默认）。当本地 `venv` 不可用时，`vk_setup.sh` 会通过 `.vibe/venv` 复用主 worktree 的 `venv`。
+>
+> `vk_dev.sh` 启动 `web` 时会检查 `web/node_modules` 与 `next` CLI；若依赖缺失，会自动执行 `pnpm install --frozen-lockfile`（失败回退 `pnpm install`）或 `npm ci`（失败回退 `npm install`）。
 
 ### 数据清理
 

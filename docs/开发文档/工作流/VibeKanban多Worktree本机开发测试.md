@@ -44,6 +44,7 @@
   - 生成 `.env.vk.local` 与 `web/.env.vk.local`（记录当前 worktree 端口与 URL）。
 - `scripts/vk_dev.sh`
   - 启动本机 `backend + web`（或单独启动其中之一）。
+  - 启动 `web` 前会检查 `web/node_modules` 与 `next` CLI；依赖缺失时自动安装（`pnpm install --frozen-lockfile`/`npm ci`，失败回退常规 install）。
   - 输出当前访问地址，供本地调试和 Vibe Kanban 识别。
 - `scripts/vk_cleanup.sh`
   - 停止当前 worktree 启动的服务进程并清理 PID 文件。

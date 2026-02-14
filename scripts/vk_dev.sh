@@ -127,6 +127,45 @@ resolve_uvicorn_cmd() {
   return 1
 }
 
+ensure_web_dependencies() {
+  local package_manager="$1"
+  local web_dir="$ROOT_DIR/web"
+  local install_reason=""
+
+  if [[ ! -d "$web_dir/node_modules" ]]; then
+    install_reason="node_modules 缺失"
+  elif [[ ! -x "$web_dir/node_modules/.bin/next" ]]; then
+    install_reason="next CLI 缺失"
+  fi
+
+  if [[ -z "$install_reason" ]]; then
+    return 0
+  fi
+
+  echo "[vk_dev] 检测到 web 依赖未就绪（${install_reason}），开始自动安装..."
+
+  if [[ "$package_manager" == "pnpm" ]]; then
+    if [[ -f "$web_dir/pnpm-lock.yaml" ]]; then
+      if (cd "$web_dir" && pnpm install --frozen-lockfile); then
+        return 0
+      fi
+      echo "[vk_dev] pnpm --frozen-lockfile 失败，回退为 pnpm install" >&2
+    fi
+
+    (cd "$web_dir" && pnpm install)
+    return 0
+  fi
+
+  if [[ -f "$web_dir/package-lock.json" ]]; then
+    if (cd "$web_dir" && npm ci); then
+      return 0
+    fi
+    echo "[vk_dev] npm ci 失败，回退为 npm install" >&2
+  fi
+
+  (cd "$web_dir" && npm install)
+}
+
 start_backend() {
   local current_pid
   current_pid="$(read_pid "$BACKEND_PID_FILE")"
@@ -163,6 +202,7 @@ start_backend() {
 
 start_web() {
   local current_pid
+  local package_manager=""
   current_pid="$(read_pid "$WEB_PID_FILE")"
   if is_pid_running "$current_pid"; then
     echo "[vk_dev] web already running (pid=${current_pid})"
@@ -173,13 +213,17 @@ start_web() {
 
   local web_cmd=( )
   if command -v pnpm >/dev/null 2>&1; then
+    package_manager="pnpm"
     web_cmd=(pnpm dev -p "$VK_FRONTEND_PORT")
   elif command -v npm >/dev/null 2>&1; then
+    package_manager="npm"
     web_cmd=(npm run dev -- -p "$VK_FRONTEND_PORT")
   else
     echo "[vk_dev] 未找到 pnpm/npm，请先安装 Node.js 依赖。" >&2
     return 1
   fi
+
+  ensure_web_dependencies "$package_manager"
 
   load_env_file "$ROOT_DIR/web/.env.local"
   load_env_file "$ROOT_DIR/web/.env.vk.local"
