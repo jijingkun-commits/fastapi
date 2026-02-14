@@ -7,6 +7,8 @@ from starlette.types import ASGIApp
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.services.runtime_request_metrics import record_runtime_request_metric
+
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """将请求ID挂载到 ``request.state.correlation_id``，并在响应头写回；同时记录耗时。
@@ -36,6 +38,15 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         duration_ms = (time.perf_counter() - start) * 1000.0
         response.headers[self.header_name] = cid
         response.headers["X-Process-Time"] = f"{duration_ms:.2f}ms"
+
+        request_path = request.url.path
+        if request_path.startswith("/api/"):
+            record_runtime_request_metric(
+                path=request_path,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+
         # 4) 记录调试级日志，便于问题定位
         self.logger.debug(f"{request.method} {request.url.path} cid={cid} time_ms={duration_ms:.2f}")
         return response

@@ -26,6 +26,7 @@ from app.schemas.admin_overview import (
     AdminOverviewTrendWindow,
 )
 from app.services.admin_overview_service import AdminOverviewService
+from app.services.overview_runtime_collector import RuntimeOverviewMetricCollector
 
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def _normalize_trace_id(request: Request) -> Optional[str]:
 def get_admin_overview_service() -> AdminOverviewService:
     """总览服务依赖。"""
 
-    return AdminOverviewService()
+    return AdminOverviewService(collector=RuntimeOverviewMetricCollector())
 
 
 def _query_snapshots_for_window(
