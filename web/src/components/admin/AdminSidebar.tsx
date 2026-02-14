@@ -90,7 +90,7 @@ export function AdminSidebar() {
             <aside
                 className={cn(
                     "app-sidebar-surface relative flex h-screen flex-col border-r transition-all duration-200",
-                    collapsed ? "w-[56px]" : "w-[196px]"
+                    collapsed ? "w-[60px]" : "w-[212px]"
                 )}
             >
                 {/* 右侧内阴影 */}
@@ -99,29 +99,29 @@ export function AdminSidebar() {
                 {/* 顶部标题区 */}
                 <div
                     className={cn(
-                        "app-sidebar-separator flex h-12 shrink-0 items-center border-b",
-                        collapsed ? "justify-center px-1.5" : "justify-between px-3"
+                        "app-sidebar-separator flex h-[52px] shrink-0 items-center border-b",
+                        collapsed ? "justify-center px-2" : "justify-between px-3"
                     )}
                 >
                     {!collapsed && (
-                        <span className="app-sidebar-title text-xs font-semibold tracking-wide">
+                        <span className="app-sidebar-title text-sm font-semibold">
                             管理后台
                         </span>
                     )}
                     <button
                         onClick={() => setCollapsed(!collapsed)}
-                        className="app-sidebar-item flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:text-[var(--app-sidebar-icon-active)]"
+                        className="app-sidebar-item flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:text-[var(--app-sidebar-icon-active)]"
                     >
                         {collapsed ? (
-                            <PanelLeft className="h-3.5 w-3.5" />
+                            <PanelLeft className="h-4 w-4" />
                         ) : (
-                            <PanelLeftClose className="h-3.5 w-3.5" />
+                            <PanelLeftClose className="h-4 w-4" />
                         )}
                     </button>
                 </div>
 
                 {/* 导航菜单 */}
-                <nav className="flex-1 overflow-y-auto px-1.5 py-1.5">
+                <nav className="flex-1 overflow-y-auto px-2 py-2">
                     <ul className="flex flex-col gap-0.5">
                         {navItems.map((item) => {
                             const active = isActive(item.href);
@@ -129,14 +129,14 @@ export function AdminSidebar() {
                                 <Link
                                     href={item.href}
                                     className={cn(
-                                        "app-sidebar-item flex items-center rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150",
+                                        "app-sidebar-item flex items-center rounded-lg px-3 py-2 text-[13px] transition-all duration-150",
                                         collapsed ? "justify-center" : "gap-3",
                                         active && "app-sidebar-item-active"
                                     )}
                                 >
                                     <item.icon
                                         className={cn(
-                                            "app-sidebar-icon h-3.5 w-3.5 shrink-0 transition-colors",
+                                            "app-sidebar-icon h-4 w-4 shrink-0 transition-colors",
                                             active && "app-sidebar-icon-active"
                                         )}
                                     />
@@ -172,15 +172,15 @@ export function AdminSidebar() {
                 </nav>
 
                 {/* 底部返回聊天入口 */}
-                <div className="app-sidebar-separator shrink-0 border-t px-1.5 py-1.5">
+                <div className="app-sidebar-separator shrink-0 border-t px-2 py-2">
                     {collapsed ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Link
                                     href="/"
-                                    className="app-sidebar-item flex items-center justify-center rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150"
+                                    className="app-sidebar-item flex items-center justify-center rounded-lg px-3 py-2 text-[13px] transition-all duration-150"
                                 >
-                                    <MessageSquare className="app-sidebar-icon h-3.5 w-3.5 shrink-0" />
+                                    <MessageSquare className="app-sidebar-icon h-4 w-4 shrink-0" />
                                 </Link>
                             </TooltipTrigger>
                             <TooltipContent side="right" sideOffset={8}>
@@ -190,9 +190,9 @@ export function AdminSidebar() {
                     ) : (
                         <Link
                             href="/"
-                            className="app-sidebar-item flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150"
+                            className="app-sidebar-item flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition-all duration-150"
                         >
-                            <MessageSquare className="app-sidebar-icon h-3.5 w-3.5 shrink-0" />
+                            <MessageSquare className="app-sidebar-icon h-4 w-4 shrink-0" />
                             <span>返回聊天</span>
                         </Link>
                     )}
