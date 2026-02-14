@@ -1,28 +1,53 @@
-"""管理后台总览 API 的请求/响应模型。"""
+"""管理后台总览 API Schema。"""
 
-from enum import Enum
-from typing import Any, Optional
+from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any, Literal, Optional
 
-
-class TrendWindow(str, Enum):
-    """总览趋势窗口。"""
-
-    ONE_HOUR = "1h"
-    TWENTY_FOUR_HOURS = "24h"
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class OverviewSummaryResponse(BaseModel):
-    """总览摘要响应。"""
+AdminOverviewTrendWindow = Literal["1h", "24h"]
+
+
+class AdminOverviewTrendPoint(BaseModel):
+    """总览趋势单点。"""
+
+    timestamp: str
+    health_score: Optional[float] = None
+    request_success_rate: Optional[float] = None
+    error_5xx_rate: Optional[float] = None
+    latency_p95_ms: Optional[float] = None
+    qps: Optional[float] = None
+    budget_usage_pct: Optional[float] = None
+
+
+class AdminOverviewTrendsResponse(BaseModel):
+    """多窗口趋势响应。"""
+
+    windows: dict[AdminOverviewTrendWindow, list[AdminOverviewTrendPoint]]
+    snapshot_at: Optional[str] = None
+
+
+class AdminOverviewTrendSeriesResponse(BaseModel):
+    """单窗口趋势响应。"""
+
+    window: AdminOverviewTrendWindow
+    points: list[AdminOverviewTrendPoint] = Field(default_factory=list)
+    snapshot_at: Optional[str] = None
+
+
+class AdminOverviewSummaryResponse(BaseModel):
+    """总览快照响应。"""
+
+    model_config = ConfigDict(extra="allow")
 
     snapshot_at: str
     source: str
-    degraded: bool = False
+    degraded: bool
     health_score: Optional[float] = None
-    health_level: str = "unknown"
+    health_level: str
     budget_usage_pct: Optional[float] = None
-
     request_quality: dict[str, Any] = Field(default_factory=dict)
     stability: dict[str, Any] = Field(default_factory=dict)
     capacity_cost: dict[str, Any] = Field(default_factory=dict)
@@ -33,47 +58,65 @@ class OverviewSummaryResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
-class TrendPoint(BaseModel):
-    """趋势点位。"""
-
-    snapshot_at: str
-    health_score: Optional[float] = None
-    health_level: str = "unknown"
-    budget_usage_pct: Optional[float] = None
-    request_total: Optional[float] = None
-    error_5xx_rate: Optional[float] = None
-    latency_p95_ms: Optional[float] = None
-
-
-class OverviewTrendsResponse(BaseModel):
-    """总览趋势响应。"""
-
-    window: TrendWindow
-    interval: str
-    points: list[TrendPoint] = Field(default_factory=list)
-    generated_at: str
-    meta: dict[str, Any] = Field(default_factory=dict)
-
-
-class StreamResultEventData(BaseModel):
-    """SSE result 事件数据体。"""
+class AdminOverviewStreamResultData(BaseModel):
+    """SSE result 事件 data。"""
 
     snapshot_at: str
     patch: dict[str, Any] = Field(default_factory=dict)
     trace_id: Optional[str] = None
 
 
-class StreamInterruptEventData(BaseModel):
-    """SSE interrupt 事件数据体。"""
+class AdminOverviewStreamInterruptData(BaseModel):
+    """SSE interrupt 事件 data。"""
 
     reason: str
-    level: str
+    level: Literal["info", "warning", "critical"]
     retry_after_sec: Optional[int] = None
     message: Optional[str] = None
 
 
-class StreamDoneEventData(BaseModel):
-    """SSE done 事件数据体。"""
+class AdminOverviewStreamDoneData(BaseModel):
+    """SSE done 事件 data。"""
 
     batch_id: str
     final: bool = False
+
+
+class AdminOverviewStreamResultEvent(BaseModel):
+    """SSE result 事件。"""
+
+    type: Literal["result"] = "result"
+    data: AdminOverviewStreamResultData
+    node: Optional[str] = None
+
+
+class AdminOverviewStreamInterruptEvent(BaseModel):
+    """SSE interrupt 事件。"""
+
+    type: Literal["interrupt"] = "interrupt"
+    data: AdminOverviewStreamInterruptData
+    node: Optional[str] = None
+
+
+class AdminOverviewStreamDoneEvent(BaseModel):
+    """SSE done 事件。"""
+
+    type: Literal["done"] = "done"
+    data: AdminOverviewStreamDoneData
+    node: Optional[str] = None
+
+
+__all__ = [
+    "AdminOverviewTrendWindow",
+    "AdminOverviewTrendPoint",
+    "AdminOverviewTrendsResponse",
+    "AdminOverviewTrendSeriesResponse",
+    "AdminOverviewSummaryResponse",
+    "AdminOverviewStreamResultData",
+    "AdminOverviewStreamInterruptData",
+    "AdminOverviewStreamDoneData",
+    "AdminOverviewStreamResultEvent",
+    "AdminOverviewStreamInterruptEvent",
+    "AdminOverviewStreamDoneEvent",
+]
+

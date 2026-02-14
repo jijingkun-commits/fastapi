@@ -1,0 +1,79 @@
+{
+  "version": "v1",
+  "owner": "WS-00",
+  "compatibility": {
+    "policy": "append_optional_only",
+    "notes": "required 字段语义不可变更，仅允许追加 optional 字段"
+  },
+  "events": {
+    "result": {
+      "required": [
+        "type",
+        "data.snapshot_at",
+        "data.patch"
+      ],
+      "optional": [
+        "node",
+        "data.trace_id"
+      ],
+      "constraints": {
+        "type": {
+          "enum": [
+            "result"
+          ]
+        },
+        "data.patch": {
+          "type": "object",
+          "allow_empty": true
+        }
+      }
+    },
+    "interrupt": {
+      "required": [
+        "type",
+        "data.reason",
+        "data.level"
+      ],
+      "optional": [
+        "node",
+        "data.retry_after_sec",
+        "data.message"
+      ],
+      "constraints": {
+        "type": {
+          "enum": [
+            "interrupt"
+          ]
+        },
+        "data.level": {
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ]
+        }
+      }
+    },
+    "done": {
+      "required": [
+        "type",
+        "data.batch_id"
+      ],
+      "optional": [
+        "node",
+        "data.final"
+      ],
+      "constraints": {
+        "type": {
+          "enum": [
+            "done"
+          ]
+        },
+        "data.final": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

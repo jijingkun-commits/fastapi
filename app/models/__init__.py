@@ -6,6 +6,7 @@ from app.models.agent_skill import AgentSkill
 from app.models.idempotency_key import IdempotencyKey
 from app.models.token_blacklist import TokenBlacklist
 from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
+from app.models.ops_metric_snapshot import OpsMetricSnapshotMinute
 
 __all__ = [
     "User",
@@ -17,4 +18,5 @@ __all__ = [
     "TokenBlacklist",
     "ResultEnrichmentRule",
     "ResultEnrichmentRuleAudit",
+    "OpsMetricSnapshotMinute",
 ]

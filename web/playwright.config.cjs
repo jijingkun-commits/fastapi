@@ -18,6 +18,7 @@ const FRONTEND_PORT = Number.parseInt(
 );
 const BACKEND_PORT = Number.parseInt(process.env.TEST_BACKEND_PORT || process.env.VK_BACKEND_PORT || '8000', 10);
 const API_BASE = process.env.E2E_API_BASE || `http://127.0.0.1:${BACKEND_PORT}`;
+const REUSE_EXISTING_SERVER = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === 'true';
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL
     || process.env.VK_FRONTEND_BASE_URL
     || `http://127.0.0.1:${FRONTEND_PORT}`;
@@ -66,7 +67,7 @@ module.exports = defineConfig({
     webServer: {
         command: `NEXT_PUBLIC_API_BASE_URL=${API_BASE} npm run dev -- -p ${FRONTEND_PORT}`,
         url: BASE_URL,
-        reuseExistingServer: true,
+        reuseExistingServer: REUSE_EXISTING_SERVER,
         timeout: 120 * 1000,
     },
 });

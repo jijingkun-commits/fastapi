@@ -1,0 +1,206 @@
+{
+  "source_task_split_dir": "2026-02-13_管理后台总览驾驶舱",
+  "resolved_path": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱",
+  "mode": "strict",
+  "task_key": "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+  "parsed_files": {
+    "parallel_plan": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-00_G0_协议冻结.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-01_总览观测快照模型与迁移.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-02_指标采集与健康聚合服务.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-03_总览API与SSE通道.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-04_前端驾驶舱页面与实时接入.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G1_集成回归门禁.md",
+      "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G2_文档终稿门禁.md"
+    ]
+  },
+  "cards": [
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-01",
+      "title": "WS-01 总览观测快照模型与迁移 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "parallel",
+        "lane-backend-model"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "file_scope": [
+        "app/models/ops_metric_snapshot.py",
+        "app/models/__init__.py",
+        "alembic/versions/",
+        "tests/unit/test_ops_metric_snapshot_model.py"
+      ],
+      "dod": [
+        "t_ops_metric_snapshot_minute 模型与迁移落地并可回滚"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit -k \"ops_metric_snapshot or migration\""
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-01_总览观测快照模型与迁移.md"
+    },
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-02",
+      "title": "WS-02 指标采集与健康聚合服务 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "parallel",
+        "lane-backend-service"
+      ],
+      "hard_depends_on": [
+        "WS-01"
+      ],
+      "soft_depends_on": [],
+      "file_scope": [
+        "app/services/admin_overview_service.py",
+        "app/services/ops_snapshot_service.py",
+        "app/core/middlewares/correlation.py",
+        "tests/unit/test_admin_overview_service.py"
+      ],
+      "dod": [
+        "OverviewSnapshot 聚合逻辑可用并覆盖异常降级路径"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_admin_overview_service.py"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-02_指标采集与健康聚合服务.md"
+    },
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-03",
+      "title": "WS-03 总览 API 与 SSE 通道 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "parallel",
+        "lane-backend-api"
+      ],
+      "hard_depends_on": [
+        "WS-02"
+      ],
+      "soft_depends_on": [
+        "WS-01"
+      ],
+      "file_scope": [
+        "app/api/v1/endpoints/admin_overview_api.py",
+        "app/api/v1/router.py",
+        "app/schemas/admin_overview.py",
+        "tests/api/test_admin_overview_api.py"
+      ],
+      "dod": [
+        "summary/trends/stream 接口可用并符合 G0 协议冻结"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/api/test_admin_overview_api.py"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-03_总览API与SSE通道.md"
+    },
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-04",
+      "title": "WS-04 前端驾驶舱页面与实时接入 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "parallel",
+        "lane-frontend"
+      ],
+      "hard_depends_on": [
+        "WS-03"
+      ],
+      "soft_depends_on": [
+        "WS-01",
+        "WS-02"
+      ],
+      "file_scope": [
+        "web/src/app/admin/page.tsx",
+        "web/src/components/admin/overview/",
+        "web/src/lib/admin-overview-api.ts",
+        "web/src/types/admin-overview.ts",
+        "web/e2e/features/admin-overview.feature.cjs"
+      ],
+      "dod": [
+        "管理后台总览升级为 8 块驾驶舱并完成实时降级链路"
+      ],
+      "check_cmd": [
+        "cd web && pnpm tsc --noEmit",
+        "cd web && pnpm lint",
+        "cd web && pnpm playwright test e2e/features/admin-overview.feature.cjs"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-04_前端驾驶舱页面与实时接入.md"
+    },
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-G1",
+      "title": "WS-G1 集成回归门禁 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "gate",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "WS-01",
+        "WS-02",
+        "WS-03",
+        "WS-04"
+      ],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G1_集成回归门禁.md"
+      ],
+      "dod": [
+        "G1 门禁命令执行并完成失败项责任 WS 归因"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_admin_overview_service.py",
+        "venv/bin/python -m pytest -q tests/api/test_admin_overview_api.py",
+        "cd web && pnpm tsc --noEmit",
+        "cd web && pnpm playwright test e2e/features/admin-overview.feature.cjs",
+        "venv/bin/python scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G1_集成回归门禁.md"
+    },
+    {
+      "id": "PP-20260213-ADMIN-OVERVIEW-COCKPIT::WS-G2",
+      "title": "WS-G2 文档终稿门禁 [PP-20260213-ADMIN-OVERVIEW-COCKPIT]",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "PP-20260213-ADMIN-OVERVIEW-COCKPIT",
+        "2026-02-13_管理后台总览驾驶舱",
+        "gate",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "WS-G1"
+      ],
+      "soft_depends_on": [],
+      "file_scope": [
+        "docs/产品文档/管理后台需求.md",
+        "docs/开发文档/架构设计/前端架构.md",
+        "docs/开发文档/架构设计/数据库设计.md",
+        "docs/开发文档/测试管理/管理后台测试案例.md",
+        "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/parallel_plan.md"
+      ],
+      "dod": [
+        "文档矩阵完成同步并通过 docs_guard"
+      ],
+      "check_cmd": [
+        "venv/bin/python scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G2_文档终稿门禁.md"
+    }
+  ]
+}
