@@ -15,7 +15,7 @@
 ## 1. seed 来源
 
 - `task_key`:
-- 来源：`plan` / `rwfj 推导`
+- 来源：`plan` / `vkplan 推导`
 - `card_seed` 来源：
 - 推导依据与风险：
 

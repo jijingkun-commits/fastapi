@@ -1,5 +1,5 @@
 ---
-description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
+description: 并行拆解入口（前提：已完成 /plan）
 ---
 
 > 参考规则: @dual-database
@@ -11,8 +11,6 @@ description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 定位
-
-`/vkplan` = `/rwfj`（用户入口别名）
 
 - 前置要求：必须先完成 `/plan`
 - 核心目标：完成并行拆解与 G0 冻结，生成 `vk_cards.json` 供 `/vktodo` 直接使用
@@ -56,7 +54,7 @@ description: 并行拆解入口：等价 /rwfj（前提：已完成 /plan）
 - `/vktodo`：直接落卡/推进（多 worktree 场景默认执行 `/vksync` 硬拦截）
 - `/imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
 
-手工分步链路（调试用）：`/plan -> /rwfj -> /vksync -> /vk -> /vktodo`
+手工分步链路（调试用）：`/plan -> /vkplan -> /vksync -> /vk -> /vktodo`
 
 ---
 *使用 `/vkplan` 触发。用于“完成拆解后直接进入 `/vktodo`”。*

@@ -97,9 +97,11 @@ bash scripts/vk_dev.sh up
 为避免“拆了解但不能并行执行”，建议命令链路固定为：
 
 ```text
-/clarify -> /plan -> /vkplan(= /rwfj) -> /vkkb(或 /vktodo)
-        -> /imp-ws(WS-01...WS-N 并行)
-        -> /imp-ws(WS-G1) -> /imp-ws(WS-G2)
+/clarify -> /plan -> /vkplan
+        -> /vkkb <任务拆解目录>(或 /vktodo <任务拆解目录>)
+        -> /imp-ws @workstreams/WS-01...WS-N(并行)
+        -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
+        -> /imp-ws @workstreams/WS-G2_文档终稿门禁.md
         -> /review -> /test
 ```
 
@@ -118,8 +120,8 @@ bash scripts/vk_dev.sh up
 关键要求：
 
 1. 先执行 `/plan`，产出需求与技术方案（含 `task_key/card_seed`）。
-2. `/vkplan` 语义等价 `/rwfj`，固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
-3. `WS-00` 在 `/vkplan`（`/rwfj`）阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
+2. `/vkplan` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
+3. `WS-00` 在 `/vkplan` 阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
 4. `/vkkb` 或 `/vktodo` 负责默认落卡；多 worktree 场景可按需先执行 `/vksync`，`/vk` 降级为可选导出审阅命令。
 5. `WS-00` 为 master 前置里程碑，不进入 VK 落卡与推进列表。
 6. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。

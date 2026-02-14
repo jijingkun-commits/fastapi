@@ -17,14 +17,17 @@
 ### 1.2 并行开发（多 AI / 多 worktree）
 
 ```text
-想法 -> /clarify -> /plan -> /vkplan（= /rwfj） -> /vkkb（或 /vktodo）
-     -> /imp-ws(并行层) -> /imp-ws(WS-G1) -> /imp-ws(WS-G2)
+想法 -> /clarify -> /plan -> /vkplan
+     -> /vkkb <任务拆解目录>（或 /vktodo <任务拆解目录>）
+     -> /imp-ws @workstreams/WS-01...WS-N（并行层）
+     -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
+     -> /imp-ws @workstreams/WS-G2_文档终稿门禁.md
      -> /review -> /test -> 验收
 ```
 
 并行执行顺序固定：
 
-1. `WS-00_G0_协议冻结`（Foundation，由 `/rwfj` 生成并冻结，默认不单独执行 `/imp-ws`）
+1. `WS-00_G0_协议冻结`（Foundation，由 `/vkplan` 生成并冻结，默认不单独执行 `/imp-ws`）
 2. `WS-01 ... WS-N`（并行层）
 3. `WS-G1_集成回归门禁`
 4. `WS-G2_文档终稿门禁`
@@ -36,10 +39,10 @@
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
 | 1. 需求与方案 | `/plan` | `requirements.md` + `implementation_plan.md`（含 `task_key/card_seed`） | `task_key` 全局唯一，`card_seed` 字段完整 |
-| 2. 并行拆解 | `/vkplan`（等价 `/rwfj`） | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
+| 2. 并行拆解 | `/vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
 | 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
-| 4. 子任务执行 | `/imp-ws @WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
-| 5. Gate 回填 | `/imp-ws @WS-G1` + `/imp-ws @WS-G2` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
+| 4. 子任务执行 | `/imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
+| 5. Gate 回填 | `/imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
 ---
 
@@ -49,14 +52,13 @@
 |---|---|---|
 | 快速澄清需求 | `/clarify` | 只问答，不落文档 |
 | 规划（不拆卡） | `/plan` 或 `/plan core` | 只产出需求与技术方案 |
-| 规划 + 并行拆解（推荐） | `/plan -> /vkplan` | `/vkplan` 等价 `/rwfj`，含 G0 冻结与落卡前产物 |
-| 并行拆包（兼容） | `/rwfj` | 与 `/vkplan` 语义等价 |
+| 规划 + 并行拆解（推荐） | `/plan -> /vkplan` | 含 G0 冻结与落卡前产物 |
 | 基线同步（调试） | `/vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
 | 看板一体落地（推荐） | `/vkkb <任务拆解目录>` | 自动补导出并落卡 |
 | 看板落卡（兼容） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
 | 看板导出（可选） | `/vk` | 仅在需要审阅 payload 或排障时使用 |
 | 看板推进（简化） | `/vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
-| 执行单个 WS | `/imp-ws` | 按白名单改动并回填自检卡 |
+| 执行单个 WS | `/imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/imp` | 不走并行流程时使用 |
 | 代码审查 | `/review` | 质量与风险检查 |
 | 测试验证 | `/test` | 回归验证与报告沉淀 |
@@ -65,7 +67,7 @@
 
 ## 4. 并行前 3 秒判断法
 
-满足以下 4 条才建议 `/rwfj`：
+满足以下 4 条才建议 `/vkplan`：
 
 1. 子任务可独立开始并独立交付（无需等待他人产出）
 2. 文件白名单互斥（无共享文件并发写）

@@ -40,7 +40,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 - 产出：`requirements.md` + `implementation_plan.md` + 最小 `card_seed`
 - 要求给出 `task_key`（后续卡片前缀）
 - 适用于多人/多 AI/多 worktree 并行
-- 并行拆解与落卡前准备由后续 `/vkplan`（= `/rwfj`）承接
+- 并行拆解与落卡前准备由后续 `/vkplan` 承接
 
 ---
 
@@ -104,7 +104,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 2. `result`：必选 / 可选字段
 3. `interrupt`：必选 / 可选字段
 
-并要求 `/rwfj` 在 WS 文档中同步“契约 owner + 消费只读方”关系。
+并要求 `/vkplan` 在 WS 文档中同步“契约 owner + 消费只读方”关系。
 
 ### 2.3 并行拆解种子（仅 parallel 模式必填）
 
@@ -127,20 +127,20 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 1. `hard_depends_on` 仅用于阻塞依赖；非阻塞引用写入 `soft_depends_on`。
 2. `file_scope` 必须可映射到后续 WS 白名单。
-3. 未提供 seed 时，`/rwfj` 可临时补齐，但必须在 `parallel_plan.md` 标注“seed 来源为 rwfj 推导”。
+3. 未提供 seed 时，`/vkplan` 可临时补齐，但必须在 `parallel_plan.md` 标注“seed 来源为 vkplan 推导”。
 
-## 3. 与 `/rwfj` 的关系（澄清）
+## 3. 与 `/vkplan` 的关系（澄清）
 
-`/plan` 与 `/rwfj` **不是二选一的替代关系**，而是分工关系：
+`/plan` 与 `/vkplan` **不是二选一的替代关系**，而是分工关系：
 
 1. `/plan` 负责“需求与架构正确性”。
-2. `/rwfj` 负责“并行拆包与可执行边界”。
+2. `/vkplan` 负责“并行拆包与可执行边界”。
 3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo（或 /vkkb） -> /imp-ws`。
 
 ## 4. 衔接下游
 
 规划完成后：
-- 并行场景：执行 `/vkplan`（等价 `/rwfj`）进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
+- 并行场景：执行 `/vkplan` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
 - 看板场景：执行 `/vktodo`（或 `/vkkb`）直接落卡；其前置会自动完成 G0 基线校验
 - 单任务实现：执行 `/imp`
 - 测试设计：执行 `/test` 基于模块需求文档生成测试用例

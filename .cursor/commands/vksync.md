@@ -36,7 +36,7 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 2. `workstreams/WS-00_G0_协议冻结.md`
 3. `contracts/sse_events_v1.json`
 
-若缺失任一文件，直接失败并提示回到 `/rwfj` 重产。
+若缺失任一文件，直接失败并提示回到 `/vkplan` 重产。
 
 ### Step 2: 解析基线提交
 
@@ -65,7 +65,7 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 ## 推荐链路
 
-`/plan -> /vkplan（= /rwfj） -> /vksync -> /vktodo（或 /vkkb） -> /imp-ws`
+`/plan -> /vkplan -> /vksync -> /vktodo（或 /vkkb） -> /imp-ws`
 
 ---
 
