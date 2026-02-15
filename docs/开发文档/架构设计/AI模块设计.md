@@ -597,6 +597,18 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 | Embedding | `app/ai/utils/embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
 | Vision | `vision_tool.py` | 路由优先 + 类型回退 | `vision`（优先） + `t_llm_model(type=vision)`（回退） | glm-4v-flash / gpt-5.2 |
 
+> **Vision 接口协议（2026-02-14）**
+> - 上传图片仍使用固定地址：`/api/v1/assets/{object_key}`。
+> - `vision_tool.py` 会先从 MinIO 读取该图片并转 `data:image/*;base64,...`，避免外网模型直接访问私有资源。
+> - 模型请求协议按 `extra_config` 选择：
+>   - 默认走 `POST /chat/completions`
+>   - 当 `use_responses_api=true` 或 `wire_api=responses` 时走 `POST /responses`
+>
+> **开发环境说明（当前排查结论）**
+> - 本次“图片识别返回 404”出现在开发阶段：`vision` 路由被配置为 `gpt-5.2`，其 provider 为 `openai_proxy_trial`，并启用 `wire_api=responses`。
+> - 若仍按 `/chat/completions` 调用该中转网关，会返回接口级 404（并非上传图片地址 404）。
+> - 生产环境建议优先使用正式 provider（或确保网关协议与模型配置一致），避免将开发试验链路配置直接复用到生产。
+
 #### 按模型类型分类
 
 | 模型类型 | 代表模型 | 特点 | 适合场景 | 不适合场景 |

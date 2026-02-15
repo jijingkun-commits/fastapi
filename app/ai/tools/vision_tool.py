@@ -5,7 +5,7 @@
 """
 import httpx
 import logging
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import tool
 
@@ -45,6 +45,46 @@ def _get_vision_model_config() -> Optional[LLMModelConfig]:
     return LLMConfigService.get_model_by_type("vision")
 
 
+def _is_truthy(value: Any) -> bool:
+    """宽松解析布尔值。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def _extract_responses_text(data: dict) -> str:
+    """从 Responses API 返回体中提取文本。"""
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    texts: list[str] = []
+    output_items = data.get("output")
+    if isinstance(output_items, list):
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            content_items = item.get("content")
+            if not isinstance(content_items, list):
+                continue
+            for content in content_items:
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") in {"output_text", "text"}:
+                    text = content.get("text")
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+
+    if texts:
+        return "\n".join(texts)
+
+    raise ValueError("Vision Responses API 未返回可解析文本")
+
+
 def _call_vision_model(image_url: str, question: str) -> str:
     """调用 Vision 模型分析图片。
     
@@ -63,24 +103,27 @@ def _call_vision_model(image_url: str, question: str) -> str:
     
     if not config.api_key:
         return f"⚠️ Vision 模型 {config.model_code} 的 API Key 未配置"
-    
+
+    extra_config = config.extra_config if isinstance(config.extra_config, dict) else {}
+    request_params = extra_config.get("request_params") if isinstance(extra_config.get("request_params"), dict) else {}
+    wire_api = str(extra_config.get("wire_api") or "").strip().lower()
+    use_responses_api = _is_truthy(extra_config.get("use_responses_api")) or wire_api == "responses"
+
+    normalized_image_url = (image_url or "").strip()
+    image_url = normalized_image_url
+    object_key = None
+    if normalized_image_url.startswith("/api/v1/assets/"):
+        object_key = normalized_image_url.split("/api/v1/assets/", 1)[1]
+    elif normalized_image_url and "/" in normalized_image_url and not normalized_image_url.startswith(("http://", "https://", "data:")):
+        object_key = normalized_image_url.lstrip("/")
+
     # 处理本地 URL
-    if image_url.startswith("/") or image_url.startswith("http://localhost") or image_url.startswith("minio://"):
+    if object_key:
         try:
             from app.services.asset_service import get_asset_service
             import base64
-            
-            # 提取 object_key
-            object_key = image_url
-            if "/api/v1/assets/" in image_url:
-                object_key = image_url.split("/api/v1/assets/")[-1]
-                logger.info("从 URL 提取 object_key: %s", object_key)
-            elif image_url.startswith("minio://"):
-                # minio://bucket/path/to/file -> path/to/file
-                parts = image_url.replace("minio://", "").split("/", 1)
-                if len(parts) > 1:
-                    object_key = parts[1]
-                logger.info("从 minio:// URL 提取 object_key: %s", object_key)
+
+            logger.info("从上传图片地址提取 object_key: %s", object_key)
             
             # 获取文件内容
             asset_service = get_asset_service()
@@ -118,6 +161,48 @@ def _call_vision_model(image_url: str, question: str) -> str:
         "Authorization": f"Bearer {config.api_key}",
         "Content-Type": "application/json",
     }
+
+    default_headers = extra_config.get("default_headers")
+    if isinstance(default_headers, dict):
+        headers.update(default_headers)
+    if _is_truthy(extra_config.get("send_x_api_key")):
+        headers["X-API-Key"] = config.api_key
+
+    base_url = config.base_url.rstrip("/") if config.base_url else ""
+
+    if use_responses_api:
+        payload = {
+            "model": config.model_code,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_image",
+                            "image_url": image_url,
+                        },
+                        {
+                            "type": "input_text",
+                            "text": question,
+                        },
+                    ],
+                }
+            ],
+            "max_output_tokens": config.max_output_tokens or 1024,
+        }
+        payload.update(request_params)
+
+        api_url = f"{base_url}/responses"
+        logger.info("Vision 调用接口: responses (%s)", api_url)
+        response = httpx.post(
+            api_url,
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return _extract_responses_text(data)
     
     # 构建请求体（兼容 OpenAI 格式）
     payload = {
@@ -139,14 +224,11 @@ def _call_vision_model(image_url: str, question: str) -> str:
         ],
         "max_tokens": config.max_output_tokens or 1024,
     }
-    
-    # 从 extra_config 获取额外参数
-    if config.extra_config:
-        payload.update(config.extra_config.get("request_params", {}))
-    
-    # 确定 API 端点
-    base_url = config.base_url.rstrip("/") if config.base_url else ""
+
+    payload.update(request_params)
+
     api_url = f"{base_url}/chat/completions"
+    logger.info("Vision 调用接口: chat_completions (%s)", api_url)
     
     response = httpx.post(
         api_url,
@@ -185,8 +267,10 @@ def analyze_image(image_url: str, question: str = "请描述这张图片的内�
         return result
         
     except httpx.HTTPStatusError as e:
-        logger.error("Vision API 错误: %s", e)
-        return f"图片分析失败: HTTP {e.response.status_code}"
+        status_code = e.response.status_code if e.response else "unknown"
+        endpoint = str(e.request.url) if e.request else "unknown"
+        logger.error("Vision API 错误: status=%s, endpoint=%s, err=%s", status_code, endpoint, e)
+        return f"图片分析失败: Vision 接口 HTTP {status_code}（endpoint={endpoint}）"
     except httpx.ConnectError as e:
         logger.error("无法连接到 Vision 服务: %s", e)
         return "图片分析服务连接失败"
