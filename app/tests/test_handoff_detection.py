@@ -44,3 +44,51 @@ def test_extract_latest_handoff_from_messages_returns_none_when_missing():
     delta_messages = [AIMessage(content="只是普通回复，没有工具调用")]
     assert AgentOutputParser.extract_latest_handoff_from_messages(delta_messages) is None
 
+
+def test_augment_data_handoff_payload_should_use_user_raw_question():
+    """data handoff 规范化应保留用户原始问题并避免过度推断。"""
+    from app.ai.state import AgentType
+    from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
+    from langchain_core.messages import HumanMessage
+
+    handoff = {
+        "action": "handoff",
+        "target_agent": AgentType.DATA,
+        "task_description": "请执行复杂口径确认后再输出。",
+        "frame": None,
+        "turn_act_hint": "",
+    }
+    state = {
+        "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户")],
+    }
+
+    normalized = _augment_data_handoff_payload(handoff, state)
+
+    assert normalized["task_description"] == "用户原始问题：查询2025年6月30日贷款余额前10名的客户"
+    assert normalized["turn_act_hint"] == "NEW_QUERY"
+    assert normalized.get("frame") is None
+
+
+def test_augment_data_handoff_payload_should_keep_existing_frame():
+    """已有结构化 frame 时应保持透传，仅补齐描述与 turn_act。"""
+    from app.ai.state import AgentType
+    from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
+    from langchain_core.messages import HumanMessage
+
+    handoff = {
+        "action": "handoff",
+        "target_agent": AgentType.DATA,
+        "task_description": "请按模型建议处理",
+        "frame": {"metric": "贷款余额", "time_range": "2025-06-30"},
+        "turn_act_hint": "",
+    }
+    state = {
+        "messages": [HumanMessage(content="查询2025年6月30日贷款余额")],
+    }
+
+    normalized = _augment_data_handoff_payload(handoff, state)
+
+    assert normalized["frame"] == {"metric": "贷款余额", "time_range": "2025-06-30"}
+    assert normalized["turn_act_hint"] == "NEW_QUERY"
+    assert normalized["task_description"] == "用户原始问题：查询2025年6月30日贷款余额"
+

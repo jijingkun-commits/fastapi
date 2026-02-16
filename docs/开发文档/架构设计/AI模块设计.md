@@ -1871,6 +1871,10 @@ Data Agent 采用两层漏斗模型处理用户查询：
 6. **默认口径**：机构分布图表场景未指定层级时，默认按 `分行` 执行，并在 `query_context.used_default_org_level=true` 留痕。  
 7. **策略可配置 + 缓存**：意图归一化/图表别名/指标同义词可通过 `t_system_config` 的 `data_graph.intent_policy`（JSON）配置；运行时带 60 秒本地缓存，降低重复读取开销。  
 8. **日志增强**：新增 `continuation_reason/context_reset_for_new_query/intent_policy_source/intent_policy_cache_hit` 等排障字段。  
+9. **Data Handoff 规范化（2026-02-16）**：Supervisor 在委派 `data_expert` 前会对 payload 做轻量归一化：`task_description` 优先保留“用户原始问题”，并补齐 `turn_act_hint`（默认 `NEW_QUERY`）；不在 Supervisor 侧推断问数槽位，避免规则膨胀与误判。  
+10. **Handoff frame 强优先（2026-02-16）**：`data_graph._extract_handoff_context` 在 `frame` 存在时仅消费结构化字段，`task_description` 仅作为无 frame 时兜底，减少“文本噪声误提取机构层级”的风险。  
+11. **NEW_QUERY 提示优先（2026-02-16）**：当 `turn_act_hint=NEW_QUERY` 且无历史 state 上下文时，禁止将当前轮误判为补充轮（`SUPPLEMENT`）。  
+12. **结构化澄清级别（2026-02-16）**：意图分析输出新增 `clarify_level`（`required|optional`）。当关键槽位已齐备且 `clarify_level=optional` 时，Data Agent 跳过该澄清并继续执行；`required` 仍按澄清流程处理，避免依赖口径关键词硬编码。  
 
 #### 相关状态字段（DataAgentState）
 
@@ -1972,6 +1976,7 @@ graph TD
 - 增加：`frame`（结构化槽位）
 - 增加：`turn_act_hint`（可选，辅助专家侧判定）
 - 增加：`frame.tool_observations`（可选，Supervisor 工具观测摘要）
+- 约束：`task_description` 用于兼容与审计，不应承载高密度执行脚本；专家优先消费 `frame` 真值。
 
 `tool_observations` 约定（2026-02）：
 - 产生方：Supervisor（如 `tavily_search` 工具调用后）
@@ -2003,6 +2008,12 @@ graph TD
 - 运行时可调项：`data_graph.intent_policy`（`t_system_config`）用于策略微调（模式判定/确认词/延续词），读取入口为 `app/ai/workflow/data_graph.py` 的 `_load_data_graph_intent_policy()`。
 - 轻量降级：Supervisor 仅透传 `task_description`，不传 `frame/turn_act_hint`，可快速回退到文本 handoff 主导模式（入口：`app/ai/workflow/multi_agent_graph.py` 的 `_create_task_handoff_tool`）。
 - 全量回滚：发布层回退到上一稳定版本（恢复 V1 行为），推荐作为生产应急兜底。
+
+### 7.1 机构与权限执行说明（2026-02-16）
+
+- 机构层级默认策略保持不变：机构图表场景未明确层级时默认 `分行`，并在 `query_context.used_default_org_level=true` 留痕。
+- SQL 仍统一经过 `sql_safety_check -> evaluate_sql_policy`：表级、行级、列级权限先于执行生效。
+- 当权限重写实际生效（`permission_rewritten=true`）时，`sql_execute` 会在解释文本与结果载荷里标注“已按当前账号机构/部门权限过滤”，降低口径误读风险。
 
 ### 8. 落地顺序（已执行）
 

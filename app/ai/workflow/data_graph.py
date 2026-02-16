@@ -1139,27 +1139,21 @@ def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
         context["metric_name"] = _pick_first_non_empty_str(
             handoff_frame.get("metric"),
             handoff_frame.get("metric_name"),
-            text_parsed.get("metric_name"),
         )
         context["time_range"] = _pick_first_non_empty_str(
             handoff_frame.get("time_range"),
-            text_parsed.get("time_range"),
         )
         context["dimensions"] = _pick_first_non_empty_list(
             _ensure_text_list(handoff_frame.get("dimensions")),
-            _ensure_text_list(text_parsed.get("dimensions")),
         )
         context["chart_type"] = _pick_first_non_empty_str(
             handoff_frame.get("chart_type"),
-            text_parsed.get("chart_type"),
         )
         context["org_level"] = _pick_first_non_empty_str(
             handoff_frame.get("org_level"),
-            text_parsed.get("org_level"),
         )
         context["filters"] = _pick_first_non_empty_list(
             _ensure_text_list(handoff_frame.get("filters")),
-            _ensure_text_list(text_parsed.get("filters")),
         )
         context["turn_act_hint"] = str(
             pending_handoff.get("turn_act_hint")
@@ -1232,7 +1226,10 @@ def _infer_clarify_slot(clarification: str) -> str:
     compact = re.sub(r"\s+", "", clarification or "")
     if not compact:
         return ""
-    if any(keyword in compact for keyword in ("图表", "展示", "明细", "占比")):
+    if any(
+        keyword in compact
+        for keyword in ("图表", "可视化", "柱状图", "柱形图", "条形图", "饼图", "折线图", "明细", "占比", "列表")
+    ):
         return "display_mode"
     if "指标" in compact and "时间" in compact:
         return "metric_time"
@@ -1243,6 +1240,19 @@ def _infer_clarify_slot(clarification: str) -> str:
     if any(keyword in compact for keyword in ("层级", "分行", "支行")):
         return "org_level"
     return "general"
+
+
+def _normalize_clarify_level(value: Any) -> str:
+    """标准化澄清级别：required|optional。"""
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+
+    if token in {"required", "mandatory", "must", "必需", "必须"}:
+        return "required"
+    if token in {"optional", "suggested", "preference", "可选", "建议"}:
+        return "optional"
+    return ""
 
 
 def _build_clarification_message(missing_slots: List[str]) -> str:
@@ -1262,6 +1272,7 @@ def _build_clarification_message(missing_slots: List[str]) -> str:
 def _resolve_clarification(
     *,
     analysis_clarification: str,
+    analysis_clarify_level: str,
     merged_metric: str,
     merged_time: str,
     need_org_level: bool,
@@ -1288,6 +1299,10 @@ def _resolve_clarification(
     clarification = str(analysis_clarification or "").strip()
     if not clarification:
         return None, None, 0, "no_clarification_needed"
+
+    clarify_level = _normalize_clarify_level(analysis_clarify_level)
+    if clarify_level == "optional":
+        return None, None, 0, "skip_optional_clarify_level"
 
     analysis_slot = _infer_clarify_slot(clarification)
 
@@ -1354,17 +1369,33 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     handoff_task_description = str(handoff_context.get("task_description") or "").strip()
     handoff_turn_act_hint = str(handoff_context.get("turn_act_hint") or "").strip()
 
-    has_prior_context = any([
+    has_state_context = any([
         existing_metric,
         existing_time,
         existing_dims,
         existing_filters,
+        str(query_context.get("original_question") or "").strip() if isinstance(query_context, dict) else "",
+    ])
+
+    has_handoff_context = any([
         handoff_metric,
         handoff_time,
         handoff_dims,
+        handoff_filters,
         handoff_task_description,
-        str(query_context.get("original_question") or "").strip() if isinstance(query_context, dict) else "",
     ])
+
+    has_clarify_history = bool(str(state.get("last_clarify_slot") or "").strip()) or int(state.get("clarify_count") or 0) > 0
+    allow_handoff_as_prior = handoff_turn_act_hint in {
+        TURN_ACT_SUPPLEMENT,
+        TURN_ACT_CONFIRM,
+        TURN_ACT_CORRECTION,
+    }
+    if not handoff_turn_act_hint and has_clarify_history:
+        allow_handoff_as_prior = True
+
+    has_prior_context = has_state_context or (has_handoff_context and allow_handoff_as_prior)
+
     continuation_mode, continuation_reason = _is_continuation_reply(
         normalized_last_message,
         has_prior_context=bool(has_prior_context),
@@ -1381,6 +1412,15 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     elif continuation_reason in {"metric_switched", "time_switched"}:
         turn_act = TURN_ACT_CORRECTION
     else:
+        turn_act = TURN_ACT_NEW_QUERY
+
+    if (
+        handoff_turn_act_hint == TURN_ACT_NEW_QUERY
+        and not has_state_context
+        and continuation_mode
+    ):
+        continuation_mode = False
+        continuation_reason = "handoff_new_query_hint"
         turn_act = TURN_ACT_NEW_QUERY
 
     if (
@@ -1559,6 +1599,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         previous_clarify_round = int(state.get("clarify_round") or previous_clarify_count or 0)
         clarification, clarify_slot, clarified_count, clarify_reason = _resolve_clarification(
             analysis_clarification=str(analysis.get("clarification_needed") or ""),
+            analysis_clarify_level=str(analysis.get("clarify_level") or ""),
             merged_metric=merged_metric,
             merged_time=merged_time,
             need_org_level=has_chart_request and org_dimension_requested and not bool(merged_org_level),
@@ -2468,9 +2509,19 @@ def sql_safety_check(state: DataAgentState) -> Dict:
     sql = state.get("pending_sql") or state.get("generated_sql")
     if not sql:
         return {}
+
+    query_context = state.get("query_context")
+    if isinstance(query_context, dict):
+        updated_query_context = dict(query_context)
+    else:
+        updated_query_context = {}
     
     user_id = state.get("user_id")
     decision = evaluate_sql_policy(sql, user_id=user_id, auto_limit=True, limit=1000)
+    if user_id:
+        updated_query_context["permission_checked"] = True
+        updated_query_context["permission_rewritten"] = bool(getattr(decision, "permission_rewritten", False))
+        updated_query_context["sql_policy_reason_code"] = decision.reason_code
 
     if not decision.is_allowed:
         logger.warning(
@@ -2482,7 +2533,8 @@ def sql_safety_check(state: DataAgentState) -> Dict:
         return {
             "clarification_needed": f"查询被拒绝：{decision.reason}",
             "last_error": decision.reason,
-            "pending_sql": None
+            "pending_sql": None,
+            "query_context": updated_query_context,
         }
 
     processed_sql = decision.rewritten_sql
@@ -2493,10 +2545,14 @@ def sql_safety_check(state: DataAgentState) -> Dict:
         return {
             "generated_sql": processed_sql,
             "pending_sql": processed_sql,
-            "sql_approved": True
+            "sql_approved": True,
+            "query_context": updated_query_context,
         }
-    
-    return {"sql_approved": True}
+
+    return {
+        "sql_approved": True,
+        "query_context": updated_query_context,
+    }
 
 
 def _is_chart_requested(state: DataAgentState) -> bool:
@@ -3213,6 +3269,7 @@ def sql_execute(state: DataAgentState) -> Dict:
         # 生成结果解释
         query_context = state.get("query_context", {})
         question = query_context.get("original_question", "")
+        permission_rewritten = bool(query_context.get("permission_rewritten")) if isinstance(query_context, dict) else False
 
         # 可视化增强：在 sql_result 中附带前端可直接消费的 chart 规格（可选）
         chart_payload = _build_sql_result_chart_payload(
@@ -3227,6 +3284,8 @@ def sql_execute(state: DataAgentState) -> Dict:
         interpretation = _interpret_result(question, sql, result_data)
         if rewrite_note:
             interpretation = f"ℹ️ 已自动调整查询策略：{rewrite_note}。\n\n{interpretation}"
+        if permission_rewritten:
+            interpretation = f"{interpretation}\n\n注：结果已按当前账号的数据权限范围（机构/部门）过滤。"
         
         # 构建响应消息
         response_msg = create_ai_message(
@@ -3243,6 +3302,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                     "sql_source": state.get("sql_source", "unknown"),
                     "iterations": iterations,  # 记录重试次数
                     "chart": chart_payload,
+                    "permission_scope_applied": permission_rewritten,
                 }
             }
         )
@@ -3256,6 +3316,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "column_display_names": column_display_names,
                 "display_sql": display_sql,
                 "chart": chart_payload,
+                "permission_scope_applied": permission_rewritten,
             },
             message=interpretation,
             node="sql_execute"

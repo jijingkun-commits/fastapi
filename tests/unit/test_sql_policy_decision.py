@@ -30,6 +30,8 @@ def test_policy_allow_without_user(mock_sanitize_sql):
     assert decision.is_allowed is True
     assert decision.reason_code == "allowed_without_user"
     assert decision.rewritten_sql.endswith("LIMIT 1000")
+    assert decision.safety_rewritten is True
+    assert decision.permission_rewritten is False
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
@@ -49,6 +51,7 @@ def test_policy_denied_by_permission(mock_sanitize_sql, mock_check_and_rewrite_s
     assert decision.is_allowed is False
     assert decision.denied_stage == "permission"
     assert decision.reason_code == "permission_rejected"
+    assert decision.permission_rewritten is False
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
@@ -68,6 +71,7 @@ def test_policy_allow_with_rewritten_sql(mock_sanitize_sql, mock_check_and_rewri
     assert decision.is_allowed is True
     assert decision.reason_code == "allowed"
     assert "org_code" in decision.rewritten_sql
+    assert decision.permission_rewritten is True
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")

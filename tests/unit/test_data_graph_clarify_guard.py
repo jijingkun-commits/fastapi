@@ -255,6 +255,117 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertEqual(result.get("matched_metric"), "存款户数")
         self.assertIsNone(result.get("time_range"))
 
+    def test_optional_caliber_clarification_should_not_block_ready_query(self):
+        """指标+时间齐备时，口径型可选澄清不应阻断执行。"""
+        llm_payload = {
+            "intent": "clarification",
+            "metric_name": "贷款余额",
+            "time_range": "2025-06-30",
+            "filters": [],
+            "dimensions": ["客户"],
+            "chart_type": "",
+            "clarification_needed": (
+                "需确认数据口径：1)贷款余额是否含贴现/垫款；2)客户口径是否集团合并；"
+                "3)币种口径是折人民币还是原币。"
+            ),
+            "clarify_level": "optional",
+        }
+
+        result = self._invoke("查询2025-06-30贷款余额前10名客户", llm_payload)
+
+        self.assertIsNone(result.get("clarification_needed"))
+        self.assertEqual(result.get("matched_metric"), "贷款余额")
+        self.assertEqual(result.get("time_range"), "2025-06-30")
+        self.assertEqual(
+            result.get("query_context", {}).get("clarify_reason"),
+            "skip_optional_clarify_level",
+        )
+
+    def test_required_clarification_should_still_block_ready_query(self):
+        """clarify_level=required 时，即使指标+时间齐备也应保留澄清。"""
+        llm_payload = {
+            "intent": "clarification",
+            "metric_name": "贷款余额",
+            "time_range": "2025-06-30",
+            "filters": [],
+            "dimensions": ["客户"],
+            "chart_type": "",
+            "clarification_needed": "请确认客户口径是否按集团合并",
+            "clarify_level": "required",
+        }
+
+        result = self._invoke("查询2025-06-30贷款余额前10名客户", llm_payload)
+
+        self.assertIsNotNone(result.get("clarification_needed"))
+        self.assertIn("集团合并", result.get("clarification_needed"))
+        self.assertEqual(result.get("query_context", {}).get("clarify_reason"), "analysis:general")
+
+    def test_handoff_new_query_hint_should_not_force_continuation(self):
+        """handoff 明确 NEW_QUERY 时，不应把首轮识别成补充轮。"""
+        llm_payload = {
+            "intent": "metric_query",
+            "metric_name": "贷款余额",
+            "time_range": "2025-06-30",
+            "filters": [],
+            "dimensions": ["客户"],
+            "chart_type": "",
+            "clarification_needed": "",
+        }
+
+        result = self._invoke(
+            "查询2025-06-30贷款余额前10名客户",
+            llm_payload,
+            pending_handoff={
+                "target_agent": "data_expert",
+                "task_description": "用户原始问题：查询2025-06-30贷款余额前10名客户",
+                "turn_act_hint": "NEW_QUERY",
+                "frame": {
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["客户"],
+                },
+            },
+        )
+
+        self.assertFalse(result.get("continuation_mode"))
+        self.assertEqual(result.get("turn_act"), "NEW_QUERY")
+        self.assertEqual(result.get("query_context", {}).get("continuation_reason"), "no_prior_context")
+
+    def test_handoff_frame_should_override_task_description_noise(self):
+        """handoff frame 存在时，应优先使用 frame，避免 task_description 噪声污染。"""
+        llm_payload = {
+            "intent": "clarification",
+            "metric_name": "",
+            "time_range": "",
+            "filters": [],
+            "dimensions": [],
+            "chart_type": "",
+            "clarification_needed": "请补充指标和时间范围",
+        }
+
+        result = self._invoke(
+            "图标",
+            llm_payload,
+            pending_handoff={
+                "target_agent": "data_expert",
+                "task_description": "总行→分行→支行；默认按支行展示。",
+                "frame": {
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["机构"],
+                    "org_level": "分行",
+                    "chart_type": "图表",
+                },
+            },
+            last_clarify_slot="display_mode",
+            clarify_count=1,
+        )
+
+        self.assertIsNone(result.get("clarification_needed"))
+        self.assertEqual(result.get("matched_metric"), "贷款余额")
+        self.assertEqual(result.get("time_range"), "2025-06-30")
+        self.assertEqual(result.get("query_context", {}).get("org_level"), "分行")
+
 
 if __name__ == "__main__":
     unittest.main()

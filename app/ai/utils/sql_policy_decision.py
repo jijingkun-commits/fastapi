@@ -25,6 +25,8 @@ class SqlPolicyDecision:
     reason: Optional[str] = None
     reason_code: str = "allowed"
     denied_stage: Optional[str] = None
+    safety_rewritten: bool = False
+    permission_rewritten: bool = False
 
 
 def _deny(
@@ -42,6 +44,8 @@ def _deny(
         reason=reason,
         reason_code=reason_code,
         denied_stage=denied_stage,
+        safety_rewritten=False,
+        permission_rewritten=False,
     )
 
 
@@ -74,6 +78,7 @@ def evaluate_sql_policy(
         auto_limit=auto_limit,
         limit=limit,
     )
+    safety_rewritten = safe_sql != normalized_sql
     if not is_safe:
         logger.warning("SQL 安全策略拒绝: reason=%s", safety_error)
         return _deny(
@@ -90,9 +95,12 @@ def evaluate_sql_policy(
             reason=None,
             reason_code="allowed_without_user",
             denied_stage=None,
+            safety_rewritten=safety_rewritten,
+            permission_rewritten=False,
         )
 
     rewritten_sql, is_allowed, permission_error = check_and_rewrite_sql(safe_sql, user_id)
+    permission_rewritten = rewritten_sql != safe_sql
     if not is_allowed:
         logger.warning(
             "SQL 权限策略拒绝: user_id=%s, reason=%s",
@@ -112,6 +120,8 @@ def evaluate_sql_policy(
         reason=None,
         reason_code="allowed",
         denied_stage=None,
+        safety_rewritten=safety_rewritten,
+        permission_rewritten=permission_rewritten,
     )
 
 

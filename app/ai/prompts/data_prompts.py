@@ -43,6 +43,9 @@ DATA_INTENT_ANALYSIS_PROMPT = """你是一个专业的数据分析助手。
 - 请**合并**已有上下文与当前轮内容，不要丢弃已有信息。
 - **不要**对用户已明确提供过的内容再次要求澄清（如已有指标且用户说「本月」时，只补时间，不要再问「请指定指标」）。
 - 仅当确实缺少**关键**信息（如既无指标也无时间）时，才填写 clarification_needed，且只问**尚未提供**的那一项。
+- 当你给出 clarification_needed 时，必须同时给出 clarify_level：
+  - `required`：缺关键槽位，或不澄清就无法执行。
+  - `optional`：口径偏好、展示偏好等可选确认，不应阻断查询执行。
 
 补充回复识别（必须遵守）：
 - 当用户仅回复“图标/图表/柱状图/饼图/占比/明细/列表/分行/支行”等短词时，视为对上一轮的补充，不是新问题。
@@ -65,7 +68,8 @@ DATA_INTENT_ANALYSIS_PROMPT = """你是一个专业的数据分析助手。
   "filters": ["筛选条件列表"],
   "dimensions": ["聚合维度列表，如用户说「总体」「汇总」则为空"],
   "chart_type": "图表类型（如有）",
-  "clarification_needed": "仅当仍缺关键信息时填写，否则留空"
+  "clarification_needed": "仅当仍缺关键信息时填写，否则留空",
+  "clarify_level": "required | optional（仅在 clarification_needed 非空时填写）"
 }}
 ```
 

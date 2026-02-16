@@ -119,6 +119,14 @@ EXTERNAL_INFO_HINTS = (
 )
 
 
+TURN_ACT_HINTS = {
+    "NEW_QUERY",
+    "SUPPLEMENT",
+    "CORRECTION",
+    "CONFIRM",
+}
+
+
 def _is_model_access_error(error_text: str) -> bool:
     """判断是否为上游模型权限/配额/订阅类错误。"""
     lowered = str(error_text or "").strip().lower()
@@ -137,6 +145,48 @@ def _extract_latest_human_content(messages: Sequence[BaseMessage]) -> str:
         if content and content.strip():
             return content.strip()
     return ""
+
+
+def _augment_data_handoff_payload(
+    handoff_data: Dict[str, Any],
+    state: MultiAgentState,
+) -> Dict[str, Any]:
+    """规范化 data_expert handoff，避免 task_description 过度扩写污染专家意图。"""
+    if not isinstance(handoff_data, dict):
+        return handoff_data
+
+    if handoff_data.get("target_agent") != AgentType.DATA:
+        return handoff_data
+
+    enriched = dict(handoff_data)
+    latest_user_text = _extract_latest_human_content(state.get("messages", []))
+
+    base_frame = enriched.get("frame")
+    enriched["frame"] = dict(base_frame) if isinstance(base_frame, dict) else None
+
+    turn_act_hint = str(enriched.get("turn_act_hint") or "").strip().upper()
+    if turn_act_hint not in TURN_ACT_HINTS:
+        state_turn_act = str(state.get("turn_act") or "").strip().upper()
+        if state_turn_act in TURN_ACT_HINTS:
+            turn_act_hint = state_turn_act
+        else:
+            turn_act_hint = "NEW_QUERY"
+    enriched["turn_act_hint"] = turn_act_hint
+
+    raw_desc = str(enriched.get("task_description") or "").strip()
+    user_desc = str(latest_user_text or "").strip()
+    if user_desc:
+        enriched["task_description"] = f"用户原始问题：{user_desc}"
+    else:
+        enriched["task_description"] = _normalize_tool_summary_text(raw_desc, limit=240)
+
+    logger.info(
+        "data_handoff_normalized: turn_act_hint=%s, has_frame=%s, desc_len=%s",
+        enriched.get("turn_act_hint"),
+        bool(enriched.get("frame")),
+        len(str(enriched.get("task_description") or "")),
+    )
+    return enriched
 
 
 def _infer_todo_handoff_from_text(user_text: str) -> Optional[Dict[str, Any]]:
@@ -917,6 +967,7 @@ async def create_multi_agent_graph(
                                 delta_messages_for_scan,
                                 state,
                             )
+                            handoff_data = _augment_data_handoff_payload(handoff_data, state)
                             target_agent = handoff_data.get("target_agent")
                             logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
                             
