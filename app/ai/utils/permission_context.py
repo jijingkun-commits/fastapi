@@ -14,11 +14,14 @@ class UserPermissionContext:
     
     Attributes:
         user_id: 用户 ID
-        role: 用户角色 (admin / analyst / user)
+        role: 兼容字段，等价于 data_role
+        data_role: 数据角色（问数权限主体）
+        sys_role: 系统角色（仅用于兼容与观测，不参与数据权限判定）
         org_code: 机构代码
         org_name: 机构名称
         dept_code: 部门代码
         dept_name: 部门名称
+        default_dept_scope: 是否启用默认部门隔离
         allowed_schemas: 允许访问的 Schema 列表
         allowed_tables: 允许访问的表规则列表（支持通配符）
         denied_tables: 禁止访问的表列表
@@ -26,11 +29,14 @@ class UserPermissionContext:
         masked_columns: 列脱敏规则 {schema.table.column: mask_type}
     """
     user_id: int
-    role: str = "user"
+    role: Optional[str] = None
+    data_role: Optional[str] = None
+    sys_role: Optional[str] = None
     org_code: Optional[str] = None
     org_name: Optional[str] = None
     dept_code: Optional[str] = None
     dept_name: Optional[str] = None
+    default_dept_scope: bool = True
     
     # 表级权限
     allowed_schemas: List[str] = field(default_factory=list)
@@ -44,10 +50,35 @@ class UserPermissionContext:
     # 列级权限（脱敏）
     # 格式: {"fdmdata.f_mid_deposit.mobile": "partial"}
     masked_columns: Dict[str, str] = field(default_factory=dict)
-    
+
+    def __post_init__(self) -> None:
+        """标准化角色字段，确保 data_role 为唯一权限角色来源。"""
+
+        normalized_data_role = (self.data_role or "").strip()
+        normalized_role = (self.role or "").strip()
+
+        if normalized_data_role:
+            resolved_data_role = normalized_data_role
+        elif normalized_role:
+            resolved_data_role = normalized_role
+        else:
+            resolved_data_role = "staff"
+
+        self.data_role = resolved_data_role
+        # role 保留兼容语义，始终与 data_role 对齐
+        self.role = resolved_data_role
+
+        if self.sys_role:
+            self.sys_role = self.sys_role.strip()
+
     def is_admin(self) -> bool:
-        """是否为管理员（无权限限制）。"""
-        return self.role == "admin"
+        """是否为数据管理员角色（仅基于 data_role 判定）。"""
+        return self.data_role == "admin"
+
+    def has_dept_code(self) -> bool:
+        """是否具备有效 dept_code。"""
+
+        return bool((self.dept_code or "").strip())
     
     def get_row_filter_value(self, source: str) -> Optional[str]:
         """根据 filter_source 获取实际过滤值。

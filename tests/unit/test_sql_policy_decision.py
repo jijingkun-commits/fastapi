@@ -68,3 +68,23 @@ def test_policy_allow_with_rewritten_sql(mock_sanitize_sql, mock_check_and_rewri
     assert decision.is_allowed is True
     assert decision.reason_code == "allowed"
     assert "org_code" in decision.rewritten_sql
+
+
+@patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
+@patch("app.ai.utils.sql_policy_decision.sanitize_sql")
+def test_policy_reject_when_dept_code_missing(mock_sanitize_sql, mock_check_and_rewrite_sql):
+    """dept_code 缺失时应返回可解释拒绝原因。"""
+
+    mock_sanitize_sql.return_value = ("SELECT * FROM t", True, None)
+    mock_check_and_rewrite_sql.return_value = (
+        "SELECT * FROM t",
+        False,
+        "用户 7 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
+    )
+
+    decision = evaluate_sql_policy("SELECT * FROM t", user_id=7)
+
+    assert decision.is_allowed is False
+    assert decision.denied_stage == "permission"
+    assert decision.reason_code == "permission_rejected"
+    assert "dept_code" in (decision.reason or "")

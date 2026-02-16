@@ -11,7 +11,9 @@ class TestUserPermissionContext(unittest.TestCase):
         ctx = UserPermissionContext(user_id=1)
         
         self.assertEqual(ctx.user_id, 1)
-        self.assertEqual(ctx.role, "user")
+        self.assertEqual(ctx.role, "staff")
+        self.assertEqual(ctx.data_role, "staff")
+        self.assertTrue(ctx.default_dept_scope)
         self.assertIsNone(ctx.org_code)
         self.assertIsNone(ctx.dept_code)
         self.assertEqual(ctx.allowed_schemas, [])
@@ -21,13 +23,35 @@ class TestUserPermissionContext(unittest.TestCase):
     
     def test_is_admin(self):
         """测试管理员判断。"""
-        admin_ctx = UserPermissionContext(user_id=1, role="admin")
-        user_ctx = UserPermissionContext(user_id=2, role="user")
-        analyst_ctx = UserPermissionContext(user_id=3, role="analyst")
-        
+        admin_ctx = UserPermissionContext(user_id=1, data_role="admin")
+        sys_admin_ctx = UserPermissionContext(user_id=2, data_role="staff", sys_role="admin")
+        staff_ctx = UserPermissionContext(user_id=3, data_role="staff")
+
         self.assertTrue(admin_ctx.is_admin())
-        self.assertFalse(user_ctx.is_admin())
-        self.assertFalse(analyst_ctx.is_admin())
+        self.assertFalse(sys_admin_ctx.is_admin())
+        self.assertFalse(staff_ctx.is_admin())
+
+    def test_data_role_priority(self):
+        """测试 data_role 优先于兼容 role 字段。"""
+        ctx = UserPermissionContext(user_id=1, role="legacy_user", data_role="staff")
+
+        self.assertEqual(ctx.data_role, "staff")
+        self.assertEqual(ctx.role, "staff")
+
+    def test_fallback_to_role_when_data_role_missing(self):
+        """测试 data_role 缺失时回退到 role。"""
+        ctx = UserPermissionContext(user_id=1, role="department_gm")
+
+        self.assertEqual(ctx.data_role, "department_gm")
+        self.assertEqual(ctx.role, "department_gm")
+
+    def test_has_dept_code(self):
+        """测试部门编码存在性判断。"""
+        has_dept_ctx = UserPermissionContext(user_id=1, dept_code="D001")
+        no_dept_ctx = UserPermissionContext(user_id=2, dept_code="  ")
+
+        self.assertTrue(has_dept_ctx.has_dept_code())
+        self.assertFalse(no_dept_ctx.has_dept_code())
     
     def test_get_row_filter_value_org_code(self):
         """测试获取机构代码过滤值。"""
@@ -60,7 +84,8 @@ class TestUserPermissionContext(unittest.TestCase):
         """测试完整字段初始化。"""
         ctx = UserPermissionContext(
             user_id=1,
-            role="analyst",
+            data_role="department_gm",
+            sys_role="admin",
             org_code="ORG001",
             org_name="总行",
             dept_code="DEPT001",
@@ -72,7 +97,9 @@ class TestUserPermissionContext(unittest.TestCase):
             masked_columns={"fdmdata.*.mobile": "partial"}
         )
         
-        self.assertEqual(ctx.role, "analyst")
+        self.assertEqual(ctx.role, "department_gm")
+        self.assertEqual(ctx.data_role, "department_gm")
+        self.assertEqual(ctx.sys_role, "admin")
         self.assertEqual(len(ctx.allowed_schemas), 2)
         self.assertEqual(len(ctx.allowed_tables), 2)
         self.assertIn("fdmdata.sensitive_table", ctx.denied_tables)

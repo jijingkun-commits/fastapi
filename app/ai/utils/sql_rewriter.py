@@ -9,7 +9,7 @@
 """
 import re
 import logging
-from typing import Tuple, Optional, List, Dict, Set
+from typing import Tuple, Optional, List, Dict
 
 import sqlglot
 from sqlglot import exp
@@ -61,12 +61,18 @@ def rewrite_sql_with_permissions(
         return (sql, False, "SQL 语句为空")
     
     sql = sql.strip()
-    
-    # admin 角色无限制
-    if user_context.is_admin():
-        logger.debug("管理员用户，跳过权限重写")
-        return (sql, True, None)
-    
+
+    service = get_permission_service()
+    context_allowed, context_error = service.validate_query_context(user_context)
+    if not context_allowed:
+        logger.warning(
+            "SQL 权限上下文拒绝: user_id=%s, data_role=%s, reason=%s",
+            user_context.user_id,
+            user_context.data_role,
+            context_error,
+        )
+        return (sql, False, context_error)
+
     try:
         # 1. 提取并检查表级权限
         tables = _extract_tables_with_schema(sql)
@@ -157,7 +163,7 @@ def _check_table_permissions(
         allowed, error = service.check_table_access(user_context, schema, table)
         if not allowed:
             logger.warning(f"表访问被拒绝: user_id={user_context.user_id}, "
-                         f"role={user_context.role}, table={schema}.{table}")
+                         f"data_role={user_context.data_role}, table={schema}.{table}")
             return (False, error)
     
     return (True, None)
@@ -202,12 +208,14 @@ def _inject_row_filters(
                 condition = f"{table}.{column} = '{escaped_value}'"
             
             all_filters.append(condition)
-    
-    if not all_filters:
+
+    deduped_filters = list(dict.fromkeys(all_filters))
+
+    if not deduped_filters:
         return sql
     
     # 注入 WHERE 条件
-    filter_clause = " AND ".join(all_filters)
+    filter_clause = " AND ".join(deduped_filters)
     
     # 使用 sqlglot 注入（更安全）
     try:

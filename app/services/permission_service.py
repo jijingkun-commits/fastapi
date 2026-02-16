@@ -78,7 +78,12 @@ class PermissionService:
         with self._lock:
             self._cache[user_id] = (ctx, datetime.now())
         
-        logger.info(f"权限上下文已加载: user_id={user_id}, role={ctx.role}")
+        logger.info(
+            "权限上下文已加载: user_id=%s, data_role=%s, sys_role=%s",
+            user_id,
+            ctx.data_role,
+            ctx.sys_role,
+        )
         return ctx
     
     def invalidate_cache(self, user_id: Optional[int] = None):
@@ -115,25 +120,22 @@ class PermissionService:
             logger.warning(f"用户不存在: user_id={user_id}，返回默认权限")
             return UserPermissionContext(user_id=user_id)
         
-        role = user.role or "user"
-        
+        raw_data_role = getattr(user, "data_role", None)
+        data_role = (raw_data_role or "").strip() or (user.role or "").strip() or "staff"
+
         ctx = UserPermissionContext(
             user_id=user_id,
-            role=role,
+            data_role=data_role,
+            sys_role=user.role,
             org_code=user.org_code,
             org_name=user.org_name,
             dept_code=user.dept_code,
             dept_name=user.dept_name,
         )
-        
-        # admin 角色无限制
-        if ctx.is_admin():
-            logger.debug(f"管理员用户，跳过权限加载: user_id={user_id}")
-            return ctx
-        
+
         # 2. 加载表级权限
         table_perms = db.query(DataPermissionTable).filter(
-            DataPermissionTable.role == role
+            DataPermissionTable.role == ctx.data_role
         ).all()
         
         for perm in table_perms:
@@ -147,7 +149,7 @@ class PermissionService:
         
         # 3. 加载行级权限（RLS）
         row_perms = db.query(DataPermissionRow).filter(
-            (DataPermissionRow.role == role) | (DataPermissionRow.role.is_(None))
+            (DataPermissionRow.role == ctx.data_role) | (DataPermissionRow.role.is_(None))
         ).all()
         
         for perm in row_perms:
@@ -168,7 +170,7 @@ class PermissionService:
         
         # 4. 加载列级权限（脱敏）
         col_perms = db.query(DataPermissionColumn).filter(
-            DataPermissionColumn.role == role
+            DataPermissionColumn.role == ctx.data_role
         ).all()
         
         for perm in col_perms:
@@ -180,6 +182,20 @@ class PermissionService:
         
         return ctx
     
+    def validate_query_context(
+        self,
+        ctx: UserPermissionContext,
+    ) -> Tuple[bool, Optional[str]]:
+        """校验 SQL 查询前的默认权限前提。"""
+
+        if ctx.default_dept_scope and not ctx.has_dept_code():
+            return (
+                False,
+                f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
+            )
+
+        return (True, None)
+
     def check_table_access(
         self, 
         ctx: UserPermissionContext, 
@@ -196,10 +212,6 @@ class PermissionService:
         Returns:
             (allowed, reason) 元组
         """
-        # admin 无限制
-        if ctx.is_admin():
-            return (True, None)
-        
         full_name = f"{schema}.{table}"
         
         # 检查黑名单
@@ -212,7 +224,7 @@ class PermissionService:
                 return (True, None)
         
         # 默认拒绝
-        return (False, f"角色 {ctx.role} 无权访问表 {full_name}")
+        return (False, f"数据角色 {ctx.data_role} 无权访问表 {full_name}")
     
     def _match_table_pattern(self, pattern: str, schema: str, table: str) -> bool:
         """匹配表名模式（支持通配符）。
@@ -259,10 +271,7 @@ class PermissionService:
         Returns:
             过滤条件列表 [(column, operator, value), ...]
         """
-        if ctx.is_admin():
-            return []
-        
-        filters = []
+        filters: List[Tuple[str, str, str]] = []
         
         # 精确匹配
         full_name = f"{schema}.{table}"
@@ -273,8 +282,19 @@ class PermissionService:
         wildcard_key = f"{schema}.*"
         if wildcard_key in ctx.row_filters:
             filters.extend(ctx.row_filters[wildcard_key])
-        
-        return filters
+
+        if ctx.default_dept_scope and ctx.has_dept_code():
+            filters.append(("dept_code", "=", (ctx.dept_code or "").strip()))
+
+        deduped_filters: List[Tuple[str, str, str]] = []
+        seen = set()
+        for item in filters:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped_filters.append(item)
+
+        return deduped_filters
     
     def get_masked_columns_for_table(
         self, 
@@ -292,9 +312,6 @@ class PermissionService:
         Returns:
             脱敏规则 {column_name: mask_type}
         """
-        if ctx.is_admin():
-            return {}
-        
         result = {}
         
         # 精确匹配

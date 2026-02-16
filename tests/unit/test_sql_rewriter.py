@@ -142,20 +142,25 @@ class TestMaskExpression(unittest.TestCase):
 class TestRewriteSqlWithPermissions(unittest.TestCase):
     """测试完整的 SQL 权限重写。"""
     
-    def test_admin_bypass(self):
-        """测试管理员跳过权限检查。"""
-        ctx = UserPermissionContext(user_id=1, role="admin")
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_sys_admin_no_bypass(self, mock_get_service):
+        """测试系统管理员不会绕过数据权限。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+        mock_service.check_table_access.return_value = (False, "数据角色 staff 无权访问表 public.sensitive_table")
+        mock_get_service.return_value = mock_service
+
+        ctx = UserPermissionContext(user_id=1, data_role="staff", sys_role="admin", dept_code="D001")
         sql = "SELECT * FROM sensitive_table"
-        
+
         rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
-        
-        self.assertTrue(allowed)
-        self.assertIsNone(error)
-        self.assertEqual(rewritten, sql)  # 管理员不重写
+
+        self.assertFalse(allowed)
+        self.assertIn("无权访问", error)
     
     def test_empty_sql(self):
         """测试空 SQL。"""
-        ctx = UserPermissionContext(user_id=1, role="user")
+        ctx = UserPermissionContext(user_id=1, data_role="staff")
         
         rewritten, allowed, error = rewrite_sql_with_permissions("", ctx)
         
@@ -164,7 +169,7 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
     
     def test_whitespace_sql(self):
         """测试空白 SQL。"""
-        ctx = UserPermissionContext(user_id=1, role="user")
+        ctx = UserPermissionContext(user_id=1, data_role="staff")
         
         rewritten, allowed, error = rewrite_sql_with_permissions("   ", ctx)
         
@@ -174,10 +179,11 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
     def test_table_access_denied(self, mock_get_service):
         """测试表访问被拒绝。"""
         mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
         mock_service.check_table_access.return_value = (False, "禁止访问 sensitive_table")
         mock_get_service.return_value = mock_service
         
-        ctx = UserPermissionContext(user_id=1, role="user")
+        ctx = UserPermissionContext(user_id=1, data_role="staff")
         sql = "SELECT * FROM sensitive_table"
         
         rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
@@ -189,6 +195,7 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
     def test_row_filter_injection(self, mock_get_service):
         """测试行级过滤注入。"""
         mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
         mock_service.check_table_access.return_value = (True, None)
         mock_service.get_row_filters_for_table.return_value = [("org_code", "=", "ORG001")]
         mock_service.get_masked_columns_for_table.return_value = {}
@@ -196,7 +203,8 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         
         ctx = UserPermissionContext(
             user_id=1, 
-            role="analyst",
+            data_role="staff",
+            dept_code="DEPT001",
             org_code="ORG001"
         )
         sql = "SELECT * FROM orders"
@@ -207,6 +215,38 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         self.assertIn("WHERE", rewritten.upper())
         self.assertIn("org_code", rewritten)
         self.assertIn("ORG001", rewritten)
+
+    def test_default_dept_filter_injection(self):
+        """测试默认 dept_code 隔离自动注入。"""
+        ctx = UserPermissionContext(
+            user_id=1,
+            data_role="staff",
+            dept_code="DEPT001",
+            allowed_tables=["public.orders"],
+        )
+        sql = "SELECT * FROM orders"
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertTrue(allowed)
+        self.assertIsNone(error)
+        self.assertIn("dept_code", rewritten)
+        self.assertIn("DEPT001", rewritten)
+
+    def test_missing_dept_code_rejected(self):
+        """测试缺失 dept_code 时明确拒绝。"""
+        ctx = UserPermissionContext(
+            user_id=1,
+            data_role="staff",
+            allowed_tables=["public.orders"],
+        )
+        sql = "SELECT * FROM orders"
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rewritten, sql)
+        self.assertIn("dept_code", error)
 
 
 class TestEdgeCases(unittest.TestCase):
