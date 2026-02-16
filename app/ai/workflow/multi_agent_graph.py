@@ -606,7 +606,12 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         logger.info("预处理节点: 检测到 %d 张图片，开始分析...", len(image_urls))
         
         # 发送分析状态给前端
-        emit_status(writer, message=f"正在分析 {len(image_urls)} 张图片...", node="preprocess")
+        emit_status(
+            writer,
+            message=f"正在分析 {len(image_urls)} 张图片...",
+            node="preprocess",
+            phase="processing",
+        )
         
         try:
             from app.ai.tools.vision_tool import analyze_image, is_vision_configured
@@ -616,8 +621,13 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                 logger.info("预处理节点: 图片分析完成 - %s", str(analysis_result)[:100])
                 updates["attachment_analysis"] = f"[图片分析结果] {analysis_result}"
                 
-                # 发送完成状态
-                emit_status(writer, message="图片分析完成", node="preprocess")
+                # 进入回答生成阶段
+                emit_status(
+                    writer,
+                    message="正在生成回答...",
+                    node="preprocess",
+                    phase="generating",
+                )
         except Exception as e:
             logger.warning("预处理节点: 图片分析失败 - %s", e)
     

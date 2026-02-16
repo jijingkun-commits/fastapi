@@ -143,15 +143,27 @@ export function AssistantMessage({
 
   // 获取当前处理状态
   const currentStatus = thread.currentStatus;
+  const statusMessage = currentStatus?.message?.trim() ?? "";
+  const shouldAnimateStatus = currentStatus?.phase !== "done";
 
   if (isLoading) {
     return (
       <div className="flex flex-col gap-2">
         {/* 显示当前处理状态 */}
-        {currentStatus && (
-          <div className="flex items-center gap-2 text-xs text-gray-500 animate-pulse">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-ping"></span>
-            {currentStatus}
+        {statusMessage && (
+          <div
+            className={cn(
+              "flex items-center gap-2 text-xs text-gray-500",
+              shouldAnimateStatus && "animate-pulse",
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-1.5 w-1.5 rounded-full bg-blue-500",
+                shouldAnimateStatus && "animate-ping",
+              )}
+            />
+            {statusMessage}
           </div>
         )}
         {/* 流式输出中也显示工具调用 */}

@@ -346,7 +346,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 
 | 节点函数 | 应发事件（目标） | 说明 |
 |-----|----------------|------|
-| `_preprocess_multimodal` | `status` | 护栏、技能加载、图片分析状态 |
+| `_preprocess_multimodal` | `status` | 护栏、技能加载、图片分析状态；图片完成后发送 `phase=generating` |
 | `streaming_wrapper` | `token` / `thinking` / `tool_start` / `tool_end` / `result` / `kb_images` | 核心统一事件出口 |
 | `_evaluate_expert_work` | `status` | 协调继续执行时的提示 |
 | `_postprocess` | 无 | 仅负责持久化与清理 |
@@ -455,7 +455,7 @@ def my_node(state):
 |------|----------|------|
 | `emit_token` | `token` | AI 文本输出 |
 | `emit_thinking` | `thinking` | 思考过程 |
-| `emit_status` | `status` | 状态更新（如"正在查询..."） |
+| `emit_status` | `status` | 状态更新（`message + phase`，如 `processing/generating/done`） |
 | `emit_result` | `result` | 结构化结果（卡片数据） |
 | `emit_confirmation` | `confirmation` | 确认请求 |
 | `emit_clarification` | `clarification` | 澄清问题 |
@@ -763,9 +763,9 @@ def emit_token(writer, content: str, node: str = ""):
 def emit_thinking(writer, content: str, node: str = ""):
     writer({"type": "thinking", "data": {"content": content}, "node": node})
 
-# 状态更新
-def emit_status(writer, message: str, node: str = ""):
-    writer({"type": "status", "data": {"message": message}, "node": node})
+# 状态更新（结构化阶段）
+def emit_status(writer, message: str, node: str = "", phase: str = "processing"):
+    writer({"type": "status", "data": {"message": message, "phase": phase}, "node": node})
 
 # 工具调用开始
 def emit_tool_start(writer, tool_name: str, tool_input: dict = None, node: str = ""):
@@ -894,15 +894,16 @@ async def streaming_wrapper(state, config):
 ```tsx
 // 获取当前处理状态
 const currentStatus = thread.currentStatus;
+const statusMessage = currentStatus?.message ?? "";
+const shouldAnimateStatus = currentStatus?.phase !== "done";
 
 if (isLoading) {
   return (
     <div className="flex flex-col gap-2">
-      {/* 显示当前处理状态 */}
-      {currentStatus && (
-        <div className="flex items-center gap-2 text-xs text-gray-500 animate-pulse">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-ping"></span>
-          {currentStatus}
+      {statusMessage && (
+        <div className={cn("flex items-center gap-2 text-xs text-gray-500", shouldAnimateStatus && "animate-pulse")}>
+          <span className={cn("inline-block h-1.5 w-1.5 rounded-full bg-blue-500", shouldAnimateStatus && "animate-ping")}></span>
+          {statusMessage}
         </div>
       )}
       {/* 工具调用和内容 */}

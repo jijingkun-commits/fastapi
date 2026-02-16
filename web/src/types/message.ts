@@ -200,11 +200,14 @@ export interface ClarificationEventData {
     message?: string;
 }
 
+export type StatusPhase = "processing" | "generating" | "done";
+
 /**
  * 状态事件数据
  */
 export interface StatusEventData {
     message: string;
+    phase?: StatusPhase;
 }
 
 /**

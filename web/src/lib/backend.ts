@@ -6,6 +6,7 @@ import type {
   ResultEventData,
   SqlResultData,
   StatusEventData,
+  StatusPhase,
   TokenEventData,
 } from "@/types/message";
 
@@ -177,7 +178,7 @@ export interface StreamCallbacks {
   /** 结构化结果（待办列表、图片等） */
   onResult?: (data: ResultEventData) => void;
   /** 状态更新 */
-  onStatus?: (message: string) => void;
+  onStatus?: (status: StatusEventData) => void;
   /** 澄清问题 */
   onClarification?: (data: ClarificationEventData) => void;
   /** 知识库图片映射（用于替换占位符） */
@@ -223,6 +224,12 @@ function isObjectRecord(data: unknown): data is Record<string, unknown> {
 
 function toOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function toOptionalStatusPhase(value: unknown): StatusPhase | undefined {
+  return value === "processing" || value === "generating" || value === "done"
+    ? value
+    : undefined;
 }
 
 function toOptionalMessageId(value: unknown): number | undefined {
@@ -415,7 +422,10 @@ function dispatchSSEEvent(
       const statusData = event.data as StatusEventData;
       const message = toOptionalString(statusData?.message);
       if (message) {
-        onStatus?.(message);
+        onStatus?.({
+          message,
+          phase: toOptionalStatusPhase(statusData?.phase) ?? "processing",
+        });
       }
       return;
     }

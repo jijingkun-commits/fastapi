@@ -35,7 +35,7 @@ data: {json_payload}
 | `thinking` | 思考过程 | 深度思考模式下 |
 | `tool_start` | 工具调用开始 | Tool 执行前 |
 | `tool_end` | 工具调用结束 | Tool 执行后 |
-| `status` | 状态更新 | 长时间操作时 |
+| `status` | 状态更新（含 `phase` 阶段） | 长时间操作时 |
 | `result` | 结构化结果 | 返回卡片数据时 |
 | `kb_images` | 知识库图片映射 | RAG 返回图片占位符映射时 |
 | `confirmation` | 确认请求 | 需要用户确认时 |
@@ -138,10 +138,13 @@ data: {json_payload}
 {
   type: "status",
   data: {
-    message: string  // 状态消息，如"正在查询数据库..."
+    message: string,                          // 状态消息
+    phase: "processing" | "generating" | "done" // 状态阶段
   }
 }
 ```
+
+> 兼容约定：历史事件若缺少 `phase`，前端按 `processing` 处理。
 
 ### `result` - 结构化结果
 

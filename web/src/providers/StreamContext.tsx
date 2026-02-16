@@ -9,6 +9,7 @@ import { createContext, useContext } from "react";
 import { type Message, Checkpoint } from "@langchain/langgraph-sdk";
 import { type UIMessage } from "@langchain/langgraph-sdk/react-ui";
 import { InterruptData, DecisionType, Attachment } from "@/lib/backend";
+import type { StatusPhase } from "@/types/message";
 
 /**
  * 状态类型
@@ -25,6 +26,11 @@ export interface MessageMetadata {
     };
     branch?: string;
     branchOptions?: string[];
+}
+
+export interface StreamStatus {
+    message: string;
+    phase: StatusPhase;
 }
 
 /**
@@ -71,8 +77,8 @@ export interface StreamContextValue {
     hideToolCalls: boolean;
     /** 设置隐藏工具调用开关 */
     setHideToolCalls: (value: boolean) => void;
-    /** 当前处理状态（如"正在分析..."） */
-    currentStatus: string | null;
+    /** 当前处理状态（结构化阶段 + 文案） */
+    currentStatus: StreamStatus | null;
     /** 知识库图片映射（用于替换 [IMG-N] 占位符） */
     kbImages: Record<string, string>;
 }

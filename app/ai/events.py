@@ -35,6 +35,8 @@ EventType = Literal[
     "error",           # 错误
 ]
 
+StatusPhase = Literal["processing", "generating", "done"]
+
 
 # ==================== AgentEvent 统一事件模型 ====================
 
@@ -121,9 +123,18 @@ class AgentEvent(BaseModel):
         )
     
     @classmethod
-    def status(cls, message: str, node: str = "") -> "AgentEvent":
+    def status(
+        cls,
+        message: str,
+        node: str = "",
+        phase: StatusPhase = "processing",
+    ) -> "AgentEvent":
         """创建 status 事件。"""
-        return cls(type=AgentEventType.STATUS, content={"message": message}, node=node)
+        return cls(
+            type=AgentEventType.STATUS,
+            content={"message": message, "phase": phase},
+            node=node,
+        )
     
     @classmethod
     def handoff(cls, target_agent: str, task_description: str, node: str = "") -> "AgentEvent":
@@ -188,19 +199,25 @@ def emit_thinking(writer: StreamWriter, content: str, node: str = "") -> None:
     })
 
 
-def emit_status(writer: StreamWriter, message: str, node: str = "") -> None:
+def emit_status(
+    writer: StreamWriter,
+    message: str,
+    node: str = "",
+    phase: StatusPhase = "processing",
+) -> None:
     """发送状态更新事件。
-    
-    用于通知前端当前处理进度，如"正在分析图片..."、"正在查询数据库..."。
-    
+
+    用于通知前端当前处理进度，如"正在分析图片..."、"正在生成回答..."。
+
     Args:
         writer: LangGraph StreamWriter
         message: 状态消息
         node: 来源节点名称
+        phase: 状态阶段（processing/generating/done）
     """
     writer({
         "type": "status",
-        "data": {"message": message},
+        "data": {"message": message, "phase": phase},
         "node": node
     })
 

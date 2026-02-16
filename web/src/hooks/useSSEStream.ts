@@ -27,12 +27,12 @@ import {
 } from "@/lib/backend";
 import { fromBackendMessages } from "@/lib/message-normalizer";
 import { useThreads } from "@/providers/Thread";
-import { StateType, StreamContextValue, MessageMetadata } from "@/providers/StreamContext";
+import { StateType, StreamContextValue, MessageMetadata, StreamStatus } from "@/providers/StreamContext";
 import { useMessageUpdater } from "@/hooks/use-message-updater";
 import { useModelConfig } from "@/hooks/use-model-config";
 import type { KbImages } from "@/components/chat/utils";
 import { safeParseJson, SelectedTodoSchema } from "@/lib/utils";
-import type { ClarificationEventData, ResultEventData } from "@/types/message";
+import type { ClarificationEventData, ResultEventData, StatusEventData } from "@/types/message";
 
 type MessageWithAdditionalKwargs = Message & {
     additional_kwargs?: Record<string, unknown>;
@@ -81,6 +81,17 @@ function getToolOutputPreview(output: unknown): string {
     }
 }
 
+function normalizeStatusData(statusData: StatusEventData): StreamStatus | null {
+    const message = statusData.message.trim();
+    if (message.length === 0) {
+        return null;
+    }
+    return {
+        message,
+        phase: statusData.phase ?? "processing",
+    };
+}
+
 /**
  * SSE 流消息处理 Hook
  */
@@ -89,8 +100,8 @@ export function useSSEStream(): StreamContextValue {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<unknown>(undefined);
     const [interrupt, setInterrupt] = useState<InterruptData | null>(null);
-    // 当前处理状态（显示如"正在分析..."）
-    const [currentStatus, setCurrentStatus] = useState<string | null>(null);
+    // 当前处理状态（结构化：phase + message）
+    const [currentStatus, setCurrentStatus] = useState<StreamStatus | null>(null);
     // 知识库图片映射（用于替换 [IMG-N] 占位符）
     const [kbImages, setKbImages] = useState<KbImages>({});
 
@@ -326,6 +337,7 @@ export function useSSEStream(): StreamContextValue {
             const aiId = uuidv4();
             currentAiIdRef.current = aiId;
             setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
+            setCurrentStatus(null);
             setIsLoading(true);
             isStreamingRef.current = true;
             const idempotencyKey = uuidv4();
@@ -342,7 +354,10 @@ export function useSSEStream(): StreamContextValue {
             const { stop: stopFn, promise } = startLLMStream(
                 prompt,
                 {
-                    onToken: (token: string) => appendToAiMessage(aiId, token),
+                    onToken: (token: string) => {
+                        appendToAiMessage(aiId, token);
+                        setCurrentStatus(null);
+                    },
                     onThinking: (content: string) => handleThinking(aiId, content),
                     onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
                     onToolEnd: (name: string, output: unknown) => {
@@ -365,10 +380,11 @@ export function useSSEStream(): StreamContextValue {
                         handleStructuredResultEvent(aiId, data, false);
                     },
                     // 处理状态更新事件
-                    onStatus: (statusMsg: string) => {
-                        console.log(`📊 状态更新: ${statusMsg}`);
-                        // 设置状态消息，在 UI 中显示
-                        setCurrentStatus(statusMsg);
+                    onStatus: (statusData: StatusEventData) => {
+                        const normalizedStatus = normalizeStatusData(statusData);
+                        if (!normalizedStatus) return;
+                        console.log(`📊 状态更新(${normalizedStatus.phase}): ${normalizedStatus.message}`);
+                        setCurrentStatus(normalizedStatus);
                     },
                     // 处理澄清问题事件
                     onClarification: (data: ClarificationEventData) => {
@@ -433,6 +449,7 @@ export function useSSEStream(): StreamContextValue {
         if (!threadId || !interrupt) return;
 
         setInterrupt(null);
+        setCurrentStatus(null);
         setIsLoading(true);
 
         // 复用最后一条 AI 消息，避免重复创建
@@ -454,7 +471,10 @@ export function useSSEStream(): StreamContextValue {
             threadId,
             decision,
             {
-                onToken: (token: string) => appendToAiMessage(aiId, token),
+                onToken: (token: string) => {
+                    appendToAiMessage(aiId, token);
+                    setCurrentStatus(null);
+                },
                 onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
                 onToolEnd: (name: string, output: unknown) => {
                     console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
@@ -462,9 +482,11 @@ export function useSSEStream(): StreamContextValue {
                 onResult: (data: ResultEventData) => {
                     handleStructuredResultEvent(aiId, data, true);
                 },
-                onStatus: (statusMsg: string) => {
-                    console.log(`📊 恢复流状态更新: ${statusMsg}`);
-                    setCurrentStatus(statusMsg);
+                onStatus: (statusData: StatusEventData) => {
+                    const normalizedStatus = normalizeStatusData(statusData);
+                    if (!normalizedStatus) return;
+                    console.log(`📊 恢复流状态更新(${normalizedStatus.phase}): ${normalizedStatus.message}`);
+                    setCurrentStatus(normalizedStatus);
                 },
                 onClarification: (data: ClarificationEventData) => {
                     console.log(`❓ 恢复流澄清问题:`, data.questions);
