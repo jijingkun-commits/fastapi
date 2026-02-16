@@ -31,7 +31,9 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 - 产出：`requirements.md` + `implementation_plan.md`
 - 不强制产出 `card_seed`
-- 适用于单人/单 AI、小范围改动、无需并行落卡
+- 适用于单人/单 AI 主导规划，改动范围可小可大（含跨模块/全局架构）
+- 默认无需并行落卡；若后续需要多人并行再切换 `/plan parallel` + `/vkplan`
+- 若属于全局改造，`implementation_plan.md` 必须显式包含：分阶段路线图、跨模块依赖矩阵、回滚与观测方案
 
 ### 2) parallel 模式（并行规划）
 
