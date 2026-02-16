@@ -1300,6 +1300,12 @@ flowchart TB
 | 行级权限 (RLS) | 用户能看到哪些行 | SQL WHERE 条件注入 | `t_data_permission_row` |
 | 列级权限 | 敏感字段脱敏 | SELECT 列替换 | `t_data_permission_column` |
 
+**行级规则优先级（2026-02-16）**：
+
+1. 若角色在 `t_data_permission_row` 中已命中显式行级规则（如 `dept_cd = user.dept_code`、`org_code = user.org_code`），问数引擎直接复用该规则。
+2. 仅当当前表未命中任何显式行级规则时，才回退注入默认部门隔离条件 `dept_code = user.dept_code`。
+3. `dept_code` 缺失导致的上下文拒绝仅在“无显式行级规则可用”时触发，避免与角色已配置规则冲突。
+
 **权限上下文**（新文件 `app/ai/utils/permission_context.py`）：
 
 ```python

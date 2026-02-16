@@ -242,13 +242,24 @@ class PermissionService:
     ) -> Tuple[bool, Optional[str]]:
         """校验 SQL 查询前的默认权限前提。"""
 
-        if ctx.default_dept_scope and not ctx.has_dept_code():
-            return (
-                False,
-                f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
-            )
+        if not ctx.default_dept_scope:
+            return (True, None)
 
-        return (True, None)
+        if ctx.has_dept_code():
+            return (True, None)
+
+        has_explicit_row_scope = any(bool(items) for items in ctx.row_filters.values())
+        if has_explicit_row_scope:
+            logger.debug(
+                "用户缺少 dept_code，但存在显式行级规则，跳过默认部门隔离校验: user_id=%s",
+                ctx.user_id,
+            )
+            return (True, None)
+
+        return (
+            False,
+            f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
+        )
 
     def _evaluate_table_access(
         self,
@@ -375,7 +386,9 @@ class PermissionService:
         if wildcard_key in ctx.row_filters:
             filters.extend(ctx.row_filters[wildcard_key])
 
-        if ctx.default_dept_scope and ctx.has_dept_code():
+        has_explicit_filters = bool(filters)
+
+        if ctx.default_dept_scope and ctx.has_dept_code() and not has_explicit_filters:
             filters.append(("dept_code", "=", (ctx.dept_code or "").strip()))
 
         deduped_filters: List[Tuple[str, str, str]] = []

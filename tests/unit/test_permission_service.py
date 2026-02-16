@@ -227,3 +227,51 @@ def test_evaluate_sql_dry_run_returns_reason_and_hits(permission_service: Permis
     assert result["denied_stage"] == "permission"
     assert len(result["policy_hits"]) == 1
     assert result["policy_hits"][0]["hit_rule_type"] == "default_deny"
+
+
+def test_validate_query_context_allows_when_explicit_row_scope_exists_without_dept(
+    permission_service: PermissionService,
+):
+    """缺少 dept_code 但存在显式行级规则时不应触发默认拒绝。"""
+
+    ctx = UserPermissionContext(
+        user_id=2,
+        data_role="staff",
+        org_code="ORG001",
+        row_filters={"fdmdata.*": [("org_code", "=", "ORG001")]},
+    )
+
+    allowed, reason = permission_service.validate_query_context(ctx)
+
+    assert allowed is True
+    assert reason is None
+
+
+def test_get_row_filters_for_table_skips_default_dept_when_explicit_filter_exists(
+    permission_service: PermissionService,
+):
+    """已有显式行级规则时不再追加默认 dept_code 过滤。"""
+
+    ctx = UserPermissionContext(
+        user_id=2,
+        data_role="staff",
+        dept_code="00808",
+        row_filters={"fdmdata.*": [("dept_cd", "=", "00808")]},
+    )
+
+    filters = permission_service.get_row_filters_for_table(ctx, "fdmdata", "f_mid_loan_k_tb")
+
+    assert ("dept_cd", "=", "00808") in filters
+    assert ("dept_code", "=", "00808") not in filters
+
+
+def test_get_row_filters_for_table_appends_default_dept_when_no_explicit_filter(
+    permission_service: PermissionService,
+):
+    """无显式行级规则时仍应追加默认 dept_code 过滤。"""
+
+    ctx = UserPermissionContext(user_id=3, data_role="staff", dept_code="D001")
+
+    filters = permission_service.get_row_filters_for_table(ctx, "fdmdata", "any_table")
+
+    assert filters == [("dept_code", "=", "D001")]
