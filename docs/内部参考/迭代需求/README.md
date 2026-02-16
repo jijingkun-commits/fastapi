@@ -55,10 +55,8 @@
 
 ---
 
-## 4. 当前索引清单（2026-02-15）
+## 4. 当前索引清单（2026-02-16）
 
-- `requirements.md`
-- `implementation_plan.md`
 - `skill_admin_frontend_requirements.md`
 - `skill_admin_frontend_plan.md`（历史兼容命名）
 - `docs_governance_requirements.md`
@@ -68,3 +66,5 @@
 - `user_preference_memory_requirements.md`
 - `user_preference_memory_implementation_plan.md`
 - `evaluation_report.md`
+
+附注：`requirements.md`、`implementation_plan.md`、`fix_plan.md` 作为本地可选入口，当前默认不纳入版本管理（见 `.gitignore`）。
