@@ -9,7 +9,7 @@
  */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,8 +28,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  getAllSkills,
   getSkillDetail,
-  getSkills,
   getVectorStatus,
   regenerateEmbeddings,
   regenerateSingleSkill,
@@ -51,9 +51,11 @@ function getErrorMessage(error: unknown, fallback = "操作失败"): string {
 export function SkillAdminPanel() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [vectorStatus, setVectorStatus] = useState<VectorStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
 
-  const [searchText, setSearchText] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [filterEmbedding, setFilterEmbedding] = useState<"all" | "with" | "without">("all");
 
   const [selectedSkill, setSelectedSkill] = useState<SkillDetail | null>(null);
@@ -64,12 +66,23 @@ export function SkillAdminPanel() {
 
   const [regenerating, setRegenerating] = useState(false);
 
+  const hasInitializedRef = useRef(false);
+  const requestIdRef = useRef(0);
+
   const loadData = useCallback(async () => {
-    setLoading(true);
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    const shouldShowInitialLoading = !hasInitializedRef.current;
+    if (shouldShowInitialLoading) {
+      setInitialLoading(true);
+    } else {
+      setListLoading(true);
+    }
 
     try {
-      const params: Parameters<typeof getSkills>[0] = { limit: 100 };
-      const normalizedSearch = searchText.trim();
+      const params: { search?: string; has_embedding?: boolean } = {};
+      const normalizedSearch = searchQuery.trim();
 
       if (normalizedSearch) {
         params.search = normalizedSearch;
@@ -83,19 +96,48 @@ export function SkillAdminPanel() {
         params.has_embedding = false;
       }
 
-      const [skillsData, statusData] = await Promise.all([getSkills(params), getVectorStatus()]);
+      const [skillsData, statusData] = await Promise.all([getAllSkills(params), getVectorStatus()]);
+
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       setSkills(skillsData);
       setVectorStatus(statusData);
     } catch (error: unknown) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       toast.error(getErrorMessage(error, "加载数据失败"));
     } finally {
-      setLoading(false);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      if (shouldShowInitialLoading) {
+        hasInitializedRef.current = true;
+        setInitialLoading(false);
+      }
+
+      setListLoading(false);
     }
-  }, [filterEmbedding, searchText]);
+  }, [filterEmbedding, searchQuery]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const handleApplySearch = () => {
+    const normalized = searchInput.trim();
+
+    if (normalized === searchQuery) {
+      void loadData();
+      return;
+    }
+
+    setSearchQuery(normalized);
+  };
 
   const handleViewDetail = async (skillId: string) => {
     try {
@@ -156,7 +198,7 @@ export function SkillAdminPanel() {
     }
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="admin-page-content">
         <div className="flex h-72 items-center justify-center">
@@ -166,6 +208,9 @@ export function SkillAdminPanel() {
     );
   }
 
+  const hasFiltersApplied = Boolean(searchQuery) || filterEmbedding !== "all";
+  const listCountText = hasFiltersApplied ? `当前条件命中 ${skills.length} 个技能` : `共 ${skills.length} 个技能`;
+
   return (
     <div className="admin-page-content space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -173,8 +218,8 @@ export function SkillAdminPanel() {
           <h1 className="text-2xl font-bold">技能管理</h1>
           <p className="text-sm text-muted-foreground">管理 Agent 技能向量和配置</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void loadData()}>
-          刷新
+        <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={listLoading}>
+          {listLoading ? "刷新中..." : "刷新"}
         </Button>
       </div>
 
@@ -251,16 +296,25 @@ export function SkillAdminPanel() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-base">技能列表</CardTitle>
-                  <CardDescription className="text-xs">共 {skills.length} 个技能</CardDescription>
+                  <CardDescription className="text-xs">{listCountText}</CardDescription>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     placeholder="搜索技能..."
-                    value={searchText}
-                    onChange={(event) => setSearchText(event.target.value)}
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        handleApplySearch();
+                      }
+                    }}
                     className="h-9 w-[180px] text-sm sm:w-[220px]"
                   />
+
+                  <Button variant="outline" size="sm" onClick={handleApplySearch} disabled={listLoading}>
+                    搜索
+                  </Button>
 
                   <select
                     value={filterEmbedding}
@@ -280,6 +334,13 @@ export function SkillAdminPanel() {
             </CardHeader>
 
             <CardContent className="px-4 pt-1">
+              {listLoading ? (
+                <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#A8D4D4] border-t-[#2F6868]" />
+                  <span>正在更新技能列表...</span>
+                </div>
+              ) : null}
+
               <Table>
                 <TableHeader>
                   <TableRow>

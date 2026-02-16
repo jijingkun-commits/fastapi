@@ -1,6 +1,6 @@
 /**
  * 技能管理 API 客户端（中文注释）
- * 
+ *
  * 提供：
  * - 技能列表查询
  * - 向量状态检查
@@ -10,6 +10,8 @@
 import { apiFetch } from '@/lib/backend';
 
 const API_BASE = '/api/v1/skill-admin';
+const DEFAULT_SKILL_PAGE_SIZE = 200;
+const MAX_SKILL_FETCH_PAGES = 100;
 
 // ==================== 类型定义 ====================
 
@@ -53,24 +55,60 @@ export interface SearchResult {
   similarity: number;
 }
 
-// ==================== API ====================
-
-export async function getSkills(params?: {
-  skip?: number;
-  limit?: number;
+export interface SkillListParams {
   search?: string;
   has_embedding?: boolean;
-}): Promise<Skill[]> {
+}
+
+export interface SkillPageParams extends SkillListParams {
+  skip?: number;
+  limit?: number;
+}
+
+// ==================== API ====================
+
+export async function getSkills(params?: SkillPageParams): Promise<Skill[]> {
   const searchParams = new URLSearchParams();
   if (params?.skip !== undefined) searchParams.set('skip', String(params.skip));
   if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params?.search) searchParams.set('search', params.search);
-  if (params?.has_embedding !== undefined) searchParams.set('has_embedding', String(params.has_embedding));
-  
-  const url = `${API_BASE}/skills${searchParams.toString() ? '?' + searchParams : ''}`;
+  if (params?.has_embedding !== undefined) {
+    searchParams.set('has_embedding', String(params.has_embedding));
+  }
+
+  const url = `${API_BASE}/skills${searchParams.toString() ? `?${searchParams}` : ''}`;
   const response = await apiFetch(url);
   if (!response.ok) throw new Error('获取技能列表失败');
   return response.json();
+}
+
+export async function getAllSkills(params?: SkillListParams & { pageSize?: number }): Promise<Skill[]> {
+  const normalizedPageSize = Math.max(
+    1,
+    Math.min(params?.pageSize ?? DEFAULT_SKILL_PAGE_SIZE, DEFAULT_SKILL_PAGE_SIZE),
+  );
+
+  const allSkills: Skill[] = [];
+  let skip = 0;
+
+  for (let page = 0; page < MAX_SKILL_FETCH_PAGES; page += 1) {
+    const batch = await getSkills({
+      skip,
+      limit: normalizedPageSize,
+      search: params?.search,
+      has_embedding: params?.has_embedding,
+    });
+
+    allSkills.push(...batch);
+
+    if (batch.length < normalizedPageSize) {
+      return allSkills;
+    }
+
+    skip += batch.length;
+  }
+
+  throw new Error('技能数量过多，分页拉取超过安全上限，请改用分页模式');
 }
 
 export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
@@ -120,7 +158,11 @@ export async function deleteSkill(skillId: string): Promise<void> {
   if (!response.ok) throw new Error('删除技能失败');
 }
 
-export async function searchSkills(query: string, topK: number = 5, threshold: number = 0.3): Promise<{
+export async function searchSkills(
+  query: string,
+  topK: number = 5,
+  threshold: number = 0.3,
+): Promise<{
   query: string;
   results: SearchResult[];
   count: number;
