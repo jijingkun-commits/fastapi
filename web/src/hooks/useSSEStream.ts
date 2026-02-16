@@ -42,6 +42,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+function getImageUrlFromResult(data: ResultEventData): string | null {
+    if (data.data_type !== "image" || !isRecord(data.data)) {
+        return null;
+    }
+
+    const value = data.data.url;
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
 function getErrorMessageFromResult(data: ResultEventData): string {
     if (typeof data.message === "string" && data.message.trim().length > 0) {
         return data.message;
@@ -92,6 +106,7 @@ export function useSSEStream(): StreamContextValue {
     // 2. Message Updater Hook
     const {
         appendToAiMessage,
+        appendImageToAiMessage,
         addToolCallToMessage,
         handleThinking
     } = useMessageUpdater(setMessages);
@@ -182,13 +197,18 @@ export function useSSEStream(): StreamContextValue {
     }, [bindMessageIdToAiMessage, refreshThreads]);
 
     const handleStructuredResultEvent = useCallback((aiId: string, data: ResultEventData, isResume: boolean) => {
+        const imageUrl = getImageUrlFromResult(data);
+        if (imageUrl) {
+            appendImageToAiMessage(aiId, imageUrl);
+        }
+
         storeStructuredResultToMessage(aiId, data);
         if (isResume) {
             console.log(`恢复流收到结构化结果: ${data.data_type}`);
             return;
         }
         console.log(`收到结构化结果: ${data.data_type}`);
-    }, [storeStructuredResultToMessage]);
+    }, [appendImageToAiMessage, storeStructuredResultToMessage]);
 
     /**
      * 加载历史消息

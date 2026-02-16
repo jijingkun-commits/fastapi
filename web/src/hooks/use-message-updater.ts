@@ -2,6 +2,36 @@ import { useCallback } from "react";
 import { Message } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 
+const MARKDOWN_IMAGE_REGEX = /!\[[^\]]*\]\(([^)]+)\)/g;
+
+function getMessageTextContent(content: Message["content"]): string {
+    if (typeof content === "string") {
+        return content;
+    }
+
+    if (!Array.isArray(content)) {
+        return "";
+    }
+
+    return content
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text)
+        .join("\n");
+}
+
+function filterDuplicateImageMarkdown(token: string, existingContent: string): string {
+    if (!token || !existingContent || !token.includes("![")) {
+        return token;
+    }
+
+    return token.replace(MARKDOWN_IMAGE_REGEX, (fullMatch, url: string) => {
+        if (!url) {
+            return fullMatch;
+        }
+        return existingContent.includes(url) ? "" : fullMatch;
+    });
+}
+
 /**
  * Hook to manage message state updates
  */
@@ -15,13 +45,41 @@ export function useMessageUpdater(setMessages: React.Dispatch<React.SetStateActi
             const idx = prev.findIndex((m) => m.id === aiId);
             if (idx < 0) return prev;
             const ai = prev[idx] as any;
-            const content = typeof ai.content === "string"
-                ? ai.content
-                : Array.isArray(ai.content)
-                    ? ai.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
-                    : "";
+            const content = getMessageTextContent(ai.content);
+            const filteredToken = filterDuplicateImageMarkdown(token, content);
+            if (!filteredToken) {
+                return prev;
+            }
 
-            const next: Message = { ...ai, content: content + token } as Message;
+            const next: Message = { ...ai, content: content + filteredToken } as Message;
+            return [...prev.slice(0, idx), next, ...prev.slice(idx + 1)];
+        });
+    }, [setMessages]);
+
+    /**
+     * Append image markdown to AI message (for result.image SSE event)
+     */
+    const appendImageToAiMessage = useCallback((aiId: string, imageUrl: string, alt = "生成图片") => {
+        if (!imageUrl || !imageUrl.trim()) {
+            return;
+        }
+
+        setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === aiId);
+            if (idx < 0) return prev;
+
+            const ai = prev[idx] as any;
+            const content = getMessageTextContent(ai.content);
+            if (content.includes(imageUrl)) {
+                return prev;
+            }
+
+            const imageMarkdown = `![${alt}](${imageUrl})`;
+            const trimmed = content.trimEnd();
+            const separator = trimmed.length > 0 ? "\n\n" : "";
+            const nextContent = `${trimmed}${separator}${imageMarkdown}`;
+
+            const next: Message = { ...ai, content: nextContent } as Message;
             return [...prev.slice(0, idx), next, ...prev.slice(idx + 1)];
         });
     }, [setMessages]);
@@ -97,6 +155,7 @@ export function useMessageUpdater(setMessages: React.Dispatch<React.SetStateActi
 
     return {
         appendToAiMessage,
+        appendImageToAiMessage,
         addToolCallToMessage,
         handleThinking
     };

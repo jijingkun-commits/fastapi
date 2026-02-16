@@ -9,11 +9,12 @@ from io import BytesIO
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from pydantic import BaseModel
 from minio.error import S3Error
 
 from app.api.deps import get_current_user_optional
 from app.models.user import User
+from app.models.chat_asset import AssetType
+from app.db.session import get_db_context
 from app.services.asset_service import get_asset_service
 from app.core import config as ai_config
 
@@ -113,6 +114,21 @@ async def upload_image(
             length=len(content),
             content_type=content_type,
         )
+
+        # 补录资产元数据，保持上传文件与工具生成文件一致的管理方式
+        try:
+            asset_type = AssetType.IMAGE if content_type.startswith("image/") else AssetType.ATTACHMENT
+            with get_db_context() as db:
+                asset_service.register_existing_asset(
+                    db=db,
+                    object_key=object_key,
+                    chat_id=thread_prefix,
+                    user_id=current_user.id if current_user else None,
+                    asset_type=asset_type,
+                    file_name=file.filename,
+                )
+        except Exception as db_error:
+            logger.warning("上传成功但资产元数据补录失败: %s", db_error)
         
         logger.info("图片上传成功: %s (%d bytes)", object_key, len(content))
         

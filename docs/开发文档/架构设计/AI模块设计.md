@@ -949,17 +949,17 @@ if (isLoading) {
 | 来源 | 工具 | 返回值 | 事件推送 |
 |------|------|--------|---------|
 | Agent 生成 | `fig_inter` | `{"image_url": proxy_url}` | `emit_result("image", {url})` |
-| 知识库检索 | `knowledge_search` | 文本含 `![source](url)` | `emit_result("image", {url})` |
+| 知识库检索 | `knowledge_search` | 文本含 `[IMG-N]` + `<!--KB_IMAGES:{...}-->` | `emit_kb_images({images})` |
 
-两种来源使用**完全相同**的机制：
-1. **实时显示**: `emit_result` 推送事件 → 前端 `appendImageToAiMessage`
-2. **历史恢复**: 返回值包含 Markdown 图片 → 后端保存 → 前端渲染
+两种来源共享统一的图片 URL 规范（均为代理路径），但实时协议分为两类：
+1. **block 图片**（图表生成）: `result.data_type=image` → 前端追加 Markdown 图片
+2. **inline 图片**（知识库）: `kb_images` 映射 + `[IMG-N]` 占位符替换
 
 #### 路径 1: 实时流式显示
 
 ```mermaid
 sequenceDiagram
-    participant Tool as 工具 (fig_inter / knowledge_search)
+    participant Tool as 工具 (fig_inter)
     participant Frontend as 前端
     
     Tool->>Tool: 获取/生成图片 URL
@@ -971,8 +971,28 @@ sequenceDiagram
 
 **实现**:
 - 工具调用 `emit_result()` 发送 `result` 事件
-- 前端 `onResult` 回调调用 `appendImageToAiMessage()` 追加图片
-- URL 存储在 `additional_kwargs.displayedImages[]` 用于去重
+- 前端 `onResult` 回调调用 `appendImageToAiMessage()` 追加图片 Markdown
+- `appendToAiMessage()` 会过滤重复图片 token（按 URL 去重）
+
+#### 路径 1B: 知识库 inline 混排显示
+
+```mermaid
+sequenceDiagram
+    participant Tool as 工具 (knowledge_search)
+    participant Graph as multi_agent_graph
+    participant Frontend as 前端
+
+    Tool->>Tool: 返回文本 + [IMG-N] + <!--KB_IMAGES:{...}-->
+    Graph->>Graph: 从 ToolMessage 解析 KB_IMAGES
+    Graph->>Frontend: emit_kb_images({images})
+    Frontend->>Frontend: replaceImagePlaceholders()
+    Note over Frontend: ✅ 保留文图混排顺序
+```
+
+**实现**:
+- `knowledge_search` 只返回占位符，不直接写长 URL 到正文
+- Graph 负责把映射透传为 `kb_images` 事件
+- 前端渲染阶段按映射替换，保留“文字-图片-文字”顺序
 
 #### 图片位置与时序
 
@@ -992,12 +1012,12 @@ T3: LLM 继续输出 "完成！"        → content = "好的...![图片](...)�
 ```
 T0: LLM 调用工具                → content = "" (空)
 T1: 工具执行，检索知识库
-T2: emit_result() 追加图片       → content = "![图片](...)"
-T3: LLM 输出 "根据知识库..."     → content = "![图片](...)根据知识库..."
-                                     ↑ 图片在最前面
+T2: 收到 kb_images 映射          → content 仍含 [IMG-0]
+T3: 渲染阶段替换占位符           → content = "...![参考图片](...)..."
+                                     ↑ 图片按引用位置内联显示
 ```
 
-**关键差异**：`emit_result` 触发时，LLM 是否已有输出。
+**关键差异**：图表走 `result.image`（block），知识库走 `kb_images + [IMG-N]`（inline）。
 
 #### 路径 2: 数据库持久化
 
@@ -1007,16 +1027,16 @@ sequenceDiagram
     participant Graph as LangGraph
     participant DB as 数据库
     
-    Tool->>Tool: 返回包含 Markdown 图片的文本
-    Tool-->>Graph: "...![source](url)..."
+    Tool->>Tool: 返回文本/JSON（含图片引用信息）
+    Tool-->>Graph: "...[IMG-N]..." 或 "{\"image_url\":\"...\"}"
     Graph->>DB: save_conversation_from_messages()
     Note over DB: AIMessage.content 包含图片链接
 ```
 
 **实现**:
 - `fig_inter`: 返回 `{"image_url": url}`, LLM 输出 Markdown 或 `image_fixer` 补充
-- `knowledge_search`: 返回文本直接包含 `![source](url)`
-- `save_conversation_from_messages` 提取 Tool 消息中的图片 URL 并补充到 AI 回复
+- `knowledge_search`: 返回 `[IMG-N]` + `KB_IMAGES` 注释，保存前替换成 Markdown
+- `save_conversation_from_messages` 统一提取 Tool 消息中的 Markdown/JSON 图片 URL 并补充图表图片
 
 ### 去重机制
 
@@ -1026,15 +1046,14 @@ sequenceDiagram
 
 1. **前端追加时检查** (`appendImageToAiMessage`)
    ```typescript
-   if (displayedImages.includes(imageUrl)) return; // 已通过事件显示
-   if (content.includes(imageUrl)) return; // LLM 已输出（竞态）
+   if (content.includes(imageUrl)) return;
    ```
 
 2. **前端 Token 过滤** (`appendToAiMessage`)
    ```typescript
-   const imageRegex = /!\[.*?\]\(([^)]+)\)/g;
-   if (displayedImages.includes(url)) {
-       filteredToken = filteredToken.replace(match[0], ""); // 移除重复
+   const imageRegex = /!\[[^\]]*\]\(([^)]+)\)/g;
+   if (existingContent.includes(url)) {
+       filteredToken = filteredToken.replace(match[0], "");
    }
    ```
 
@@ -1049,6 +1068,9 @@ sequenceDiagram
    | `knowledge_search` 知识库 | 包含 `/proxy/ragflow/` | 只保存 LLM 引用的 |
    
    ```python
+   # 统一提取 Tool 图片来源：Markdown + JSON.image_url
+   urls = _extract_tool_image_urls(tool_content)
+
    # 只补充图表图片，不补充知识库图片
    if "/charts/" in url and url not in ai_content:
        missing_chart_images.append(url)
@@ -1059,22 +1081,19 @@ sequenceDiagram
 **文件**: `app/ai/tools/ragflow_tool.py`
 
 ```python
-def _format_retrieval_results(chunks: list) -> tuple[str, list[dict]]:
-    """格式化检索结果，提取图片信息用于主动推送。"""
-    images = []
-    for chunk in chunks:
+def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
+    """格式化检索结果，返回占位符和映射。"""
+    kb_images = {}
+    for idx, chunk in enumerate(chunks):
         if image_id := chunk.get("image_id"):
             image_url = f"/api/v1/assets/proxy/ragflow/{image_id}"
-            images.append({"url": image_url, "source": source})
-            # 返回文本直接包含 Markdown 图片
-            result_text += f"\n   ![{source}]({image_url})"
-    return text, images
+            kb_images[idx] = image_url
+            result_text += f"\n   相关图片: [IMG-{idx}]"
 
-def _emit_images(images: list[dict]) -> None:
-    """主动推送图片事件给前端。"""
-    writer = get_stream_writer()
-    for img in images:
-        emit_result(writer, "image", {"url": img["url"]}, ...)
+    if kb_images:
+        result_text += f"\n\n<!--KB_IMAGES:{json.dumps(kb_images)}-->"
+
+    return result_text, kb_images
 ```
 
 ### 时序图（完整流程）

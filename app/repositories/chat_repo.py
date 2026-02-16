@@ -21,6 +21,46 @@ from app.core.utils import content_hash as _content_hash
 logger = logging.getLogger(__name__)
 
 
+def _extract_tool_image_urls(content: str) -> list[str]:
+    """从 ToolMessage 内容中提取图片 URL。
+
+    兼容两类格式：
+    1. Markdown 图片：![alt](url)
+    2. fig_inter JSON 返回：{"status":"success","image_url":"..."}
+    """
+    import re
+
+    urls: set[str] = set()
+
+    for url in re.findall(r'!\[[^\]]*\]\(([^)]+)\)', content):
+        if url:
+            urls.add(url.strip())
+
+    stripped = content.strip()
+    if not stripped:
+        return list(urls)
+
+    json_payload = None
+    if stripped.startswith("{") and stripped.endswith("}"):
+        try:
+            json_payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            json_payload = None
+
+    if isinstance(json_payload, dict):
+        image_url = json_payload.get("image_url")
+        status = json_payload.get("status")
+        if isinstance(image_url, str) and image_url.strip():
+            if status in (None, "success", "success_local"):
+                urls.add(image_url.strip())
+    elif '"image_url"' in content:
+        regex_match = re.search(r'"image_url"\s*:\s*"([^\"]+)"', content)
+        if regex_match and regex_match.group(1).strip():
+            urls.add(regex_match.group(1).strip())
+
+    return list(urls)
+
+
 def save_message(
     db: Session,
     *,
@@ -374,7 +414,7 @@ def save_conversation_from_messages(
     # 1. 从后往前查找最后一条 human 消息和最后一条 ai 消息
     last_human = None
     last_ai = None
-    tool_images = []  # 收集该轮工具返回的图片
+    tool_images: set[str] = set()  # 收集该轮工具返回的图片
     kb_images = {}    # 知识库图片映射 {索引: URL}
     
     for msg in reversed(messages):
@@ -393,9 +433,8 @@ def save_conversation_from_messages(
         elif msg_type == "tool":
             # 提取工具返回中的图片链接（用于图表图片补充）
             content = str(getattr(msg, "content", ""))
-            img_pattern = r'!\[[^\]]*\]\(([^)]+)\)'
-            for url in re.findall(img_pattern, content):
-                tool_images.append(url)
+            for url in _extract_tool_image_urls(content):
+                tool_images.add(url)
             
             # 提取知识库图片映射（用于占位符替换）
             logger.info("Tool消息内容(前500字): %s", content[:500])
@@ -615,4 +654,3 @@ def get_feedback_scores_batch(
     except Exception as e:
         logger.error("批量查询反馈失败: %s", e)
         return {}
-
