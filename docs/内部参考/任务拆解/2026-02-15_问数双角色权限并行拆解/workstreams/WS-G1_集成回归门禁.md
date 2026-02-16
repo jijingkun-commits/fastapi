@@ -70,10 +70,10 @@
 
 | TC-ID | 门禁命令/检查项 | 自动化脚本或 nodeid | 本次结果 | 责任 WS | 豁免/缺陷单 |
 |---|---|---|---|---|---|
-| DP-GATE-001 | 权限策略决策回归 | `tests/unit/test_sql_policy_decision.py` | 待执行 | WS-02 | - |
-| DP-GATE-002 | SQL 重写与默认隔离回归 | `tests/unit/test_sql_rewriter.py` | 待执行 | WS-02 | - |
-| DP-GATE-003 | 权限配置 API 回归 | `tests/api/test_access_admin_api.py` | 待执行 | WS-03 | - |
-| DP-GATE-004 | 文档门禁 | `python3 scripts/docs_guard.py --strict` | 待执行 | WS-G2 | - |
+| DP-GATE-001 | 权限策略决策回归 | `tests/unit/test_sql_policy_decision.py` | PASS | WS-02 | - |
+| DP-GATE-002 | SQL 重写与默认隔离回归 | `tests/unit/test_sql_rewriter.py` | PASS | WS-02 | - |
+| DP-GATE-003 | 权限配置 API 回归 | `tests/api/test_access_admin_api.py` | PASS | WS-03 | - |
+| DP-GATE-004 | 文档门禁 | `python3 scripts/docs_guard.py --strict` | PASS | WS-G2 | - |
 
 ### 5.2 浏览器测试（触发式）
 
@@ -95,10 +95,16 @@
 ## 7. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
-- 是否修改了白名单外文件（是/否）：
+  - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md`
+  - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G1_集成回归门禁.md`
+- 是否修改了白名单外文件（是/否）：否
 - 测试命令与结果：
-- 已知风险点：
-- 回滚建议：
+  - `set -a; source .env.dev; set +a; .vibe/venv/bin/python -m pytest -q tests/unit/test_sql_policy_decision.py tests/unit/test_sql_rewriter.py`（PASS）
+  - `set -a; source .env.dev; set +a; .vibe/venv/bin/python -m pytest -q tests/api/test_access_admin_api.py`（PASS）
+  - `python3 scripts/docs_guard.py --strict`（PASS）
+  - `python3 scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md --pytest-cmd "set -a; source .env.dev; set +a; .vibe/venv/bin/python -m pytest -q tests/unit/test_sql_policy_decision.py tests/unit/test_sql_rewriter.py tests/api/test_access_admin_api.py" --tsc-cmd ":" --lint-cmd ":" --docs-cmd "python3 scripts/docs_guard.py --strict"`（PASS）
+- 已知风险点：`tsc/lint` 在本 Gate 按非前端场景以 no-op 执行，已在回填命令中显式声明。
+- 回滚建议：回滚 `parallel_plan.md` 与本 WS 文档后，重新执行 Gate 命令并自动回填。
 
 ---
 

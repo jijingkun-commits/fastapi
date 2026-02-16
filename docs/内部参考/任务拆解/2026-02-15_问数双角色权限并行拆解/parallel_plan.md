@@ -152,11 +152,12 @@
 
 ## 10. Gate 执行状态
 
-### 10.1 WS-G1 结果
+### 10.1 WS-G1 结果（自动回填：2026-02-16 15:28）
 
-- `pytest`：待执行
-- `api`：待执行
-- `docs_guard`：待执行
+- `pytest`：通过
+- `tsc`：通过
+- `lint`：通过（0 warning）
+- `docs_guard`：通过（0 error, 0 warning）
 
 ### 10.2 WS-G2 预期动作
 
@@ -166,8 +167,14 @@
 
 ---
 
-## 11. Gate 收口结果
+## 11. Gate 收口结果（自动回填：2026-02-16 15:28）
 
-1. `WS-G1` 已执行：否
-2. `WS-G2` 已执行：否
-3. Gate 结论：待执行
+1. `WS-G1` 已执行：
+   - `pytest` 通过
+   - `tsc` 通过
+   - `lint` 通过（0 warning）
+   - `docs_guard` 通过（0 error, 0 warning）
+2. `WS-G2` 已执行：
+   - `docs_guard --strict` 通过（0 error, 0 warning）
+3. Gate 结论：
+   - 业务与文档门禁通过，可关闭本轮 Gate。

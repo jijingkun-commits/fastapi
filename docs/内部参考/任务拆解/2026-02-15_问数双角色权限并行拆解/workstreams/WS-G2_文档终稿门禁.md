@@ -72,8 +72,8 @@
 
 | TC-ID | 门禁命令/检查项 | 自动化脚本或 nodeid | 本次结果 | 责任 WS | 豁免/缺陷单 |
 |---|---|---|---|---|---|
-| DP-DOC-001 | 文档严格门禁 | `python3 scripts/docs_guard.py --strict` | 待执行 | WS-G2 | - |
-| DP-DOC-002 | 索引可达性 | `docs/SUMMARY.md` 人工审阅 | 待执行 | WS-G2 | - |
+| DP-DOC-001 | 文档严格门禁 | `python3 scripts/docs_guard.py --strict` | PASS | WS-G2 | - |
+| DP-DOC-002 | 索引可达性 | `docs/SUMMARY.md` 人工审阅 | PASS | WS-G2 | - |
 
 ### 5.2 浏览器测试（触发式）
 
@@ -95,10 +95,14 @@
 ## 7. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
-- 是否修改了白名单外文件（是/否）：
+  - `docs/SUMMARY.md`
+  - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md`
+  - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G2_文档终稿门禁.md`
+- 是否修改了白名单外文件（是/否）：否
 - 测试命令与结果：
-- 已知风险点：
-- 回滚建议：
+  - `python3 scripts/docs_guard.py --strict`（PASS）
+- 已知风险点：本次仅修正索引断链并完成 Gate 回填，未新增文档专题内容。
+- 回滚建议：如需回退，按文档文件粒度回滚并重跑 `docs_guard`。
 
 ---
 
