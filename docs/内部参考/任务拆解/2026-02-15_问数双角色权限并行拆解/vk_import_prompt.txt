@@ -1,0 +1,14 @@
+请按以下 JSON 建立 Vibe Kanban 卡片，task_key=PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION，拆解目录=2026-02-15_问数双角色权限并行拆解。
+规则：
+1) 仅根据 hard_depends_on 建立阻塞依赖；soft_depends_on 仅作参考。
+2) 同泳道且无 hard 依赖冲突的卡片标记可并行。
+3) Gate 卡片保持串行（column=Gate）；`WS-00` 为前置里程碑，不建卡。
+4) 若 file_scope 存在冲突，阻止并行并提示回退串行。
+5) 默认列流转：Backlog -> Doing -> Review -> Gate -> Done。
+
+卡片概览：
+- PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION::WS-01 | WS-01 用户模型与迁移改造 [PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION] | column=Backlog | hard_depends_on=['WS-00']
+- PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION::WS-02 | WS-02 权限引擎与 SQL 重写收敛 [PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION] | column=Backlog | hard_depends_on=['WS-01']
+- PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION::WS-03 | WS-03 权限配置 API 与审计能力 [PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION] | column=Backlog | hard_depends_on=['WS-02']
+- PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION::WS-G1 | WS-G1 集成回归门禁 [PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION] | column=Gate | hard_depends_on=['WS-01', 'WS-02', 'WS-03']
+- PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION::WS-G2 | WS-G2 文档终稿门禁 [PP-20260215-ASKDATA-DUAL-ROLE-PERMISSION] | column=Gate | hard_depends_on=['WS-G1']

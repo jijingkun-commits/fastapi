@@ -141,10 +141,14 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
+* [需求基线（通用入口）](内部参考/迭代需求/requirements.md)
+* [实施方案（通用入口）](内部参考/迭代需求/implementation_plan.md)
 * [需求基线（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
 * [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
 * [需求基线（文档治理执行）](内部参考/迭代需求/docs_governance_requirements.md)
 * [实施方案（文档治理执行）](内部参考/迭代需求/docs_governance_implementation_plan.md)
+* [需求基线（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_requirements.md)
+* [实施方案（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_implementation_plan.md)
 * [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解
@@ -200,6 +204,17 @@
 * [WS-04 迭代需求命名规范与索引治理](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-04_迭代需求命名规范与索引治理.md)
 * [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md)
 * [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md)
+
+#### 当前并行拆解（2026-02-15 问数双角色权限并行拆解）
+
+* [并行总计划](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md)
+* [WS-00 G0 数据权限契约冻结](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-00_G0_数据权限契约冻结.md)
+* [WS-00 G0 协议冻结（vksync兼容）](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-00_G0_协议冻结.md)
+* [WS-01 用户模型与迁移改造](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-01_用户模型与迁移改造.md)
+* [WS-02 权限引擎与 SQL 重写收敛](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-02_权限引擎与SQL重写收敛.md)
+* [WS-03 权限配置 API 与审计能力](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-03_权限配置API与审计能力.md)
+* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G1_集成回归门禁.md)
+* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G2_文档终稿门禁.md)
 
 ---
 

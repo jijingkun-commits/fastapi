@@ -55,11 +55,12 @@
 
 ---
 
-## 4. 当前索引清单（2026-02-14）
+## 4. 当前索引清单（2026-02-15）
 
 - `skill_admin_frontend_requirements.md`
 - `skill_admin_frontend_plan.md`（历史兼容命名）
 - `docs_governance_requirements.md`
 - `docs_governance_implementation_plan.md`
+- `askdata_dual_role_permission_requirements.md`
+- `askdata_dual_role_permission_implementation_plan.md`
 - `evaluation_report.md`
-

@@ -18,6 +18,7 @@ from app.models.todo import Todo, TodoHistory, TodoReminderQueue
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
+from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.token_blacklist import TokenBlacklist
 
 def init_tables():

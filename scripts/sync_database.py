@@ -24,6 +24,7 @@ from app.models.todo import Todo, TodoHistory, TodoReminderQueue
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
+from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.token_blacklist import TokenBlacklist
 from app.models.idempotency_key import IdempotencyKey
 
@@ -52,7 +53,8 @@ def get_all_models():
     return [
         User, Todo, TodoHistory, TodoReminderQueue,
         ChatMessage, ChatAsset, MetaTable, MetaColumn,
-        MetaRelation, TokenBlacklist, IdempotencyKey
+        MetaRelation, DataPermissionTable, DataPermissionRow,
+        DataPermissionColumn, TokenBlacklist, IdempotencyKey
     ]
 
 

@@ -7,7 +7,7 @@
 """
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Integer, String, Boolean, DateTime, Text, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,14 +21,19 @@ class DataPermissionTable(Base):
     """
     __tablename__ = "t_data_permission_table"
 
+    __table_args__ = (
+        UniqueConstraint("role", "schema_name", "table_name", name="uq_perm_table_role_schema_table"),
+        Index("idx_perm_table_role", "role"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     role: Mapped[str] = mapped_column(String(50), nullable=False, comment="用户角色")
     schema_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Schema 名称")
     table_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="表名，支持 * 通配符")
     allow_access: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否允许访问")
     description: Mapped[Optional[str]] = mapped_column(Text, comment="描述")
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="创建时间")
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="更新时间")
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="更新时间")
 
 
 class DataPermissionRow(Base):
@@ -42,6 +47,11 @@ class DataPermissionRow(Base):
     """
     __tablename__ = "t_data_permission_row"
 
+    __table_args__ = (
+        UniqueConstraint("role", "schema_name", "table_name", "filter_column", name="uq_perm_row_role_schema_table_column"),
+        Index("idx_perm_row_role", "role"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     role: Mapped[Optional[str]] = mapped_column(String(50), comment="用户角色，NULL 表示所有角色")
     schema_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Schema 名称")
@@ -51,8 +61,8 @@ class DataPermissionRow(Base):
     filter_value: Mapped[Optional[str]] = mapped_column(String(200), comment="固定过滤值（source=fixed 时使用）")
     filter_operator: Mapped[str] = mapped_column(String(20), default="=", comment="比较运算符")
     description: Mapped[Optional[str]] = mapped_column(Text, comment="描述")
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="创建时间")
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="更新时间")
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="更新时间")
 
 
 class DataPermissionColumn(Base):
@@ -66,6 +76,11 @@ class DataPermissionColumn(Base):
     """
     __tablename__ = "t_data_permission_column"
 
+    __table_args__ = (
+        UniqueConstraint("role", "schema_name", "table_name", "column_name", name="uq_perm_column_role_schema_table_column"),
+        Index("idx_perm_column_role", "role"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     role: Mapped[str] = mapped_column(String(50), nullable=False, comment="用户角色")
     schema_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Schema 名称")
@@ -74,5 +89,5 @@ class DataPermissionColumn(Base):
     mask_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="脱敏类型: hide/partial/hash")
     mask_pattern: Mapped[Optional[str]] = mapped_column(String(200), comment="脱敏显示模式")
     description: Mapped[Optional[str]] = mapped_column(Text, comment="描述")
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="创建时间")
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="更新时间")
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, comment="更新时间")
