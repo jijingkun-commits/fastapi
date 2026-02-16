@@ -16,6 +16,7 @@ import re
 from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
+from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
@@ -118,13 +119,18 @@ EXTERNAL_INFO_HINTS = (
     "基金",
 )
 
-
 TURN_ACT_HINTS = {
     "NEW_QUERY",
     "SUPPLEMENT",
     "CORRECTION",
     "CONFIRM",
 }
+
+SUPERVISOR_CONTEXT_TOKEN_BUDGET_RATIO = 0.85
+SUPERVISOR_CONTEXT_MIN_TOKENS = 1024
+SUPERVISOR_TOOL_MESSAGE_CHAR_LIMIT = 2400
+SUPERVISOR_TOOL_MESSAGE_HEAD_CHARS = 1500
+SUPERVISOR_TOOL_MESSAGE_TAIL_CHARS = 600
 
 
 def _is_model_access_error(error_text: str) -> bool:
@@ -258,6 +264,72 @@ def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
     if not cleaned:
         return ""
     return cleaned[:limit]
+
+
+def _calculate_supervisor_context_budget(max_tokens: int) -> int:
+    """根据模型窗口计算 Supervisor 单轮上下文预算。"""
+    safe_max_tokens = max(max_tokens, SUPERVISOR_CONTEXT_MIN_TOKENS)
+    budget = int(safe_max_tokens * SUPERVISOR_CONTEXT_TOKEN_BUDGET_RATIO)
+    return max(budget, SUPERVISOR_CONTEXT_MIN_TOKENS)
+
+
+def _truncate_tool_message_text(
+    text: str,
+    *,
+    char_limit: int = SUPERVISOR_TOOL_MESSAGE_CHAR_LIMIT,
+    head_chars: int = SUPERVISOR_TOOL_MESSAGE_HEAD_CHARS,
+    tail_chars: int = SUPERVISOR_TOOL_MESSAGE_TAIL_CHARS,
+) -> str:
+    """压缩超长工具结果，保留首尾关键信息，避免污染后续路由。"""
+    raw = str(text or "")
+    if len(raw) <= char_limit:
+        return raw
+
+    head = raw[:head_chars].rstrip()
+    tail = raw[-tail_chars:].lstrip()
+    omitted_chars = max(len(raw) - len(head) - len(tail), 0)
+    omitted_notice = (
+        f"\n\n...[工具输出过长，已省略 {omitted_chars} 字符，"
+        "完整内容已保存在消息存储中]...\n\n"
+    )
+    return f"{head}{omitted_notice}{tail}"
+
+
+def _compact_tool_message_for_inference(message: ToolMessage) -> ToolMessage:
+    """仅在推理输入阶段压缩 ToolMessage，不影响持久化原始消息。"""
+    content_text = _normalize_text_content(getattr(message, "content", ""))
+    compacted_text = _truncate_tool_message_text(content_text)
+    if compacted_text == content_text:
+        return message
+
+    if hasattr(message, "model_copy"):
+        try:
+            return message.model_copy(update={"content": compacted_text})
+        except Exception as exc:
+            logger.debug("ToolMessage 压缩失败，回退原消息: %s", exc)
+            return message
+
+    return message
+
+
+def _prepare_messages_for_supervisor_inference(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """准备 Supervisor 推理输入，压缩超长工具消息。"""
+    prepared: list[BaseMessage] = []
+    compacted_count = 0
+
+    for message in messages or []:
+        if isinstance(message, ToolMessage):
+            compacted = _compact_tool_message_for_inference(message)
+            if compacted is not message:
+                compacted_count += 1
+            prepared.append(compacted)
+            continue
+        prepared.append(message)
+
+    if compacted_count:
+        logger.info("Supervisor 上下文压缩: compacted_tool_messages=%d", compacted_count)
+
+    return prepared
 
 
 def _summarize_tavily_tool_output(tool_content: str) -> str:
@@ -775,15 +847,23 @@ async def create_multi_agent_graph(
             
             try:
                 # 使用 astream + stream_mode="messages" 获取 LLM 流式输出
-                # Context Pruning: 限制传递给 Agent 的消息数量
-                # 策略: 保留最后 15 条消息，确保以 Human 开始（适配 Chat Model）
+                # Context Budget: 先压缩超长工具结果，再按 token 预算裁剪消息
+                # 避免上一轮超长 ToolMessage 污染当前轮路由判断。
                 original_messages = state.get("messages", [])
+                prepared_messages = _prepare_messages_for_supervisor_inference(original_messages)
+
+                from app.ai import config as ai_config
+
+                token_budget = _calculate_supervisor_context_budget(
+                    getattr(ai_config, "MESSAGE_MAX_TOKENS", SUPERVISOR_CONTEXT_MIN_TOKENS)
+                )
                 pruned_messages = trim_messages(
-                    original_messages,
-                    max_tokens=15,
-                    token_counter=len,
+                    prepared_messages,
+                    max_tokens=token_budget,
+                    token_counter=count_tokens_approximately,
                     strategy="last",
                     start_on="human",
+                    end_on=("human", "tool", "ai"),
                     include_system=True,
                     allow_partial=False,
                 )
@@ -827,8 +907,19 @@ async def create_multi_agent_graph(
                 input_message_count = len(pruned_state.get("messages", []))
                 # 保存初始值，用于最后计算增量消息（input_message_count 会在流式处理中被更新）
                 initial_input_count = input_message_count
+
+                prepared_token_estimate = int(count_tokens_approximately(prepared_messages) or 0)
+                pruned_token_estimate = int(count_tokens_approximately(pruned_messages) or 0)
                 
-                logger.info(f"[{name}] Context Pruning: {len(original_messages)} -> {input_message_count} msgs")
+                logger.info(
+                    "[%s] Context Budget: msgs %d->%d, tokens %d->%d, budget=%d",
+                    name,
+                    len(original_messages),
+                    input_message_count,
+                    prepared_token_estimate,
+                    pruned_token_estimate,
+                    token_budget,
+                )
 
                 sent_tool_call_ids = set()
                 # 跟踪已发送的文本消息 ID，防止 values 模式重复发送

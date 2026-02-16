@@ -352,6 +352,13 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | `_postprocess` | 无 | 仅负责持久化与清理 |
 | `ChatService done` | `done`（仅生命周期） | 严禁携带结构化数据 |
 
+#### Supervisor 上下文预算治理（2026-02）
+
+- `streaming_wrapper` 在进入 `trim_messages` 前，先对超长 `ToolMessage` 做推理态压缩（仅压缩送模内容，原始消息仍保留在 checkpoint / 对话表）。
+- 消息裁剪从“按条数”升级为“按 token 预算”：使用 `count_tokens_approximately` 估算消息 token，避免单条超长工具输出挤占整轮上下文。
+- 预算公式：`max(MESSAGE_MAX_TOKENS * 0.85, 1024)`；在高噪声场景（如知识库返回长文）可稳定保留最近用户意图与路由指令。
+- 目标：降低“上一轮工具长文本污染下一轮路由”的概率，确保问数/待办委派判断更多依据当前轮输入。
+
 #### Supervisor 模型异常降级策略（2026-02）
 
 - 当 `supervisor` 在 `streaming_wrapper` 中遇到模型配额/订阅/权限类错误（如 `403`、`SUBSCRIPTION_NOT_FOUND`、`Insufficient Balance`）时，不再向用户透传 `[System Error: ...]`。
