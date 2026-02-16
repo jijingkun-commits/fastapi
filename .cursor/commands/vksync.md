@@ -40,8 +40,9 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 ### Step 2: 解析基线提交
 
-1. 基线分支优先：`main`，其次 `master`。
-2. 获取基线 HEAD 作为 `g0_baseline_commit`。
+1. 优先从 `parallel_plan.md` 读取本轮冻结记录的 `g0_baseline_commit`（若已记录）。
+2. 若未记录，再回退到基线分支 HEAD（优先 `main`，其次 `master`）。
+3. 最终得到 `g0_baseline_commit` 后再进入 worktree 对齐校验。
 
 ### Step 3: 校验 worktree 同步状态
 

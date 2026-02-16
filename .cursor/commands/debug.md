@@ -44,7 +44,8 @@ description: 问题排查：重现 -> 定位 -> 修复 -> 验证 -> 预防
     - 应用日志: `tail -n 100 logs/assistant.log`
     - 容器日志: `docker compose logs postgres`
 3. **数据库分析**:
-    - 使用 `postgres_query` 工具查询异常数据
+    - `chat_db`（主应用库）: 可使用 MCP Postgres 查询（默认 `DATABASE_URL`）
+    - `data_db`（分析库，只读）: 必须通过 `ANALYTICS_DATABASE_URL` 对应脚本链路查询，避免误连主库
 
 ## 阶段 3: 修复与验证 (Fix & Verify)
 

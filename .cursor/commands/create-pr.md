@@ -15,17 +15,18 @@ description: 🚀 创建 Pull Request：自动生成 PR 描述、检查清单和
 # 确保所有变更已提交
 git status
 
-# 推送分支到远程
-git push -u origin HEAD
-
-# 确保与 main 分支同步
+# 先同步基线分支（main 或 master）
 git fetch origin main
+# 若仓库默认分支为 master，请替换为 origin/master
 git rebase origin/main  # 或 merge
+
+# 再推送分支到远程；若此前已推送且发生 rebase，使用 --force-with-lease
+git push -u origin HEAD
 ```
 
 ### 2. 分析变更
 ```bash
-# 查看与 main 的差异
+# 查看与基线分支（main 或 master）的差异
 git log origin/main..HEAD --oneline
 git diff origin/main...HEAD --stat
 ```
