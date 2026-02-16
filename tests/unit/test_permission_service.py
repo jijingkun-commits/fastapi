@@ -265,6 +265,26 @@ def test_get_row_filters_for_table_skips_default_dept_when_explicit_filter_exist
     assert ("dept_code", "=", "00808") not in filters
 
 
+def test_get_row_filters_for_table_exact_rule_overrides_schema_wildcard(
+    permission_service: PermissionService,
+):
+    """同表存在精确规则时，应覆盖 schema.* 通配规则。"""
+
+    ctx = UserPermissionContext(
+        user_id=4,
+        data_role="staff",
+        dept_code="00808",
+        row_filters={
+            "fdmdata.*": [("dept_cd", "=", "00808")],
+            "fdmdata.f_mid_index_result": [("org_no", "=", "00808")],
+        },
+    )
+
+    filters = permission_service.get_row_filters_for_table(ctx, "fdmdata", "f_mid_index_result")
+
+    assert filters == [("org_no", "=", "00808")]
+
+
 def test_get_row_filters_for_table_appends_default_dept_when_no_explicit_filter(
     permission_service: PermissionService,
 ):

@@ -378,13 +378,17 @@ class PermissionService:
 
         # 精确匹配
         full_name = f"{schema}.{table}"
-        if full_name in ctx.row_filters:
+        has_exact_filters = full_name in ctx.row_filters
+        if has_exact_filters:
             filters.extend(ctx.row_filters[full_name])
 
         # 通配符匹配 (schema.*)
-        wildcard_key = f"{schema}.*"
-        if wildcard_key in ctx.row_filters:
-            filters.extend(ctx.row_filters[wildcard_key])
+        # 规则优先级：精确规则 > 通配规则。
+        # 若当前表已配置精确规则，不再叠加 schema.*，避免产生冲突过滤条件。
+        if not has_exact_filters:
+            wildcard_key = f"{schema}.*"
+            if wildcard_key in ctx.row_filters:
+                filters.extend(ctx.row_filters[wildcard_key])
 
         has_explicit_filters = bool(filters)
 
