@@ -55,7 +55,7 @@
 ## 4. 实施步骤
 
 1. 按代码变更映射同步产品/架构/测试文档。
-2. 更新 `docs/SUMMARY.md` 新增入口。
+2. 复核 `docs/SUMMARY.md` 索引可达性并补齐契约入口。
 3. 执行 `docs_guard` 并回填 Gate 结论。
 
 ---
@@ -72,8 +72,8 @@
 
 | TC-ID | 门禁命令/检查项 | 自动化脚本或 nodeid | 本次结果 | 责任 WS | 豁免/缺陷单 |
 |---|---|---|---|---|---|
-| DP-DOC-001 | 文档严格门禁 | `python3 scripts/docs_guard.py --strict` | PASS | WS-G2 | - |
-| DP-DOC-002 | 索引可达性 | `docs/SUMMARY.md` 人工审阅 | PASS | WS-G2 | - |
+| DP-DOC-001 | 文档严格门禁 | `python3 scripts/docs_guard.py --strict` | PASS（`errors=0`，`warnings=0`，`summary_coverage=116/116`） | WS-G2 | - |
+| DP-DOC-002 | 索引可达性 | `docs/SUMMARY.md` 人工审阅 | PASS（双角色拆解入口 + 契约入口可达） | WS-G2 | - |
 
 ### 5.2 浏览器测试（触发式）
 
@@ -95,14 +95,20 @@
 ## 7. 协作者自检卡（提交必填）
 
 - 实际修改文件列表：
+  - `docs/产品文档/问数助手需求.md`
+  - `docs/产品文档/用户管理需求.md`
+  - `docs/开发文档/架构设计/问数引擎设计.md`
+  - `docs/开发文档/架构设计/数据库设计.md`
+  - `docs/开发文档/测试管理/问数引擎测试案例.md`
+  - `docs/开发文档/测试管理/用户管理测试案例.md`
   - `docs/SUMMARY.md`
   - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md`
   - `docs/内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G2_文档终稿门禁.md`
 - 是否修改了白名单外文件（是/否）：否
 - 测试命令与结果：
-  - `python3 scripts/docs_guard.py --strict`（PASS）
-- 已知风险点：本次仅修正索引断链并完成 Gate 回填，未新增文档专题内容。
-- 回滚建议：如需回退，按文档文件粒度回滚并重跑 `docs_guard`。
+  - `python3 scripts/docs_guard.py --strict`（PASS，`errors=0`，`warnings=0`，`summary_coverage=116/116`）
+- 已知风险点：`t_data_permission_*` 历史种子仍存在 `admin/analyst/user` 角色编码，当前通过 `data_role > role(非admin) > staff` 兼容解析兜底，后续需评估是否迁移为纯 `data_role` 编码。
+- 回滚建议：按文档文件粒度回滚后重跑 `python3 scripts/docs_guard.py --strict`，确保索引与覆盖率回到一致状态。
 
 ---
 

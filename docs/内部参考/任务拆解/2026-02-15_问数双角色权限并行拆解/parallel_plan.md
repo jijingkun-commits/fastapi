@@ -159,15 +159,21 @@
 - `lint`：通过（0 warning）
 - `docs_guard`：通过（0 error, 0 warning）
 
-### 10.2 WS-G2 预期动作
+### 10.2 WS-G2 结果（自动回填：2026-02-16 15:59）
 
-1. 同步产品/架构/测试文档。
-2. 更新 `docs/SUMMARY.md` 索引。
-3. 复跑 `docs_guard` 并归档结论。
+1. 文档矩阵同步完成：
+   - 产品文档：`问数助手需求.md`、`用户管理需求.md`
+   - 架构文档：`问数引擎设计.md`、`数据库设计.md`
+   - 测试文档：`问数引擎测试案例.md`、`用户管理测试案例.md`
+2. `docs/SUMMARY.md` 索引复核完成：
+   - `2026-02-15_问数双角色权限并行拆解` 入口可达
+   - 需求基线与实施方案入口可达
+3. 文档门禁复跑完成：
+   - `python3 scripts/docs_guard.py --strict` 通过（`errors=0`，`warnings=0`，`summary_coverage=116/116`）
 
 ---
 
-## 11. Gate 收口结果（自动回填：2026-02-16 15:28）
+## 11. Gate 收口结果（自动回填：2026-02-16 15:59）
 
 1. `WS-G1` 已执行：
    - `pytest` 通过
@@ -175,6 +181,7 @@
    - `lint` 通过（0 warning）
    - `docs_guard` 通过（0 error, 0 warning）
 2. `WS-G2` 已执行：
-   - `docs_guard --strict` 通过（0 error, 0 warning）
+   - 文档矩阵与索引同步完成
+   - `docs_guard --strict` 通过（0 error, 0 warning，summary_coverage=116/116）
 3. Gate 结论：
-   - 业务与文档门禁通过，可关闭本轮 Gate。
+   - 双角色权限相关文档与测试追溯已收口，本轮 Gate 可关闭。
