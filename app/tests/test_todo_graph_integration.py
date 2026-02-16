@@ -17,8 +17,8 @@ class MockLLMResponse:
 
 class TestAnalyzeIntentIntegration(unittest.TestCase):
     
-    @patch("app.ai.workflow.todo_graph.get_llm")
-    def test_next_tuesday_integration(self, mock_get_llm):
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_next_tuesday_integration(self, mock_get_scene_llm):
         # 1. 模拟 LLM 返回 "下周二"
         mock_response = MockLLMResponse(json.dumps({
             "intent": "create",
@@ -28,7 +28,7 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
             },
             "needs_confirmation": True
         }))
-        mock_get_llm.return_value.invoke.return_value = mock_response
+        mock_get_scene_llm.return_value.invoke.return_value = mock_response
         
         # 2. 构造初始 State
         state = {
@@ -63,8 +63,8 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
         
         # 验证 constraints
     
-    @patch("app.ai.workflow.todo_graph.get_llm")
-    def test_constraint_extraction(self, mock_get_llm):
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_constraint_extraction(self, mock_get_scene_llm):
         # 模拟 LLM 返回包含约束的文本
         mock_response = MockLLMResponse(json.dumps({
             "intent": "create",
@@ -73,7 +73,7 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
                 "time": "下周一 (周五不可用)"
             }
         }))
-        mock_get_llm.return_value.invoke.return_value = mock_response
+        mock_get_scene_llm.return_value.invoke.return_value = mock_response
         
         state = {"messages": [], "user_id": 1, "time_constraints": {}}
         new_state = analyze_intent(state)

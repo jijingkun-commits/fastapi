@@ -356,7 +356,7 @@ class TestWaitForConfirmationReturnType:
 class TestInvokeLLMForIntent:
     """_invoke_llm_for_intent 辅助函数测试。"""
     
-    @patch('app.ai.workflow.todo_graph.get_llm')
+    @patch('app.ai.workflow.todo_graph.get_scene_llm')
     def test_applies_heuristic_title(self, mock_get_llm):
         """当 LLM 未提取标题时应使用启发式标题。"""
         from app.ai.workflow.todo_graph import _invoke_llm_for_intent
@@ -376,7 +376,7 @@ class TestInvokeLLMForIntent:
         assert result["extracted_info"]["title"] == "启发式标题"
         assert result["intent"] == "create"  # clarify 被修正为 create
     
-    @patch('app.ai.workflow.todo_graph.get_llm')
+    @patch('app.ai.workflow.todo_graph.get_scene_llm')
     def test_merges_pre_extracted_info(self, mock_get_llm):
         """应合并 Handoff 预提取的信息。"""
         from app.ai.workflow.todo_graph import _invoke_llm_for_intent
@@ -434,7 +434,7 @@ class TestOutOfScopeGuard:
     )
     @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
     @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
-    @patch("app.ai.workflow.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
     def test_selected_todo_external_supplement_should_not_trigger_out_of_scope(
         self,
         mock_get_llm,
@@ -565,7 +565,7 @@ class TestImplicitReferenceRouting:
     @patch("app.ai.workflow.todo_graph._find_todo_candidates_by_keyword")
     @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
     @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
-    @patch("app.ai.workflow.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
     def test_analyze_intent_implicit_reference_single_match_defaults_update(
         self,
         mock_get_llm,
@@ -617,7 +617,7 @@ class TestTodoSupplementConvergence:
     )
     @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
     @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
-    @patch("app.ai.workflow.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
     def test_supplement_time_should_promote_to_need_confirm(
         self,
         mock_get_llm,
@@ -674,7 +674,7 @@ class TestTodoWorkflowStateSemantics:
     @patch("app.ai.workflow.todo_graph.is_implicit_reference_message", return_value=False)
     @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
     @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
-    @patch("app.ai.workflow.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
     def test_need_clarify_should_set_action_clarify_state_and_round(
         self,
         mock_get_llm,
@@ -725,7 +725,7 @@ class TestTodoWorkflowStateSemantics:
     )
     @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
     @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
-    @patch("app.ai.workflow.todo_graph.get_llm")
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
     def test_need_confirm_should_reset_clarify_state_and_round(
         self,
         mock_get_llm,

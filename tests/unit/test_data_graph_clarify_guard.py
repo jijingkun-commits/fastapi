@@ -44,8 +44,8 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             "messages": [HumanMessage(content=user_text)],
             **state_overrides,
         }
-        with patch("app.ai.workflow.data_graph.get_routing_model", return_value="mock-sql-model"), patch(
-            "app.ai.workflow.data_graph.get_llm", return_value=_FakeLLM(llm_payload)
+        with patch(
+            "app.ai.workflow.data_graph.get_scene_llm", return_value=_FakeLLM(llm_payload)
         ):
             return analyze_data_intent(state)
 

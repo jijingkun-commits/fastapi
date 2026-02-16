@@ -1,8 +1,8 @@
 """创建 LLM 场景治理表并初始化调用点配置。
 
-Revision ID: 20260215_0005
-Revises: 20260213_0004
-Create Date: 2026-02-15
+Revision ID: 20260216_0007
+Revises: 20260215_0005
+Create Date: 2026-02-16
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "20260215_0005"
-down_revision = "20260213_0004"
+revision = "20260216_0007"
+down_revision = "20260215_0005"
 branch_labels = None
 depends_on = None
 
@@ -186,6 +186,18 @@ def _query_scalar(conn, sql: str, params: dict | None = None):
     return result.scalar()
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    inspector = sa.inspect(conn)
+    return table_name in inspector.get_table_names()
+
+
+def _index_exists(conn, table_name: str, index_name: str) -> bool:
+    inspector = sa.inspect(conn)
+    if table_name not in inspector.get_table_names():
+        return False
+    return any(index.get("name") == index_name for index in inspector.get_indexes(table_name))
+
+
 def _resolve_model_id_by_code(conn, model_code: str | None):
     if not model_code:
         return None
@@ -283,31 +295,33 @@ def _resolve_route_model_ids(conn):
 def upgrade() -> None:
     """升级：创建场景治理表并初始化场景配置。"""
 
-    op.create_table(
-        "t_llm_scene",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("scene_key", sa.String(length=255), nullable=False),
-        sa.Column("scene_name", sa.String(length=120), nullable=False),
-        sa.Column("scene_type", sa.String(length=32), nullable=False, server_default="text"),
-        sa.Column("default_model_id", sa.Integer(), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-        sa.Column("create_time", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
-        sa.Column("update_time", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
-        sa.ForeignKeyConstraint(["default_model_id"], ["t_llm_model.id"], ondelete="RESTRICT"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("scene_key", name="uq_t_llm_scene_scene_key"),
-        sa.CheckConstraint("position('.' in scene_key) > 0", name="ck_t_llm_scene_scene_key_format"),
-        sa.CheckConstraint(
-            "scene_type in ('text','image','video','audio','embedding','vision','rerank','asr','tts')",
-            name="ck_t_llm_scene_scene_type",
-        ),
-        comment="LLM 调用场景治理表",
-    )
-
-    op.create_index("ix_t_llm_scene_scene_type", "t_llm_scene", ["scene_type"], unique=False)
-
     conn = op.get_bind()
+    if not _table_exists(conn, "t_llm_scene"):
+        op.create_table(
+            "t_llm_scene",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("scene_key", sa.String(length=255), nullable=False),
+            sa.Column("scene_name", sa.String(length=120), nullable=False),
+            sa.Column("scene_type", sa.String(length=32), nullable=False, server_default="text"),
+            sa.Column("default_model_id", sa.Integer(), nullable=False),
+            sa.Column("description", sa.Text(), nullable=True),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+            sa.Column("create_time", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
+            sa.Column("update_time", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
+            sa.ForeignKeyConstraint(["default_model_id"], ["t_llm_model.id"], ondelete="RESTRICT"),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("scene_key", name="uq_t_llm_scene_scene_key"),
+            sa.CheckConstraint("position('.' in scene_key) > 0", name="ck_t_llm_scene_scene_key_format"),
+            sa.CheckConstraint(
+                "scene_type in ('text','image','video','audio','embedding','vision','rerank','asr','tts')",
+                name="ck_t_llm_scene_scene_type",
+            ),
+            comment="LLM 调用场景治理表",
+        )
+
+    if not _index_exists(conn, "t_llm_scene", "ix_t_llm_scene_scene_type"):
+        op.create_index("ix_t_llm_scene_scene_type", "t_llm_scene", ["scene_type"], unique=False)
+
     model_ids = _resolve_route_model_ids(conn)
 
     insert_sql = sa.text(
@@ -355,5 +369,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     """降级：删除场景治理表。"""
 
-    op.drop_index("ix_t_llm_scene_scene_type", table_name="t_llm_scene")
+    conn = op.get_bind()
+    if not _table_exists(conn, "t_llm_scene"):
+        return
+
+    if _index_exists(conn, "t_llm_scene", "ix_t_llm_scene_scene_type"):
+        op.drop_index("ix_t_llm_scene_scene_type", table_name="t_llm_scene")
     op.drop_table("t_llm_scene")

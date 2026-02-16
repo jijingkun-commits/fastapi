@@ -81,6 +81,7 @@ class TestMeAPI:
         mock_user.username = "testuser"
         mock_user.mobile = "13800138000"
         mock_user.role = "user"
+        mock_user.data_role = "staff"
         mock_user.created_at = None
         
         def override_current_user():

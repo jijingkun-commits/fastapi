@@ -27,6 +27,9 @@ from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.token_blacklist import TokenBlacklist
 from app.models.idempotency_key import IdempotencyKey
+from app.models.llm_provider import LLMProvider
+from app.models.llm_model import LLMModel
+from app.models.llm_scene import LLMScene
 
 
 def get_db_columns(table_name: str) -> set:
@@ -54,7 +57,8 @@ def get_all_models():
         User, Todo, TodoHistory, TodoReminderQueue,
         ChatMessage, ChatAsset, MetaTable, MetaColumn,
         MetaRelation, DataPermissionTable, DataPermissionRow,
-        DataPermissionColumn, TokenBlacklist, IdempotencyKey
+        DataPermissionColumn, TokenBlacklist, IdempotencyKey,
+        LLMProvider, LLMModel, LLMScene,
     ]
 
 

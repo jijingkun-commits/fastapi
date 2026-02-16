@@ -11,10 +11,12 @@
     python app/tests/test_todo_multiround.py
 """
 import asyncio
+import json
 import logging
 import pytest
 from datetime import datetime
 from typing import List, Dict, Any
+from unittest.mock import patch
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -151,7 +153,6 @@ class TodoAgentTester:
     async def run_single_round(self, round_data: Dict) -> Dict:
         """执行单轮测试。"""
         from app.ai.workflow.todo_graph import create_todo_graph, TodoAgentState
-        from app.ai.llm_util import get_llm
         from langchain_core.messages import HumanMessage, AIMessage
         
         logger.info(f"\n{'='*60}")
@@ -164,8 +165,7 @@ class TodoAgentTester:
         messages.append(HumanMessage(content=round_data['user_input']))
         
         # 创建图
-        llm = get_llm()
-        graph = create_todo_graph(model=llm)
+        graph = create_todo_graph()
         
         # 执行
         config = {"configurable": {"thread_id": self.thread_id, "user_id": 1}}
@@ -280,6 +280,25 @@ class TodoAgentTester:
 async def test_intent_analysis():
     """测试意图分析能力（不需要完整服务）。"""
     from app.ai.intent_classifier import classify_intent
+
+    class _FakeIntentLLM:
+        async def ainvoke(self, prompt: str):
+            prompt_text = str(prompt)
+
+            if "天气" in prompt_text:
+                payload = {"intent": "web_search", "confidence": 0.92, "route_to": "supervisor"}
+            elif "差旅规定" in prompt_text:
+                payload = {"intent": "knowledge_query", "confidence": 0.91, "route_to": "supervisor"}
+            elif "饼图" in prompt_text or "图" in prompt_text:
+                payload = {"intent": "chart_drawing", "confidence": 0.89, "route_to": "supervisor"}
+            else:
+                payload = {"intent": "todo_management", "confidence": 0.95, "route_to": "todo_expert"}
+
+            class _Resp:
+                def __init__(self, content: str):
+                    self.content = content
+
+            return _Resp(json.dumps(payload, ensure_ascii=False))
     
     test_cases = [
         ("最近事情太多了，帮我把接下来要做的事情理一理。", "todo_management"),
@@ -294,12 +313,13 @@ async def test_intent_analysis():
     logger.info("="*60)
     
     results = []
-    for message, expected in test_cases:
-        result = await classify_intent(message)
-        passed = result.intent == expected or result.route_to == "todo_expert"
-        status = "✅" if passed else "❌"
-        logger.info(f"{status} '{message[:30]}...' -> {result.intent} (expected: {expected})")
-        results.append(passed)
+    with patch("app.ai.llm_util.get_scene_llm", return_value=_FakeIntentLLM()):
+        for message, expected in test_cases:
+            result = await classify_intent(message)
+            passed = result.intent == expected or result.route_to == "todo_expert"
+            status = "✅" if passed else "❌"
+            logger.info(f"{status} '{message[:30]}...' -> {result.intent} (expected: {expected})")
+            results.append(passed)
     
     return all(results)
 

@@ -143,13 +143,14 @@ class TestGetLlm:
     
     @patch("app.ai.llm_util.init_chat_model")
     def test_default_model_fallback(self, mock_init):
-        """测试未指定 model_id 时使用默认配置。"""
+        """测试未指定 model_id 时抛出场景化调用异常。"""
         mock_init.return_value = MagicMock()
-        
-        llm = get_llm()
-        
-        mock_init.assert_called_once()
-        print("✓ 默认模型回退正确")
+
+        with pytest.raises(ValueError, match="get_llm 已禁用无场景调用"):
+            get_llm()
+
+        mock_init.assert_not_called()
+        print("✓ 无场景调用被正确拦截")
 
 
 # ==================== 集成测试：API 端点 ====================
