@@ -76,12 +76,12 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
         >>> print(params.due_date)  # datetime(2026, 1, 15, 15, 0)
     """
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_DEFAULT_CHAT, MODEL_SCENE_LIGHTWEIGHT
-    
-    try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
-    except Exception:
-        llm = get_scene_llm(scene=MODEL_SCENE_DEFAULT_CHAT)
+    from app.ai.scene_registry import SCENE_KEY_PARAM_TODO
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_PARAM_TODO,
+        model_id=model_id,
+    )
     
     try:
         # 使用 with_structured_output 确保返回结构化数据
@@ -108,10 +108,14 @@ async def extract_todo_params(message: str, model_id: str = None) -> TodoParams:
 async def extract_query_params(message: str, model_id: str = None) -> QueryParams:
     """从用户消息中提取数据库查询参数。"""
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-    
+    from app.ai.scene_registry import SCENE_KEY_PARAM_QUERY
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_PARAM_QUERY,
+        model_id=model_id,
+    )
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(QueryParams)
         
         result = await structured_llm.ainvoke(
@@ -129,10 +133,14 @@ async def extract_query_params(message: str, model_id: str = None) -> QueryParam
 async def extract_chart_params(message: str, model_id: str = None) -> ChartParams:
     """从用户消息中提取图表绘制参数。"""
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-    
+    from app.ai.scene_registry import SCENE_KEY_PARAM_CHART
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_PARAM_CHART,
+        model_id=model_id,
+    )
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(ChartParams)
         
         result = await structured_llm.ainvoke(

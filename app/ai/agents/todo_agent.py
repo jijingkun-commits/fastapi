@@ -6,7 +6,8 @@
 import logging
 from langchain.agents import create_agent
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_scene_llm
+from app.ai.scene_registry import SCENE_KEY_TODO_AGENT_FACTORY
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,11 @@ def create_todo_agent(
     
     # 以下是原有的 create_agent 实现（向后兼容）
     if model is None:
-        model = get_llm(force_thinking=enable_thinking, model_id=model_id)
+        model = get_scene_llm(
+            scene_key=SCENE_KEY_TODO_AGENT_FACTORY,
+            force_thinking=enable_thinking,
+            model_id=model_id,
+        )
     
     # 加载待办管理工具（升级版）
     tools = []

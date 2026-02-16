@@ -22,7 +22,7 @@ def test_invoke_llm_for_intent_accepts_list_content():
         def invoke(self, _messages):
             return SimpleNamespace(content=fake_content)
 
-    with patch("app.ai.workflow.todo_graph.get_llm", return_value=_FakeLLM()):
+    with patch("app.ai.workflow.todo_graph.get_scene_llm", return_value=_FakeLLM()):
         result = _invoke_llm_for_intent(
             recent_messages=[HumanMessage(content="帮我创建一个测试待办")],
             system_prompt="test",
@@ -50,7 +50,7 @@ async def test_intent_classifier_accepts_list_content():
                 ]
             )
 
-    with patch("app.ai.llm_util.get_llm", return_value=_FakeLLM()):
+    with patch("app.ai.llm_util.get_scene_llm", return_value=_FakeLLM()):
         result = await classify_intent("查询本月贷款余额")
 
     assert result.intent == "data_query"

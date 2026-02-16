@@ -8,6 +8,7 @@ from app.models.token_blacklist import TokenBlacklist
 from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
 from app.models.ops_metric_snapshot import OpsMetricSnapshotMinute
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
+from app.models.llm_scene import LLMScene
 
 __all__ = [
     "User",
@@ -23,4 +24,5 @@ __all__ = [
     "DataPermissionTable",
     "DataPermissionRow",
     "DataPermissionColumn",
+    "LLMScene",
 ]

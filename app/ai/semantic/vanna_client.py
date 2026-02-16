@@ -388,7 +388,7 @@ class VannaPGVector(VannaBase):
         return self.get_related_question_sql(question, **kwargs)
 
     def submit_prompt(self, prompt, **kwargs) -> str:
-        """通过项目统一的 get_llm() 调用 LLM 生成 SQL。
+        """通过项目统一的 get_scene_llm() 调用 LLM 生成 SQL。
         
         Args:
             prompt: Vanna 传入的 prompt（消息列表或字符串）
@@ -396,14 +396,16 @@ class VannaPGVector(VannaBase):
                 model_id: 用户选择的模型标识（可选，默认使用系统默认模型）
                 enable_thinking: 是否启用深度思考（可选，默认 False）
         """
-        from app.ai.llm_util import get_llm, _normalize_text_content
+        from app.ai.llm_util import get_scene_llm, _normalize_text_content
+        from app.ai.scene_registry import SCENE_KEY_VANNA_SQL_GENERATION
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
         
         model_id = kwargs.get("model_id")
         enable_thinking = kwargs.get("enable_thinking", False)
         
         try:
-            llm = get_llm(
+            llm = get_scene_llm(
+                scene_key=SCENE_KEY_VANNA_SQL_GENERATION,
                 enable_streaming=False,
                 force_thinking=enable_thinking,
                 model_id=model_id,

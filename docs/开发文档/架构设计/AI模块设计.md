@@ -487,30 +487,72 @@ writer(event.to_stream_dict())  # {"type": "token", "data": {"content": "你好"
 **文件**: `app/ai/llm_util.py`
 
 ```python
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_scene_llm
 
-# 获取默认 LLM
-llm = get_llm()
+# 按调用点场景键获取模型（推荐）
+llm = get_scene_llm(scene_key="app.ai.workflow.multi_agent_graph.create_multi_agent_graph")
 
-# 获取用户选择的模型（从 State 读取）
-llm = get_llm(model_id=state.get("model_id"))
+# 内部分析（禁用流式 + 添加 tag）
+llm = get_scene_llm(
+    scene_key="app.ai.workflow.todo_graph.analyze_intent",
+    internal=True,
+)
 
-# 内部分析（禁用流式 + 添加 tag，跟随用户模型选择）
-llm = get_llm(internal=True, model_id=state.get("model_id"))
-
-# 启用深度思考模式
-llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
+# 受控覆盖（仅在明确需要指定模型时）
+llm = get_scene_llm(
+    scene_key="app.ai.semantic.vanna_client.submit_prompt",
+    model_id=state.get("model_id"),
+)
 ```
 
 ### LLM 调用规范
 
-> **2026-02 架构修复**: 统一所有 chat 类 LLM 调用走 `get_llm()`。
+> **2026-02 架构更新**: 统一实行“模型管理与场景治理解耦”，业务侧只允许场景化调用。
 
 **规则**:
-1. **所有 chat 类 LLM 调用必须通过 `get_llm()`**，禁止自建 `OpenAI` 客户端
-2. **model_id 从 State 读取**: `BaseAgentState` 已定义 `model_id` 和 `enable_thinking` 字段，由 `chat_service` 注入，所有节点可通过 `state.get("model_id")` 获取
-3. **内部分析节点传 model_id 不传 thinking**: `get_llm(internal=True, model_id=...)` 确保模型一致但不消耗 thinking token
-4. **合理例外**: embedding 和 vision 等非 chat 模型仍直接创建客户端（`get_llm()` 不支持这些类型）
+1. **业务链路必须通过 `get_scene_llm(scene_key=...)` 调用**，禁止新增裸 `get_llm()` 默认分支。
+2. **`scene_key` 必须使用 `模块.函数名`**，例如 `app.ai.workflow.data_graph.analyze_data_intent`。
+3. **每个场景只绑定一个默认模型**，绑定关系由 `t_llm_scene` 管理，`t_llm_model` 仅保存模型元数据。
+4. **启动期强校验**：若任一必需调用点未配置 `t_llm_scene`，服务启动失败（Fail Fast）。
+5. **类型兼容校验**：`scene_type` 与 `model_type` 必须满足兼容矩阵（如 text->chat/reasoning）。
+
+### 数据流
+
+```
+代码调用点(scene_key)
+  -> get_scene_llm(scene_key=...)
+  -> LLMSceneService 读取 t_llm_scene 场景缓存
+  -> 解析 default_model_id -> model_code
+  -> get_llm(model_id=...) 构建客户端
+```
+
+### 模型分类路由表
+
+> **2026-02 更新**: 路由语义由“固定配置键”升级为“调用点场景键”。
+
+#### 按场景分类
+
+| 场景类型 | 调用点示例（scene_key） | 默认模型来源 | 说明 |
+|------|--------|----------|------|
+| `text` | `app.ai.workflow.multi_agent_graph.create_multi_agent_graph` | `t_llm_scene.default_model_id` | 主对话/意图分析/SQL 生成等文本场景 |
+| `vision` | `app.ai.tools.vision_tool.analyze_image` | `t_llm_scene.default_model_id` | 图像理解、多模态分析 |
+| `video` | `app.ai.tools.video_tool.generate_video_summary` | `t_llm_scene.default_model_id` | 视频理解与摘要（预留） |
+| `audio` | `app.ai.tools.audio_tool.transcribe_audio` | `t_llm_scene.default_model_id` | 语音理解与转写（预留） |
+| `embedding` | `app.ai.utils.embedding_util.get_embedding` | `t_llm_scene.default_model_id` | 向量化调用 |
+| `rerank` | `app.ai.tools.rerank_tool.score_documents` | `t_llm_scene.default_model_id` | 检索重排 |
+| `asr` | `app.ai.tools.audio_tool.asr` | `t_llm_scene.default_model_id` | 语音识别 |
+| `tts` | `app.ai.tools.audio_tool.tts` | `t_llm_scene.default_model_id` | 语音合成 |
+
+#### 调用场景注册表（开发规范）
+
+**权威注册表**：`app/ai/scene_registry.py`
+
+新增调用点标准步骤：
+
+1. 在 `app/ai/scene_registry.py` 注册 `scene_key / scene_type / scene_name`。
+2. 在 `t_llm_scene` 配置对应 `default_model_id`（可通过后台接口维护）。
+3. 业务代码调用 `get_scene_llm(scene_key=..., model_id=...)`。
+4. 补充单测（场景解析、启动校验、调用约束）并同步更新本文档。
 
 ### 中转供应商实验适配（仅开发/测试环境）
 
@@ -573,85 +615,11 @@ llm = get_llm(force_thinking=True, model_id=state.get("model_id"))
 ```
 前端模型选择 → API enable_thinking / model_id
 → chat_service 注入 input_state
-→ BaseAgentState.model_id / enable_thinking
-→ 各节点 state.get("model_id") → get_llm()
+→ 各节点通过 scene_key 调用 get_scene_llm(...)
+→ get_llm(model_id=...) 构建最终客户端
 ```
 
-### 模型分类路由表
 
-> **2026-02 更新**: 不同场景使用不同模型，避免推理模型浪费 reasoning tokens。
-
-#### 按场景分类
-
-> **配置提示**: 
-> 下表中的 `主对话默认模型`、`SQL 生成`、`内部分析`、`意图分类`、`参数提取`、`评估` 等场景的模型配置，现在均已支持在 **后台管理 -> LLM 配置 -> 模型路由** 页面进行可视化配置。
-> `Embedding` 模型通过在 **模型列表** 中设置 `type=embedding` 默认模型生效；`Vision` 模型优先读取路由键 `vision`（支持绑定 `vision/chat/reasoning` 类型的多模态模型），未配置时回退 `type=vision` 默认模型。
-
-| 场景 | 调用点 | 模型来源 | 配置项 | 推荐模型 |
-|------|--------|----------|--------|----------|
-| 主对话 | Supervisor / Agent 回复 | 固定配置 + 用户覆盖 | `model_routing.default_chat`（未选模型时） + State `model_id`（用户显式选择） | qwen-plus / deepseek-chat |
-| SQL 生成 | `vanna_client.submit_prompt` | 固定配置 | `model_routing.sql_generation` | 非推理模型（qwen-plus） |
-| 内部分析 | `analyze_data_intent` 等 `internal=True` 节点 | 固定配置 | `model_routing.sql_generation` | qwen-plus |
-| 轻量任务（意图分类） | `intent_classifier.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
-| 轻量任务（评估/提取） | `llm_judge.py`, `parameter_extractor.py` | 固定配置 | `model_routing.lightweight` | qwen-plus |
-| Embedding | `app/ai/utils/embedding_util.py` | 数据库 `type=embedding` | `t_llm_model` | embedding-3 |
-| Vision | `vision_tool.py` | 路由优先 + 类型回退 | `vision`（优先） + `t_llm_model(type=vision)`（回退） | glm-4v-flash / gpt-5.2 |
-
-> **Vision 接口协议（2026-02-14）**
-> - 上传图片仍使用固定地址：`/api/v1/assets/{object_key}`。
-> - `vision_tool.py` 会先从 MinIO 读取该图片并转 `data:image/*;base64,...`，避免外网模型直接访问私有资源。
-> - 模型请求协议按 `extra_config` 选择：
->   - 默认走 `POST /chat/completions`
->   - 当 `use_responses_api=true` 或 `wire_api=responses` 时走 `POST /responses`
->
-> **开发环境说明（当前排查结论）**
-> - 本次“图片识别返回 404”出现在开发阶段：`vision` 路由被配置为 `gpt-5.2`，其 provider 为 `openai_proxy_trial`，并启用 `wire_api=responses`。
-> - 若仍按 `/chat/completions` 调用该中转网关，会返回接口级 404（并非上传图片地址 404）。
-> - 生产环境建议优先使用正式 provider（或确保网关协议与模型配置一致），避免将开发试验链路配置直接复用到生产。
-
-#### 按模型类型分类
-
-| 模型类型 | 代表模型 | 特点 | 适合场景 | 不适合场景 |
-|----------|----------|------|----------|------------|
-| 非推理通用 | qwen-plus, deepseek-chat, deepseek-v3.2 | 无 reasoning tokens、响应快、成本低 | SQL 生成、意图分类、评估 | 需要深度推理的复杂问题 |
-| 隐式推理 | glm-4.5-air | 自动消耗 reasoning tokens、不可控 | 复杂对话（需用户主动选择） | 内部分析、SQL 生成（浪费 token） |
-| 显式推理 | qwen-flash, deepseek-r1, kimi-k2.5 | 可控的 thinking 模式（enable_thinking 开关） | 用户开启"思考"开关时 | 日常简单查询 |
-| 深度推理 | kimi-k2-thinking | 仅思考模式、256K 上下文、强工具调用 | 复杂推理、编码、多步骤规划 | 简单查询（始终消耗 reasoning tokens） |
-| 嵌入专用 | embedding-3 | 向量生成，非 chat | DDL/指标向量检索 | 不可用于对话 |
-| 视觉专用 | glm-4v-flash, kimi-k2.5 | 图片/视频理解 | 图片分析、多模态任务 | 不可用于 SQL 生成 |
-
-#### 配置项速查
-
-| 配置项 | 对应路由 Key | 默认值 (环境变量) | 说明 |
-|--------|------|--------|------|
-| 数据库默认模型 | - | `qwen-plus` | chat 类型默认模型（路由默认缺失时回退） |
-| `MODEL_NAME` | - | `glm-4.5-air` | 环境变量回退（数据库不可用时） |
-| `model_routing.default_chat` | `model_routing.default_chat` | 空（未配置） | 主对话默认模型（用户未显式选择模型时生效） |
-| `INTENT_CLASSIFIER_MODEL` | `model_routing.lightweight` | `qwen-plus` | 意图分类/评估/参数提取 (轻量任务) |
-| `SQL_GENERATION_MODEL` | `model_routing.sql_generation` | `qwen-plus` | Vanna SQL 生成 / 复杂意图分析 |
-| `vision` | `vision` | 空（未配置） | Vision 多模态路由（可绑定 vision/chat/reasoning，未配置回退 type=vision 默认） |
-
-#### 调用场景注册表（开发规范）
-
-> **开发者常见问题**：我自己写代码时，是否要先配置调用场景注册表？
->
-> - **使用已有场景**（`default_chat` / `lightweight` / `sql_generation`）：不需要新增配置，直接调用 `get_scene_llm(scene=...)`。
-> - **新增场景**：必须先完成注册表配置，再编写业务调用代码。
-
-**当前场景注册表（权威）**：`app/core/config.py#get_scene_routing`
-
-| scene | 路由键 | 回退值 | 典型用途 |
-|------|--------|--------|----------|
-| `default_chat` | `model_routing.default_chat` | 空字符串（继续回退 chat 类型默认模型） | 主对话默认模型、兜底 |
-| `lightweight` | `model_routing.lightweight` | `INTENT_CLASSIFIER_MODEL` | 意图分类、参数提取、Judge、轻量文本加工 |
-| `sql_generation` | `model_routing.sql_generation` | `SQL_GENERATION_MODEL` | SQL 生成、ETL/SQL 模板转换、内部分析 |
-
-**新增场景的标准步骤**：
-
-1. 在 `app/core/config.py` 新增 `MODEL_SCENE_*` 常量，并在 `get_scene_routing(scene)` 中注册 `(routing_key, env_fallback)`。
-2. 若需要后台可视化管理，同时更新 `app/api/v1/endpoints/llm_admin_api.py` 的 `GET/PUT /llm-admin/model-routing`。
-3. 业务代码统一通过 `get_scene_llm(scene=..., model_id=...)` 获取模型，禁止在业务节点新增裸 `get_llm()` 默认分支。
-4. 补充单测（场景解析、回退策略、调用约束）并更新本文档。
 
 ---
 

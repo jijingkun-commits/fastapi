@@ -8,7 +8,8 @@ from typing import Literal
 from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 
-from app.ai.llm_util import get_llm
+from app.ai.llm_util import get_scene_llm
+from app.ai.scene_registry import SCENE_KEY_KNOWLEDGE_AGENT_FACTORY
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,11 @@ def create_knowledge_agent(
         编译后的 Agent StateGraph 实例
     """
     if model is None:
-        model = get_llm(force_thinking=enable_thinking, model_id=model_id)
+        model = get_scene_llm(
+            scene_key=SCENE_KEY_KNOWLEDGE_AGENT_FACTORY,
+            force_thinking=enable_thinking,
+            model_id=model_id,
+        )
     
     # 加载知识库检索工具
     tools = []

@@ -78,13 +78,12 @@ async def evaluate_response(
         >>> print(result.feedback)  # "回答准确完整..."
     """
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_DEFAULT_CHAT, MODEL_SCENE_LIGHTWEIGHT
+    from app.ai.scene_registry import SCENE_KEY_LLM_JUDGE_RESPONSE
 
-    # 使用 lightweight 场景模型作为 Judge
-    try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
-    except Exception:
-        llm = get_scene_llm(scene=MODEL_SCENE_DEFAULT_CHAT)
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_LLM_JUDGE_RESPONSE,
+        model_id=model_id,
+    )
     
     try:
         structured_llm = llm.with_structured_output(JudgeResult)
@@ -118,10 +117,14 @@ async def evaluate_response_detailed(
 ) -> DetailedJudgeResult:
     """详细评估 Agent 回复质量。"""
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-    
+    from app.ai.scene_registry import SCENE_KEY_LLM_JUDGE_RESPONSE_DETAILED
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_LLM_JUDGE_RESPONSE_DETAILED,
+        model_id=model_id,
+    )
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(DetailedJudgeResult)
         
         result = await structured_llm.ainvoke(
@@ -201,8 +204,8 @@ async def iterative_improvement(
 def evaluate_sql_response_sync(sql: str, result: str, model_id: str = None) -> JudgeResult:
     """同步版本的 SQL 评估（供同步节点使用）。"""
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-    
+    from app.ai.scene_registry import SCENE_KEY_LLM_JUDGE_SQL_SYNC
+
     prompt = f"""评估 SQL 查询质量:
 
 SQL: {sql}
@@ -215,8 +218,12 @@ SQL: {sql}
 
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_LLM_JUDGE_SQL_SYNC,
+        model_id=model_id,
+    )
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
         structured_llm = llm.with_structured_output(JudgeResult)
         return structured_llm.invoke(prompt)
     except Exception as e:
@@ -240,9 +247,14 @@ SQL: {sql}
 
 返回 JSON: {{"score": "pass|fail", "feedback": "..."}}"""
     
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
+    from app.ai.scene_registry import SCENE_KEY_LLM_JUDGE_SQL_ASYNC
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_LLM_JUDGE_SQL_ASYNC,
+        model_id=model_id,
+    )
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT)
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:
@@ -253,8 +265,8 @@ SQL: {sql}
 async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
     """评估图表生成代码。"""
     from app.ai.llm_util import get_scene_llm
-    from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-    
+    from app.ai.scene_registry import SCENE_KEY_LLM_JUDGE_CHART
+
     prompt = f"""评估图表生成代码:
 
 图表类型: {chart_type}
@@ -270,8 +282,9 @@ async def evaluate_chart_response(chart_type: str, code: str) -> JudgeResult:
 
 返回 JSON: {{"score": "pass|needs_improvement|fail", "feedback": "..."}}"""
     
+    llm = get_scene_llm(scene_key=SCENE_KEY_LLM_JUDGE_CHART)
+
     try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT)
         structured_llm = llm.with_structured_output(JudgeResult)
         return await structured_llm.ainvoke(prompt)
     except Exception as e:

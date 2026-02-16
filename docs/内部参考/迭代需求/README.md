@@ -57,6 +57,8 @@
 
 ## 4. 当前索引清单（2026-02-15）
 
+- `requirements.md`
+- `implementation_plan.md`
 - `skill_admin_frontend_requirements.md`
 - `skill_admin_frontend_plan.md`（历史兼容命名）
 - `docs_governance_requirements.md`

@@ -49,28 +49,12 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
         IntentResult 包含意图类型、置信度和路由目标
     """
     from app.ai.llm_util import get_scene_llm, _normalize_text_content
-    from app.core.config import MODEL_SCENE_DEFAULT_CHAT, MODEL_SCENE_LIGHTWEIGHT
-    
-    # 使用配置的意图分类器模型，添加降级策略
-    # 优先级：用户指定 model_id → t_system_config 配置 → 环境变量回退 → 默认模型
-    llm = None
-    
-    # 尝试 1: 使用显式模型或 lightweight 场景路由模型
-    try:
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, model_id=model_id)
-        logger.debug("意图分类器使用场景模型: scene=%s, override=%s", MODEL_SCENE_LIGHTWEIGHT, model_id)
-    except Exception as e:
-        logger.warning("意图分类器 scene=%s 初始化失败: %s，尝试降级", MODEL_SCENE_LIGHTWEIGHT, e)
-    
-    # 尝试 2: 降级使用默认模型
-    if llm is None:
-        try:
-            llm = get_scene_llm(scene=MODEL_SCENE_DEFAULT_CHAT)
-            logger.info("意图分类器降级使用默认模型")
-        except Exception as e:
-            logger.error("意图分类器无法获取任何可用模型: %s", e)
-            # 直接返回 unknown，避免系统崩溃
-            return IntentResult(intent="unknown", confidence=0.0, route_to="supervisor")
+    from app.ai.scene_registry import SCENE_KEY_INTENT_CLASSIFIER
+
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_INTENT_CLASSIFIER,
+        model_id=model_id,
+    )
     
     try:
         response = await llm.ainvoke(

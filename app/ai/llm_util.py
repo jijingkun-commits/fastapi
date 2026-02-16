@@ -115,30 +115,50 @@ def _resolve_reasoning_effort(extra_config: dict):
     return None
 
 
-def _resolve_scene_model_id(scene: str, model_id: str = None) -> str:
-    """按调用场景解析目标模型代码。
+def _map_legacy_scene(scene: str) -> str:
+    """兼容历史 scene 名称到 scene_key。"""
 
-    优先级：显式 model_id > 场景路由配置（t_system_config）> 环境变量回退。
-    """
-    if model_id:
-        return model_id
+    from app.ai.scene_registry import (
+        SCENE_KEY_DATA_INTENT_ANALYSIS,
+        SCENE_KEY_INTENT_CLASSIFIER,
+        SCENE_KEY_MULTI_AGENT_SUPERVISOR,
+    )
 
-    from app.core.config import get_scene_routing, get_routing_model
+    legacy_map = {
+        "default_chat": SCENE_KEY_MULTI_AGENT_SUPERVISOR,
+        "lightweight": SCENE_KEY_INTENT_CLASSIFIER,
+        "sql_generation": SCENE_KEY_DATA_INTENT_ANALYSIS,
+    }
+    if scene not in legacy_map:
+        raise ValueError(f"不支持的历史场景标识: {scene}")
+    logger.warning("get_scene_llm(scene=...) 已废弃，请改为 scene_key，当前自动映射: %s", scene)
+    return legacy_map[scene]
 
-    config_key, env_fallback = get_scene_routing(scene)
-    routed_model = get_routing_model(config_key, env_fallback)
-    return routed_model if routed_model else None
+
+def _resolve_scene_model_id(scene_key: str, model_id: str = None) -> str:
+    """按调用场景键解析目标模型代码。"""
+
+    from app.services.llm_scene_service import LLMSceneService
+
+    return LLMSceneService.resolve_model_code(scene_key=scene_key, model_id=model_id)
 
 
-def get_scene_llm(scene: str, model_id: str = None, **kwargs):
-    """按调用场景获取 LLM 实例。
+def get_scene_llm(
+    scene_key: str = None,
+    model_id: str = None,
+    *,
+    scene: str = None,
+    **kwargs,
+):
+    """按调用场景键获取 LLM 实例。"""
 
-    Args:
-        scene: 调用场景（default_chat/lightweight/sql_generation）
-        model_id: 可选显式模型代码
-        **kwargs: 透传给 get_llm 的参数
-    """
-    resolved_model_id = _resolve_scene_model_id(scene=scene, model_id=model_id)
+    resolved_scene_key = scene_key
+    if not resolved_scene_key:
+        if not scene:
+            raise ValueError("调用 get_scene_llm 时必须提供 scene_key")
+        resolved_scene_key = _map_legacy_scene(scene)
+
+    resolved_model_id = _resolve_scene_model_id(scene_key=resolved_scene_key, model_id=model_id)
     return get_llm(model_id=resolved_model_id, **kwargs)
 
 
@@ -255,7 +275,7 @@ class InternalLLMWrapper:
     自动为 invoke/ainvoke 添加 internal_thought tag，防止内容泄露到前端。
     
     使用方式：
-        llm = get_llm(internal=True)
+        llm = get_scene_llm(scene_key="app.ai.workflow.todo_graph.analyze_intent", internal=True)
         response = llm.invoke(messages)  # 自动添加 tag
     """
     
@@ -369,25 +389,12 @@ def get_llm(
     # 默认关闭实验分支，确保生产链路不受影响。
     proxy_experiment_enabled = False
 
-    if model_id:
-        config = LLMConfigService.get_model_config(model_id)
-        if config:
-            logger.info("使用数据库配置: model=%s, provider=%s", config.model_code, config.provider_code)
+    if not model_id:
+        raise ValueError("get_llm 已禁用无场景调用，请使用 get_scene_llm(scene_key=...)")
 
-    if not model_id and not config:
-        routed_default_code = _resolve_scene_model_id("default_chat")
-        if routed_default_code:
-            config = LLMConfigService.get_model_config(routed_default_code)
-            if config:
-                logger.info("使用路由默认模型配置: %s", routed_default_code)
-            else:
-                logger.warning("模型路由默认模型未命中可用配置: %s，继续回退", routed_default_code)
-
-        if not config:
-            default_code = LLMConfigService.get_default_model_code()
-            if default_code:
-                config = LLMConfigService.get_model_config(default_code)
-                logger.info("使用默认模型配置: %s", default_code)
+    config = LLMConfigService.get_model_config(model_id)
+    if config:
+        logger.info("使用数据库配置: model=%s, provider=%s", config.model_code, config.provider_code)
 
     if config:
         model_type = config.provider_code
@@ -426,33 +433,21 @@ def get_llm(
     else:
         logger.warning("由于未找到配置或 ConfigService 未初始化，回退到环境变量: model_id=%s", model_id)
 
-        if model_id:
-            if "deepseek" in model_id.lower():
-                model_type = "deepseek"
-                model_name = model_id
-                api_key = os.getenv("DEEPSEEK_API_KEY", ai_config.MODEL_API_KEY)
-                base_url = _normalize(os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
-            elif "qwen" in model_id.lower():
-                model_type = "qwen"
-                model_name = model_id
-                api_key = os.getenv("QWEN_API_KEY", ai_config.MODEL_API_KEY)
-                base_url = _normalize(os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
-            else:
-                model_type = ai_config.MODEL_TYPE
-                model_name = model_id
-                api_key = ai_config.MODEL_API_KEY
-                base_url = _normalize(ai_config.MODEL_BASE_URL)
+        if "deepseek" in model_id.lower():
+            model_type = "deepseek"
+            model_name = model_id
+            api_key = os.getenv("DEEPSEEK_API_KEY", ai_config.MODEL_API_KEY)
+            base_url = _normalize(os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+        elif "qwen" in model_id.lower():
+            model_type = "qwen"
+            model_name = model_id
+            api_key = os.getenv("QWEN_API_KEY", ai_config.MODEL_API_KEY)
+            base_url = _normalize(os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
         else:
             model_type = ai_config.MODEL_TYPE
-            model_name = ai_config.MODEL_NAME
+            model_name = model_id
             api_key = ai_config.MODEL_API_KEY
             base_url = _normalize(ai_config.MODEL_BASE_URL)
-
-            if "deepseek" in model_name.lower() or "reasoner" in model_name.lower():
-                if model_type != "deepseek":
-                    model_type = "deepseek"
-                    if not api_key:
-                        api_key = os.getenv("DEEPSEEK_API_KEY")
 
         temperature = ai_config.MODEL_TEMPERATURE
         enable_thinking = ai_config.ENABLE_THINKING or force_thinking

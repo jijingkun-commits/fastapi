@@ -49,7 +49,7 @@ target_metadata = Base.metadata
 # 忽略不在模型中的表（LangGraph checkpoints、LLM 配置等）
 EXCLUDE_TABLES = {
     "checkpoints", "checkpoint_writes", "checkpoint_blobs", "checkpoint_migrations",
-    "t_llm_model", "t_llm_provider", "t_system_config", "t_chat_feedback",
+    "t_llm_model", "t_llm_provider", "t_llm_scene", "t_system_config", "t_chat_feedback",
     "t_metrics", "f_mid_dep_tb", "f_mid_loan_tb", "t_dmp_ind_info",
     "schema_migrations", "t_agent_skills", "t_data_query_log",
     "alembic_version",

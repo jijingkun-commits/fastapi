@@ -18,7 +18,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_ai_message, create_human_message
 from langchain_core.runnables.config import RunnableConfig
 
-from app.ai.llm_util import get_llm, _normalize_text_content
+from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.scene_registry import SCENE_KEY_TODO_TASK_DECOMPOSITION
 from app.ai.state import TodoAgentState
 from app.ai.config.todo_config import get_todo_config
 
@@ -322,10 +323,10 @@ def task_decomposition_node(state: TodoAgentState) -> Dict:
     for todo in draft_todos:
         if todo.get("is_complex"):
             # 调用 LLM 拆解（internal=True 自动禁用流式 + 添加 tag）
-            # 使用内部分析路由配置的模型
-            from app.core.config import MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL, get_routing_model
-            decompose_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
-            llm = get_llm(internal=True, model_id=decompose_model)
+            llm = get_scene_llm(
+                scene_key=SCENE_KEY_TODO_TASK_DECOMPOSITION,
+                internal=True,
+            )
             decompose_messages = [
                 SystemMessage(content=TODO_DECOMPOSE_PROMPT),
                 create_human_message(f"任务: {todo.get('title')}\n描述: {todo.get('description', '')}")

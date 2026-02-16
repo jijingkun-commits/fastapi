@@ -24,7 +24,8 @@ from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.config import get_stream_writer
 
-from app.ai.llm_util import get_llm, _normalize_text_content
+from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.scene_registry import SCENE_KEY_DATA_INTENT_ANALYSIS
 from app.ai.state import DataAgentState
 from app.ai.semantic import get_vanna
 from app.ai.prompts.data_prompts import (
@@ -52,9 +53,7 @@ from app.ai.utils.sql_empty_result_recovery import (
 )
 from app.db.session import engine
 from app.core.config import (
-    ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, LLM_JUDGE_MODEL,
-    SQL_GENERATION_MODEL, ENABLE_RESULT_ENRICHMENT,
-    MODEL_ROUTING_LLM_JUDGE, MODEL_ROUTING_SQL_GENERATION, get_routing_model
+    ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, ENABLE_RESULT_ENRICHMENT,
 )
 from app.services.result_enrichment_rule_service import (
     ResultLookupEnrichmentRuleConfig as ResultLookupEnrichmentRule,
@@ -1418,8 +1417,10 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
     # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
     # 使用 SQL 生成/内部分析 路由配置的模型，避免推理模型浪费 thinking tokens
-    sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
-    llm = get_llm(internal=True, model_id=sql_gen_model)
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_DATA_INTENT_ANALYSIS,
+        internal=True,
+    )
     prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
         question=normalized_last_message,
         existing_context=existing_context,
@@ -2297,11 +2298,8 @@ def sql_generate(state: DataAgentState) -> Dict:
             logger.info(f"添加错误反馈到 prompt: {error_feedback[:100]}...")
         
         # 使用 submit_prompt 直接提交，避免 generate_sql 内部的重复检索
-        # 使用 SQL 生成路由配置的模型（标准模型，非推理），避免浪费 thinking tokens
-        sql_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
         response = vanna.submit_prompt(
             messages,
-            model_id=sql_model,
             enable_thinking=state.get("enable_thinking", False),
         )
         
@@ -2326,9 +2324,7 @@ def sql_generate(state: DataAgentState) -> Dict:
                 try:
                     from app.ai.llm_judge import evaluate_sql_response_sync
                     
-                    judge_result = evaluate_sql_response_sync(
-                        sql, "待执行", get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL)
-                    )
+                    judge_result = evaluate_sql_response_sync(sql, "待执行")
                     
                     if judge_result.score == "fail":
                         logger.warning(f"SQL 质量评估失败: {judge_result.feedback}")

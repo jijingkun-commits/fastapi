@@ -25,7 +25,8 @@ from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
 
-from app.ai.llm_util import get_llm, _normalize_text_content
+from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.scene_registry import SCENE_KEY_MULTI_AGENT_SUPERVISOR
 from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
@@ -662,7 +663,11 @@ async def create_multi_agent_graph(
     """
     
     # 获取 LLM
-    llm = get_llm(force_thinking=enable_thinking, model_id=model_id)
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_MULTI_AGENT_SUPERVISOR,
+        force_thinking=enable_thinking,
+        model_id=model_id,
+    )
     
     # 1. 创建 Handoff 工具（使用常量定义）
     handoff_tools = [

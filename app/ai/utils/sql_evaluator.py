@@ -188,7 +188,6 @@ async def evaluate_semantic(
     
     检查 SQL 是否准确回答了用户问题。
     """
-    from app.ai.llm_util import get_llm, _normalize_text_content
     
     ddl_str = "\n".join(ddl_context[:3]) if ddl_context else "无可用 DDL"
     
@@ -227,8 +226,13 @@ async def evaluate_semantic(
 - score="incorrect": 明显错误，需要重新生成"""
 
     try:
-        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        from app.ai.scene_registry import SCENE_KEY_SQL_EVALUATOR_SEMANTIC
+        from app.ai.llm_util import get_scene_llm
+
+        llm = get_scene_llm(
+            scene_key=SCENE_KEY_SQL_EVALUATOR_SEMANTIC,
+            model_id=model_id,
+        )
         structured_llm = llm.with_structured_output(SQLSemanticResult)
         result = await structured_llm.ainvoke(prompt)
         
@@ -240,6 +244,10 @@ async def evaluate_semantic(
         return result
         
     except Exception as e:
+        from app.services.llm_scene_service import SceneConfigError
+
+        if isinstance(e, SceneConfigError):
+            raise
         logger.warning("SQL 语义评估失败: %s", e)
         return SQLSemanticResult(
             score="partial",
@@ -438,7 +446,6 @@ async def should_retry(
     Returns:
         (should_retry: bool, feedback: str)
     """
-    from app.ai.llm_util import get_llm, _normalize_text_content
     
     prompt = f"""分析以下 SQL 生成失败的原因，判断是否应该重试。
 
@@ -458,8 +465,13 @@ async def should_retry(
 }}"""
 
     try:
-        from app.core.config import LLM_JUDGE_MODEL, MODEL_ROUTING_LLM_JUDGE, get_routing_model
-        llm = get_llm(model_id=model_id or get_routing_model(MODEL_ROUTING_LLM_JUDGE, LLM_JUDGE_MODEL))
+        from app.ai.scene_registry import SCENE_KEY_SQL_EVALUATOR_RETRY
+        from app.ai.llm_util import get_scene_llm
+
+        llm = get_scene_llm(
+            scene_key=SCENE_KEY_SQL_EVALUATOR_RETRY,
+            model_id=model_id,
+        )
         response = await llm.ainvoke(prompt)
         content = _normalize_text_content(
             response.content if hasattr(response, "content") else response
@@ -470,6 +482,10 @@ async def should_retry(
         return result.get("should_retry", False), result.get("feedback", "")
         
     except Exception as e:
+        from app.services.llm_scene_service import SceneConfigError
+
+        if isinstance(e, SceneConfigError):
+            raise
         logger.warning("重试判断失败: %s", e)
         # 默认策略：语法错误不重试，其他重试
         from app.ai.utils.sql_parser import validate_sql_syntax

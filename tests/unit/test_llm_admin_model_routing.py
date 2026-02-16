@@ -89,7 +89,7 @@ def test_get_model_routing_disables_vision_when_no_candidates(
 
 @patch("app.services.system_config_service.SystemConfigService.refresh_cache")
 @patch("app.repositories.config_repo.upsert_config")
-@patch("app.api.v1.endpoints.llm_admin_api.LLMConfigService.refresh_cache")
+@patch("app.api.v1.endpoints.llm_admin_api._refresh_llm_runtime_cache")
 def test_update_model_routing_supports_vision_default_switch(
     mock_refresh_llm_cache,
     mock_upsert_config,
@@ -129,7 +129,7 @@ def test_update_model_routing_supports_vision_default_switch(
 
 @patch("app.services.system_config_service.SystemConfigService.refresh_cache")
 @patch("app.repositories.config_repo.upsert_config")
-@patch("app.api.v1.endpoints.llm_admin_api.LLMConfigService.refresh_cache")
+@patch("app.api.v1.endpoints.llm_admin_api._refresh_llm_runtime_cache")
 def test_update_model_routing_accepts_chat_model_for_vision_key(
     mock_refresh_llm_cache,
     mock_upsert_config,

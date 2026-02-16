@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.models.llm_provider import LLMProvider
 from app.models.llm_model import LLMModel
 from app.services.llm_config_service import LLMConfigService
+from app.services.llm_scene_service import LLMSceneService, SceneConfigError
 from app.core.config import MODEL_ROUTING_VISION
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,13 @@ def _model_to_response(model: LLMModel) -> ModelResponse:
     )
 
 
+def _refresh_llm_runtime_cache(db: Session):
+    """刷新 LLM 运行时缓存。"""
+
+    LLMConfigService.refresh_cache(db)
+    LLMSceneService.refresh_cache(db)
+
+
 # ==================== 提供商管理 ====================
 
 @router.get("/providers", response_model=List[ProviderResponse])
@@ -221,7 +229,7 @@ def create_provider(request: ProviderCreateRequest, db: Session = Depends(get_db
     logger.info(f"创建提供商: {request.code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return _provider_to_response(provider)
 
@@ -253,7 +261,7 @@ def update_provider(provider_id: int, request: ProviderUpdateRequest, db: Sessio
     logger.info(f"更新提供商: {provider.code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return _provider_to_response(provider)
 
@@ -272,7 +280,7 @@ def delete_provider(provider_id: int, db: Session = Depends(get_db)):
     logger.info(f"删除提供商: {code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return {"message": "提供商已删除", "code": code}
 
@@ -290,7 +298,7 @@ def update_provider_api_key(provider_id: int, api_key: str, db: Session = Depend
     logger.info(f"更新提供商 API Key: {provider.code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return {"message": "API Key 已更新", "code": provider.code}
 
@@ -380,7 +388,7 @@ def create_model(request: ModelCreateRequest, db: Session = Depends(get_db)):
     logger.info(f"创建模型: {request.model_code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return _model_to_response(model)
 
@@ -416,7 +424,7 @@ def update_model(model_id: int, request: ModelUpdateRequest, db: Session = Depen
     logger.info(f"更新模型: {model.model_code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return _model_to_response(model)
 
@@ -435,7 +443,7 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
     logger.info(f"删除模型: {code}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return {"message": "模型已删除", "code": code}
 
@@ -460,7 +468,7 @@ def set_default_model(model_id: int, db: Session = Depends(get_db)):
     logger.info(f"设置默认模型: {model.model_code} (类型: {model.model_type})")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return {
         "message": "已设为默认模型",
@@ -483,7 +491,7 @@ def toggle_model_active(model_id: int, db: Session = Depends(get_db)):
     logger.info(f"切换模型状态: {model.model_code} -> {status}")
     
     # 刷新缓存
-    LLMConfigService.refresh_cache(db)
+    _refresh_llm_runtime_cache(db)
     
     return {
         "message": f"模型已{status}",
@@ -509,6 +517,61 @@ class ModelRoutingUpdateRequest(BaseModel):
     """更新模型路由请求。"""
     config_key: str      # 配置键名
     model_code: str      # 新的模型代码
+
+
+class SceneItem(BaseModel):
+    """场景治理项。"""
+
+    scene_key: str
+    scene_name: str
+    scene_type: str
+    default_model_id: int
+    default_model_code: Optional[str] = None
+    is_active: bool
+    description: Optional[str] = None
+
+
+class SceneUpdateRequest(BaseModel):
+    """场景更新请求。"""
+
+    default_model_code: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.get("/scenes", response_model=List[SceneItem])
+def list_llm_scenes(db: Session = Depends(get_db)):
+    """获取 LLM 场景治理列表。"""
+
+    LLMSceneService.refresh_cache(db)
+    payload = LLMSceneService.export_scene_payload()
+    return [SceneItem(**item) for item in payload]
+
+
+@router.put("/scenes/{scene_key}")
+def update_llm_scene(scene_key: str, request: SceneUpdateRequest, db: Session = Depends(get_db)):
+    """更新场景默认模型或状态。"""
+
+    if request.default_model_code is None and request.is_active is None:
+        raise HTTPException(status_code=400, detail="至少提供一个可更新字段")
+
+    try:
+        scene = LLMSceneService.update_scene(
+            db,
+            scene_key,
+            default_model_code=request.default_model_code,
+            is_active=request.is_active,
+        )
+    except SceneConfigError as exc:
+        detail = str(exc)
+        status = 404 if "场景不存在" in detail else 400
+        raise HTTPException(status_code=status, detail=detail)
+
+    return {
+        "message": "场景配置已更新",
+        "scene_key": scene.scene_key,
+        "default_model_code": scene.default_model_code,
+        "is_active": scene.is_active,
+    }
 
 
 def _get_chat_default_model_for_routing(db: Session) -> str:
@@ -724,7 +787,7 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
 
         # Vision 既依赖系统配置，也可能依赖类型默认模型，两个缓存都要刷新。
         SystemConfigService.refresh_cache(db)
-        LLMConfigService.refresh_cache(db)
+        _refresh_llm_runtime_cache(db)
 
         logger.info("更新模型路由: vision -> %s", request.model_code)
         return {

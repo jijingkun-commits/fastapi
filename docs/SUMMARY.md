@@ -141,8 +141,8 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
-* [需求基线（通用入口）](内部参考/迭代需求/requirements.md)
-* [实施方案（通用入口）](内部参考/迭代需求/implementation_plan.md)
+* [需求基线（模型场景治理）](内部参考/迭代需求/requirements.md)
+* [实施方案（模型场景治理）](内部参考/迭代需求/implementation_plan.md)
 * [需求基线（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
 * [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
 * [需求基线（文档治理执行）](内部参考/迭代需求/docs_governance_requirements.md)

@@ -45,21 +45,34 @@ async def lifespan(app: FastAPI):
         logging.exception("PostgreSQL Checkpointer 初始化失败")
         raise e
         
-    # 初始化 LLM 配置服务（加载模型配置到缓存）
+    # 初始化 LLM/系统/场景配置服务（Fail Fast）
     try:
         from app.services.llm_config_service import LLMConfigService
+        from app.services.llm_scene_service import LLMSceneService
         from app.services.system_config_service import SystemConfigService
         from app.db.session import SessionLocal
+
         with SessionLocal() as db:
             LLMConfigService.load_from_db(db)
             SystemConfigService.load_from_db(db)
-
-            from app.services.result_enrichment_rule_service import get_result_enrichment_rule_service
-            rule_service = get_result_enrichment_rule_service()
-            rule_service.refresh_rules()
+            LLMSceneService.load_from_db(db)
+            LLMSceneService.validate_startup_integrity()
     except Exception as e:
         import logging
-        logging.exception("配置服务初始化失败，将使用环境变量降级")
+
+        logging.critical("配置服务初始化失败，终止启动: %s", e)
+        raise
+
+    # 结果增强规则缓存（失败不阻断启动）
+    try:
+        from app.services.result_enrichment_rule_service import get_result_enrichment_rule_service
+
+        rule_service = get_result_enrichment_rule_service()
+        rule_service.refresh_rules()
+    except Exception:
+        import logging
+
+        logging.exception("结果增强规则初始化失败，将跳过并继续启动")
 
     # 启动时自动同步技能文件到数据库（失败可观测且不阻断启动）
     try:

@@ -50,6 +50,10 @@ class LLMModel(Base):
     provider: Mapped["LLMProvider"] = relationship(
         "LLMProvider", back_populates="models"
     )
+    scenes: Mapped[list["LLMScene"]] = relationship(
+        "LLMScene",
+        back_populates="default_model",
+    )
 
     def __repr__(self):
         return f"<LLMModel(code={self.model_code}, name={self.model_name})>"

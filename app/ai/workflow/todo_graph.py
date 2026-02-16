@@ -24,7 +24,12 @@ from langgraph.types import interrupt
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.ai.llm_util import get_llm, get_scene_llm, _normalize_text_content
+from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.scene_registry import (
+    SCENE_KEY_TODO_DESC_MERGE,
+    SCENE_KEY_TODO_INTENT_ANALYSIS,
+    SCENE_KEY_TODO_INTENT_HELPER,
+)
 from app.db.session import get_db_context  # 数据库上下文管理器
 from app.repositories.todo_repository import TodoRepository  # 待办仓库
 from app.core.types import ToolResult, ToolResultBuilder  # 统一类型
@@ -411,7 +416,11 @@ def _invoke_llm_for_intent(
         >>> intent = analysis["intent"]
         >>> extracted_info = analysis["extracted_info"]
     """
-    llm = get_llm(internal=True, model_id=model_id)
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_TODO_INTENT_HELPER,
+        model_id=model_id,
+        internal=True,
+    )
     parser = JsonOutputParser(pydantic_object=IntentResult)
     
     analysis_messages = [SystemMessage(content=system_prompt)]
@@ -684,10 +693,10 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         return updates
     
     # Step 3: 调用 LLM 分析（internal=True 自动禁用流式 + 添加 tag）
-    # 使用 SQL 生成/内部分析路由配置的模型，避免推理模型浪费 thinking tokens
-    from app.core.config import MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL, get_routing_model
-    analysis_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
-    llm = get_llm(internal=True, model_id=analysis_model)
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_TODO_INTENT_ANALYSIS,
+        internal=True,
+    )
     
     # 构建 Parser
     parser = JsonOutputParser(pydantic_object=IntentResult)
@@ -1624,9 +1633,10 @@ def _execute_create(data: Dict, state: TodoAgentState) -> ToolResult:
 def _merge_description(original: str, supplement: str) -> str:
     """使用 LLM 将原有描述和补充信息融合为完整描述。"""
     try:
-        from app.core.config import MODEL_SCENE_LIGHTWEIGHT
-
-        llm = get_scene_llm(scene=MODEL_SCENE_LIGHTWEIGHT, internal=True)
+        llm = get_scene_llm(
+            scene_key=SCENE_KEY_TODO_DESC_MERGE,
+            internal=True,
+        )
         prompt = (
             "将以下原始描述和补充信息融合为一段完整的任务描述。\n"
             "要求：语句通顺，保留所有关键信息，不要多余解释，直接输出融合后的描述。\n\n"
