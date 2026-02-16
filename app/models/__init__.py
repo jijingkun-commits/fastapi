@@ -9,6 +9,7 @@ from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrich
 from app.models.ops_metric_snapshot import OpsMetricSnapshotMinute
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.llm_scene import LLMScene
+from app.models.user_memory import UserMemory
 
 __all__ = [
     "User",
@@ -25,4 +26,5 @@ __all__ = [
     "DataPermissionRow",
     "DataPermissionColumn",
     "LLMScene",
+    "UserMemory",
 ]

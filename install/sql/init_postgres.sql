@@ -80,6 +80,34 @@ COMMENT ON COLUMN t_chat_message.content IS '消息内容';
 COMMENT ON COLUMN t_chat_message.metadata IS '元数据JSON';
 COMMENT ON COLUMN t_chat_message.title IS '对话标题';
 
+-- 用户偏好记忆表（跨会话）
+CREATE TABLE IF NOT EXISTS t_user_memory (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    scope VARCHAR(32) NOT NULL DEFAULT 'global',
+    memory_key VARCHAR(128) NOT NULL,
+    memory_value TEXT NOT NULL,
+    confidence NUMERIC(4, 3) NOT NULL DEFAULT 1.000,
+    source_thread_id VARCHAR(100),
+    source_message_id BIGINT,
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_memory_user_scope ON t_user_memory(user_id, scope);
+CREATE INDEX IF NOT EXISTS idx_user_memory_user_update ON t_user_memory(user_id, update_time);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_memory_active_unique
+    ON t_user_memory(user_id, scope, memory_key)
+    WHERE status = 'active';
+
+COMMENT ON TABLE t_user_memory IS '用户跨会话偏好记忆表';
+COMMENT ON COLUMN t_user_memory.scope IS '作用域，默认 global';
+COMMENT ON COLUMN t_user_memory.memory_key IS '偏好键，例如 response.language';
+COMMENT ON COLUMN t_user_memory.memory_value IS '偏好值';
+COMMENT ON COLUMN t_user_memory.confidence IS '偏好置信度';
+
 -- 对话资产表（图片、图表等）
 CREATE TYPE asset_type AS ENUM ('chart', 'image', 'export', 'attachment');
 

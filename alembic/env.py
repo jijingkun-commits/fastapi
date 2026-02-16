@@ -28,6 +28,7 @@ from app.models.data_agent_metadata import MetaTable, MetaColumn, MetaRelation
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
 from app.models.token_blacklist import TokenBlacklist
+from app.models.user_memory import UserMemory
 
 # Alembic 配置
 config = context.config

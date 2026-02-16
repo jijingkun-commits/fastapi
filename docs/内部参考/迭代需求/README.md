@@ -65,4 +65,6 @@
 - `docs_governance_implementation_plan.md`
 - `askdata_dual_role_permission_requirements.md`
 - `askdata_dual_role_permission_implementation_plan.md`
+- `user_preference_memory_requirements.md`
+- `user_preference_memory_implementation_plan.md`
 - `evaluation_report.md`

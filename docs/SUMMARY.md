@@ -152,6 +152,8 @@
 * [实施方案（文档治理执行）](内部参考/迭代需求/docs_governance_implementation_plan.md)
 * [需求基线（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_requirements.md)
 * [实施方案（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_implementation_plan.md)
+* [需求基线（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_requirements.md)
+* [实施方案（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_implementation_plan.md)
 * [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解

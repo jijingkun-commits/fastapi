@@ -11,13 +11,20 @@ from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
 from fastapi.encoders import jsonable_encoder
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_human_message
 
 from app.ai.workflow import get_multi_agent_graph
+from app.core.config import ENABLE_USER_PREFERENCE_MEMORY, USER_PREFERENCE_MEMORY_MAX_ITEMS
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
+from app.db.session import get_db_context
+from app.repositories import chat_repo
+from app.services.user_preference_memory_service import (
+    build_user_preference_context,
+    persist_explicit_preferences_from_input,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -300,9 +307,30 @@ class ChatService:
             
             logger.info("已将附件信息追加到 Prompt: %d 个附件 (%d 图片, %d 其他)", 
                        len(attachments), len(image_attachments), len(other_attachments))
+
+        memory_context = ""
+        if ENABLE_USER_PREFERENCE_MEMORY and user_id:
+            try:
+                with get_db_context() as db:
+                    memory_context = build_user_preference_context(
+                        db,
+                        user_id=user_id,
+                        max_items=USER_PREFERENCE_MEMORY_MAX_ITEMS,
+                    )
+            except Exception as memory_error:
+                logger.warning("读取用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
             
-        input_messages = [create_human_message(final_prompt)]
-        current_human_message_id = getattr(input_messages[0], "id", None)
+        input_messages = []
+        if memory_context:
+            input_messages.append(SystemMessage(content=memory_context))
+
+        human_message = create_human_message(final_prompt)
+        input_messages.append(human_message)
+        current_human_message_id = getattr(human_message, "id", None)
+
+        if memory_context:
+            logger.info("已注入用户偏好上下文: user_id=%s", user_id)
+
         config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id}}
         
         # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）
@@ -326,11 +354,9 @@ class ChatService:
         
         # 在流开始时保存 human 消息（单一入口，确保顺序正确）
         # AI 消息由 interrupt 或 postprocess 保存
-        from app.db.session import get_db_context
-        from app.repositories import chat_repo
         with get_db_context() as db:
             title = prompt[:50] if len(prompt) > 50 else prompt
-            chat_repo.save_message(
+            saved_human = chat_repo.save_message(
                 db,
                 user_id=user_id,
                 thread_id=thread_id,
@@ -339,6 +365,20 @@ class ChatService:
                 content=prompt,
                 title=title,
             )
+
+            if ENABLE_USER_PREFERENCE_MEMORY and user_id:
+                try:
+                    persisted_count = persist_explicit_preferences_from_input(
+                        db,
+                        user_id=user_id,
+                        user_text=prompt,
+                        source_thread_id=thread_id,
+                        source_message_id=saved_human.id,
+                    )
+                    if persisted_count:
+                        logger.info("用户偏好记忆已更新: user_id=%s, count=%d", user_id, persisted_count)
+                except Exception as memory_error:
+                    logger.warning("写入用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         
         # 发送初始化事件
         yield self._format_sse("init", {"thread_id": thread_id})

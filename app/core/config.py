@@ -138,6 +138,10 @@ SQL_REQUIRE_APPROVAL = os.getenv("SQL_REQUIRE_APPROVAL", "true").lower() == "tru
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
 
+# 跨会话用户偏好记忆开关
+ENABLE_USER_PREFERENCE_MEMORY = os.getenv("ENABLE_USER_PREFERENCE_MEMORY", "false").lower() == "true"
+USER_PREFERENCE_MEMORY_MAX_ITEMS = int(os.getenv("USER_PREFERENCE_MEMORY_MAX_ITEMS", "8"))
+
 # 结果增强规则开关与缓存 TTL
 ENABLE_RESULT_ENRICHMENT = os.getenv("ENABLE_RESULT_ENRICHMENT", "true").lower() == "true"
 RESULT_ENRICHMENT_RULE_TTL_SECONDS = int(os.getenv("RESULT_ENRICHMENT_RULE_TTL_SECONDS", "120"))
