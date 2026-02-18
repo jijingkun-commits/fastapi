@@ -163,7 +163,7 @@ function buildVegaSpec(
     height: 300,
     autosize: {
       type: "fit-x",
-      contains: "padding",
+      contains: "content",
       resize: true,
     },
     data: { values },
@@ -185,12 +185,15 @@ function buildVegaSpec(
   const yAxisLabelExpr = "abs(datum.value) >= 100000000 ? format(datum.value/100000000, ',.2f') + ' 亿' : abs(datum.value) >= 10000 ? format(datum.value/10000, ',.2f') + ' 万' : format(datum.value, ',.2f')";
   const xAxis = chart.type === "bar" && xType === "nominal"
     ? {
-        labelAngle: 0,
-        labelAlign: "center" as const,
-        labelBaseline: "top" as const,
-        labelLineHeight: 14,
-        labelPadding: 10,
-        labelExpr: "join(split(toString(datum.label), ''), '\\n')",
+        labelAngle: -32,
+        labelAlign: "right" as const,
+        labelBaseline: "middle" as const,
+        labelPadding: 8,
+        labelLimit: 120,
+        labelOverlap: "greedy" as const,
+        titlePadding: 14,
+        labelExpr:
+          "length(toString(datum.label)) > 8 ? slice(toString(datum.label), 0, 8) + '…' : toString(datum.label)",
       }
     : undefined;
 
@@ -247,6 +250,7 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
   const [renderError, setRenderError] = useState<string | null>(null);
   const chartViewRef = useRef<VegaChartView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerWidthRef = useRef(0);
   const normalizedValues = useMemo(() => normalizeChartValues(chart), [chart]);
   const spec = useMemo(() => buildVegaSpec(chart, normalizedValues), [chart, normalizedValues]);
 
@@ -274,7 +278,13 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.contentRect.width > 0) {
+        const currentWidth = Math.floor(entry.contentRect.width);
+        if (currentWidth <= 0) {
+          continue;
+        }
+
+        if (Math.abs(currentWidth - containerWidthRef.current) >= 1) {
+          containerWidthRef.current = currentWidth;
           refreshChartLayout();
           break;
         }
@@ -309,6 +319,7 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
         options={{ actions: false, renderer: "svg" }}
         onEmbed={(result) => {
           chartViewRef.current = result.view;
+          containerWidthRef.current = containerRef.current?.clientWidth ?? 0;
           refreshChartLayout();
         }}
         onError={(error) => {
