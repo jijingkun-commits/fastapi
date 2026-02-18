@@ -33,6 +33,28 @@ interface CurrentUser {
     id: number;
     username: string | null;
     mobile: string | null;
+    dataRole: string | null;
+}
+
+type UserDataRole = "head_president" | "department_gm" | "department_vgm" | "staff";
+
+const USER_DATA_ROLE_LABEL: Record<UserDataRole, string> = {
+    head_president: "总行行长",
+    department_gm: "部门总经理",
+    department_vgm: "部门副总经理",
+    staff: "普通员工",
+};
+
+function getUserDataRoleLabel(dataRole: string | null | undefined): string | null {
+    if (!dataRole) {
+        return null;
+    }
+
+    if (dataRole in USER_DATA_ROLE_LABEL) {
+        return USER_DATA_ROLE_LABEL[dataRole as UserDataRole];
+    }
+
+    return dataRole;
 }
 
 export interface ChatHeaderProps {
@@ -87,6 +109,7 @@ export function ChatHeader({
                     id: me.id,
                     username: me.username ?? null,
                     mobile: me.mobile ?? null,
+                    dataRole: me.data_role ?? null,
                 });
             } catch {
                 if (!mounted) {
@@ -124,6 +147,27 @@ export function ChatHeader({
         const source = currentUser?.username?.trim() || currentUser?.mobile?.trim() || "U";
         const firstChar = source.charAt(0);
         return firstChar ? firstChar.toUpperCase() : "U";
+    }, [currentUser]);
+
+    const userMetaItems = useMemo(() => {
+        const items: Array<{ label: string; value: string }> = [];
+
+        if (typeof currentUser?.id === "number") {
+            items.push({
+                label: "用户 ID",
+                value: String(currentUser.id),
+            });
+        }
+
+        const dataRoleLabel = getUserDataRoleLabel(currentUser?.dataRole);
+        if (dataRoleLabel) {
+            items.push({
+                label: "数据角色",
+                value: dataRoleLabel,
+            });
+        }
+
+        return items;
     }, [currentUser]);
 
     // 处理登出
@@ -199,7 +243,7 @@ export function ChatHeader({
                             </Avatar>
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56 rounded-2xl p-1">
+                    <DropdownMenuContent align="end" className="w-64 rounded-2xl p-1">
                         <DropdownMenuLabel className="p-1 font-normal">
                             <div className="rounded-xl bg-muted/40 px-3 py-2.5">
                                 <div className="flex items-center gap-2.5">
@@ -219,6 +263,18 @@ export function ChatHeader({
                                     <p className="mt-1.5 truncate pl-[42px] text-xs text-muted-foreground">
                                         {userSecondaryText}
                                     </p>
+                                )}
+                                {userMetaItems.length > 0 && (
+                                    <div className="mt-2 space-y-1.5 rounded-lg bg-background/70 px-2.5 py-2">
+                                        {userMetaItems.map((item) => (
+                                            <div key={item.label} className="flex items-center justify-between gap-3 text-[11px]">
+                                                <span className="text-muted-foreground">{item.label}</span>
+                                                <span className="max-w-[130px] truncate font-medium text-foreground">
+                                                    {item.value}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
                             </div>
                         </DropdownMenuLabel>
