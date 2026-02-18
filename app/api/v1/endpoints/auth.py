@@ -5,11 +5,31 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.schemas.user import LoginRequest, Token, UserOut, get_data_role_label
+from app.schemas.user import LoginRequest, Token, UserOut
 from app.core.security import create_access_token
 from app.services.user_service import authenticate
 from app.services.token_service import logout as token_logout
+from app.services.system_config_service import SystemConfigService
 from app.api.deps import get_current_user, get_raw_token
+
+
+DATA_ROLE_LABELS_CONFIG_KEY = "user.data_role_labels"
+
+
+def _resolve_data_role_label(data_role: str | None) -> str | None:
+    """从系统配置解析数据角色展示文案。"""
+
+    normalized_role = (data_role or "").strip()
+    if not normalized_role:
+        return None
+
+    configured_labels = SystemConfigService.get(DATA_ROLE_LABELS_CONFIG_KEY, {})
+    if isinstance(configured_labels, dict):
+        label = configured_labels.get(normalized_role)
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+
+    return normalized_role
 
 
 router = APIRouter(tags=["auth"])
@@ -59,5 +79,5 @@ def me(current_user = Depends(get_current_user)):
         mobile=getattr(current_user, "mobile", None),
         data_role=getattr(current_user, "data_role", None),
     )
-    user_out.data_role_label = get_data_role_label(user_out.data_role)
+    user_out.data_role_label = _resolve_data_role_label(user_out.data_role)
     return user_out

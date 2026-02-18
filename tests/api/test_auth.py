@@ -74,6 +74,34 @@ class TestMeAPI:
         response = client.get("/api/v1/me")
         assert response.status_code == 401
     
+    def test_me_returns_configured_data_role_label(self):
+        """测试配置存在时返回配置化数据角色文案。"""
+        mock_user = MagicMock()
+        mock_user.id = 2
+        mock_user.username = "manager"
+        mock_user.mobile = "13900139000"
+        mock_user.role = "user"
+        mock_user.data_role = "department_gm"
+
+        def override_current_user():
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = override_current_user
+
+        try:
+            with patch(
+                "app.api.v1.endpoints.auth.SystemConfigService.get",
+                return_value={"department_gm": "部门总经理"},
+            ):
+                response = client.get("/api/v1/me")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["data_role"] == "department_gm"
+            assert data["data_role_label"] == "部门总经理"
+        finally:
+            app.dependency_overrides.clear()
+
     def test_me_success(self):
         """测试认证成功返回用户信息。"""
         mock_user = MagicMock()
@@ -96,6 +124,6 @@ class TestMeAPI:
             assert data["id"] == 1
             assert data["username"] == "testuser"
             assert data["data_role"] == "staff"
-            assert data["data_role_label"] == "普通员工"
+            assert data["data_role_label"] == "staff"
         finally:
             app.dependency_overrides.clear()

@@ -9,27 +9,6 @@ SysRole = Literal["user", "analyst", "admin"]
 DataRole = Literal["head_president", "department_gm", "department_vgm", "staff"]
 
 
-DATA_ROLE_LABELS: dict[str, str] = {
-    "head_president": "总行行长",
-    "department_gm": "部门总经理",
-    "department_vgm": "部门副总经理",
-    "staff": "普通员工",
-}
-
-
-def get_data_role_label(data_role: Optional[str]) -> Optional[str]:
-    """将数据角色编码转换为展示文案。"""
-
-    if not data_role:
-        return None
-
-    normalized = data_role.strip()
-    if not normalized:
-        return None
-
-    return DATA_ROLE_LABELS.get(normalized, normalized)
-
-
 class LoginRequest(BaseModel):
     """登录请求体：支持用户名或手机号+密码。"""
 
