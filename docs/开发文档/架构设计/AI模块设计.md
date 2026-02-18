@@ -1116,7 +1116,7 @@ sequenceDiagram
 | 完整 DDL 检索 | `vanna_client.py` | 从 `t_meta_columns` 获取完整列信息，构建真实 CREATE TABLE |
 | 统一 SQL 解析 | `sql_parser.py` (新) | 使用 sqlglot 替代分散的正则表达式 |
 | 错误自愈机制 | `data_graph.py` | 执行失败时自动重试（最多 3 次），错误信息反馈给 LLM |
-| 空结果表切换自愈 | `data_graph.py` | vanna_rag 结果为空且命中历史空表（如 `f_mid_loan_tb`）时，自动切换到有数表（如 `f_mid_loan_k_tb`）重试 |
+| 空结果表切换自愈 | `data_graph.py` + `sql_empty_result_recovery.py` | vanna_rag 结果为空且命中历史空表（如 `f_mid_loan_tb`）时，自动切换到有数表（如 `f_mid_loan_k_tb`）并按字段映射重写历史列名（如 `org_cd->dept_cd`, `level7_val->dept_val`）后重试 |
 | 统一安全检查 | `sql_safety.py` (新) | 消除代码重复，集中管理危险关键词和敏感表黑名单 |
 | 向量相似度搜索 | `metric_service.py` | 指标匹配优先使用 embedding 向量搜索 |
 | LLM Judge 评估 | `llm_judge.py` | SQL 生成后可选质量评估，需设置 `ENABLE_LLM_JUDGE=true` |

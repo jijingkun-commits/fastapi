@@ -50,6 +50,7 @@ from app.ai.utils.sql_parser import extract_tables_from_sql
 from app.ai.utils.sql_empty_result_recovery import (
     is_effectively_empty_result,
     rewrite_sql_for_empty_result,
+    rewrite_sql_for_column_compatibility,
 )
 from app.db.session import engine
 from app.core.config import (
@@ -3200,6 +3201,13 @@ def sql_execute(state: DataAgentState) -> Dict:
 
     try:
         vanna = get_vanna()
+
+        compat_sql, compat_reason = rewrite_sql_for_column_compatibility(sql)
+        if compat_reason and compat_sql != sql:
+            logger.info("字段兼容 SQL 预重写触发: %s", compat_reason)
+            emit_status(writer, f"检测到字段兼容映射，已自动调整查询：{compat_reason}", node="sql_execute")
+            sql = compat_sql
+            rewrite_note = compat_reason
         
         # 执行 SQL（可能已被权限重写）
         emit_status(writer, "正在执行查询...", node="sql_execute")
@@ -3215,7 +3223,10 @@ def sql_execute(state: DataAgentState) -> Dict:
                 if not is_effectively_empty_result(df_retry.to_dict(orient="records")):
                     sql = rewritten_sql
                     df = df_retry
-                    rewrite_note = reason
+                    if rewrite_note:
+                        rewrite_note = f"{rewrite_note}；{reason}"
+                    else:
+                        rewrite_note = reason
                     logger.info("空结果 SQL 自愈重写成功")
         
         # 转换为可序列化格式
