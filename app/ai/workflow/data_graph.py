@@ -2609,6 +2609,17 @@ def _coerce_chart_number(value: Any) -> Optional[float]:
     if not text:
         return None
 
+    unit_match = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*(亿|万)\s*元?", text)
+    if unit_match:
+        base = float(unit_match.group(1))
+        if not math.isfinite(base):
+            return None
+        unit = unit_match.group(2)
+        if unit == "亿":
+            return base * 1_0000_0000
+        if unit == "万":
+            return base * 1_0000
+
     try:
         numeric = float(text)
         if math.isfinite(numeric):
@@ -2788,24 +2799,50 @@ def _is_numeric_column(
     return numeric_count / non_null_count >= 0.8
 
 
-def _is_identifier_column(column: str) -> bool:
+def _build_chart_semantic_text(
+    column: str,
+    column_display_name_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """合并原始列名与展示列名用于语义判别。"""
+    raw_name = str(column or "").strip()
+    if not raw_name:
+        return ""
+
+    if not column_display_name_map:
+        return raw_name
+
+    display_name = str(column_display_name_map.get(column) or "").strip()
+    if not display_name or display_name == raw_name:
+        return raw_name
+
+    return f"{raw_name} {display_name}"
+
+
+def _is_identifier_column(
+    column: str,
+    column_display_name_map: Optional[Dict[str, str]] = None,
+) -> bool:
     """判断列是否属于标识字段（客户号/编号/ID 等）。"""
-    text = str(column or "").strip()
-    if not text:
+    semantic_text = _build_chart_semantic_text(column, column_display_name_map)
+    if not semantic_text:
         return False
 
-    lowered = re.sub(r"\s+", "", text).lower()
+    compact_text = re.sub(r"\s+", "", semantic_text)
+    lowered = compact_text.lower()
 
     if any(token in lowered for token in ("ecif_cust_no", "cust_no", "customer_no", "customer_id")):
         return True
 
-    if any(token in text for token in ("客户统一编号", "客户编号", "客户号", "编号", "编码")):
+    if any(token in compact_text for token in ("客户统一编号", "客户编号", "客户号", "编号", "编码", "证件号")):
+        return True
+
+    if any(token in lowered for token in ("org_no", "dept_no", "inst_no", "branch_no", "org_cd", "dept_cd", "inst_cd", "branch_cd")):
         return True
 
     if lowered in {"id", "no", "code"}:
         return True
 
-    if lowered.endswith(("_id", "id", "_no", "no", "_code", "code")):
+    if lowered.endswith(("_id", "id", "_no", "no", "_code", "code", "_cd", "cd")):
         return True
 
     return False
@@ -2821,28 +2858,251 @@ def _is_date_like_column(column: str) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
-def _pick_preferred_y_column(numeric_columns: List[str]) -> str:
+def _is_name_like_column(
+    column: str,
+    column_display_name_map: Optional[Dict[str, str]] = None,
+) -> bool:
+    """判断列是否更偏向名称语义（如客户名称/机构名称）。"""
+    semantic_text = _build_chart_semantic_text(column, column_display_name_map)
+    if not semantic_text:
+        return False
+
+    compact_text = re.sub(r"\s+", "", semantic_text)
+    lowered = compact_text.lower()
+
+    chinese_tokens = ("名称", "户名", "单位名", "公司名", "机构名", "分行名", "支行名")
+    if any(token in compact_text for token in chinese_tokens):
+        return True
+
+    english_tokens = (
+        "_name",
+        "name",
+        "_nm",
+        "cust_name",
+        "cust_nm",
+        "customer_name",
+        "org_name",
+        "org_nm",
+        "branch_name",
+        "branch_nm",
+        "dept_name",
+        "dept_nm",
+        "inst_name",
+        "inst_nm",
+        "company",
+    )
+    if any(token in lowered for token in english_tokens):
+        return True
+
+    return False
+
+
+def _resolve_dimension_hint_flags(dimension_hints: Optional[List[str]] = None) -> Dict[str, bool]:
+    """将维度提示词归一为客户/机构/时间语义开关。"""
+    hints = _ensure_text_list(dimension_hints)
+    flags = {
+        "customer": False,
+        "organization": False,
+        "time": False,
+    }
+
+    for hint in hints:
+        compact_hint = re.sub(r"\s+", "", str(hint or ""))
+        lowered_hint = compact_hint.lower()
+        if not compact_hint:
+            continue
+
+        if any(token in compact_hint for token in ("客户", "客群", "户")) or any(
+            token in lowered_hint for token in ("cust", "customer", "ecif")
+        ):
+            flags["customer"] = True
+
+        if any(token in compact_hint for token in ("机构", "分行", "支行", "网点", "部门", "营业部")) or any(
+            token in lowered_hint for token in ("org", "branch", "dept", "inst")
+        ):
+            flags["organization"] = True
+
+        if any(token in compact_hint for token in ("日期", "时间", "月份", "年度", "年", "月", "日", "趋势")) or any(
+            token in lowered_hint for token in ("date", "time", "month", "year", "trend")
+        ):
+            flags["time"] = True
+
+    return flags
+
+
+def _pick_dimension_column_by_semantics(
+    dimension_columns: List[str],
+    rows: List[Dict[str, Any]],
+    temporal_flags: Dict[str, bool],
+    identifier_flags: Dict[str, bool],
+    column_display_name_map: Optional[Dict[str, str]] = None,
+    dimension_hints: Optional[List[str]] = None,
+) -> str:
+    """结合名称语义与维度提示词，挑选更可读的 x 轴维度列。"""
+    if not dimension_columns:
+        return ""
+
+    hint_flags = _resolve_dimension_hint_flags(dimension_hints)
+    best_column = ""
+    best_score = -10**9
+    best_index = len(dimension_columns)
+
+    for index, column in enumerate(dimension_columns):
+        semantic_text = _build_chart_semantic_text(column, column_display_name_map)
+        compact_text = re.sub(r"\s+", "", semantic_text)
+        lowered = compact_text.lower()
+
+        is_identifier = bool(identifier_flags.get(column))
+        is_temporal = bool(temporal_flags.get(column) or _is_date_like_column(column))
+        is_name_like = _is_name_like_column(column, column_display_name_map)
+        distinct_count = _count_distinct_non_null_dimension_values(rows, column)
+
+        score = 0
+
+        if is_name_like:
+            score += 8
+        if is_identifier:
+            score -= 6
+
+        if distinct_count > 1:
+            score += 3
+        elif distinct_count == 1:
+            score -= 2
+        else:
+            score -= 4
+
+        if hint_flags["time"]:
+            if is_temporal:
+                score += 10
+            else:
+                score -= 3
+        elif is_temporal:
+            score -= 2
+
+        if hint_flags["customer"]:
+            if any(token in compact_text for token in ("客户", "户名")) or any(
+                token in lowered for token in ("cust", "customer", "ecif")
+            ):
+                score += 8
+            elif is_name_like:
+                score += 2
+
+        if hint_flags["organization"]:
+            if any(token in compact_text for token in ("机构", "分行", "支行", "网点", "部门", "营业部")) or any(
+                token in lowered for token in ("org", "branch", "dept", "inst")
+            ):
+                score += 8
+            elif is_name_like:
+                score += 2
+
+        if not any(hint_flags.values()) and is_name_like:
+            score += 2
+
+        if score > best_score or (score == best_score and index < best_index):
+            best_score = score
+            best_column = column
+            best_index = index
+
+    return best_column
+
+
+def _pick_preferred_y_column(
+    numeric_columns: List[str],
+    rows: List[Dict[str, Any]],
+    column_display_name_map: Optional[Dict[str, str]] = None,
+    identifier_flags: Optional[Dict[str, bool]] = None,
+    metric_hint: str = "",
+) -> str:
     """在多个数值列中挑选更可能的指标列。"""
     if not numeric_columns:
         return ""
 
-    preferred_tokens = (
-        "余额", "金额", "占比", "比率", "率", "数量", "笔数",
-        "balance", "amount", "amt", "sum", "total", "count", "avg", "ratio", "pct",
-    )
+    measure_tokens = ("余额", "金额", "占比", "比率", "利率", "数量", "笔数", "规模", "总额", "合计")
+    measure_tokens_en = ("balance", "amount", "amt", "sum", "total", "count", "avg", "ratio", "pct")
+    identifier_tokens = ("编号", "编码", "客户号", "客户统一", "身份证", "证件号")
+
+    normalized_metric_hint = re.sub(r"\s+", "", str(metric_hint or ""))
+    normalized_metric_hint_lower = normalized_metric_hint.lower()
+
+    best_column = numeric_columns[0]
+    best_score = -10**9
 
     for column in numeric_columns:
-        lowered = str(column or "").strip().lower()
-        if any(token in lowered for token in preferred_tokens):
-            return column
+        score = 0
+        semantic_text = _build_chart_semantic_text(column, column_display_name_map)
+        compact_text = re.sub(r"\s+", "", semantic_text)
+        lowered = compact_text.lower()
 
-    return numeric_columns[0]
+        if any(token in compact_text for token in measure_tokens):
+            score += 8
+        if any(token in lowered for token in measure_tokens_en):
+            score += 4
+
+        if normalized_metric_hint_lower:
+            if normalized_metric_hint_lower in lowered or lowered in normalized_metric_hint_lower:
+                score += 10
+
+        if identifier_flags and identifier_flags.get(column):
+            score -= 12
+        if any(token in compact_text for token in identifier_tokens):
+            score -= 8
+
+        non_null_count = 0
+        decimal_count = 0
+        unit_count = 0
+        long_integer_count = 0
+
+        for row in rows[:50]:
+            if not isinstance(row, dict) or column not in row:
+                continue
+
+            raw_value = row.get(column)
+            if raw_value is None:
+                continue
+
+            text = str(raw_value).strip()
+            if not text:
+                continue
+
+            non_null_count += 1
+            if re.search(r"(亿|万)\s*元?$", text):
+                unit_count += 1
+
+            numeric = _coerce_chart_number(raw_value)
+            if numeric is None:
+                continue
+
+            if not float(numeric).is_integer():
+                decimal_count += 1
+                continue
+
+            if _is_date_like_value(raw_value):
+                continue
+
+            digit_text = re.sub(r"\D", "", text)
+            if len(digit_text) >= 8 and abs(int(round(numeric))) >= 1_000_000:
+                long_integer_count += 1
+
+        if non_null_count > 0:
+            if unit_count > 0:
+                score += 6
+            if decimal_count / non_null_count >= 0.2:
+                score += 3
+            if long_integer_count / non_null_count >= 0.8 and unit_count == 0 and decimal_count == 0:
+                score -= 4
+
+        if score > best_score:
+            best_score = score
+            best_column = column
+
+    return best_column
 
 
 def _build_chart_semantic_flags(
     columns: List[str],
     rows: List[Dict[str, Any]],
     column_data_type_map: Optional[Dict[str, str]] = None,
+    column_display_name_map: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, bool], Dict[str, bool], Dict[str, bool]]:
     """构建字段语义标记（时间/数值/标识）。"""
     temporal_flags = {
@@ -2854,7 +3114,7 @@ def _build_chart_semantic_flags(
         for column in columns
     }
     identifier_flags = {
-        column: _is_identifier_column(column)
+        column: _is_identifier_column(column, column_display_name_map)
         for column in columns
     }
     return temporal_flags, numeric_flags, identifier_flags
@@ -2866,6 +3126,9 @@ def _pick_chart_axes_from_flags(
     temporal_flags: Dict[str, bool],
     numeric_flags: Dict[str, bool],
     identifier_flags: Dict[str, bool],
+    column_display_name_map: Optional[Dict[str, str]] = None,
+    dimension_hints: Optional[List[str]] = None,
+    metric_hint: str = "",
 ) -> Tuple[str, str]:
     """根据字段语义标记选择图表 x/y 轴。"""
     numeric_columns = [
@@ -2878,7 +3141,13 @@ def _pick_chart_axes_from_flags(
     if not numeric_columns:
         return "", ""
 
-    y_key = _pick_preferred_y_column(numeric_columns)
+    y_key = _pick_preferred_y_column(
+        numeric_columns,
+        rows,
+        column_display_name_map=column_display_name_map,
+        identifier_flags=identifier_flags,
+        metric_hint=metric_hint,
+    )
     if not y_key:
         return "", ""
 
@@ -2888,6 +3157,17 @@ def _pick_chart_axes_from_flags(
     ]
 
     if dimension_columns:
+        semantic_dimension = _pick_dimension_column_by_semantics(
+            dimension_columns=dimension_columns,
+            rows=rows,
+            temporal_flags=temporal_flags,
+            identifier_flags=identifier_flags,
+            column_display_name_map=column_display_name_map,
+            dimension_hints=dimension_hints,
+        )
+        if semantic_dimension:
+            return semantic_dimension, y_key
+
         date_like_columns = [
             column
             for column in dimension_columns
@@ -2977,6 +3257,9 @@ def _pick_chart_axes(
     columns: List[str],
     rows: List[Dict[str, Any]],
     column_data_type_map: Optional[Dict[str, str]] = None,
+    column_display_name_map: Optional[Dict[str, str]] = None,
+    dimension_hints: Optional[List[str]] = None,
+    metric_hint: str = "",
 ) -> Tuple[str, str]:
     """选择图表 x/y 轴字段（优先维度列 + 数值列）。"""
     if not columns:
@@ -2988,6 +3271,7 @@ def _pick_chart_axes(
         columns=columns,
         rows=rows,
         column_data_type_map=column_data_type_map,
+        column_display_name_map=column_display_name_map,
     )
 
     return _pick_chart_axes_from_flags(
@@ -2996,6 +3280,9 @@ def _pick_chart_axes(
         temporal_flags=temporal_flags,
         numeric_flags=numeric_flags,
         identifier_flags=identifier_flags,
+        column_display_name_map=column_display_name_map,
+        dimension_hints=dimension_hints,
+        metric_hint=metric_hint,
     )
 
 
@@ -3008,7 +3295,14 @@ def _serialize_chart_dimension_value(value: Any) -> str:
         return value.isoformat()
 
     text = str(value).strip()
-    return text or "未知"
+    if not text:
+        return "未知"
+
+    lowered = text.lower()
+    if lowered in {"none", "null", "nan", "-"}:
+        return "未知"
+
+    return text
 
 
 def _serialize_chart_identifier_value(value: Any) -> str:
@@ -3036,6 +3330,7 @@ def _ensure_chart_dimension_uniqueness(
     x_key: str,
     y_key: str,
     columns: List[str],
+    column_display_name_map: Optional[Dict[str, str]] = None,
 ) -> None:
     """在维度重复时补齐唯一后缀，避免图表类目塌缩。"""
     if not chart_rows or _is_date_like_column(x_key):
@@ -3048,7 +3343,7 @@ def _ensure_chart_dimension_uniqueness(
     identifier_columns = [
         column
         for column in columns
-        if column not in {x_key, y_key} and _is_identifier_column(column)
+        if column not in {x_key, y_key} and _is_identifier_column(column, column_display_name_map)
     ]
     sequence_counter: Counter[str] = Counter()
     final_counter: Counter[str] = Counter()
@@ -3077,6 +3372,34 @@ def _ensure_chart_dimension_uniqueness(
         chart_item[x_key] = dedup_label
 
 
+def _collect_chart_axis_semantic_context(
+    state: DataAgentState,
+    question: str,
+) -> Tuple[List[str], str]:
+    """收集图表轴选择所需语义提示（维度/指标）。"""
+    dimension_hints: List[str] = []
+    dimension_hints.extend(_ensure_text_list(state.get("dimensions")))
+
+    analysis_metric = ""
+    query_context = state.get("query_context")
+    if isinstance(query_context, dict):
+        analysis = query_context.get("analysis")
+        if isinstance(analysis, dict):
+            dimension_hints.extend(_ensure_text_list(analysis.get("dimensions")))
+            analysis_metric = str(analysis.get("metric_name") or "").strip()
+
+    dimension_hints.extend(_extract_dimensions_from_text(question))
+    normalized_dimension_hints = _ensure_text_list(dimension_hints)
+
+    metric_hint = _pick_first_non_empty_str(
+        str(state.get("matched_metric") or "").strip(),
+        analysis_metric,
+        _extract_metric_from_text(question),
+    )
+
+    return normalized_dimension_hints, metric_hint
+
+
 def _build_sql_result_chart_payload(
     state: DataAgentState,
     question: str,
@@ -3094,11 +3417,18 @@ def _build_sql_result_chart_payload(
         return None
 
     chart_type = _resolve_chart_type(str(state.get("viz_type") or ""), columns, rows)
+    display_name_map: Dict[str, str] = {
+        column: (column_display_names[idx] if idx < len(column_display_names) else column)
+        for idx, column in enumerate(columns)
+    }
+    dimension_hints, metric_hint = _collect_chart_axis_semantic_context(state, question)
+
     column_data_type_map = _load_column_data_type_map(columns, sql)
     temporal_flags, numeric_flags, identifier_flags = _build_chart_semantic_flags(
         columns=columns,
         rows=rows,
         column_data_type_map=column_data_type_map,
+        column_display_name_map=display_name_map,
     )
     x_key, y_key = _pick_chart_axes_from_flags(
         columns=columns,
@@ -3106,14 +3436,12 @@ def _build_sql_result_chart_payload(
         temporal_flags=temporal_flags,
         numeric_flags=numeric_flags,
         identifier_flags=identifier_flags,
+        column_display_name_map=display_name_map,
+        dimension_hints=dimension_hints,
+        metric_hint=metric_hint,
     )
     if not x_key or not y_key:
         return None
-
-    display_name_map: Dict[str, str] = {
-        column: (column_display_names[idx] if idx < len(column_display_names) else column)
-        for idx, column in enumerate(columns)
-    }
 
     chart_rows: List[Dict[str, Any]] = []
     source_rows: List[Dict[str, Any]] = []
@@ -3142,6 +3470,7 @@ def _build_sql_result_chart_payload(
         x_key=x_key,
         y_key=y_key,
         columns=columns,
+        column_display_name_map=display_name_map,
     )
 
     title = str(question or "").strip()

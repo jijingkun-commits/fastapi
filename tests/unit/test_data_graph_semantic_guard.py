@@ -8,11 +8,14 @@ from app.services.result_enrichment_rule_service import ResultLookupEnrichmentRu
 from app.ai.workflow.data_graph import (
     _build_column_display_names,
     _build_display_sql,
+    _build_sql_result_chart_payload,
+    _coerce_chart_number,
     _derive_metric_sql,
     _enrich_result_rows_if_needed,
     _extract_top_n,
     _is_sql_semantically_compatible,
     _load_column_display_name_map,
+    _pick_chart_axes,
     _requires_detail_query,
 )
 
@@ -62,6 +65,157 @@ class TestDataGraphSemanticGuard(unittest.TestCase):
         self.assertEqual(_extract_top_n("贷款余额前10名客户"), 10)
         self.assertEqual(_extract_top_n("贷款余额top25客户"), 25)
         self.assertEqual(_extract_top_n("贷款余额客户排名"), 10)
+
+    def test_coerce_chart_number_supports_chinese_units(self):
+        self.assertEqual(_coerce_chart_number("15.26亿"), 1526000000.0)
+        self.assertEqual(_coerce_chart_number("15.26 亿"), 1526000000.0)
+        self.assertEqual(_coerce_chart_number("6.92万"), 69200.0)
+
+    @patch("app.ai.workflow.data_graph._load_column_data_type_map", return_value={})
+    def test_build_chart_payload_prefers_amount_with_unit_strings(self, _mock_type_map):
+        state = {"viz_type": "柱状图", "data_intent": "visualization"}
+        question = "查询2025年6月30日贷款余额前10名的客户"
+        sql = (
+            "SELECT ecif_cust_no AS 客户统一编号, cust_name AS 客户名称, loan_bal AS 贷款余额 "
+            "FROM fdmdata.f_mid_loan_tb LIMIT 10"
+        )
+        columns = ["客户统一编号", "客户名称", "贷款余额"]
+        rows = [
+            {"客户统一编号": "2009001293", "客户名称": None, "贷款余额": "15.26 亿"},
+            {"客户统一编号": "2000045474", "客户名称": None, "贷款余额": "6.92 亿"},
+            {"客户统一编号": "2000068157", "客户名称": "新昌县亚鑫科技有限公司", "贷款余额": "2 亿"},
+        ]
+
+        payload = _build_sql_result_chart_payload(
+            state=state,
+            question=question,
+            sql=sql,
+            columns=columns,
+            column_display_names=columns,
+            rows=rows,
+        )
+
+        assert payload is not None
+        self.assertEqual(payload["y_key"], "贷款余额")
+        self.assertEqual(payload["x_key"], "客户名称")
+        self.assertEqual(len(payload["data"]), 3)
+        labels = [str(item.get("客户名称")) for item in payload["data"]]
+        self.assertTrue(any("2009001293" in label for label in labels))
+
+
+    def test_pick_chart_axes_uses_display_name_to_avoid_identifier_as_measure(self):
+        columns = ["cust_seq", "cust_name", "loan_bal"]
+        rows = [
+            {"cust_seq": "2009001293", "cust_name": "-", "loan_bal": "15.26 亿"},
+            {"cust_seq": "2000045474", "cust_name": "-", "loan_bal": "6.92 亿"},
+            {"cust_seq": "2000068157", "cust_name": "新昌县亚鑫科技有限公司", "loan_bal": "2 亿"},
+        ]
+        display_name_map = {
+            "cust_seq": "客户统一编号",
+            "cust_name": "客户名称",
+            "loan_bal": "贷款余额",
+        }
+
+        x_key, y_key = _pick_chart_axes(
+            columns,
+            rows,
+            column_data_type_map={},
+            column_display_name_map=display_name_map,
+        )
+
+        self.assertEqual(x_key, "cust_name")
+        self.assertEqual(y_key, "loan_bal")
+
+    @patch("app.ai.workflow.data_graph._load_column_data_type_map", return_value={})
+    def test_build_chart_payload_keeps_unique_points_when_name_missing(self, _mock_type_map):
+        state = {"viz_type": "柱状图", "data_intent": "visualization"}
+        columns = ["cust_seq", "cust_name", "loan_bal"]
+        column_display_names = ["客户统一编号", "客户名称", "贷款余额"]
+        rows = [
+            {"cust_seq": "2009001293", "cust_name": "-", "loan_bal": "15.26 亿"},
+            {"cust_seq": "2000045474", "cust_name": "-", "loan_bal": "6.92 亿"},
+            {"cust_seq": "2000068157", "cust_name": "新昌县亚鑫科技有限公司", "loan_bal": "2 亿"},
+        ]
+
+        payload = _build_sql_result_chart_payload(
+            state=state,
+            question="查询2025年6月30日贷款余额前10名的客户",
+            sql="SELECT cust_seq, cust_name, loan_bal FROM fdmdata.f_mid_loan_tb LIMIT 10",
+            columns=columns,
+            column_display_names=column_display_names,
+            rows=rows,
+        )
+
+        assert payload is not None
+        self.assertEqual(payload["x_key"], "cust_name")
+        self.assertEqual(payload["y_key"], "loan_bal")
+        self.assertEqual(len(payload["data"]), 3)
+
+        labels = [str(item.get("cust_name", "")) for item in payload["data"]]
+        self.assertEqual(len(set(labels)), 3)
+        self.assertTrue(any(label.startswith("未知（2009001293") for label in labels))
+        self.assertTrue(any(label.startswith("未知（2000045474") for label in labels))
+
+
+    def test_pick_chart_axes_prefers_org_name_when_org_dimension_requested(self):
+        columns = ["org_cd", "org_nm", "loan_bal"]
+        rows = [
+            {"org_cd": "330101", "org_nm": "嘉兴分行", "loan_bal": "15.26 亿"},
+            {"org_cd": "330102", "org_nm": "绍兴分行", "loan_bal": "6.92 亿"},
+            {"org_cd": "330103", "org_nm": "宁波分行", "loan_bal": "2 亿"},
+        ]
+        display_name_map = {
+            "org_cd": "机构编号",
+            "org_nm": "机构名称",
+            "loan_bal": "贷款余额",
+        }
+
+        x_key, y_key = _pick_chart_axes(
+            columns,
+            rows,
+            column_data_type_map={},
+            column_display_name_map=display_name_map,
+            dimension_hints=["机构"],
+            metric_hint="贷款余额",
+        )
+
+        self.assertEqual(x_key, "org_nm")
+        self.assertEqual(y_key, "loan_bal")
+
+    @patch("app.ai.workflow.data_graph._load_column_data_type_map", return_value={})
+    def test_build_chart_payload_uses_state_semantic_context_for_axis(self, _mock_type_map):
+        state = {
+            "viz_type": "柱状图",
+            "data_intent": "visualization",
+            "dimensions": ["机构"],
+            "matched_metric": "贷款余额",
+            "query_context": {
+                "analysis": {
+                    "dimensions": ["机构"],
+                    "metric_name": "贷款余额",
+                }
+            },
+        }
+        columns = ["org_cd", "org_nm", "loan_amt"]
+        rows = [
+            {"org_cd": "330101", "org_nm": "嘉兴分行", "loan_amt": "15.26 亿"},
+            {"org_cd": "330102", "org_nm": "绍兴分行", "loan_amt": "6.92 亿"},
+            {"org_cd": "330103", "org_nm": "宁波分行", "loan_amt": "2 亿"},
+        ]
+
+        payload = _build_sql_result_chart_payload(
+            state=state,
+            question="查询2025年6月30日贷款余额前10名机构并用柱状图展示",
+            sql="SELECT org_cd, org_nm, loan_amt FROM fdmdata.f_mid_loan_tb LIMIT 10",
+            columns=columns,
+            column_display_names=columns,
+            rows=rows,
+        )
+
+        assert payload is not None
+        self.assertEqual(payload["x_key"], "org_nm")
+        self.assertEqual(payload["y_key"], "loan_amt")
+        self.assertEqual(len(payload["data"]), 3)
 
     def test_derive_metric_sql_for_topn_customer(self):
         template = (
