@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from app.ai.utils.sql_safety import sanitize_sql
 from app.ai.utils.sql_rewriter import check_and_rewrite_sql
+from app.services.permission_service import get_permission_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class SqlPolicyDecision:
     denied_stage: Optional[str] = None
     safety_rewritten: bool = False
     permission_rewritten: bool = False
+    permission_scope_summary: Optional[Dict[str, Any]] = None
 
 
 def _deny(
@@ -35,6 +37,7 @@ def _deny(
     reason: str,
     reason_code: str,
     denied_stage: str,
+    permission_scope_summary: Optional[Dict[str, Any]] = None,
 ) -> SqlPolicyDecision:
     """构造拒绝结果。"""
 
@@ -46,7 +49,23 @@ def _deny(
         denied_stage=denied_stage,
         safety_rewritten=False,
         permission_rewritten=False,
+        permission_scope_summary=permission_scope_summary,
     )
+
+
+def _build_permission_scope_summary(user_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    """构建权限范围摘要，失败时降级为 None，不影响主链路。"""
+
+    if not user_id:
+        return None
+
+    try:
+        service = get_permission_service()
+        ctx = service.get_user_permission_context(user_id)
+        return service.summarize_permission_scope(ctx)
+    except Exception as e:
+        logger.warning("构建权限范围摘要失败: user_id=%s, error=%s", user_id, e)
+        return None
 
 
 def evaluate_sql_policy(
@@ -97,10 +116,12 @@ def evaluate_sql_policy(
             denied_stage=None,
             safety_rewritten=safety_rewritten,
             permission_rewritten=False,
+            permission_scope_summary=None,
         )
 
     rewritten_sql, is_allowed, permission_error = check_and_rewrite_sql(safe_sql, user_id)
     permission_rewritten = rewritten_sql != safe_sql
+    permission_scope_summary = _build_permission_scope_summary(user_id)
     if not is_allowed:
         logger.warning(
             "SQL 权限策略拒绝: user_id=%s, reason=%s",
@@ -112,6 +133,7 @@ def evaluate_sql_policy(
             reason=permission_error or "权限检查失败",
             reason_code="permission_rejected",
             denied_stage="permission",
+            permission_scope_summary=permission_scope_summary,
         )
 
     return SqlPolicyDecision(
@@ -122,6 +144,7 @@ def evaluate_sql_policy(
         denied_stage=None,
         safety_rewritten=safety_rewritten,
         permission_rewritten=permission_rewritten,
+        permission_scope_summary=permission_scope_summary,
     )
 
 

@@ -35,11 +35,19 @@ def test_policy_allow_without_user(mock_sanitize_sql):
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
+@patch("app.ai.utils.sql_policy_decision._build_permission_scope_summary")
 @patch("app.ai.utils.sql_policy_decision.sanitize_sql")
-def test_policy_denied_by_permission(mock_sanitize_sql, mock_check_and_rewrite_sql):
+def test_policy_denied_by_permission(
+    mock_sanitize_sql,
+    mock_build_permission_scope_summary,
+    mock_check_and_rewrite_sql,
+):
     """权限检查拒绝时应返回 permission 阶段拒绝。"""
 
     mock_sanitize_sql.return_value = ("SELECT * FROM t", True, None)
+    mock_build_permission_scope_summary.return_value = {
+        "display_text": "机构：广州分行（440100）",
+    }
     mock_check_and_rewrite_sql.return_value = (
         "SELECT * FROM t",
         False,
@@ -55,11 +63,21 @@ def test_policy_denied_by_permission(mock_sanitize_sql, mock_check_and_rewrite_s
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
+@patch("app.ai.utils.sql_policy_decision._build_permission_scope_summary")
 @patch("app.ai.utils.sql_policy_decision.sanitize_sql")
-def test_policy_allow_with_rewritten_sql(mock_sanitize_sql, mock_check_and_rewrite_sql):
+def test_policy_allow_with_rewritten_sql(
+    mock_sanitize_sql,
+    mock_build_permission_scope_summary,
+    mock_check_and_rewrite_sql,
+):
     """安全与权限通过时应返回重写后的 SQL。"""
 
     mock_sanitize_sql.return_value = ("SELECT * FROM t LIMIT 1000", True, None)
+    mock_build_permission_scope_summary.return_value = {
+        "org_code": "440100",
+        "org_name": "广州分行",
+        "display_text": "机构：广州分行（440100）",
+    }
     mock_check_and_rewrite_sql.return_value = (
         "SELECT * FROM t WHERE org_code = '001' LIMIT 1000",
         True,
@@ -72,14 +90,25 @@ def test_policy_allow_with_rewritten_sql(mock_sanitize_sql, mock_check_and_rewri
     assert decision.reason_code == "allowed"
     assert "org_code" in decision.rewritten_sql
     assert decision.permission_rewritten is True
+    assert decision.permission_scope_summary is not None
+    assert decision.permission_scope_summary.get("display_text") == "机构：广州分行（440100）"
 
 
 @patch("app.ai.utils.sql_policy_decision.check_and_rewrite_sql")
+@patch("app.ai.utils.sql_policy_decision._build_permission_scope_summary")
 @patch("app.ai.utils.sql_policy_decision.sanitize_sql")
-def test_policy_reject_when_dept_code_missing(mock_sanitize_sql, mock_check_and_rewrite_sql):
+def test_policy_reject_when_dept_code_missing(
+    mock_sanitize_sql,
+    mock_build_permission_scope_summary,
+    mock_check_and_rewrite_sql,
+):
     """dept_code 缺失时应返回可解释拒绝原因。"""
 
     mock_sanitize_sql.return_value = ("SELECT * FROM t", True, None)
+    mock_build_permission_scope_summary.return_value = {
+        "org_code": "440100",
+        "org_name": "广州分行",
+    }
     mock_check_and_rewrite_sql.return_value = (
         "SELECT * FROM t",
         False,

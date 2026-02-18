@@ -261,6 +261,57 @@ class PermissionService:
             f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
         )
 
+    @staticmethod
+    def _compose_scope_display(label: str, name: str, code: str) -> Optional[str]:
+        """组装机构/部门展示文案。"""
+
+        clean_name = name.strip()
+        clean_code = code.strip()
+
+        if clean_name and clean_code:
+            return f"{label}：{clean_name}（{clean_code}）"
+        if clean_name:
+            return f"{label}：{clean_name}"
+        if clean_code:
+            return f"{label}代码：{clean_code}"
+        return None
+
+    def summarize_permission_scope(self, ctx: UserPermissionContext) -> dict:
+        """汇总当前用户的权限范围，用于前端与解释文本展示。"""
+
+        org_code = str(ctx.org_code or "").strip()
+        org_name = str(ctx.org_name or "").strip()
+        dept_code = str(ctx.dept_code or "").strip()
+        dept_name = str(ctx.dept_name or "").strip()
+
+        row_scope_keys = sorted(
+            key
+            for key, filters in ctx.row_filters.items()
+            if filters
+        )
+        has_explicit_row_filters = bool(row_scope_keys)
+
+        display_parts: list[str] = []
+        org_text = self._compose_scope_display("机构", org_name, org_code)
+        dept_text = self._compose_scope_display("部门", dept_name, dept_code)
+        if org_text:
+            display_parts.append(org_text)
+        if dept_text:
+            display_parts.append(dept_text)
+        if not display_parts and has_explicit_row_filters:
+            display_parts.append("已命中预设行级权限规则")
+
+        return {
+            "data_role": ctx.data_role,
+            "org_code": org_code or None,
+            "org_name": org_name or None,
+            "dept_code": dept_code or None,
+            "dept_name": dept_name or None,
+            "has_explicit_row_filters": has_explicit_row_filters,
+            "row_scope_keys": row_scope_keys,
+            "display_text": "；".join(display_parts) if display_parts else None,
+        }
+
     def _evaluate_table_access(
         self,
         ctx: UserPermissionContext,

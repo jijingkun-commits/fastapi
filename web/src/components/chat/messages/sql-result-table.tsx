@@ -16,6 +16,8 @@ interface SqlResultTableProps {
   rows: Record<string, any>[];
   totalRows: number;
   sql?: string;
+  permissionScopeApplied?: boolean;
+  permissionScopeText?: string;
 }
 
 /** 格式化数值：大数字转亿/万 */
@@ -31,8 +33,20 @@ function formatValue(value: any): string {
   return String(value);
 }
 
-export function SqlResultTable({ columns, columnDisplayNames, rows, totalRows, sql }: SqlResultTableProps) {
+export function SqlResultTable({
+  columns,
+  columnDisplayNames,
+  rows,
+  totalRows,
+  sql,
+  permissionScopeApplied,
+  permissionScopeText,
+}: SqlResultTableProps) {
   const [showSql, setShowSql] = useState(false);
+  const normalizedScopeText = (permissionScopeText || "").trim();
+  const resolvedScopeHint = normalizedScopeText.length > 0
+    ? normalizedScopeText
+    : "结果已按当前账号的数据权限范围（机构/部门）过滤";
 
   if (!rows || rows.length === 0) {
     return (
@@ -44,6 +58,12 @@ export function SqlResultTable({ columns, columnDisplayNames, rows, totalRows, s
 
   return (
     <div className="rounded-lg border border-gray-200 overflow-hidden">
+      {permissionScopeApplied && (
+        <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+          注：{resolvedScopeHint}。
+        </div>
+      )}
+
       {/* 表格 */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

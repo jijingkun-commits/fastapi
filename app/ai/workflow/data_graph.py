@@ -2522,6 +2522,9 @@ def sql_safety_check(state: DataAgentState) -> Dict:
     if user_id:
         updated_query_context["permission_checked"] = True
         updated_query_context["permission_rewritten"] = bool(getattr(decision, "permission_rewritten", False))
+        scope_summary = getattr(decision, "permission_scope_summary", None)
+        if isinstance(scope_summary, dict):
+            updated_query_context["permission_scope_summary"] = scope_summary
         updated_query_context["sql_policy_reason_code"] = decision.reason_code
 
     if not decision.is_allowed:
@@ -3281,6 +3284,9 @@ def sql_execute(state: DataAgentState) -> Dict:
         query_context = state.get("query_context", {})
         question = query_context.get("original_question", "")
         permission_rewritten = bool(query_context.get("permission_rewritten")) if isinstance(query_context, dict) else False
+        permission_scope_summary = query_context.get("permission_scope_summary") if isinstance(query_context, dict) else None
+        if not isinstance(permission_scope_summary, dict):
+            permission_scope_summary = None
 
         # 可视化增强：在 sql_result 中附带前端可直接消费的 chart 规格（可选）
         chart_payload = _build_sql_result_chart_payload(
@@ -3296,7 +3302,14 @@ def sql_execute(state: DataAgentState) -> Dict:
         if rewrite_note:
             interpretation = f"ℹ️ 已自动调整查询策略：{rewrite_note}。\n\n{interpretation}"
         if permission_rewritten:
-            interpretation = f"{interpretation}\n\n注：结果已按当前账号的数据权限范围（机构/部门）过滤。"
+            scope_text = None
+            if permission_scope_summary:
+                scope_text = str(permission_scope_summary.get("display_text") or "").strip()
+
+            if scope_text:
+                interpretation = f"{interpretation}\n\n注：结果已按当前账号的数据权限范围过滤（{scope_text}）。"
+            else:
+                interpretation = f"{interpretation}\n\n注：结果已按当前账号的数据权限范围（机构/部门）过滤。"
         
         # 构建响应消息
         response_msg = create_ai_message(
@@ -3314,6 +3327,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                     "iterations": iterations,  # 记录重试次数
                     "chart": chart_payload,
                     "permission_scope_applied": permission_rewritten,
+                    "permission_scope_summary": permission_scope_summary,
                 }
             }
         )
@@ -3328,6 +3342,7 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "display_sql": display_sql,
                 "chart": chart_payload,
                 "permission_scope_applied": permission_rewritten,
+                "permission_scope_summary": permission_scope_summary,
             },
             message=interpretation,
             node="sql_execute"

@@ -1144,6 +1144,7 @@ sequenceDiagram
 - `column_display_names`: 与 `columns` 索引对齐的表头显示名列表
 - `display_sql`: SQL 折叠区展示字符串（可能包含中文别名）
 - `chart`（可选）: 前端交互图规格（`type/x_key/y_key/data/field_meta`），用于“图表补充回合”直出图形
+- `permission_scope_summary`（可选）: 权限范围摘要（机构/部门代码与名称），用于解释文本与前端提示统一口径
 
 设计原则：
 
@@ -2021,7 +2022,8 @@ graph TD
 
 - 机构层级默认策略保持不变：机构图表场景未明确层级时默认 `分行`，并在 `query_context.used_default_org_level=true` 留痕。
 - SQL 仍统一经过 `sql_safety_check -> evaluate_sql_policy`：表级、行级、列级权限先于执行生效。
-- 当权限重写实际生效（`permission_rewritten=true`）时，`sql_execute` 会在解释文本与结果载荷里标注“已按当前账号机构/部门权限过滤”，降低口径误读风险。
+- 当权限重写实际生效（`permission_rewritten=true`）时，`sql_execute` 优先使用 `permission_scope_summary.display_text` 输出具体范围（例如“机构：广州分行（440100）；部门：公司金融部（A012）”），避免只提示“已过滤”但无法判断口径。
+- `permission_scope_summary` 由 `evaluate_sql_policy` 基于 `UserPermissionContext` 统一构建并透传到 `query_context` 与 `sql_result.data`，避免在执行层重复拼装权限语义。
 
 ### 8. 落地顺序（已执行）
 

@@ -109,6 +109,44 @@ def test_sql_execute_builds_bar_chart_for_customer_amount(monkeypatch):
     assert field_meta["贷款金额"]["axis_hint"] == "y"
 
 
+def test_sql_execute_includes_permission_scope_summary_in_message_payload(monkeypatch):
+    """权限重写生效时应在 sql_result 中返回范围摘要，并在解释中体现。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    rows = [{"贷款余额": 100.0}]
+    columns = ["贷款余额"]
+
+    _setup_common_patches(monkeypatch, module, rows=rows, columns=columns)
+
+    state = {
+        "generated_sql": "SELECT 贷款余额 FROM t_demo",
+        "query_context": {
+            "original_question": "查询本月贷款余额",
+            "permission_rewritten": True,
+            "permission_scope_summary": {
+                "display_text": "机构：广州分行（440100）；部门：公司金融部（A012）",
+            },
+        },
+        "data_intent": "metric_query",
+        "sql_source": "vanna_rag",
+        "iterations": 1,
+    }
+
+    output = module.sql_execute(state)
+    messages = output.get("messages") or []
+    assert messages
+
+    ai_message = messages[0]
+    text = getattr(ai_message, "content", "")
+    assert "机构：广州分行（440100）；部门：公司金融部（A012）" in text
+
+    payload = getattr(ai_message, "additional_kwargs", {}).get("data", {})
+    assert payload.get("permission_scope_applied") is True
+    assert payload.get("permission_scope_summary", {}).get("display_text") == (
+        "机构：广州分行（440100）；部门：公司金融部（A012）"
+    )
+
+
 def test_sql_execute_builds_line_chart_for_date_amount(monkeypatch):
     """viz_type=折线图 + 日期/金额两列，生成 line 图表。"""
     module = importlib.import_module("app.ai.workflow.data_graph")

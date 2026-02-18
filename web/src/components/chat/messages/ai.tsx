@@ -222,6 +222,10 @@ export function AssistantMessage({
                   rows={sqlResultData.rows as Record<string, any>[]}
                   totalRows={sqlResultData.total_rows as number}
                   sql={(sqlResultData.display_sql as string) || (sqlResultData.sql as string)}
+                  permissionScopeApplied={Boolean(sqlResultData.permission_scope_applied)}
+                  permissionScopeText={
+                    (sqlResultData.permission_scope_summary as { display_text?: string } | undefined)?.display_text
+                  }
                 />
               </>
             )}

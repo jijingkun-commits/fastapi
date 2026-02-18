@@ -179,6 +179,17 @@ export interface SqlResultData {
     sql?: string;
     display_sql?: string;
     column_display_names?: string[];
+    permission_scope_applied?: boolean;
+    permission_scope_summary?: {
+        data_role?: string;
+        org_code?: string;
+        org_name?: string;
+        dept_code?: string;
+        dept_name?: string;
+        has_explicit_row_filters?: boolean;
+        row_scope_keys?: string[];
+        display_text?: string;
+    };
     chart?: SqlResultChartData;
 }
 

@@ -295,3 +295,45 @@ def test_get_row_filters_for_table_appends_default_dept_when_no_explicit_filter(
     filters = permission_service.get_row_filters_for_table(ctx, "fdmdata", "any_table")
 
     assert filters == [("dept_code", "=", "D001")]
+
+
+def test_summarize_permission_scope_prefers_org_and_dept_display(
+    permission_service: PermissionService,
+):
+    """权限范围摘要应输出可读机构/部门文案。"""
+
+    ctx = UserPermissionContext(
+        user_id=11,
+        data_role="staff",
+        org_code="440100",
+        org_name="广州分行",
+        dept_code="A012",
+        dept_name="公司金融部",
+        row_filters={"fdmdata.*": [("dept_code", "=", "A012")]},
+    )
+
+    summary = permission_service.summarize_permission_scope(ctx)
+
+    assert summary["data_role"] == "staff"
+    assert summary["org_code"] == "440100"
+    assert summary["dept_code"] == "A012"
+    assert summary["has_explicit_row_filters"] is True
+    assert summary["row_scope_keys"] == ["fdmdata.*"]
+    assert summary["display_text"] == "机构：广州分行（440100）；部门：公司金融部（A012）"
+
+
+def test_summarize_permission_scope_falls_back_to_rule_hint(
+    permission_service: PermissionService,
+):
+    """缺少机构/部门信息时，仍应给出规则级别提示。"""
+
+    ctx = UserPermissionContext(
+        user_id=12,
+        data_role="staff",
+        row_filters={"fdmdata.f_mid_dep_tb": [("org_no", "=", "440100")]},
+    )
+
+    summary = permission_service.summarize_permission_scope(ctx)
+
+    assert summary["has_explicit_row_filters"] is True
+    assert summary["display_text"] == "已命中预设行级权限规则"
