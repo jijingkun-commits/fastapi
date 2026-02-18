@@ -126,6 +126,42 @@ def _extract_tables_with_schema(sql: str) -> List[Tuple[str, str]]:
     return list(set(tables))
 
 
+def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
+    """提取 SQL 中每个表可用的限定符（别名优先）。
+
+    返回结构：{(schema, table): [qualifier1, qualifier2, ...]}
+    - qualifier 为 SQL 中可直接用于 `qualifier.column` 的前缀
+    - 若表存在别名，优先使用别名；否则使用表名
+    """
+    qualifiers: Dict[Tuple[str, str], List[str]] = {}
+
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="postgres")
+
+        for table in parsed.find_all(exp.Table):
+            schema = (table.db or "public").lower()
+            table_name = (table.name or "").lower()
+            if not table_name:
+                continue
+
+            qualifier = table.alias_or_name or table.name
+            qualifier = str(qualifier or "").strip()
+            if not qualifier:
+                continue
+
+            key = (schema, table_name)
+            if key not in qualifiers:
+                qualifiers[key] = []
+            if qualifier not in qualifiers[key]:
+                qualifiers[key].append(qualifier)
+
+    except ParseError:
+        # 解析失败时回退到默认行为（使用表名本身作为限定符）
+        return {}
+
+    return qualifiers
+
+
 def _extract_tables_regex(sql: str) -> List[Tuple[str, str]]:
     """正则提取表名（降级方案）。"""
     tables = []
@@ -185,6 +221,7 @@ def _inject_row_filters(
         注入过滤条件后的 SQL
     """
     service = get_permission_service()
+    table_qualifiers = _extract_table_qualifiers(sql)
     
     # 收集所有过滤条件
     all_filters: List[str] = []
@@ -192,22 +229,27 @@ def _inject_row_filters(
     for schema, table in tables:
         filters = service.get_row_filters_for_table(user_context, schema, table)
         
-        for column, operator, value in filters:
-            # 转义值，防止 SQL 注入
-            escaped_value = _escape_sql_value(value)
-            
-            # 构建过滤条件
-            if operator.upper() == "IN":
-                # IN 操作符：值应该是逗号分隔的列表
-                values = [f"'{_escape_sql_value(v.strip())}'" for v in value.split(",")]
-                condition = f"{table}.{column} IN ({', '.join(values)})"
-            elif operator.upper() == "LIKE":
-                condition = f"{table}.{column} LIKE '{escaped_value}'"
-            else:
-                # 默认 = 操作符
-                condition = f"{table}.{column} = '{escaped_value}'"
-            
-            all_filters.append(condition)
+        qualifiers = table_qualifiers.get((schema, table), [table])
+
+        for qualifier in qualifiers:
+            for column, operator, value in filters:
+                # 转义值，防止 SQL 注入
+                escaped_value = _escape_sql_value(value)
+
+                # 构建过滤条件（优先使用表别名，避免 Postgres FROM-clause 错误）
+                qualified_column = f"{qualifier}.{column}"
+
+                if operator.upper() == "IN":
+                    # IN 操作符：值应该是逗号分隔的列表
+                    values = [f"'{_escape_sql_value(v.strip())}'" for v in value.split(",")]
+                    condition = f"{qualified_column} IN ({', '.join(values)})"
+                elif operator.upper() == "LIKE":
+                    condition = f"{qualified_column} LIKE '{escaped_value}'"
+                else:
+                    # 默认 = 操作符
+                    condition = f"{qualified_column} = '{escaped_value}'"
+
+                all_filters.append(condition)
 
     deduped_filters = list(dict.fromkeys(all_filters))
 

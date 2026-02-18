@@ -216,6 +216,54 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         self.assertIn("org_code", rewritten)
         self.assertIn("ORG001", rewritten)
 
+
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_row_filter_injection_uses_alias_qualifier(self, mock_get_service):
+        """测试行级过滤在表有别名时使用别名，避免 FROM-clause 报错。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+        mock_service.check_table_access.return_value = (True, None)
+        mock_service.get_row_filters_for_table.return_value = [("dept_code", "=", "DEPT001")]
+        mock_service.get_masked_columns_for_table.return_value = {}
+        mock_get_service.return_value = mock_service
+
+        ctx = UserPermissionContext(
+            user_id=1,
+            data_role="staff",
+            dept_code="DEPT001",
+        )
+        sql = "SELECT t.dept_code, SUM(t.bal) FROM fdmdata.orders t GROUP BY t.dept_code"
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertTrue(allowed)
+        self.assertIsNone(error)
+        self.assertIn("t.dept_code = 'DEPT001'", rewritten)
+        self.assertNotIn("orders.dept_code = 'DEPT001'", rewritten)
+
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_row_filter_injection_self_join_rewrites_each_alias(self, mock_get_service):
+        """测试同表多别名 JOIN 时会为每个别名注入过滤条件。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+        mock_service.check_table_access.return_value = (True, None)
+        mock_service.get_row_filters_for_table.return_value = [("dept_code", "=", "D001")]
+        mock_service.get_masked_columns_for_table.return_value = {}
+        mock_get_service.return_value = mock_service
+
+        ctx = UserPermissionContext(user_id=1, data_role="staff", dept_code="D001")
+        sql = (
+            "SELECT a.id FROM fdmdata.orders a "
+            "JOIN fdmdata.orders b ON a.id = b.id"
+        )
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertTrue(allowed)
+        self.assertIsNone(error)
+        self.assertIn("a.dept_code = 'D001'", rewritten)
+        self.assertIn("b.dept_code = 'D001'", rewritten)
+
     def test_default_dept_filter_injection(self):
         """测试默认 dept_code 隔离自动注入。"""
         ctx = UserPermissionContext(
