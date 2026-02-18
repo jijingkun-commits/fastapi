@@ -367,5 +367,44 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertEqual(result.get("query_context", {}).get("org_level"), "分行")
 
 
+    def test_session_frame_should_backfill_context_after_parent_schema_trim(self):
+        """父图裁剪 data 专有字段后，应从 session_frame 回收关键上下文。"""
+        llm_payload = {
+            "intent": "clarification",
+            "metric_name": "",
+            "time_range": "",
+            "filters": [],
+            "dimensions": [],
+            "chart_type": "图表",
+            "clarification_needed": "请补充指标和时间范围",
+        }
+
+        result = self._invoke(
+            "生成图表",
+            llm_payload,
+            session_frame={
+                "metric": "贷款余额",
+                "time_range": "2025-06-30",
+                "dimensions": ["客户"],
+                "chart_type": "图表",
+                "org_level": "分行",
+            },
+            pending_handoff={
+                "target_agent": "data_expert",
+                "task_description": "在上一轮查询结果基础上生成图表。",
+                "turn_act_hint": "SUPPLEMENT",
+            },
+            last_clarify_slot="display_mode",
+            clarify_count=1,
+        )
+
+        self.assertIsNone(result.get("clarification_needed"))
+        self.assertEqual(result.get("matched_metric"), "贷款余额")
+        self.assertEqual(result.get("time_range"), "2025-06-30")
+        self.assertEqual(result.get("turn_act"), "SUPPLEMENT")
+        self.assertEqual(result.get("frame_source_map", {}).get("metric"), "state")
+
+
+
 if __name__ == "__main__":
     unittest.main()

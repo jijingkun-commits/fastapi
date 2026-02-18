@@ -1913,6 +1913,7 @@ Data Agent 采用两层漏斗模型处理用户查询：
 10. **Handoff frame 强优先（2026-02-16）**：`data_graph._extract_handoff_context` 在 `frame` 存在时仅消费结构化字段，`task_description` 仅作为无 frame 时兜底，减少“文本噪声误提取机构层级”的风险。  
 11. **NEW_QUERY 提示优先（2026-02-16）**：当 `turn_act_hint=NEW_QUERY` 且无历史 state 上下文时，禁止将当前轮误判为补充轮（`SUPPLEMENT`）。  
 12. **结构化澄清级别（2026-02-16）**：意图分析输出新增 `clarify_level`（`required|optional`）。当关键槽位已齐备且 `clarify_level=optional` 时，Data Agent 跳过该澄清并继续执行；`required` 仍按澄清流程处理，避免依赖口径关键词硬编码。  
+13. **session_frame 回收兜底（2026-02-18）**：在 MultiAgent 父图状态裁剪导致 `matched_metric/time_range/dimensions/viz_type/query_context` 丢失时，`analyze_data_intent` 会优先从 `session_frame` 回收同义槽位，保障“生成图表/分行”等补充轮延续上一轮已确认上下文。  
 
 #### 相关状态字段（DataAgentState）
 

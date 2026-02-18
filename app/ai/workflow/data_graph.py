@@ -1372,15 +1372,39 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     turn_act = TURN_ACT_NEW_QUERY
 
     # 多轮上下文：state + handoff 融合
-    existing_metric = (state.get("matched_metric") or "").strip()
-    existing_time = (state.get("time_range") or "").strip()
-    existing_dims = _ensure_text_list(state.get("dimensions"))
-    existing_filters = _ensure_text_list(state.get("filters"))
-    existing_viz_type = (state.get("viz_type") or "").strip()
     query_context = state.get("query_context") or {}
-    existing_org_level = ""
-    if isinstance(query_context, dict):
-        existing_org_level = str(query_context.get("org_level") or "").strip()
+    if not isinstance(query_context, dict):
+        query_context = {}
+
+    session_frame = state.get("session_frame")
+    if not isinstance(session_frame, dict):
+        session_frame = {}
+
+    # 关键：在 MultiAgent 父图中，data 专有字段（matched_metric/time_range）可能被 schema 裁剪；
+    # 这里优先回收 session_frame 中的同义槽位，保证“生成图表”这类补充轮能继承上一轮信息。
+    session_metric = _pick_first_non_empty_str(
+        session_frame.get("metric"),
+        session_frame.get("metric_name"),
+    )
+    session_time = _pick_first_non_empty_str(session_frame.get("time_range"))
+    session_dims = _ensure_text_list(session_frame.get("dimensions"))
+    session_filters = _ensure_text_list(session_frame.get("filters"))
+    session_chart_type = _pick_first_non_empty_str(session_frame.get("chart_type"))
+    session_org_level = _pick_first_non_empty_str(session_frame.get("org_level"))
+
+    existing_metric = _pick_first_non_empty_str(state.get("matched_metric"), session_metric)
+    existing_time = _pick_first_non_empty_str(state.get("time_range"), session_time)
+    existing_dims = _pick_first_non_empty_list(
+        _ensure_text_list(state.get("dimensions")),
+        session_dims,
+    )
+    existing_filters = _pick_first_non_empty_list(
+        _ensure_text_list(state.get("filters")),
+        session_filters,
+    )
+    existing_viz_type = _pick_first_non_empty_str(state.get("viz_type"), session_chart_type)
+    existing_org_level = _pick_first_non_empty_str(query_context.get("org_level"), session_org_level)
+    existing_query_question = str(query_context.get("original_question") or "").strip()
 
     handoff_context = _extract_handoff_context(state)
     handoff_metric = str(handoff_context.get("metric_name") or "").strip()
@@ -1397,7 +1421,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         existing_time,
         existing_dims,
         existing_filters,
-        str(query_context.get("original_question") or "").strip() if isinstance(query_context, dict) else "",
+        existing_query_question,
     ])
 
     has_handoff_context = any([
