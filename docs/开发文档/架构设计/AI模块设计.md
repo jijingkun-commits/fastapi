@@ -1313,6 +1313,7 @@ flowchart TB
    - 当同一张表同时命中 `schema.table` 与 `schema.*` 规则时，`schema.table` 精确规则优先，避免叠加出冲突过滤条件。
 2. 仅当当前表未命中任何显式行级规则时，才回退注入默认部门隔离条件 `dept_code = user.dept_code`。
 3. `dept_code` 缺失导致的上下文拒绝仅在“无显式行级规则可用”时触发，避免与角色已配置规则冲突。
+4. SQL 重写阶段会基于 `t_meta_columns` 校验过滤字段是否存在；若 `dept_cd/dept_code/org_cd/org_no` 等同义字段存在，自动映射到可用字段；若无可用字段则直接拒绝，避免执行期抛出 `UndefinedColumn`。
 
 **权限上下文**（新文件 `app/ai/utils/permission_context.py`）：
 

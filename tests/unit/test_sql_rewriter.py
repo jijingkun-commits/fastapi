@@ -216,9 +216,9 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         self.assertIn("org_code", rewritten)
         self.assertIn("ORG001", rewritten)
 
-
+    @patch('app.ai.utils.sql_rewriter._load_table_columns_map')
     @patch('app.ai.utils.sql_rewriter.get_permission_service')
-    def test_row_filter_injection_uses_alias_qualifier(self, mock_get_service):
+    def test_row_filter_injection_uses_alias_qualifier(self, mock_get_service, mock_load_columns):
         """测试行级过滤在表有别名时使用别名，避免 FROM-clause 报错。"""
         mock_service = MagicMock()
         mock_service.validate_query_context.return_value = (True, None)
@@ -226,6 +226,7 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         mock_service.get_row_filters_for_table.return_value = [("dept_code", "=", "DEPT001")]
         mock_service.get_masked_columns_for_table.return_value = {}
         mock_get_service.return_value = mock_service
+        mock_load_columns.return_value = {("fdmdata", "orders"): {"dept_code", "bal"}}
 
         ctx = UserPermissionContext(
             user_id=1,
@@ -241,28 +242,49 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         self.assertIn("t.dept_code = 'DEPT001'", rewritten)
         self.assertNotIn("orders.dept_code = 'DEPT001'", rewritten)
 
+    @patch('app.ai.utils.sql_rewriter._load_table_columns_map')
     @patch('app.ai.utils.sql_rewriter.get_permission_service')
-    def test_row_filter_injection_self_join_rewrites_each_alias(self, mock_get_service):
-        """测试同表多别名 JOIN 时会为每个别名注入过滤条件。"""
+    def test_row_filter_injection_maps_compatible_column(self, mock_get_service, mock_load_columns):
+        """测试过滤列不存在时自动映射到兼容字段。"""
         mock_service = MagicMock()
         mock_service.validate_query_context.return_value = (True, None)
         mock_service.check_table_access.return_value = (True, None)
-        mock_service.get_row_filters_for_table.return_value = [("dept_code", "=", "D001")]
+        mock_service.get_row_filters_for_table.return_value = [("dept_cd", "=", "00808")]
         mock_service.get_masked_columns_for_table.return_value = {}
         mock_get_service.return_value = mock_service
+        mock_load_columns.return_value = {("fdmdata", "f_mid_loan_tb"): {"org_cd", "data_dt", "prin_bal"}}
 
-        ctx = UserPermissionContext(user_id=1, data_role="staff", dept_code="D001")
-        sql = (
-            "SELECT a.id FROM fdmdata.orders a "
-            "JOIN fdmdata.orders b ON a.id = b.id"
-        )
+        ctx = UserPermissionContext(user_id=1, data_role="staff", dept_code="00808")
+        sql = "SELECT l.data_dt, SUM(l.prin_bal) FROM fdmdata.f_mid_loan_tb l GROUP BY l.data_dt"
 
         rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
 
         self.assertTrue(allowed)
         self.assertIsNone(error)
-        self.assertIn("a.dept_code = 'D001'", rewritten)
-        self.assertIn("b.dept_code = 'D001'", rewritten)
+        self.assertIn("l.org_cd = '00808'", rewritten)
+        self.assertNotIn("dept_cd", rewritten)
+
+    @patch('app.ai.utils.sql_rewriter._load_table_columns_map')
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_row_filter_injection_rejects_when_no_compatible_column(self, mock_get_service, mock_load_columns):
+        """测试过滤列缺失且无兼容字段时直接拒绝，避免 SQL 运行时报错。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+        mock_service.check_table_access.return_value = (True, None)
+        mock_service.get_row_filters_for_table.return_value = [("dept_cd", "=", "00808")]
+        mock_service.get_masked_columns_for_table.return_value = {}
+        mock_get_service.return_value = mock_service
+        mock_load_columns.return_value = {("fdmdata", "f_mid_loan_tb"): {"data_dt", "prin_bal"}}
+
+        ctx = UserPermissionContext(user_id=1, data_role="staff", dept_code="00808")
+        sql = "SELECT l.data_dt, SUM(l.prin_bal) FROM fdmdata.f_mid_loan_tb l GROUP BY l.data_dt"
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rewritten, sql)
+        self.assertIn("缺少过滤字段", error)
+        self.assertIn("dept_cd", error)
 
     def test_default_dept_filter_injection(self):
         """测试默认 dept_code 隔离自动注入。"""

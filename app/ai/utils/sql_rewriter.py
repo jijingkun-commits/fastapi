@@ -9,7 +9,7 @@
 """
 import re
 import logging
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional, List, Dict, Set
 
 import sqlglot
 from sqlglot import exp
@@ -19,6 +19,19 @@ from app.ai.utils.permission_context import UserPermissionContext
 from app.services.permission_service import get_permission_service
 
 logger = logging.getLogger(__name__)
+
+
+COMPATIBLE_FILTER_COLUMNS: Dict[str, Tuple[str, ...]] = {
+    "dept_code": ("dept_cd", "org_code", "org_cd", "org_no", "legal_org_cd"),
+    "dept_cd": ("dept_code", "org_code", "org_cd", "org_no", "legal_org_cd"),
+    "org_code": ("org_cd", "org_no", "legal_org_cd", "dept_code", "dept_cd"),
+    "org_cd": ("org_code", "org_no", "legal_org_cd", "dept_code", "dept_cd"),
+    "org_no": ("org_cd", "org_code", "legal_org_cd", "dept_code", "dept_cd"),
+}
+
+
+class PermissionFilterRewriteError(ValueError):
+    """行级过滤重写失败。"""
 
 
 def _escape_sql_value(value: str) -> str:
@@ -95,6 +108,9 @@ def rewrite_sql_with_permissions(
         logger.warning(f"SQL 解析失败，跳过权限重写: {e}")
         # 解析失败时，仍然检查基本的表权限
         return _fallback_permission_check(sql, user_context)
+    except PermissionFilterRewriteError as e:
+        logger.warning("SQL 行级过滤重写拒绝: user_id=%s, reason=%s", user_context.user_id, e)
+        return (sql, False, str(e))
     except Exception as e:
         logger.error(f"SQL 权限重写异常: {e}", exc_info=True)
         return (sql, False, f"权限检查失败: {str(e)}")
@@ -124,6 +140,7 @@ def _extract_tables_with_schema(sql: str) -> List[Tuple[str, str]]:
         tables = _extract_tables_regex(sql)
     
     return list(set(tables))
+
 
 
 def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
@@ -160,6 +177,82 @@ def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
         return {}
 
     return qualifiers
+
+
+def _load_table_columns_map(tables: List[Tuple[str, str]]) -> Dict[Tuple[str, str], Set[str]]:
+    """加载表字段元数据（来自 chat_db 元数据表）。"""
+    normalized_tables = sorted(set(tables))
+    if not normalized_tables:
+        return {}
+
+    table_names = [f"{schema}.{table}" for schema, table in normalized_tables]
+
+    from sqlalchemy import text
+
+    from app.db.session import engine
+
+    query = text(
+        """
+        SELECT
+            LOWER(COALESCE(t.schema_name, 'public')) AS schema_name,
+            LOWER(t.table_name) AS table_name,
+            LOWER(c.column_name) AS column_name
+        FROM t_meta_columns c
+        JOIN t_meta_tables t ON t.id = c.table_id
+        WHERE LOWER(COALESCE(t.schema_name, 'public') || '.' || t.table_name) = ANY(:table_names)
+        """
+    )
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(query, {"table_names": table_names}).fetchall()
+    except Exception as e:
+        logger.warning("加载字段元数据失败，跳过过滤列校验: %s", e)
+        return {}
+
+    column_map: Dict[Tuple[str, str], Set[str]] = {}
+    for row in rows:
+        schema_name = str(row.schema_name or "").strip().lower()
+        table_name = str(row.table_name or "").strip().lower()
+        column_name = str(row.column_name or "").strip().lower()
+        if not schema_name or not table_name or not column_name:
+            continue
+
+        key = (schema_name, table_name)
+        if key not in column_map:
+            column_map[key] = set()
+        column_map[key].add(column_name)
+
+    return column_map
+
+
+def _resolve_filter_column(
+    *,
+    schema: str,
+    table: str,
+    configured_column: str,
+    table_columns: Optional[Set[str]],
+) -> Tuple[Optional[str], Optional[str]]:
+    """解析过滤字段，优先原字段，其次兼容字段映射。"""
+    normalized_column = str(configured_column or "").strip().lower()
+    if not normalized_column:
+        return (None, "过滤字段为空")
+
+    if not table_columns:
+        # 元数据缺失时保持原行为，避免误拒绝。
+        return (normalized_column, None)
+
+    if normalized_column in table_columns:
+        return (normalized_column, None)
+
+    for candidate in COMPATIBLE_FILTER_COLUMNS.get(normalized_column, ()):  # 兼容字段兜底
+        if candidate in table_columns:
+            return (candidate, f"字段 {normalized_column} 不存在，改用兼容字段 {candidate}")
+
+    return (
+        None,
+        f"表 {schema}.{table} 缺少过滤字段 {normalized_column}，且无可用兼容字段",
+    )
 
 
 def _extract_tables_regex(sql: str) -> List[Tuple[str, str]]:
@@ -206,39 +299,61 @@ def _check_table_permissions(
 
 
 def _inject_row_filters(
-    sql: str, 
-    tables: List[Tuple[str, str]], 
+    sql: str,
+    tables: List[Tuple[str, str]],
     user_context: UserPermissionContext
 ) -> str:
     """注入行级过滤条件（RLS）。
-    
+
     Args:
         sql: 原始 SQL
         tables: 表列表
         user_context: 用户权限上下文
-        
+
     Returns:
         注入过滤条件后的 SQL
     """
     service = get_permission_service()
     table_qualifiers = _extract_table_qualifiers(sql)
-    
+    table_columns_map = _load_table_columns_map(tables)
+
     # 收集所有过滤条件
     all_filters: List[str] = []
-    
+
     for schema, table in tables:
         filters = service.get_row_filters_for_table(user_context, schema, table)
-        
+        if not filters:
+            continue
+
         qualifiers = table_qualifiers.get((schema, table), [table])
+        table_columns = table_columns_map.get((schema, table))
 
         for qualifier in qualifiers:
             for column, operator, value in filters:
+                resolved_column, resolve_hint = _resolve_filter_column(
+                    schema=schema,
+                    table=table,
+                    configured_column=column,
+                    table_columns=table_columns,
+                )
+                if resolved_column is None:
+                    raise PermissionFilterRewriteError(resolve_hint or "行级过滤字段不可用")
+
+                if resolve_hint:
+                    logger.warning(
+                        "行级规则字段自动映射: user_id=%s, table=%s.%s, alias=%s, %s",
+                        user_context.user_id,
+                        schema,
+                        table,
+                        qualifier,
+                        resolve_hint,
+                    )
+
                 # 转义值，防止 SQL 注入
                 escaped_value = _escape_sql_value(value)
+                qualified_column = f"{qualifier}.{resolved_column}"
 
-                # 构建过滤条件（优先使用表别名，避免 Postgres FROM-clause 错误）
-                qualified_column = f"{qualifier}.{column}"
-
+                # 构建过滤条件
                 if operator.upper() == "IN":
                     # IN 操作符：值应该是逗号分隔的列表
                     values = [f"'{_escape_sql_value(v.strip())}'" for v in value.split(",")]
@@ -255,10 +370,10 @@ def _inject_row_filters(
 
     if not deduped_filters:
         return sql
-    
+
     # 注入 WHERE 条件
     filter_clause = " AND ".join(deduped_filters)
-    
+
     # 使用 sqlglot 注入（更安全）
     try:
         return _inject_where_clause_sqlglot(sql, filter_clause)
