@@ -156,6 +156,30 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertIsNone(result.get("matched_metric"))
         self.assertIsNone(result.get("time_range"))
 
+    def test_schema_metadata_query_should_not_require_metric_and_time(self):
+        """库表元数据查询应走 schema 路由，不应被追问指标和时间。"""
+        llm_payload = {
+            "intent": "clarification",
+            "metric_name": "",
+            "time_range": "",
+            "filters": [],
+            "dimensions": [],
+            "chart_type": "",
+            "clarification_needed": "请补充指标和时间范围",
+        }
+
+        result = self._invoke("查询我数据库中一共有几张表", llm_payload)
+
+        self.assertIsNone(result.get("clarification_needed"))
+        self.assertEqual(result.get("data_intent"), "free_query")
+        self.assertIsNone(result.get("matched_metric"))
+        self.assertIsNone(result.get("time_range"))
+        self.assertTrue(result.get("query_context", {}).get("is_schema_metadata_query"))
+        self.assertEqual(
+            result.get("query_context", {}).get("clarify_reason"),
+            "skip_metric_time_clarify_for_metadata_query",
+        )
+
     def test_handoff_task_description_can_restore_context(self):
         """handoff.task_description 含完整上下文时，应被正确继承。"""
         llm_payload = {

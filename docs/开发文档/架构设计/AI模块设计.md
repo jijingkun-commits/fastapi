@@ -1913,12 +1913,14 @@ Data Agent 采用两层漏斗模型处理用户查询：
 10. **Handoff frame 强优先（2026-02-16）**：`data_graph._extract_handoff_context` 在 `frame` 存在时仅消费结构化字段，`task_description` 仅作为无 frame 时兜底，减少“文本噪声误提取机构层级”的风险。  
 11. **NEW_QUERY 提示优先（2026-02-16）**：当 `turn_act_hint=NEW_QUERY` 且无历史 state 上下文时，禁止将当前轮误判为补充轮（`SUPPLEMENT`）。  
 12. **结构化澄清级别（2026-02-16）**：意图分析输出新增 `clarify_level`（`required|optional`）。当关键槽位已齐备且 `clarify_level=optional` 时，Data Agent 跳过该澄清并继续执行；`required` 仍按澄清流程处理，避免依赖口径关键词硬编码。  
+13. **元数据问句免指标时间追问（2026-02-18）**：当用户问题命中库表元数据语义（如“数据库有几张表/有哪些字段”）时，澄清规划器不再要求 `metric/time_range`，并忽略模型回退给出的“补充指标和时间”提示，直接走 `free_query -> schema` 路由。  
 
 #### 相关状态字段（DataAgentState）
 
 - `last_clarify_slot`: 上一轮澄清槽位（`metric/time_range/display_mode/org_level`）
 - `clarify_count`: 当前任务内已澄清次数（用于重复澄清保护）
 - `continuation_mode`: 当前轮是否识别为补充型短回复
+- `is_schema_metadata_query`（query_context）: 当前轮是否识别为库表元数据查询（用于排障与策略观测）
 
 ---
 
