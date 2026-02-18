@@ -25,6 +25,11 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.protocol import (
+    build_result_additional_kwargs_payload,
+    build_operation_additional_kwargs_payload,
+    extract_operation_from_ai_message,
+)
 from app.ai.scene_registry import (
     SCENE_KEY_TODO_DESC_MERGE,
     SCENE_KEY_TODO_INTENT_ANALYSIS,
@@ -42,12 +47,8 @@ from app.ai.exceptions import (
     MissingRequiredFieldError,
 )
 
-# 导入自定义事件工具
-from langgraph.config import get_stream_writer
-from app.ai.events import emit_clarification, emit_token, emit_status, emit_error, emit_result
-
 # 导入统一的状态辅助函数
-from app.ai.utils.state_helpers import get_user_id, get_user_id_optional, get_current_todo_id
+from app.ai.utils.state_helpers import get_user_id_optional, get_current_todo_id
 
 # 导入实体解析节点
 from app.ai.agents.resolve_node import resolve_entity, route_after_resolve
@@ -104,6 +105,22 @@ SUPPLEMENT_EXTERNAL_HINTS = (
 SUPPLEMENT_ACTION_HINTS = (
     "补充", "添加", "加上", "写入", "写到", "备注", "描述", "追加"
 )
+
+MISSING_SLOT_TODO_TARGET = "todo_target"
+MISSING_SLOT_TIME_RANGE = "time_range"
+MISSING_SLOT_TODO_ACTION = "todo_action"
+
+MISSING_SLOT_DISPLAY_LABELS = {
+    MISSING_SLOT_TODO_TARGET: "目标待办",
+    MISSING_SLOT_TIME_RANGE: "时间范围",
+    MISSING_SLOT_TODO_ACTION: "操作动作",
+}
+
+MISSING_SLOT_KEYS = {
+    MISSING_SLOT_TODO_TARGET,
+    MISSING_SLOT_TIME_RANGE,
+    MISSING_SLOT_TODO_ACTION,
+}
 
 
 def _is_out_of_scope_for_todo(message: str) -> bool:
@@ -220,6 +237,84 @@ def _merge_prefilled_extracted_info(
     return merged
 
 
+def _recover_recent_cancelled_create_draft(
+    messages: List[BaseMessage],
+    window: int = 12,
+) -> Optional[Dict[str, Any]]:
+    """从最近消息中恢复“已取消但可继续补充”的创建草稿。"""
+    if not isinstance(messages, list) or not messages:
+        return None
+
+    recent_messages = messages[-window:]
+
+    has_recent_cancel = False
+    for message in reversed(recent_messages):
+        if not isinstance(message, AIMessage):
+            continue
+        content_text = _normalize_text_content(getattr(message, "content", ""))
+        if "已取消操作" in content_text or "取消该操作" in content_text:
+            has_recent_cancel = True
+            break
+
+    if not has_recent_cancel:
+        return None
+
+    for message in reversed(recent_messages):
+        operation = extract_operation_from_ai_message(message)
+        if not isinstance(operation, dict):
+            continue
+
+        action = str(operation.get("action") or "").strip().lower()
+        if action != "create":
+            continue
+
+        data = operation.get("data")
+        if not isinstance(data, dict) or not data:
+            continue
+
+        recovered = canonicalize_extracted_info(data)
+        recovered.pop("todo_id", None)
+        logger.info("恢复最近取消的创建草稿: keys=%s", list(recovered.keys()))
+        return recovered
+
+    return None
+
+
+def _merge_create_draft_with_supplement(
+    draft_data: Dict[str, Any],
+    supplement_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """将用户补充信息并入创建草稿。"""
+    merged = dict(draft_data or {})
+
+    for key, value in (supplement_data or {}).items():
+        if value in (None, "", [], {}):
+            continue
+
+        if key == "description":
+            existing = str(merged.get("description") or "").strip()
+            incoming = str(value).strip()
+            if not incoming:
+                continue
+            if not existing:
+                merged["description"] = incoming
+            elif incoming not in existing:
+                merged["description"] = f"{existing}\n{incoming}"
+            continue
+
+        merged[key] = value
+
+    return merged
+
+
+def _contains_todo_target_missing(missing_slots: List[str]) -> bool:
+    """判断缺项中是否包含“目标待办”类字段。"""
+    for item in missing_slots or []:
+        if _canonicalize_missing_slot(item) == MISSING_SLOT_TODO_TARGET:
+            return True
+    return False
+
+
 # ==================== 状态定义 ====================
 
 class TodoAgentState(TypedDict):
@@ -308,7 +403,10 @@ class IntentResult(BaseModel):
     action_state: str = Field(default="need_confirm", description="下一步动作: need_clarify, need_confirm, ready, cancelled")
     response_message: str = Field(default="", description="LLM生成的自然语言回复")
     extracted_info: Dict = Field(default={}, description="提取的实体信息: title, time, due_date, priority 等")
-    missing_info: List[str] = Field(default=[], description="缺失的关键信息")
+    missing_info: List[str] = Field(
+        default=[],
+        description="缺失的关键信息（仅允许 canonical slot：todo_target/time_range/todo_action）",
+    )
     conflict_risk: str = Field(default="none", description="冲突风险: high, medium, none")
     quick_mode: bool = Field(default=False, description="是否为快速模式")
     context_hints: Dict = Field(default={}, description="上下文线索")
@@ -487,65 +585,89 @@ def _invoke_llm_for_intent(
     }
 
 
-def _normalize_missing_info(value: Optional[List]) -> List[str]:
-    """规范化 missing_info 列表。"""
+def _normalize_missing_slot_text(value: Any) -> str:
+    """统一缺项槽位文本，便于 canonical 校验。"""
+    return str(value or "").strip().replace(" ", "").replace("-", "_").lower()
+
+
+def _canonicalize_missing_slot(slot_text: Any) -> str:
+    """将 missing_info 项归一为内部 canonical slot。"""
+    normalized_text = _normalize_missing_slot_text(slot_text)
+    if normalized_text in MISSING_SLOT_KEYS:
+        return normalized_text
+    return ""
+
+
+def _missing_slot_to_display_text(slot: str) -> str:
+    """将 canonical slot 转为用户可读文案。"""
+    canonical_slot = _canonicalize_missing_slot(slot)
+    if canonical_slot in MISSING_SLOT_DISPLAY_LABELS:
+        return MISSING_SLOT_DISPLAY_LABELS[canonical_slot]
+    return str(slot or "").strip()
+
+
+def _normalize_missing_slots(value: Optional[List]) -> List[str]:
+    """规范化 missing_info，输出 canonical slot 列表。"""
     if not isinstance(value, list):
         return []
-    normalized: List[str] = []
+
+    normalized_slots: List[str] = []
     seen: set[str] = set()
     for item in value:
-        if item is None:
+        canonical_slot = _canonicalize_missing_slot(item)
+        if not canonical_slot:
+            raw_text = str(item or "").strip()
+            if raw_text:
+                logger.warning("忽略非法 missing_info 槽位: %s", raw_text)
             continue
-        text = str(item).strip()
-        if not text or text in seen:
+
+        if canonical_slot in seen:
             continue
-        seen.add(text)
-        normalized.append(text)
-    return normalized
+
+        seen.add(canonical_slot)
+        normalized_slots.append(canonical_slot)
+
+    return normalized_slots
+
+
+def _normalize_missing_info(value: Optional[List]) -> List[str]:
+    """规范化 missing_info 列表并输出用户可读文案。"""
+    slots = _normalize_missing_slots(value)
+    return [_missing_slot_to_display_text(slot) for slot in slots]
 
 
 def _map_missing_info_to_slots(missing_info: List[str]) -> List[str]:
-    """将待办缺项提示映射到澄清状态槽位。"""
+    """将缺项映射到澄清状态槽位（仅接受 canonical slot）。"""
     slots: List[str] = []
     seen_slots: set[str] = set()
     for item in missing_info:
-        compact = str(item or "").replace(" ", "")
-        if not compact:
+        canonical_slot = _canonicalize_missing_slot(item)
+        if not canonical_slot:
             continue
-        slot: str = ""
-        if any(token in compact for token in ("标题", "待办", "ID", "目标", "任务")):
-            slot = "todo_target"
-        elif any(token in compact for token in ("时间", "截止", "日期")):
-            slot = "time_range"
-        elif any(token in compact for token in ("动作", "操作", "修改", "更新", "完成", "删除", "创建")):
-            slot = "todo_action"
 
-        if slot and slot not in seen_slots:
-            seen_slots.add(slot)
-            slots.append(slot)
+        if canonical_slot not in seen_slots:
+            seen_slots.add(canonical_slot)
+            slots.append(canonical_slot)
     return slots
 
 
 def _is_missing_slot_satisfied(slot_text: str, data: Dict, action: str = "") -> bool:
     """判断缺项是否已被补充。"""
-    compact = str(slot_text or "").replace(" ", "")
-    if not compact:
+    canonical_slot = _canonicalize_missing_slot(slot_text)
+    if not canonical_slot:
         return True
 
-    title_related = any(token in compact for token in ("标题", "待办", "任务", "目标", "ID"))
-    if title_related:
+    if canonical_slot == MISSING_SLOT_TODO_TARGET:
         return bool(
             data.get("todo_id")
             or str(data.get("title") or "").strip()
             or str(data.get("resolved_title") or "").strip()
         )
 
-    time_related = any(token in compact for token in ("时间", "截止", "日期"))
-    if time_related:
+    if canonical_slot == MISSING_SLOT_TIME_RANGE:
         return bool(str(data.get("due_date") or data.get("time") or "").strip())
 
-    action_related = any(token in compact for token in ("动作", "操作", "修改", "更新", "完成", "删除", "创建"))
-    if action_related:
+    if canonical_slot == MISSING_SLOT_TODO_ACTION:
         normalized_action = str(action or "").strip()
         if normalized_action and normalized_action not in {"clarify", "chat"}:
             return True
@@ -558,7 +680,7 @@ def _is_missing_slot_satisfied(slot_text: str, data: Dict, action: str = "") -> 
 def _merge_pending_operation_by_supplement(
     pending_operation: Dict,
     extracted_info: Dict,
-    missing_info: List[str],
+    missing_slots: List[str],
 ) -> Tuple[Dict, List[str], List[str], bool]:
     """补充轮将 extracted_info 增量并入已有 pending_operation。"""
     merged_operation = dict(pending_operation or {})
@@ -575,7 +697,7 @@ def _merge_pending_operation_by_supplement(
     merged_operation["data"] = merged_data
 
     unresolved = [
-        slot for slot in missing_info
+        slot for slot in missing_slots
         if not _is_missing_slot_satisfied(slot, merged_data, str(merged_operation.get("action") or ""))
     ]
     can_promote_to_confirm = bool(changed_fields) and not unresolved
@@ -849,14 +971,14 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                     f"我找到了多个与“{implicit_keyword}”相关的待办，请告诉我具体是哪一个："
                     "可以回复“第 X 个”或“ID 为 XX”。"
                 )
-                analysis_dict["missing_info"] = ["请选择目标待办"]
+                analysis_dict["missing_info"] = [MISSING_SLOT_TODO_TARGET]
             else:
                 action_state = "need_clarify"
                 response_message = (
                     f"我暂时没找到“{implicit_keyword}”这个待办。"
                     "请补充完整标题，或告诉我您想执行的动作（修改/完成/删除）。"
                 )
-                analysis_dict["missing_info"] = ["待办标题", "操作动作"]
+                analysis_dict["missing_info"] = [MISSING_SLOT_TODO_TARGET, MISSING_SLOT_TODO_ACTION]
         
         # Step 5: 时间解析
         extracted_info, time_constraints = parse_time_info(
@@ -873,7 +995,9 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         
         # Step 7: 应用 Goal 模板默认值（渐进式策略）
         extracted_info = apply_goal_defaults(intent, extracted_info, round_count)
-        missing_info = _normalize_missing_info(analysis_dict.get("missing_info", []))
+        missing_slots = _normalize_missing_slots(analysis_dict.get("missing_info", []))
+        missing_info = [_missing_slot_to_display_text(slot) for slot in missing_slots]
+        analysis_dict["missing_info"] = missing_info
 
         # Step 7.1: 会话意图内核（TurnAct + SessionFrame）
         baseline_state_frame = {
@@ -926,7 +1050,7 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
             merged_pending_op, unresolved_missing, changed_fields, can_promote = _merge_pending_operation_by_supplement(
                 pending_operation=pending_op,
                 extracted_info=extracted_info,
-                missing_info=missing_info,
+                missing_slots=missing_slots,
             )
             if changed_fields:
                 extracted_info = canonicalize_extracted_info(merged_pending_op.get("data") or {})
@@ -934,7 +1058,8 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                 logger.info("补充轮合并: changed_fields=%s", changed_fields)
 
             pending_op = merged_pending_op
-            missing_info = unresolved_missing
+            missing_slots = unresolved_missing
+            missing_info = [_missing_slot_to_display_text(slot) for slot in missing_slots]
             analysis_dict["missing_info"] = missing_info
 
             if can_promote:
@@ -945,11 +1070,50 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                     response_message = "已根据您的补充更新待办信息，确认执行吗？"
                 logger.info("补充轮收敛: 自动从 need_clarify 提升为 need_confirm")
 
-        missing_slots = _map_missing_info_to_slots(missing_info)
+        # 取消后补充恢复：若上一轮是“创建待办 -> 拒绝/取消”，本轮补充信息应优先恢复创建草稿
+        if (
+            action_state == "need_clarify"
+            and not pending_op
+            and intent in {"update", "clarify", "chat", "create"}
+            and not str(extracted_info.get("todo_id") or "").strip()
+            and _contains_todo_target_missing(missing_slots)
+        ):
+            recovered_draft = _recover_recent_cancelled_create_draft(messages)
+            if recovered_draft:
+                merged_create_info = _merge_create_draft_with_supplement(
+                    recovered_draft,
+                    extracted_info,
+                )
+                extracted_info = canonicalize_extracted_info(merged_create_info)
+                session_frame["todo_action"] = "create"
+                session_frame["todo_fields"] = extracted_info
+                intent = "create"
+                action_state = "need_confirm"
+                missing_slots = []
+                missing_info = []
+                analysis_dict["intent"] = "create"
+                analysis_dict["missing_info"] = []
+
+                supplement_preview = str(
+                    extracted_info.get("description")
+                    or extracted_info.get("progress_notes")
+                    or last_human_msg
+                    or ""
+                ).strip()
+                if supplement_preview:
+                    response_message = (
+                        f"已根据您的补充更新待办草稿（{supplement_preview[:20]}）。确认创建吗？"
+                    )
+                elif not response_message:
+                    response_message = "已根据您的补充更新待办草稿，确认创建吗？"
+
+                logger.info("补充轮恢复: 命中最近取消的创建草稿，自动转为 create/need_confirm")
+
+        clarify_slots = _map_missing_info_to_slots(missing_slots)
         previous_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
         previous_clarify_round = int(state.get("clarify_round") or 0)
         if action_state == "need_clarify":
-            updates["clarify_fsm_state"] = advance_clarify_fsm_state(previous_fsm_state, missing_slots)
+            updates["clarify_fsm_state"] = advance_clarify_fsm_state(previous_fsm_state, clarify_slots)
             updates["clarify_round"] = max(previous_clarify_round, 0) + 1
         else:
             updates["clarify_fsm_state"] = "done"
@@ -1109,7 +1273,9 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
 - 🏷️ 分类：{category if category else '未分类'}
 {f'- 📄 待办内容：{description}' if description else ''}
 
-直接说"确认"即可创建，或"拒绝"告诉我补充内容～
+直接说"确认"即可创建。
+如需补充，请直接告诉我要修改的内容（例如：再加上“需要带纸和笔”）；
+如需放弃，请回复"取消"。
 """
     
     elif action == "delete":
@@ -1189,76 +1355,19 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
     else:
         friendly_summary = f"**执行操作**\n操作类型：{action}"
     
-    # 构造前端期望的确认数据结构（与 CompactApproval 组件适配）
-    # 将 data 字段复制并添加客户可读的显示消息
-    display_args = {
-        **data,
-        "_display_message": friendly_summary  # 关键：前端优先显示此字段
-    }
-    
-    confirmation_data = {
-        "action_requests": [
-            {
-                "name": action,  # create / update / delete 等
-                "args": display_args
-            }
-        ]
-    }
-    
     logger.info(f"请求用户确认: {action}, message_preview={confirm_msg[:50]}...")
     
-    # 构造结构化 operation 对象用于前端渲染 ConfirmationCard
-    operation_data = {
-        "action": action, # 统一使用 action 字段
-        "data": data,
-        "summary": friendly_summary
-    }
-    
-    # 对于更新操作，尝试构造 diff 数据
-    if action == "update":
-        todo_id = data.get("todo_id")
-        resolved_title = data.get("resolved_title")
-        
-        # 填充 target_task
-        if todo_id:
-            operation_data["target_task"] = {
-                "id": todo_id,
-                "title": resolved_title or title
-            }
-        
-        # 填充 diff
-        # 注意：这里简化处理，实际 diff 需要从数据库获取原始值进行对比
-        # 但在 route_next 或 resolve 阶段我们可能已经有了原始数据
-        # 如果 state 中没有原始待办，这里只能显示新值
-        diff = {}
-        for key, value in data.items():
-            if key in ["title", "priority", "due_date", "description", "category"] and value:
-                # 假设旧值未知，前端会显示 "-> 新值"
-                diff[key] = {"old": None, "new": value}
-        operation_data["diff"] = diff
-        
-    elif action == "delete":
-        todo_id = data.get("todo_id")
-        if todo_id:
-            operation_data["target_task"] = {
-                "id": todo_id,
-                "title": data.get("resolved_title") or data.get("title")
-            }
-    
-    elif action == "complete":
-        todo_id = data.get("todo_id")
-        if todo_id:
-            operation_data["target_task"] = {
-                "id": todo_id,
-                "title": data.get("resolved_title") or data.get("title")
-            }
+    operation_data = _build_todo_operation_payload(
+        action=action,
+        data=data,
+        summary=friendly_summary,
+        update_title_fallback=str(data.get("title") or "待办"),
+    )
 
     # 返回 AIMessage
     msg = create_ai_message(
         confirm_msg,
-        additional_kwargs={
-            "operation": operation_data
-        }
+        additional_kwargs=build_operation_additional_kwargs_payload(operation_data) or {},
     )
     return {
         "messages": [msg],
@@ -1350,13 +1459,87 @@ def wait_for_confirmation(state: TodoAgentState) -> Dict:
     return {"user_confirmed": False}
 
 
+def _build_todo_result_additional_kwargs(result: ToolResult) -> Dict[str, Any]:
+    """构建待办执行结果的 additional_kwargs。"""
+    result_payload = build_result_additional_kwargs_payload(
+        data_type=result.get("data_type"),
+        data=result.get("data", {}),
+    )
+    return result_payload or {}
+
+
+def _build_todo_operation_payload(
+    action: str,
+    data: Dict[str, Any],
+    summary: str,
+    update_title_fallback: str,
+) -> Dict[str, Any]:
+    """构建待办确认消息的 operation 结构化载荷。"""
+    normalized_action = str(action or "").strip()
+    normalized_data = data if isinstance(data, dict) else {}
+
+    operation_data: Dict[str, Any] = {
+        "action": normalized_action,
+        "data": normalized_data,
+        "summary": str(summary or ""),
+    }
+
+    target_task = _build_todo_operation_target_task(
+        action=normalized_action,
+        data=normalized_data,
+        update_title_fallback=update_title_fallback,
+    )
+    if target_task:
+        operation_data["target_task"] = target_task
+
+    if normalized_action == "update":
+        operation_data["diff"] = _build_todo_operation_diff(normalized_data)
+
+    return operation_data
+
+
+def _build_todo_operation_target_task(
+    action: str,
+    data: Dict[str, Any],
+    update_title_fallback: str,
+) -> Optional[Dict[str, Any]]:
+    """构建 operation.target_task（如可判定）。"""
+    todo_id = data.get("todo_id")
+    if not todo_id:
+        return None
+
+    resolved_title = data.get("resolved_title")
+    if action == "update":
+        return {
+            "id": todo_id,
+            "title": resolved_title or update_title_fallback,
+        }
+
+    if action in ("delete", "complete"):
+        return {
+            "id": todo_id,
+            "title": resolved_title or data.get("title"),
+        }
+
+    return None
+
+
+def _build_todo_operation_diff(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """构建 update 场景的字段 diff（仅展示层）。"""
+    diff: Dict[str, Dict[str, Any]] = {}
+    for key, value in data.items():
+        if key in {"title", "priority", "due_date", "description", "category"} and value:
+            diff[key] = {"old": None, "new": value}
+    return diff
+
+
 def execute_operation(state: TodoAgentState) -> Dict:
     """执行操作节点。
     
     职责：
     1. 检查用户确认状态
     2. 调用对应的工具函数
-    3. 通过 custom 事件发送结构化结果
+    3. 通过 AIMessage additional_kwargs 透传结构化结果
     4. 返回更新字典（LangGraph 推荐方式）
     
     Returns:
@@ -1366,13 +1549,6 @@ def execute_operation(state: TodoAgentState) -> Dict:
     
     # 初始化更新字典
     updates: Dict = {}
-    
-    # 获取 StreamWriter 用于发送自定义事件
-    try:
-        writer = get_stream_writer()
-    except Exception:
-        # Fallback for testing or when running outside of LangGraph context
-        writer = lambda x: None
     
     user_confirmed = state.get("user_confirmed")
     operation = state.get("pending_operation")
@@ -1395,11 +1571,7 @@ def execute_operation(state: TodoAgentState) -> Dict:
         
         # 转换 ToolResult 为 AIMessage
         if result["success"]:
-            additional_kwargs = {}
-            if result.get("data"):
-                additional_kwargs["data"] = result["data"]
-            if result.get("data_type"):
-                additional_kwargs["data_type"] = result["data_type"]
+            additional_kwargs = _build_todo_result_additional_kwargs(result)
             
             updates["messages"] = [create_ai_message(
                 result["message"],
@@ -1429,11 +1601,7 @@ def execute_operation(state: TodoAgentState) -> Dict:
         # 统一转换 ToolResult 为 AIMessage
         if result["success"]:
             # 成功：构造包含数据的 AIMessage
-            additional_kwargs = {}
-            if result.get("data"):
-                additional_kwargs["data"] = result["data"]
-            if result.get("data_type"):
-                additional_kwargs["data_type"] = result["data_type"]
+            additional_kwargs = _build_todo_result_additional_kwargs(result)
             
             updates["messages"] = [create_ai_message(
                 result["message"],
@@ -1461,13 +1629,6 @@ def execute_operation(state: TodoAgentState) -> Dict:
     updates["quick_mode"] = None
     
     return updates
-
-
-# ==================== 工具调用辅助函数 ====================
-
-# _get_user_id_from_state 已迁移到 app.ai.utils.state_helpers
-# 为保持向后兼容，创建别名
-_get_user_id_from_state = get_user_id
 
 
 # ==================== 执行器映射表 ====================

@@ -70,6 +70,7 @@ class BaseAgentState(TypedDict, total=False):
     active_projects: List[str]    # 正在讨论的项目列表
     current_focus: str            # 当前焦点任务
     pending_clarifications: List[str]  # 待澄清的问题
+    response_message: str              # 待办意图分析输出的自然语言回复（clarify 节点优先使用）
     detected_conflicts: List[Dict]     # 检测到的冲突
     time_constraints: Dict             # 时间约束
 

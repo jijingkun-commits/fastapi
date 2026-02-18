@@ -434,15 +434,13 @@ description: 命令的简短描述
 
 ### 7.7 并行与看板协作
 
-用于多 AI / 多 worktree 并行开发，核心链路为 `/plan -> /vkplan -> /vktodo（或 /vkkb） -> /imp-ws`。
+用于多 AI / 多 worktree 并行开发，核心链路为 `/plan -> /vkplan -> /vktodo -> /imp-ws`。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/vkplan` | 并行拆解入口 - 在 `/plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/vkplan` |
 | `/vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/vksync 2026-02-14_文档治理执行 check` |
-| `/vk` | 看板导出 - 审阅 `card_export` 组装结果（默认 `strict`） | `/vk 2026-02-14_文档治理执行` |
 | `/vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/vktodo 2026-02-14_文档治理执行 move Doing` |
-| `/vkkb` | 看板一体命令 - 自动补导出并调用 `/vktodo` 落卡 | `/vkkb 2026-02-14_文档治理执行` |
 | `/imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
 
 ### 7.8 问题诊断（只分析不改码）
@@ -476,10 +474,8 @@ npx ai-agent-skills update --all    # 更新全部
 
 # 并行与看板 - 多 worktree 协作
 /vkplan        # 在 /plan 后执行并行拆解并产出 vk_cards.json
-/vkkb          # 一条命令完成导出 + 落卡（可选继续 move）
 /vktodo        # 批量建卡/推进，默认执行基线硬拦截
 /vksync        # 手动执行 G0 基线同步检查（check/apply）
-/vk            # 导出看板 payload（strict/auto）
 /imp-ws        # 按单个 WS 白名单执行实现与回填
 
 # Git 工作流 - 标准化的版本控制操作
@@ -527,7 +523,7 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（26 个）
+### 9.2 Commands（24 个）
 
 ```
 .cursor/commands/
@@ -552,8 +548,6 @@ npx ai-agent-skills update --all    # 更新全部
 ├── review.md          # 代码审查
 ├── security-audit.md  # 安全审计
 ├── test.md            # 运行测试
-├── vk.md              # 看板导出
-├── vkkb.md            # 看板一体落地
 ├── vkplan.md          # 并行拆解
 ├── vksync.md          # 基线同步检查
 └── vktodo.md          # 批量建卡/推进

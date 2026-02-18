@@ -365,6 +365,31 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 - 若最新用户输入命中待办语义（如“查询我的待办列表”），系统会构造 `pending_handoff` 并降级路由到 `todo_expert` 继续执行，优先保障待办链路可用性。
 - 若不满足待办降级条件，则返回稳定的用户友好提示（如“模型服务当前不可用……”），避免暴露底层异常细节。
 
+#### 去特殊化收敛（2026-02-18）
+
+- 移除 `create_multi_agent_graph` 中未接线的 `_classify_intent` 与 `route_by_intent` 影子分支，避免“定义存在但不参与图执行”的路径误导。
+- `supervisor_should_continue` 的可路由目标改为由统一常量映射驱动（`AgentType -> workflow node`），不再散落字符串字面量判断。
+- `get_scene_llm` 契约收敛为仅接受 `scene_key`，旧 `scene` 参数兼容入口已下线，调用点全部对齐场景键。
+- `streaming_wrapper` 的 `values` 分支已按子职责抽取 helper 并接线：`handoff` 增量返回构建、`kb_images` 提取、`tool_start` 发射、文本补发去重判定、文本/结果发送，减少大段内联分支。
+- `streaming_wrapper` 的 `messages` 分支完成第一阶段拆分：消息 ID 预填充、`ToolMessage` 处理（`tool_end`/`kb_images`）、token 发送与 thinking 发送拆至独立 helper，降低单分支圈复杂度。
+- `streaming_wrapper` 的上下文准备与收尾返回完成抽取：消息裁剪+上下文注入整合为 `_prepare_streaming_inference_state`，结束态增量返回整合为 `_build_streaming_delta_return`，降低主函数流程长度。
+- `streaming_wrapper` 的双模式事件循环完成 dispatcher 抽取：`messages` 与 `values` 分支分别收敛到 `_dispatch_messages_mode_chunk` / `_dispatch_values_mode_chunk`，主循环仅保留分发与状态衔接。
+- `streaming_wrapper` 的运行编排与异常兜底完成抽取：`_run_streaming_dispatch_loop` 统一承接流循环编排，`_handle_streaming_wrapper_exception` 统一承接 supervisor 降级与用户友好报错。
+- `streaming_wrapper` 工厂上提为模块级：`_create_streaming_agent_wrapper` 与 `_execute_streaming_wrapper` 从 `create_multi_agent_graph` 闭包中拆出，支持后续以可注入 orchestrator 方式复用。
+- `streaming_wrapper` 协议解析依赖收敛到适配层：通过 `StreamingProtocolAdapter` + `_build_streaming_protocol_adapter` 注入 `parse_kb_images/should_filter_content/extract_latest_handoff_from_messages`，减少对具体 `AgentOutputParser` 的硬绑定。
+- `streaming_wrapper` 事件发射与载荷契约收敛到适配层：通过 `StreamingEventEmitterAdapter` + `_build_streaming_event_emitter_adapter` 统一注入 `emit_token/emit_thinking/emit_tool_start/emit_tool_end/emit_status/emit_result/emit_kb_images`，并将 `StreamingToolStartPayload/StreamingResultPayload/StreamingKbImagesPayload` 与 builder 上提到 `app/ai/protocol.py` 作为共享协议定义，减少跨 helper 的字段拼装分支。
+- 共享载荷协议已向其他工作流扩展：`data_graph.sql_execute` 的 `emit_result` 与 `todo_graph.execute_operation` 的 `additional_kwargs` 均复用 `build_streaming_result_payload_from_fields`，减少跨图的结构化结果字段拼装差异。
+- 共享载荷协议已向工具层扩展：`chatTools.fig_inter` 的图片流式结果事件改为复用 `build_streaming_result_payload_from_fields` 构造 `image` 载荷，消除工具层手工拼装 `emit_result` 字段分支。
+- 共享载荷协议进一步收敛到问数消息回放路径：`data_graph.sql_execute` 的 `create_ai_message.additional_kwargs` 改为复用 `_build_sql_result_additional_kwargs`（内部调用 `build_streaming_result_payload_from_fields`），减少同节点“流式事件载荷 vs 历史消息载荷”的双份字段定义。
+- 共享载荷协议继续收敛到待办确认回放路径：`todo_graph.ask_confirmation` 的 `create_ai_message.additional_kwargs` 改为复用 `build_operation_additional_kwargs_payload`，并将 `operation` 提取逻辑统一为 `extract_operation_from_ai_message`，减少“写入/读取 operation 载荷”双份散落分支。
+- 待办确认载荷构造进一步收敛：`todo_graph.ask_confirmation` 的 `operation_data`（`target_task/diff`）改为由 `_build_todo_operation_payload` 及子 helper 统一构建，清理分支内联字段拼装并降低确认节点圈复杂度。
+- 回放载荷 schema 校验入口已统一到 `app/ai/protocol.py`：`build_result_additional_kwargs_payload` / `build_operation_additional_kwargs_payload` / `extract_operation_from_ai_message`，`data_graph` 与 `todo_graph` 共用同一归一化规则。
+- 问数空结果降级策略从分支内联改为表驱动：`_SQL_EMPTY_RESULT_FALLBACK_POLICY` 与 `_EXECUTE_FALLBACK_ROUTE_MAP` 统一管理 `metric→training→schema` 路由与提示文案，减少硬编码判断分支。
+- 不必要 fallback 已清理：`data_graph._build_sql_result_additional_kwargs` 与 `todo_graph._build_todo_result_additional_kwargs` 中不可达/弱约束回退分支已删除，改为协议层校验失败时返回空载荷，避免“静默拼装半结构数据”。
+- 不必要兼容覆盖已清理：删除 `todo_graph` 末尾对 `_get_user_id_from_state` 的“向后兼容别名重绑定”，避免同名函数被后置覆盖导致语义漂移。
+- 本批次拆分遵循“只重构结构不改语义”：Pre/Post 节点行为与事件协议不变，仍保持现有运行链路兼容。
+- 本批次不改变 Pre/Post 节点行为，仅做结构收敛，保证线上语义稳定。
+
 ### 智能特性
 
 | 特性 | 说明 |
@@ -2048,3 +2073,19 @@ graph TD
 5. **待办 Agent 接入与收敛**：`todo_graph.analyze_intent` 已接入同一内核，并清理重复定义，统一补充轮合并与澄清状态推进。
 6. **Handoff 预提取增强**：`todo_intent_helpers.filter_messages_for_todo` 优先消费 `pending_handoff.frame`，`task_description` 仅作为回退。
 7. **测试状态**：`tests/unit/test_todo_nodes.py`（含补充轮收敛用例）通过；`data_graph` 相关用例在当前环境受 `vanna.base` 依赖缺失影响，已通过语法编译和代码审查校验。
+
+
+### 10. 待办确认补充语义收敛（2026-02-18）
+
+本次针对“确认后补充答非所问”问题，新增以下收敛约束：
+
+1. **状态契约统一**：`response_message` 纳入全局 `TodoAgentState`，避免 `analyze -> clarify` 链路字段丢失。
+2. **缺项字段严格契约**：`missing_info` 在模型输出与内部状态中仅允许 `todo_target/time_range/todo_action`，非法值直接丢弃并记录日志。
+3. **取消后补充恢复**：当最近轮次存在“创建待办确认 -> 取消”后，用户发送补充语义时，优先尝试恢复最近创建草稿并回到 `need_confirm`，而非误转 `update + target_todo` 追问。
+4. **确认话术对齐执行语义**：创建确认文案明确“补充请直接说，放弃请回复取消”，避免“拒绝=补充”的语义冲突。
+5. **缺项槽位分层**：保留 `canonical slot` 归一层与用户展示层，状态机仅消费 canonical，展示文案统一由映射函数输出，避免业务逻辑和 UI 文案耦合。
+
+对应实现入口：
+- `app/ai/state.py`
+- `app/ai/workflow/todo_graph.py`
+- `app/ai/prompts/todo_prompts.py`

@@ -200,3 +200,24 @@ card_seed:
     dod:
       - 配置管理与试跑接口可用，并可追溯策略命中
 ```
+
+---
+
+## 8. 与总控迁移方案映射
+
+对应总控文档：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
+
+1. 批次映射：本专题对应 **Batch-3（问数双角色权限治理）**。
+2. 进入条件：Batch-0 文档治理拆分完成，批次口径已冻结。
+3. 本批产出：
+   - 双角色契约落地（`sys_role + data_role`）；
+   - 默认 `dept_code` 行级隔离生效；
+   - 配置治理与 SQL 试跑/审计链路可追溯。
+4. 退出条件：
+   - 本文 Phase 1~4 门禁通过；
+   - `admin` 默认放行路径清理完成；
+   - 回滚路径与发布策略留档。
+5. 回滚锚点：
+   - `app/services/permission_service.py`
+   - `app/ai/utils/sql_rewriter.py`
+   - `app/api/v1/endpoints/access_admin_api.py`

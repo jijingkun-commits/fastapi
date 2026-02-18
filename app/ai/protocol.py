@@ -8,7 +8,7 @@
 import re
 import json
 import logging
-from typing import Optional, Dict, Any, Tuple, List, Set
+from typing import Optional, Dict, Any, Tuple, List, Set, TypedDict
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage
 
@@ -29,6 +29,147 @@ class HandoffResult(BaseModel):
     task_description: str = Field(..., description="任务描述与上下文")
     frame: Optional[Dict[str, Any]] = Field(default=None, description="结构化会话帧（可选）")
     turn_act_hint: Optional[str] = Field(default=None, description="回合行为提示（可选）")
+
+class StreamingToolStartPayload(TypedDict):
+    """tool_start 事件统一载荷。"""
+
+    name: str
+    input: Dict[str, Any]
+
+
+class StreamingResultPayload(TypedDict):
+    """result 事件统一载荷。"""
+
+    data_type: str
+    data: Dict[str, Any]
+    message: str
+
+
+class StreamingKbImagesPayload(TypedDict):
+    """kb_images 事件统一载荷。"""
+
+    images: Dict[str, str]
+
+
+class ResultAdditionalKwargsPayload(TypedDict):
+    """结构化结果的 additional_kwargs 统一载荷。"""
+
+    data_type: str
+    data: Dict[str, Any]
+
+
+class OperationAdditionalKwargsPayload(TypedDict):
+    """操作确认类 additional_kwargs 统一载荷。"""
+
+    operation: Dict[str, Any]
+
+
+def build_streaming_tool_start_payload(
+    tool_name: Any,
+    tool_args: Any,
+) -> Optional[StreamingToolStartPayload]:
+    """构建 tool_start 事件统一载荷。"""
+    normalized_name = str(tool_name or "").strip()
+    if not normalized_name:
+        return None
+
+    normalized_args = tool_args if isinstance(tool_args, dict) else {}
+    return {
+        "name": normalized_name,
+        "input": normalized_args,
+    }
+
+
+def build_streaming_result_payload(
+    ai_message: Any,
+    msg_content: str,
+) -> Optional[StreamingResultPayload]:
+    """从 AIMessage 提取 result 事件统一载荷。"""
+    additional = getattr(ai_message, "additional_kwargs", {})
+    return build_streaming_result_payload_from_fields(
+        data_type=additional.get("data_type"),
+        data=additional.get("data", {}),
+        message=msg_content,
+    )
+
+
+def build_streaming_result_payload_from_fields(
+    data_type: Any,
+    data: Any,
+    message: Any,
+) -> Optional[StreamingResultPayload]:
+    """从字段值构建 result 事件统一载荷。"""
+    normalized_data_type = str(data_type or "").strip()
+    if not normalized_data_type:
+        return None
+
+    normalized_data = data if isinstance(data, dict) else {}
+    return {
+        "data_type": normalized_data_type,
+        "data": normalized_data,
+        "message": str(message or ""),
+    }
+
+
+def build_streaming_kb_images_payload(
+    kb_images: Dict[str, str],
+) -> StreamingKbImagesPayload:
+    """构建 kb_images 事件统一载荷。"""
+    return {"images": dict(kb_images)}
+
+
+def build_result_additional_kwargs_payload(
+    data_type: Any,
+    data: Any,
+) -> Optional[ResultAdditionalKwargsPayload]:
+    """构建结果回放 additional_kwargs 统一载荷。"""
+    result_payload = build_streaming_result_payload_from_fields(
+        data_type=data_type,
+        data=data,
+        message="",
+    )
+    if not result_payload:
+        return None
+
+    return {
+        "data_type": result_payload["data_type"],
+        "data": result_payload["data"],
+    }
+
+
+def build_operation_additional_kwargs_payload(
+    operation: Any,
+) -> Optional[OperationAdditionalKwargsPayload]:
+    """构建操作确认回放 additional_kwargs 统一载荷。"""
+    if not isinstance(operation, dict):
+        return None
+
+    normalized_operation = dict(operation)
+    action = str(normalized_operation.get("action") or "").strip()
+    if not action:
+        return None
+
+    normalized_operation["action"] = action
+    if not isinstance(normalized_operation.get("data"), dict):
+        normalized_operation["data"] = {}
+
+    return {"operation": normalized_operation}
+
+
+def extract_operation_from_ai_message(message: BaseMessage) -> Optional[Dict[str, Any]]:
+    """从 AIMessage 提取 operation additional_kwargs。"""
+    if not isinstance(message, AIMessage):
+        return None
+
+    additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+    if not isinstance(additional_kwargs, dict):
+        return None
+
+    operation = additional_kwargs.get("operation")
+    if not isinstance(operation, dict):
+        return None
+
+    return operation
 
 class AgentOutputParser:
     """Agent 输出解析器"""

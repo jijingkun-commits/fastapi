@@ -4,16 +4,15 @@ import ast
 from typing import Optional
 from pathlib import Path
 
+import pytest
+
+from app.ai.llm_util import get_scene_llm
+
 
 ALLOWED_NO_MODEL_ID_CALLERS = {
     "app/ai/config/todo_config.py",  # 统一依赖注入包装器，透传 kwargs
     "app/ai/test_tool_calls.py",     # 本地测试脚本
 }
-
-ALLOWED_LEGACY_SCENE_CALLERS = {
-    "app/ai/llm_util.py",  # 兼容层自身
-}
-
 
 def _get_call_name(node: ast.Call) -> Optional[str]:
     if isinstance(node.func, ast.Name):
@@ -71,8 +70,6 @@ def test_get_scene_llm_must_use_scene_key_kwarg():
     for file_path in sorted(app_root.rglob("*.py")):
         rel_path = file_path.relative_to(project_root).as_posix()
 
-        if rel_path in ALLOWED_LEGACY_SCENE_CALLERS:
-            continue
         if "/examples/" in rel_path or "/tests/" in rel_path:
             continue
 
@@ -98,3 +95,10 @@ def test_get_scene_llm_must_use_scene_key_kwarg():
         "请改为 get_scene_llm(scene_key='模块.函数名', ...):\n"
         + "\n".join(violations)
     )
+
+
+def test_get_scene_llm_rejects_legacy_scene_kwarg():
+    """get_scene_llm 不再接受历史 scene 参数。"""
+
+    with pytest.raises(TypeError):
+        get_scene_llm(scene="default_chat")

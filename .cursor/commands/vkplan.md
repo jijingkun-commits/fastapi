@@ -1,5 +1,5 @@
 ---
-description: 并行拆解入口（前提：已完成 /plan）
+description: 并行拆解入口（前提：已完成 /plan，并继承同主题命名）
 ---
 
 > 参考规则: @dual-database
@@ -27,9 +27,24 @@ description: 并行拆解入口（前提：已完成 /plan）
 
 ---
 
+## 命名衔接（与 `/plan` 强一致）
+
+1. `/vkplan` 必须读取同一主题的 `/plan` 产物：
+   - `docs/内部参考/迭代需求/<主题>_requirements.md`
+   - `docs/内部参考/迭代需求/<主题>_implementation_plan.md`
+2. 并行拆解目录必须与同一 `<主题>` 对齐：
+   - `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/`
+3. 拆解产物中的来源引用必须保持一致：
+   - `parallel_plan.md` 的“输入来源”
+   - `workstreams/WS-*.md` 的“来源主计划”
+   - `vk_cards.json` 中涉及主计划的 `file_scope`
+4. 若 `/plan` 命名规则更新，`/vkplan` 需同步继承，不得回退到旧通用名。
+
+---
+
 ## 执行阶段
 
-1. 读取 `/plan` 产物（`requirements.md`、`implementation_plan.md`）。
+1. 读取 `/plan` 产物（`<主题>_requirements.md`、`<主题>_implementation_plan.md`）。
 2. 生成并行拆解（`parallel_plan.md` + `workstreams/WS-*.md`）。
 3. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
 4. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`（默认落卡范围不含 `WS-00`）。
@@ -49,12 +64,12 @@ description: 并行拆解入口（前提：已完成 /plan）
 
 ## 下游链路
 
-推荐极简链路：`/plan -> /vkplan -> /vktodo（或 /vkkb） -> /imp-ws`
+推荐极简链路：`/plan -> /vkplan -> /vktodo -> /imp-ws`
 
 - `/vktodo`：直接落卡/推进（多 worktree 场景默认执行 `/vksync` 硬拦截）
 - `/imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
 
-手工分步链路（调试用）：`/plan -> /vkplan -> /vksync -> /vk -> /vktodo`
+手工分步链路（调试用）：`/plan -> /vkplan -> /vksync -> /vktodo`
 
 ---
 *使用 `/vkplan` 触发。用于“完成拆解后直接进入 `/vktodo`”。*

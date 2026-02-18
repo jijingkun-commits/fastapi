@@ -25,9 +25,9 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 
 1. 一个 `WS-*.md` 文档（单个子任务）
 2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`（只读参考）
-3. `docs/内部参考/迭代需求/requirements.md`（真理来源）
-4. `docs/内部参考/迭代需求/implementation_plan.md`
-5. `docs/内部参考/迭代需求/implementation_plan_<主题>.md`（若当前 WS 明确引用专项附录）
+3. `docs/内部参考/迭代需求/<topic>_requirements.md`（真理来源）
+4. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+5. `docs/内部参考/迭代需求/<topic>_<appendix>_implementation_plan.md`（若当前 WS 明确引用专项附录）
 
 ## 2. 执行约束
 

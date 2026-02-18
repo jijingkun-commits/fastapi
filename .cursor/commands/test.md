@@ -128,7 +128,7 @@ curl -fsS "http://127.0.0.1:${BACKEND_PORT}/api/v1/health" >/dev/null
 1. 明确测试模块：待办 / 聊天 / 管理后台 / 问数引擎
 2. 阅读需求文档：
    - `docs/产品文档/<模块>需求.md`
-   - `docs/内部参考/迭代需求/requirements.md`（迭代级概览）
+   - `docs/内部参考/迭代需求/<topic>_requirements.md`（迭代级概览）
 3. 阅读测试案例文档：
    - `docs/开发文档/测试管理/<模块>测试案例.md`
 4. 查看追溯矩阵：

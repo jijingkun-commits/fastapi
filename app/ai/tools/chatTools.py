@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 
 from app.ai import config as ai_config
+from app.ai.protocol import build_streaming_result_payload_from_fields
 from app.db.session import get_db_context
 from app.models.chat_asset import AssetType
 
@@ -161,6 +162,29 @@ from langchain_core.runnables.config import RunnableConfig
 # 用于存储提取的 DataFrame 的全局字典
 # 结构: {thread_id: {df_name: DataFrame}}
 extracted_dataframes: Dict[str, Dict[str, Any]] = {}
+
+
+def _emit_fig_image_result_event(proxy_url: str) -> None:
+    """发送 fig_inter 图片结果事件（统一载荷协议）。"""
+    from langgraph.config import get_stream_writer
+    from app.ai.events import emit_result
+
+    result_payload = build_streaming_result_payload_from_fields(
+        data_type="image",
+        data={"url": proxy_url},
+        message="图表已生成",
+    )
+    if not result_payload:
+        return
+
+    writer = get_stream_writer()
+    emit_result(
+        writer,
+        data_type=result_payload["data_type"],
+        data=result_payload["data"],
+        message=result_payload["message"],
+        node="fig_inter",
+    )
 
 
 def cleanup_thread_dataframes(thread_id: str) -> bool:
@@ -396,10 +420,7 @@ def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
                 
                 # 实时流式发送图片事件，让前端立即显示（不依赖 LLM 输出 Markdown）
                 try:
-                    from langgraph.config import get_stream_writer
-                    from app.ai.events import emit_result
-                    writer = get_stream_writer()
-                    emit_result(writer, "image", {"url": proxy_url}, "图表已生成", "fig_inter")
+                    _emit_fig_image_result_event(proxy_url)
                     logger.info("已通过 emit_result 发送图片事件: %s", proxy_url)
                 except Exception as emit_error:
                     # 在非流式上下文中调用会失败，记录日志便于排查

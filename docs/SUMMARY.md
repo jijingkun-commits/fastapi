@@ -143,6 +143,10 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
+* [需求基线（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_requirements.md)
+* [实施方案（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_implementation_plan.md)
+* [实施附录（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_implementation_appendix.md)
+* [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
 * [需求基线（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
 * [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
 * [需求基线（文档治理执行）](内部参考/迭代需求/docs_governance_requirements.md)
@@ -151,6 +155,13 @@
 * [实施方案（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_implementation_plan.md)
 * [需求基线（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_requirements.md)
 * [实施方案（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_implementation_plan.md)
+* [需求基线（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_requirements.md)
+* [实施方案（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_implementation_plan.md)
+* [进展日志（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_progress_log.md)
+* [评估报告（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_evaluation_report.md)
+* [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
+* [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
+* [评估报告（技能检索对齐，2026-02-13）](内部参考/迭代需求/skill_retrieval_evaluation_report_20260213.md)
 * [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 
 ### 任务拆解

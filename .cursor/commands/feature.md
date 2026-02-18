@@ -27,11 +27,11 @@ description: 全流程开发：规划 -> 实现 -> 文档同步 -> 审查 -> 验
 
 1. **需求分析**: 
     - 询问用户意图
-    - 生成 `requirements.md`
+    - 生成 `<topic>_requirements.md`
     - 必须包含 User Stories + Acceptance Criteria
 
 2. **技术设计** (如需):
-    - 生成 `docs/内部参考/迭代需求/implementation_plan.md`
+    - 生成 `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
     - 记录 ADR (架构决策)
 
 3. **用户确认**: 
@@ -40,7 +40,7 @@ description: 全流程开发：规划 -> 实现 -> 文档同步 -> 审查 -> 验
 ## 阶段 2: 编码 (Coding)
 
 1. **Vibe Coding**:
-    - 读取 `requirements.md` 作为真理来源
+    - 读取 `<topic>_requirements.md` 作为真理来源
     - 遵循 `.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc` 与场景规则
 
 ## 阶段 3: 文档同步闭环 (Doc Sync Loop)
@@ -128,5 +128,5 @@ flowchart TD
 
 或者：
 ```
-/feature 完成 requirements.md 里定义的剩余工作
+/feature 完成 <topic>_requirements.md 里定义的剩余工作
 ```

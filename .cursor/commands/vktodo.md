@@ -20,6 +20,17 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 ---
 
+## 命名衔接（与 `/plan`、`/vkplan` 强一致）
+
+1. `/vktodo` 处理的 `task_split_dir` 必须来自同主题链路：`/plan -> /vkplan`。
+2. 主题一致性要求：
+   - 迭代需求文档：`docs/内部参考/迭代需求/<主题>_requirements.md`、`docs/内部参考/迭代需求/<主题>_implementation_plan.md`
+   - 拆解目录：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/`
+3. 若检测到“拆解目录主题”与“来源文档主题”语义不一致，`action=create|move` 默认直接失败（除非显式应急放行并记录风险）。
+4. 不得回退依赖旧通用名 `requirements.md` / `implementation_plan.md` 作为主输入。
+
+---
+
 ## 输入约定（支持路径直传）
 
 ### 1) 位置参数（推荐）
@@ -53,11 +64,11 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
    - 状态：若未传 `status`，使用卡片内 `column`
 3. `action=move` 时，若未传 `move_filter`，从 `vk_cards.json.task_key` 推导：
    - `move_filter=prefix:<task_key>`
-4. 若 `vk_cards.json` 缺失：先自动执行 `/vk <任务拆解目录> strict` 生成，再继续当前 `/vktodo`。
-5. 若自动生成后仍缺失或结构非法：再失败并提示人工修复拆解产物。
+4. 若 `vk_cards.json` 缺失：直接失败并提示先执行 `/vkplan` 重新生成并行拆解产物。
+5. 若 `vk_cards.json` 结构非法：直接失败并提示人工修复拆解产物。
 6. `vk_cards.json.cards[*]` 默认仅包含可落卡工作包（`WS-01...WS-G2`），不包含 `WS-00`。
 
-> 推荐最短链路：`/plan -> /vkplan -> /vktodo <任务拆解目录>`（`/vk` 改为可选排障命令）
+> 推荐最短链路：`/plan -> /vkplan -> /vktodo <任务拆解目录>`
 
 ---
 
@@ -73,9 +84,10 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 ### Step 1: 解析来源目录、项目与基线
 
 1. 若传入 `task_split_dir`（或位置参数），先按路径规则解析并校验目录合法性。
-2. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`；缺失则先执行 `/vk <任务拆解目录> strict` 自动补齐后再读取。
-3. 调用 `mcp__vibe_kanban__list_organizations` + `mcp__vibe_kanban__list_projects`，将 `project` 解析为唯一 `project_id`（若 workspace 已绑定项目可省略）。
-4. 调用 `mcp__vibe_kanban__list_issues` 获取变更前统计（按状态聚合）。
+2. 校验命名衔接：`task_split_dir` 中 `<主题>` 必须与 `/plan` / `/vkplan` 产物保持一致（`parallel_plan.md`、`vk_cards.json`、WS 来源字段）。
+3. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`；缺失则直接失败并提示先执行 `/vkplan` 重新生成。
+4. 调用 `mcp__vibe_kanban__list_organizations` + `mcp__vibe_kanban__list_projects`，将 `project` 解析为唯一 `project_id`（若 workspace 已绑定项目可省略）。
+5. 调用 `mcp__vibe_kanban__list_issues` 获取变更前统计（按状态聚合）。
 
 ### Step 2: 组装执行清单
 

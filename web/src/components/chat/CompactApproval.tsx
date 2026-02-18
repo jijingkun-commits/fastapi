@@ -104,7 +104,7 @@ export function CompactApproval() {
                     onClick={handleReject}
                     disabled={loading}
                 >
-                    拒绝
+                    取消
                 </Button>
                 <Button
                     data-testid="confirm-button"

@@ -9,7 +9,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260216-TOOL-GOVERNANCE`
-- 来源主计划：`docs/内部参考/迭代需求/implementation_plan.md`
+- 来源主计划：`docs/内部参考/迭代需求/ai_tools_governance_implementation_plan.md`
 - 来源并行计划：`docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/parallel_plan.md`
 
 ---
@@ -32,7 +32,7 @@
 - `docs/开发文档/快速入门/配置说明.md`
 - `.env.example`
 - `docs/SUMMARY.md`
-- `docs/内部参考/迭代需求/implementation_plan.md`
+- `docs/内部参考/迭代需求/ai_tools_governance_implementation_plan.md`
 - `docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/parallel_plan.md`
 - `docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-G2_文档终稿门禁.md`
 
@@ -102,7 +102,7 @@
 
 ---
 
-## 8. card_export（/vk 机读，必填）
+## 8. card_export（机读，必填）
 
 ```yaml
 card_export:
@@ -121,7 +121,7 @@ card_export:
     - docs/开发文档/快速入门/配置说明.md
     - .env.example
     - docs/SUMMARY.md
-    - docs/内部参考/迭代需求/implementation_plan.md
+    - docs/内部参考/迭代需求/ai_tools_governance_implementation_plan.md
     - docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/parallel_plan.md
     - docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-G2_文档终稿门禁.md
   readonly_scope:
@@ -139,4 +139,3 @@ card_export:
   dod:
     - 文档终稿门禁通过并完成收口回填
 ```
-

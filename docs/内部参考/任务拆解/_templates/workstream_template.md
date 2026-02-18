@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`:
-- 来源主计划：`docs/内部参考/迭代需求/implementation_plan.md`
+- 来源主计划：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`
 - 来源并行计划：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 
 ## 1. 目标
@@ -71,7 +71,7 @@
 - 已知风险点：
 - 回滚建议：
 
-## 8. card_export（/vk 机读，必填）
+## 8. card_export（机读，必填）
 
 ```yaml
 card_export:

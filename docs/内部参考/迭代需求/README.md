@@ -19,9 +19,9 @@
 
 ## 2. 命名规范
 
-### 2.1 通用入口（可选）
+### 2.1 通用入口（不推荐）
 
-仅在“单一主线迭代”场景允许使用以下文件名：
+仅在“本地临时草稿”场景允许使用以下文件名（不建议纳入版本管理）：
 
 - `requirements.md`
 - `implementation_plan.md`
@@ -35,12 +35,19 @@
 
 兼容说明：历史文件中的 `<topic>_plan.md` 继续保留，不强制重命名；新增文件优先采用 `<topic>_implementation_plan.md`。
 
-### 2.3 主题命名建议
+### 2.3 主题命名建议（与任务拆解对齐）
 
-`<topic>` 建议采用小写蛇形命名，保持语义可读并避免缩写歧义，例如：
+`<topic>` 默认与任务拆解目录 `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/` 的 `<主题>` 对齐，优先使用中文主题短语。
 
-- `skill_admin_frontend`
-- `docs_governance`
+规则：
+
+1. 新增迭代需求文件时，优先使用中文主题前缀：
+   - `<主题>_requirements.md`
+   - `<主题>_implementation_plan.md`
+2. 若同一需求已存在任务拆解目录，`<topic>` 必须与该目录名中的 `<主题>` 保持一致（仅允许语序微调，不允许改语义）。
+3. 中文主题建议控制在 4~12 字，避免空格与特殊字符；必要时可用下划线分隔（如 `问数权限治理`、`文档治理执行`）。
+4. `task_key` 所需英文机读标识独立维护，不强制写入文件名前缀。
+5. 历史英文前缀文件继续保留，不强制批量重命名；从本规则生效后新增文件按中文对齐执行。
 
 ---
 
@@ -55,16 +62,27 @@
 
 ---
 
-## 4. 当前索引清单（2026-02-16）
+## 4. 当前索引清单（2026-02-18）
 
 - `skill_admin_frontend_requirements.md`
 - `skill_admin_frontend_plan.md`（历史兼容命名）
+- `ai_tools_governance_requirements.md`
+- `ai_tools_governance_implementation_plan.md`
+- `ai_tools_governance_implementation_appendix.md`
 - `docs_governance_requirements.md`
 - `docs_governance_implementation_plan.md`
 - `askdata_dual_role_permission_requirements.md`
 - `askdata_dual_role_permission_implementation_plan.md`
 - `user_preference_memory_requirements.md`
 - `user_preference_memory_implementation_plan.md`
+- `agent_despecialization_requirements.md`
+- `agent_despecialization_implementation_plan.md`
+- `agent_despecialization_progress_log.md`
+- `agent_despecialization_evaluation_report.md`
+- `openclaw全量迁移_implementation_plan.md`
 - `evaluation_report.md`
+- `skill_retrieval_evaluation_report_20260213.md`
+- `fix_plan.md`
+- `fix_plan_todo_reject_clarify_20260218.md`
 
-附注：`requirements.md`、`implementation_plan.md`、`fix_plan.md` 作为本地可选入口，当前默认不纳入版本管理（见 `.gitignore`）。
+附注：`requirements.md` 与 `implementation_plan.md` 已迁移为专题前缀命名；`fix_plan.md` 调整为纳管入口文档，具体问题卡按 `fix_plan_<topic>_<date>.md` 追加维护。

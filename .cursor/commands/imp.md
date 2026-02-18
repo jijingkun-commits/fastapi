@@ -6,7 +6,7 @@ description: 代码实现：根据计划编写代码，自动同步文档
 
 # 实现工作流 (Implementation Workflow)
 
-将 `requirements.md` 或 `docs/内部参考/迭代需求/implementation_plan.md` 转化为代码，并完成文档同步闭环。
+将 `<topic>_requirements.md` 或 `docs/内部参考/迭代需求/<topic>_implementation_plan.md` 转化为代码，并完成文档同步闭环。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
@@ -24,9 +24,9 @@ description: 代码实现：根据计划编写代码，自动同步文档
 ## 1. 编码 (Coding)
 
 **输入**:
-- `docs/内部参考/迭代需求/requirements.md`（迭代级概览）
+- `docs/内部参考/迭代需求/<topic>_requirements.md`（迭代级概览）
 - `docs/产品文档/<模块>需求.md`（模块级用户故事/验收标准）
-- `docs/内部参考/迭代需求/implementation_plan.md`（如有）
+- `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（如有）
 
 **规范**:
 - 遵循 `.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc` 与场景规则

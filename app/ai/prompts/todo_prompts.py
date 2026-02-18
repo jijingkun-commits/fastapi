@@ -91,7 +91,7 @@ TODO_CLARIFY_PROMPT = """你是待办助手的澄清专家。
 ```json
 {
   "needs_clarification": true,
-  "missing_info": ["具体任务", "时间范围"],
+  "missing_info": ["todo_target", "time_range"],
   "questions": [
     "您希望整理哪个时间段的任务?",
     "是否只关注工作相关的事项?"
@@ -290,6 +290,10 @@ TODO_INTENT_ANALYZE_PROMPT = """你是待办管理助手的意图分析模块。
   "quick_mode": false
 }
 ```
+
+`missing_info` 约束（必须遵守）：
+- 仅允许输出 canonical slot：`todo_target`、`time_range`、`todo_action`。
+- 禁止输出任何别名或自然语言字段（如 `target_todo`、`todo_id`、`目标待办`、`操作动作`）。
 
 **update 意图输出示例**:
 ```json

@@ -66,7 +66,7 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 ## 推荐链路
 
-`/plan -> /vkplan -> /vksync -> /vktodo（或 /vkkb） -> /imp-ws`
+`/plan -> /vkplan -> /vksync -> /vktodo -> /imp-ws`
 
 ---
 

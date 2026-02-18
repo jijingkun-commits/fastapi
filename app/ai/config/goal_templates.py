@@ -214,22 +214,22 @@ GOAL_TEMPLATES: Dict[str, GoalTemplate] = {
             ("帮我理一理", {
                 "intent": "clarify",
                 "needs_clarification": True,
-                "missing_info": ["具体任务", "时间范围"]
+                "missing_info": ["todo_target", "time_range"]
             }),
             ("太多了怎么办", {
                 "intent": "clarify",
                 "needs_clarification": True,
-                "missing_info": ["优先级", "筛选条件"]
+                "missing_info": ["todo_target", "todo_action"]
             }),
             ("优先级怎么排", {
                 "intent": "clarify",
                 "needs_clarification": True,
-                "missing_info": ["排序依据"]
+                "missing_info": ["todo_action"]
             }),
             ("有几个项目要做", {
                 "intent": "clarify",
                 "needs_clarification": True,
-                "missing_info": ["项目细节", "截止时间"]
+                "missing_info": ["todo_target", "time_range"]
             }),
         ],
         prompt_hint="用户表达模糊，需要澄清或建议",

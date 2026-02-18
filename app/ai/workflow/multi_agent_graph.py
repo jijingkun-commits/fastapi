@@ -3,7 +3,6 @@
 本模块实现 Supervisor 模式的多智能体系统：
 - Supervisor 负责理解用户意图并路由到合适的专业 Agent
 - 问数 Agent: 处理数据查询、分析、可视化
-- 知识库 Agent: 处理企业知识库检索问答
 - 待办助手 Agent: 处理任务管理相关请求
 
 架构示意（升级版）：
@@ -13,7 +12,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple
+from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple, Callable
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
@@ -33,14 +32,97 @@ from app.db.postgres_checkpoint import get_checkpointer
 # 自定义事件工具
 from langgraph.config import get_stream_writer
 from app.ai.events import emit_status
-from app.ai.protocol import HandoffResult
+from app.ai.protocol import (
+    HandoffResult,
+    StreamingToolStartPayload,
+    StreamingResultPayload,
+    StreamingKbImagesPayload,
+    build_streaming_tool_start_payload,
+    build_streaming_result_payload,
+    build_streaming_kb_images_payload,
+)
 from app.ai.prompts.agent_prompts import SUPERVISOR_PROMPT
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 
 # Schema 路由增强（借鉴 TypeAgent Dispatcher）
-from app.ai.schema.agent_schema import route_by_schema, get_enabled_agents
+from app.ai.schema.agent_schema import route_by_schema
 
 logger = logging.getLogger(__name__)
+
+
+WORKFLOW_AGENT_NODE_BY_TYPE = {
+    AgentType.DATA: "data_expert",
+    AgentType.TODO: "todo_expert",
+}
+WORKFLOW_AGENT_NODES = set(WORKFLOW_AGENT_NODE_BY_TYPE.values())
+
+
+class StreamingProtocolAdapter(TypedDict):
+    """streaming_wrapper 协议适配层。"""
+
+    parse_kb_images: Callable[[str], Dict[str, str]]
+    should_filter_content: Callable[[Any], bool]
+    extract_latest_handoff_from_messages: Callable[[Sequence[BaseMessage]], Optional[Dict[str, Any]]]
+
+
+class StreamingEventEmitterAdapter(TypedDict):
+    """streaming_wrapper 事件发射适配层。"""
+
+    emit_token: Callable[..., None]
+    emit_thinking: Callable[..., None]
+    emit_tool_start: Callable[..., None]
+    emit_tool_end: Callable[..., None]
+    emit_status: Callable[..., None]
+    emit_result: Callable[..., None]
+    emit_kb_images: Callable[..., None]
+
+
+def _build_streaming_protocol_adapter(parser: Any) -> StreamingProtocolAdapter:
+    """构建协议适配器，屏蔽对具体 Parser 类的直接耦合。"""
+
+    return {
+        "parse_kb_images": parser.parse_kb_images,
+        "should_filter_content": parser.should_filter_content,
+        "extract_latest_handoff_from_messages": parser.extract_latest_handoff_from_messages,
+    }
+
+
+def _build_streaming_event_emitter_adapter(
+    *,
+    emit_token: Callable[..., None],
+    emit_thinking: Callable[..., None],
+    emit_tool_start: Callable[..., None],
+    emit_tool_end: Callable[..., None],
+    emit_status: Callable[..., None],
+    emit_result: Callable[..., None],
+    emit_kb_images: Callable[..., None],
+) -> StreamingEventEmitterAdapter:
+    """构建事件发射适配器，统一管理 streaming_wrapper 事件出口。"""
+
+    def _emit_tool_start_with_schema(writer, payload: StreamingToolStartPayload, node: str = "") -> None:
+        emit_tool_start(writer, payload["name"], payload["input"], node=node)
+
+    def _emit_result_with_schema(writer, payload: StreamingResultPayload, node: str = "") -> None:
+        emit_result(
+            writer,
+            data_type=payload["data_type"],
+            data=payload["data"],
+            message=payload["message"],
+            node=node,
+        )
+
+    def _emit_kb_images_with_schema(writer, payload: StreamingKbImagesPayload, node: str = "") -> None:
+        emit_kb_images(writer, payload["images"], node=node)
+
+    return {
+        "emit_token": emit_token,
+        "emit_thinking": emit_thinking,
+        "emit_tool_start": _emit_tool_start_with_schema,
+        "emit_tool_end": emit_tool_end,
+        "emit_status": emit_status,
+        "emit_result": _emit_result_with_schema,
+        "emit_kb_images": _emit_kb_images_with_schema,
+    }
 
 
 # AgentType, AGENT_DESCRIPTIONS, MultiAgentState 已迁移到 app/ai/state.py
@@ -489,6 +571,688 @@ def _augment_todo_handoff_with_observations(
     return enriched
 
 
+def _build_streaming_handoff_return(
+    final_state: Dict[str, Any],
+    delta_messages: Sequence[BaseMessage],
+    handoff_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """构造命中 handoff 后的增量返回结构。"""
+    other_keys = {k: v for k, v in final_state.items() if k != "messages"}
+    ret = other_keys.copy()
+    ret["messages"] = list(delta_messages)
+    ret["pending_handoff"] = handoff_data
+    return ret
+
+
+def _emit_kb_images_from_delta_messages(
+    delta_messages: Sequence[BaseMessage],
+    kb_images: Dict[str, str],
+    protocol_adapter: StreamingProtocolAdapter,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> None:
+    """从增量 ToolMessage 中提取 KB_IMAGES 并发送事件。"""
+
+    for tool_msg in reversed(delta_messages):
+        if not isinstance(tool_msg, ToolMessage):
+            continue
+        tool_content = str(getattr(tool_msg, "content", ""))
+        if not tool_content:
+            continue
+        new_images = protocol_adapter["parse_kb_images"](tool_content)
+        if new_images:
+            kb_images.update(new_images)
+            logger.info("[%s] 从 values 模式提取 kb_images: %s 个", node_name, len(new_images))
+            kb_images_payload = build_streaming_kb_images_payload(kb_images)
+            event_emitter_adapter["emit_kb_images"](writer, kb_images_payload, node=node_name)
+
+
+def _emit_tool_start_events_from_ai_message(
+    ai_message: Any,
+    sent_tool_call_ids: set,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> bool:
+    """从 AIMessage 的 tool_calls 发送 tool_start 事件。"""
+    if not (hasattr(ai_message, "tool_calls") and ai_message.tool_calls):
+        return False
+
+    for tool_call in ai_message.tool_calls:
+        tool_call_id = tool_call.get("id")
+        tool_name = tool_call.get("name", "")
+        tool_args = tool_call.get("args", {})
+
+        tool_start_payload = build_streaming_tool_start_payload(tool_name, tool_args)
+        if tool_call_id and tool_call_id not in sent_tool_call_ids and tool_start_payload:
+            sent_tool_call_ids.add(tool_call_id)
+            logger.debug("发送 tool_start 事件: %s", tool_name)
+            if tool_name and "tavily" in (tool_name or "").lower():
+                logger.info("联网搜索被调用: tool=%s, args=%s", tool_name, tool_args)
+            event_emitter_adapter["emit_tool_start"](writer, tool_start_payload, node=node_name)
+
+    return True
+
+
+def _should_skip_values_text_message(
+    msg_content: Any,
+    msg_id: Any,
+    emitted_message_ids: set,
+    collected_content: Sequence[str],
+    protocol_adapter: StreamingProtocolAdapter,
+) -> bool:
+    """values 模式文本补发去重判断。"""
+    if protocol_adapter["should_filter_content"](msg_content):
+        return True
+
+    if msg_id and msg_id in emitted_message_ids:
+        return True
+
+    full_collected = "".join(collected_content)
+    if msg_content and msg_content in full_collected:
+        if len(msg_content) > 10:
+            return True
+        return True
+
+    return False
+
+
+def _emit_values_text_message(
+    writer,
+    node_name: str,
+    ai_message: Any,
+    msg_content: str,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+) -> None:
+    """values 模式补发文本消息（兼容 result 结构化载荷）。"""
+    result_payload = build_streaming_result_payload(ai_message, msg_content)
+    if result_payload:
+        event_emitter_adapter["emit_result"](writer, result_payload, node=node_name)
+        return
+
+    event_emitter_adapter["emit_token"](writer, msg_content, node=node_name)
+
+
+def _record_emitted_message_id(message: Any, emitted_message_ids: set) -> None:
+    """记录消息 ID（若存在）用于去重。"""
+    message_id = getattr(message, "id", None)
+    if message_id:
+        emitted_message_ids.add(message_id)
+
+
+async def _prefill_emitted_message_ids(
+    agent: Any,
+    config: Any,
+    state_messages: Sequence[BaseMessage],
+    emitted_message_ids: set,
+    node_name: str,
+) -> None:
+    """预填充已发消息 ID，覆盖主图 state 与子图 checkpoint。"""
+    for existing_msg in state_messages:
+        _record_emitted_message_id(existing_msg, emitted_message_ids)
+
+    try:
+        subgraph_state = await agent.aget_state(config)
+        if subgraph_state and hasattr(subgraph_state, "values"):
+            subgraph_messages = subgraph_state.values.get("messages", [])
+            for subgraph_msg in subgraph_messages:
+                _record_emitted_message_id(subgraph_msg, emitted_message_ids)
+            if subgraph_messages:
+                logger.debug("[%s] 从子图 checkpoint 预填充 %s 条消息 ID", node_name, len(subgraph_messages))
+    except Exception as exc:
+        # 子图可能没有 checkpoint（首次调用），这是正常情况
+        logger.debug("[%s] 无法获取子图状态（可能是首次调用）: %s", node_name, exc)
+
+
+def _handle_messages_mode_tool_message(
+    message: Any,
+    protocol_adapter: StreamingProtocolAdapter,
+    kb_images: Dict[str, str],
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> bool:
+    """处理 messages 模式下的 ToolMessage（tool_end + KB_IMAGES）。"""
+    if not isinstance(message, ToolMessage):
+        return False
+
+    tool_name = getattr(message, "name", "unknown")
+    tool_content = str(getattr(message, "content", ""))
+    tool_output = tool_content[:200]
+    event_emitter_adapter["emit_tool_end"](writer, tool_name, tool_output, node=node_name)
+
+    if tool_name and "tavily" in (tool_name or "").lower():
+        logger.info("联网搜索返回: tool=%s, 结果长度=%s", tool_name, len(tool_content))
+
+    new_images = protocol_adapter["parse_kb_images"](tool_content)
+    if new_images:
+        kb_images.update(new_images)
+        logger.info("[%s] 从 ToolMessage 提取到 kb_images: %s 个", node_name, len(new_images))
+
+    return True
+
+
+def _emit_messages_mode_token(
+    message: Any,
+    protocol_adapter: StreamingProtocolAdapter,
+    collected_content: list[str],
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> None:
+    """messages 模式发送文本 token（过滤内部协议内容）。"""
+    content = getattr(message, "content", "")
+    if not (content and isinstance(content, str)):
+        return
+
+    if protocol_adapter["should_filter_content"](content):
+        logger.debug("[%s] 跳过内部协议内容", node_name)
+        return
+
+    collected_content.append(content)
+    event_emitter_adapter["emit_token"](writer, content, node=node_name)
+
+
+def _emit_messages_mode_thinking(
+    message: Any,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> None:
+    """messages 模式发送思考内容（reasoning/thinking）。"""
+    additional = getattr(message, "additional_kwargs", {})
+    reasoning = (
+        additional.get("reasoning_content") or
+        additional.get("thinking_content") or
+        additional.get("thinking")
+    )
+    if reasoning:
+        event_emitter_adapter["emit_thinking"](writer, reasoning, node=node_name)
+
+
+def _inject_streaming_context_messages(
+    pruned_messages: Sequence[BaseMessage],
+    state: Dict[str, Any],
+) -> list[BaseMessage]:
+    """将 system_context / skill_context 注入裁剪后的消息列表。"""
+    from langchain_core.messages import SystemMessage
+
+    context_messages = []
+    if state.get("system_context"):
+        context_messages.append(SystemMessage(content=state["system_context"]))
+
+    if state.get("skill_context"):
+        context_messages.append(SystemMessage(content=state["skill_context"]))
+
+    if not context_messages:
+        return list(pruned_messages)
+
+    insert_pos = 0
+    for index, message in enumerate(pruned_messages):
+        if not isinstance(message, SystemMessage):
+            insert_pos = index
+            break
+    else:
+        insert_pos = len(pruned_messages)
+
+    return list(pruned_messages[:insert_pos]) + context_messages + list(pruned_messages[insert_pos:])
+
+
+def _prepare_streaming_inference_state(
+    state: Dict[str, Any],
+) -> Tuple[Dict[str, Any], int, int, int, int, int]:
+    """构造 streaming_wrapper 调用 agent.astream 前的推理态 state。"""
+    original_messages = state.get("messages", [])
+    prepared_messages = _prepare_messages_for_supervisor_inference(original_messages)
+
+    from app.ai import config as ai_config
+
+    token_budget = _calculate_supervisor_context_budget(
+        getattr(ai_config, "MESSAGE_MAX_TOKENS", SUPERVISOR_CONTEXT_MIN_TOKENS)
+    )
+    pruned_messages = trim_messages(
+        prepared_messages,
+        max_tokens=token_budget,
+        token_counter=count_tokens_approximately,
+        strategy="last",
+        start_on="human",
+        end_on=("human", "tool", "ai"),
+        include_system=True,
+        allow_partial=False,
+    )
+
+    pruned_state = state.copy()
+    pruned_state["messages"] = _inject_streaming_context_messages(pruned_messages, state)
+
+    prepared_token_estimate = int(count_tokens_approximately(prepared_messages) or 0)
+    pruned_token_estimate = int(count_tokens_approximately(pruned_messages) or 0)
+    input_message_count = len(pruned_state.get("messages", []))
+
+    return (
+        pruned_state,
+        len(original_messages),
+        input_message_count,
+        prepared_token_estimate,
+        pruned_token_estimate,
+        token_budget,
+    )
+
+
+def _log_streaming_output_statistics(node_name: str, collected_content: Sequence[str]) -> None:
+    """记录 streaming 输出统计，辅助排障。"""
+    full_output = "".join(collected_content)
+    output_image_count = len(re.findall(r'!\[[^\]]*\]\([^)]+\)', full_output))
+
+    logger.debug("=" * 60)
+    logger.debug("[%s] LLM 输出统计:", node_name)
+    logger.debug("  总长度: %s 字符", len(full_output))
+    logger.debug("  包含图片: %s 张", output_image_count)
+    logger.debug("  输出预览（前 500 字符）:")
+    logger.debug("  %s", full_output[:500])
+    logger.debug("=" * 60)
+
+
+def _build_streaming_delta_return(
+    final_state: Optional[Dict[str, Any]],
+    initial_input_count: int,
+    node_name: str,
+) -> Dict[str, Any]:
+    """构造 streaming_wrapper 结束时的增量消息返回。"""
+    if not final_state:
+        return {}
+
+    messages = final_state.get("messages", [])
+    delta_messages = messages[initial_input_count:] if len(messages) > initial_input_count else []
+
+    other_keys = {k: v for k, v in final_state.items() if k != "messages"}
+    ret = other_keys.copy()
+    ret["messages"] = delta_messages
+
+    logger.debug(
+        "[%s] 返回增量消息: %s 条 (原 %s 条, 初始 %s 条)",
+        node_name,
+        len(delta_messages),
+        len(messages),
+        initial_input_count,
+    )
+    return ret
+
+
+def _handle_messages_mode_tool_call_chunks_noop(message: Any) -> None:
+    """兼容保留：messages 模式仅扫描 tool_call_chunks，不发 tool_start。"""
+    if not (hasattr(message, "tool_call_chunks") and message.tool_call_chunks):
+        return
+
+    for tool_call_chunk in message.tool_call_chunks:
+        if not tool_call_chunk:
+            continue
+
+        _tool_call_index = tool_call_chunk.get("index")
+        tool_name = tool_call_chunk.get("name")
+        _tool_args = tool_call_chunk.get("args")
+
+        if tool_name:
+            # 由于 chunk 不含稳定 ID，此处仅保留扫描语义，不发事件。
+            pass
+
+
+def _dispatch_messages_mode_chunk(
+    chunk: Any,
+    protocol_adapter: StreamingProtocolAdapter,
+    emitted_message_ids: set,
+    collected_content: list[str],
+    kb_images: Dict[str, str],
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> None:
+    """分发处理 stream_mode=messages 的单个 chunk。"""
+    from langchain_core.messages import AIMessage, AIMessageChunk
+
+    if not (isinstance(chunk, tuple) and len(chunk) == 2):
+        return
+
+    message, _metadata = chunk
+    _record_emitted_message_id(message, emitted_message_ids)
+
+    if node_name == "data_expert":
+        return
+
+    handled_tool_message = _handle_messages_mode_tool_message(
+        message=message,
+        protocol_adapter=protocol_adapter,
+        kb_images=kb_images,
+        event_emitter_adapter=event_emitter_adapter,
+        writer=writer,
+        node_name=node_name,
+    )
+    if handled_tool_message:
+        return
+
+    if not isinstance(message, (AIMessage, AIMessageChunk)):
+        return
+
+    _emit_messages_mode_token(
+        message=message,
+        protocol_adapter=protocol_adapter,
+        collected_content=collected_content,
+        event_emitter_adapter=event_emitter_adapter,
+        writer=writer,
+        node_name=node_name,
+    )
+
+    _handle_messages_mode_tool_call_chunks_noop(message)
+
+    _emit_messages_mode_thinking(
+        message=message,
+        event_emitter_adapter=event_emitter_adapter,
+        writer=writer,
+        node_name=node_name,
+    )
+
+
+def _dispatch_values_mode_chunk(
+    final_state: Dict[str, Any],
+    protocol_adapter: StreamingProtocolAdapter,
+    state: Dict[str, Any],
+    initial_input_count: int,
+    input_message_count: int,
+    kb_images: Dict[str, str],
+    sent_tool_call_ids: set,
+    emitted_message_ids: set,
+    collected_content: list[str],
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    """分发处理 stream_mode=values 的单个 chunk。"""
+    from langchain_core.messages import AIMessage
+
+    messages = final_state.get("messages", [])
+    delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
+
+    handoff_data = protocol_adapter["extract_latest_handoff_from_messages"](delta_messages_for_scan)
+    if handoff_data and node_name == "supervisor":
+        handoff_data = _augment_todo_handoff_with_observations(
+            handoff_data,
+            delta_messages_for_scan,
+            state,
+        )
+        handoff_data = _augment_data_handoff_payload(handoff_data, state)
+        target_agent = handoff_data.get("target_agent")
+        logger.info("[%s] values模式检测到 handoff: target=%s", node_name, target_agent)
+        handoff_return = _build_streaming_handoff_return(
+            final_state=final_state,
+            delta_messages=delta_messages_for_scan,
+            handoff_data=handoff_data,
+        )
+        return input_message_count, handoff_return
+
+    _emit_kb_images_from_delta_messages(
+        delta_messages=delta_messages_for_scan,
+        kb_images=kb_images,
+        protocol_adapter=protocol_adapter,
+        event_emitter_adapter=event_emitter_adapter,
+        writer=writer,
+        node_name=node_name,
+    )
+
+    new_messages = messages[input_message_count:] if len(messages) > input_message_count else []
+    for new_message in new_messages:
+        if not isinstance(new_message, AIMessage):
+            continue
+
+        emitted_tool_calls = _emit_tool_start_events_from_ai_message(
+            ai_message=new_message,
+            sent_tool_call_ids=sent_tool_call_ids,
+            event_emitter_adapter=event_emitter_adapter,
+            writer=writer,
+            node_name=node_name,
+        )
+        if emitted_tool_calls:
+            continue
+
+        message_content = getattr(new_message, "content", "")
+        message_id = getattr(new_message, "id", None)
+        should_skip_message = _should_skip_values_text_message(
+            msg_content=message_content,
+            msg_id=message_id,
+            emitted_message_ids=emitted_message_ids,
+            collected_content=collected_content,
+            protocol_adapter=protocol_adapter,
+        )
+        if should_skip_message:
+            continue
+
+        if message_content:
+            logger.info("[%s] values 模式补发消息: %s...", node_name, message_content[:30])
+            _emit_values_text_message(
+                writer=writer,
+                node_name=node_name,
+                ai_message=new_message,
+                msg_content=message_content,
+                event_emitter_adapter=event_emitter_adapter,
+            )
+            collected_content.append(message_content)
+            if message_id:
+                emitted_message_ids.add(message_id)
+
+    return len(messages), None
+
+
+async def _run_streaming_dispatch_loop(
+    agent: Any,
+    pruned_state: Dict[str, Any],
+    config: Any,
+    protocol_adapter: StreamingProtocolAdapter,
+    initial_input_count: int,
+    input_message_count: int,
+    emitted_message_ids: set,
+    sent_tool_call_ids: set,
+    collected_content: list[str],
+    kb_images: Dict[str, str],
+    state: Dict[str, Any],
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+    node_name: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """运行 streaming 双模式分发循环。"""
+    final_state: Optional[Dict[str, Any]] = None
+    next_input_count = input_message_count
+
+    async for mode, chunk in agent.astream(
+        pruned_state,
+        config,
+        stream_mode=["messages", "values"],
+    ):
+        if mode == "messages":
+            _dispatch_messages_mode_chunk(
+                chunk=chunk,
+                protocol_adapter=protocol_adapter,
+                emitted_message_ids=emitted_message_ids,
+                collected_content=collected_content,
+                kb_images=kb_images,
+                event_emitter_adapter=event_emitter_adapter,
+                writer=writer,
+                node_name=node_name,
+            )
+            continue
+
+        if mode != "values":
+            continue
+
+        final_state = chunk
+        next_input_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            protocol_adapter=protocol_adapter,
+            state=state,
+            initial_input_count=initial_input_count,
+            input_message_count=next_input_count,
+            kb_images=kb_images,
+            sent_tool_call_ids=sent_tool_call_ids,
+            emitted_message_ids=emitted_message_ids,
+            collected_content=collected_content,
+            event_emitter_adapter=event_emitter_adapter,
+            writer=writer,
+            node_name=node_name,
+        )
+        if handoff_return is not None:
+            return final_state, handoff_return
+
+    return final_state, None
+
+
+def _handle_streaming_wrapper_exception(
+    node_name: str,
+    state: Dict[str, Any],
+    error_text: str,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+) -> Dict[str, Any]:
+    """处理 streaming_wrapper 异常：优先 supervisor 兜底，其次统一友好错误。"""
+    if node_name == "supervisor":
+        fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
+        if fallback_handoff:
+            logger.warning(
+                "[%s] 命中模型权限错误，降级兜底路由到 %s",
+                node_name,
+                fallback_handoff.get("target_agent"),
+            )
+            event_emitter_adapter["emit_status"](
+                writer,
+                message="模型服务暂不可用，已切换到待办兜底路由继续处理。",
+                node=node_name,
+            )
+            return {
+                "messages": [],
+                "pending_handoff": fallback_handoff,
+            }
+
+    error_msg = _build_stream_error_message(error_text)
+    event_emitter_adapter["emit_token"](writer, error_msg, node=node_name)
+    return {"messages": [create_ai_message(error_msg)]}
+
+
+async def _execute_streaming_wrapper(
+    agent: Any,
+    node_name: str,
+    state: Dict[str, Any],
+    config: Any,
+    event_emitter_adapter: StreamingEventEmitterAdapter,
+    writer,
+) -> Dict[str, Any]:
+    """执行单个专家节点的 streaming 编排与事件发射。"""
+    final_state = None
+    collected_content: list[str] = []
+    kb_images: Dict[str, str] = {}
+
+    from app.ai.protocol import AgentOutputParser
+
+    protocol_adapter = _build_streaming_protocol_adapter(AgentOutputParser)
+
+    try:
+        (
+            pruned_state,
+            original_message_count,
+            input_message_count,
+            prepared_token_estimate,
+            pruned_token_estimate,
+            token_budget,
+        ) = _prepare_streaming_inference_state(state)
+
+        initial_input_count = input_message_count
+
+        logger.info(
+            "[%s] Context Budget: msgs %d->%d, tokens %d->%d, budget=%d",
+            node_name,
+            original_message_count,
+            input_message_count,
+            prepared_token_estimate,
+            pruned_token_estimate,
+            token_budget,
+        )
+
+        sent_tool_call_ids = set()
+        emitted_message_ids = set()
+
+        await _prefill_emitted_message_ids(
+            agent=agent,
+            config=config,
+            state_messages=state.get("messages", []),
+            emitted_message_ids=emitted_message_ids,
+            node_name=node_name,
+        )
+
+        logger.debug("[%s] 预填充 emitted_message_ids: %s 个", node_name, len(emitted_message_ids))
+
+        final_state, handoff_return = await _run_streaming_dispatch_loop(
+            agent=agent,
+            pruned_state=pruned_state,
+            config=config,
+            protocol_adapter=protocol_adapter,
+            initial_input_count=initial_input_count,
+            input_message_count=input_message_count,
+            emitted_message_ids=emitted_message_ids,
+            sent_tool_call_ids=sent_tool_call_ids,
+            collected_content=collected_content,
+            kb_images=kb_images,
+            state=state,
+            event_emitter_adapter=event_emitter_adapter,
+            writer=writer,
+            node_name=node_name,
+        )
+        if handoff_return is not None:
+            return handoff_return
+
+        _log_streaming_output_statistics(node_name=node_name, collected_content=collected_content)
+        return _build_streaming_delta_return(
+            final_state=final_state,
+            initial_input_count=initial_input_count,
+            node_name=node_name,
+        )
+
+    except GraphInterrupt:
+        raise
+    except Exception as exc:
+        logger.error("[%s]流式输出异常: %s", node_name, exc, exc_info=True)
+        return _handle_streaming_wrapper_exception(
+            node_name=node_name,
+            state=state,
+            error_text=str(exc),
+            event_emitter_adapter=event_emitter_adapter,
+            writer=writer,
+        )
+
+
+def _create_streaming_agent_wrapper(agent: Any, node_name: str):
+    """创建可复用的 streaming wrapper 工厂（模块级）。"""
+    from app.ai.events import emit_token, emit_thinking, emit_tool_start, emit_tool_end, emit_result, emit_kb_images
+
+    event_emitter_adapter = _build_streaming_event_emitter_adapter(
+        emit_token=emit_token,
+        emit_thinking=emit_thinking,
+        emit_tool_start=emit_tool_start,
+        emit_tool_end=emit_tool_end,
+        emit_status=emit_status,
+        emit_result=emit_result,
+        emit_kb_images=emit_kb_images,
+    )
+
+    async def streaming_wrapper(state, config):
+        writer = get_stream_writer()
+        return await _execute_streaming_wrapper(
+            agent=agent,
+            node_name=node_name,
+            state=state,
+            config=config,
+            event_emitter_adapter=event_emitter_adapter,
+            writer=writer,
+        )
+
+    return streaming_wrapper
+
+
 def _get_common_tools():
     """获取所有专家共享的工具（图片分析、文件读取）。"""
     tools = []
@@ -826,407 +1590,10 @@ async def create_multi_agent_graph(
         checkpointer=checkpointer 
     )
 
-    # 6. 为专家节点创建流式包装器
-    # agent wrapper 内部使用 astream 并通过 emit_token 发送 LLM 输出
-    # 这使得 chat_service.py 只需监听 stream_mode="custom"
-    def _create_streaming_agent_wrapper(agent, name: str):
-        """创建流式 Agent 包装器：捕获 LLM 输出并通过 emit_token 发送。"""
-        from app.ai.events import emit_token, emit_thinking, emit_tool_start, emit_tool_end
-        from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
-        
-        async def streaming_wrapper(state, config):
-            writer = get_stream_writer()
-            final_state = None
-            collected_content = []
-            
-            # kb_images 映射：在收到 ToolMessage 时动态填充
-            kb_images = {}
-            
-            # protocol parser
-            from app.ai.protocol import AgentOutputParser
-            
-            try:
-                # 使用 astream + stream_mode="messages" 获取 LLM 流式输出
-                # Context Budget: 先压缩超长工具结果，再按 token 预算裁剪消息
-                # 避免上一轮超长 ToolMessage 污染当前轮路由判断。
-                original_messages = state.get("messages", [])
-                prepared_messages = _prepare_messages_for_supervisor_inference(original_messages)
+    # 6. 为专家节点创建流式包装器（模块级工厂）
+    # wrapper 内部通过统一 orchestrator 运行流循环并发射事件。
 
-                from app.ai import config as ai_config
-
-                token_budget = _calculate_supervisor_context_budget(
-                    getattr(ai_config, "MESSAGE_MAX_TOKENS", SUPERVISOR_CONTEXT_MIN_TOKENS)
-                )
-                pruned_messages = trim_messages(
-                    prepared_messages,
-                    max_tokens=token_budget,
-                    token_counter=count_tokens_approximately,
-                    strategy="last",
-                    start_on="human",
-                    end_on=("human", "tool", "ai"),
-                    include_system=True,
-                    allow_partial=False,
-                )
-                
-                # 创建临时 state 用于 invoke (不修改原始 state)
-                # 注意：这里需要浅拷贝其他字段，以免 Agent 依赖
-                pruned_state = state.copy()
-                pruned_state["messages"] = pruned_messages
-                
-                # 注入系统上下文和技能上下文
-                from langchain_core.messages import SystemMessage
-                context_messages = []
-                
-                # 1. 系统上下文（当前时间等）
-                if state.get("system_context"):
-                    context_messages.append(SystemMessage(content=state["system_context"]))
-                
-                # 2. 技能上下文（Skills RAG 检索到的相关技能）
-                if state.get("skill_context"):
-                    context_messages.append(SystemMessage(content=state["skill_context"]))
-                
-                # 将上下文消息插入到裁剪后的消息列表开头（在原有 SystemMessage 之后）
-                if context_messages:
-                    # 找到第一个非 SystemMessage 的位置
-                    insert_pos = 0
-                    for i, msg in enumerate(pruned_messages):
-                        if not isinstance(msg, SystemMessage):
-                            insert_pos = i
-                            break
-                    else:
-                        insert_pos = len(pruned_messages)
-                    
-                    pruned_state["messages"] = (
-                        pruned_messages[:insert_pos] + 
-                        context_messages + 
-                        pruned_messages[insert_pos:]
-                    )
-                
-                # 重要：input_message_count 必须基于实际传递给 Agent 的消息数量
-                # 而不是原始 state 的消息数量（因为可能插入了系统消息）
-                input_message_count = len(pruned_state.get("messages", []))
-                # 保存初始值，用于最后计算增量消息（input_message_count 会在流式处理中被更新）
-                initial_input_count = input_message_count
-
-                prepared_token_estimate = int(count_tokens_approximately(prepared_messages) or 0)
-                pruned_token_estimate = int(count_tokens_approximately(pruned_messages) or 0)
-                
-                logger.info(
-                    "[%s] Context Budget: msgs %d->%d, tokens %d->%d, budget=%d",
-                    name,
-                    len(original_messages),
-                    input_message_count,
-                    prepared_token_estimate,
-                    pruned_token_estimate,
-                    token_budget,
-                )
-
-                sent_tool_call_ids = set()
-                # 跟踪已发送的文本消息 ID，防止 values 模式重复发送
-                emitted_message_ids = set()
-                
-                # 关键修复：预填充已存在消息的 ID，防止 interrupt/resume 后重复发送
-                # 这解决了 SP-001 中 resume 时 emitted_message_ids 被重置导致的重复问题
-                # 注意：需要从原始 state 预填充，而非 pruned_state（pruned_state 可能裁剪掉了部分消息）
-                for existing_msg in state.get("messages", []):
-                    if hasattr(existing_msg, 'id') and existing_msg.id:
-                        emitted_message_ids.add(existing_msg.id)
-                
-                # 增强修复：从子图的 checkpoint 获取已有消息 ID
-                # 当 resume 时，子图的消息可能还没有合并到主图 state，需要从子图状态获取
-                # 参见 SP-001 消息去重机制的 interrupt/resume 场景
-                try:
-                    subgraph_state = await agent.aget_state(config)
-                    if subgraph_state and hasattr(subgraph_state, 'values'):
-                        subgraph_messages = subgraph_state.values.get("messages", [])
-                        for msg in subgraph_messages:
-                            if hasattr(msg, 'id') and msg.id:
-                                emitted_message_ids.add(msg.id)
-                        if subgraph_messages:
-                            logger.debug(f"[{name}] 从子图 checkpoint 预填充 {len(subgraph_messages)} 条消息 ID")
-                except Exception as e:
-                    # 子图可能没有 checkpoint（首次调用），这是正常的
-                    logger.debug(f"[{name}] 无法获取子图状态（可能是首次调用）: {e}")
-                
-                logger.debug(f"[{name}] 预填充 emitted_message_ids: {len(emitted_message_ids)} 个")
-                
-                async for mode, chunk in agent.astream(
-                    pruned_state, 
-                    config, 
-                    stream_mode=["messages", "values"]
-                ):
-                    if mode == "messages":
-                        # 处理 LLM token 流
-                        if isinstance(chunk, tuple) and len(chunk) == 2:
-                            msg, metadata = chunk
-                            msg_type = type(msg).__name__
-                            
-                            # data_expert 的有效输出通过 emit_result/emit_status 发送，
-                            # 跳过 messages 模式的 token 流，避免内部 SQL 生成 LLM 响应泄露
-                            if name == "data_expert":
-                                if hasattr(msg, 'id') and msg.id:
-                                    emitted_message_ids.add(msg.id)
-                                continue
-                            
-                            # 记录流式消息 ID
-                            if hasattr(msg, 'id') and msg.id:
-                                emitted_message_ids.add(msg.id)
-                            
-                            # 检测 ToolMessage（工具执行完成）并发送 tool_end 事件
-                            if isinstance(msg, ToolMessage):
-                                tool_name = getattr(msg, "name", "unknown")
-                                tool_content = str(getattr(msg, "content", ""))
-                                tool_output = tool_content[:200]
-                                emit_tool_end(writer, tool_name, tool_output, node=name)
-                                if tool_name and "tavily" in (tool_name or "").lower():
-                                    logger.info(
-                                        "联网搜索返回: tool=%s, 结果长度=%s",
-                                        tool_name, len(tool_content)
-                                    )
-                                
-                                # 2. 检测 KB_IMAGES (Handoff 移至 values 模式处理以保证状态完整)
-                                new_images = AgentOutputParser.parse_kb_images(tool_content)
-                                if new_images:
-                                    kb_images.update(new_images)
-                                    logger.info(f"[{name}] 从 ToolMessage 提取到 kb_images: {len(new_images)} 个")
-                                
-                                continue
-                            
-                            # 只处理 AI 消息
-                            if not isinstance(msg, (AIMessage, AIMessageChunk)):
-                                continue
-                            
-                            # 提取并发送文本内容
-                            content = getattr(msg, "content", "")
-                            if content and isinstance(content, str):
-                                # 使用协议解析器判断是否过滤
-                                if AgentOutputParser.should_filter_content(content):
-                                    logger.debug(f"[{name}] 跳过内部协议内容")
-                                    continue
-                                
-                                # 发送 token
-                                collected_content.append(content)
-                                emit_token(writer, content, node=name)
-                            # 提取 tool_calls 并发送 tool_start 事件
-                            # 注意：messages 模式下 tool_calls.args 为空
-                            # 工具调用事件在 values 模式下发送（有完整参数）
-                            if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
-                                for tc_chunk in msg.tool_call_chunks:
-                                    if tc_chunk:
-                                        tc_index = tc_chunk.get("index") # tool_call_chunks index
-                                        tool_name = tc_chunk.get("name")
-                                        tool_args = tc_chunk.get("args")
-                                        
-                                        # 在这里我们主要关注 tool_name 的出现来触发 tool_start
-                                        # LangChain 的 tool_call_chunks 有点碎，通常第一个 chunk 包含 name
-                                        if tool_name:
-                                            # 注意：由于 chunk 不含 ID，这里很难精确去重。
-                                            # 我们主要依靠近似判断，或者在 ToolMessage 返回时发送 end
-                                            # 更好的做法是在 values 模式处理 tool_start，或者这里只发一次
-                                            pass
-                                            
-                                        # 暂时不在 messages 模式发 tool_start，太碎了，改为 values 模式发
-                                        # 或者只发 thinking
-                                        pass
-                            
-                            # 提取并发送思考内容
-                            additional = getattr(msg, "additional_kwargs", {})
-                            reasoning = (
-                                additional.get("reasoning_content") or
-                                additional.get("thinking_content") or
-                                additional.get("thinking")
-                            )
-                            if reasoning:
-                                emit_thinking(writer, reasoning, node=name)
-                    
-                    elif mode == "values":
-                        # 处理整个状态更新
-                        final_state = chunk
-                        messages = chunk.get("messages", [])
-                        
-                        # 关键修复：不要只检查 messages[-1] 是否为 ToolMessage。
-                        # Supervisor 可能在调用 assign_to_* 后继续输出一条 AIMessage，
-                        # 导致最后一条消息不是 ToolMessage，从而漏掉 handoff。
-                        # 正确做法：在本次增量消息内回溯扫描 ToolMessage。
-                        delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
-
-                        # A. 检测 Handoff (确保 ToolMessage 已在状态中)
-                        handoff_data = AgentOutputParser.extract_latest_handoff_from_messages(delta_messages_for_scan)
-                        if handoff_data and name == "supervisor":
-                            handoff_data = _augment_todo_handoff_with_observations(
-                                handoff_data,
-                                delta_messages_for_scan,
-                                state,
-                            )
-                            handoff_data = _augment_data_handoff_payload(handoff_data, state)
-                            target_agent = handoff_data.get("target_agent")
-                            logger.info(f"[{name}] values模式检测到 handoff: target={target_agent}")
-                            
-                            # 构造增量更新：只包含新增消息和 handoff 标记
-                            # 使用 initial_input_count 而非 input_message_count（后者可能已被更新）
-                            delta_messages = delta_messages_for_scan
-                            
-                            # 确保此时不丢失其他状态 (如 user_id, thread_id 等)
-                            other_keys = {k: v for k, v in final_state.items() if k != "messages"}
-                            
-                            ret = other_keys.copy()
-                            ret["messages"] = delta_messages
-                            ret["pending_handoff"] = handoff_data
-                            return ret
-
-                        # B. 检测 KB_IMAGES
-                        for tool_msg in reversed(delta_messages_for_scan):
-                            if not isinstance(tool_msg, ToolMessage):
-                                continue
-                            tool_content = str(getattr(tool_msg, "content", ""))
-                            if not tool_content:
-                                continue
-                            new_images = AgentOutputParser.parse_kb_images(tool_content)
-                            if new_images:
-                                kb_images.update(new_images)
-                                logger.info(f"[{name}] 从 values 模式提取 kb_images: {len(new_images)} 个")
-                                from app.ai.events import emit_kb_images
-                                emit_kb_images(writer, kb_images, node=name)
-                        
-                        # 只检查新增的 AI 消息（索引 >= input_message_count），避免发送历史消息
-                        new_messages = messages[input_message_count:] if len(messages) > input_message_count else []
-                        for new_msg in new_messages:
-                            if isinstance(new_msg, AIMessage):
-                                # 1. 处理 Tool Calls (tool_start)
-                                if hasattr(new_msg, 'tool_calls') and new_msg.tool_calls:
-                                    for tc in new_msg.tool_calls:
-                                        tc_id = tc.get("id")
-                                        tool_name = tc.get("name", "")
-                                        tool_args = tc.get("args", {})
-                                        
-                                        # 去重：只发送未发送过的 tool_call
-                                        if tc_id and tc_id not in sent_tool_call_ids and tool_name:
-                                            sent_tool_call_ids.add(tc_id)
-                                            logger.debug(f"发送 tool_start 事件: {tool_name}")
-                                            if tool_name and "tavily" in (tool_name or "").lower():
-                                                logger.info(
-                                                    "联网搜索被调用: tool=%s, args=%s",
-                                                    tool_name, tool_args
-                                                )
-                                            emit_tool_start(writer, tool_name, tool_args, node=name)
-                                else:
-                                    # 2. 处理非流式文本消息 (补发漏掉的消息)
-                                    msg_content = getattr(new_msg, 'content', '')
-                                    msg_id = getattr(new_msg, 'id', None)
-                                    
-                                    # 过滤逻辑
-                                    if AgentOutputParser.should_filter_content(msg_content):
-                                        continue
-
-                                    # 去重逻辑
-                                    # A. 如果 ID 已处理过，跳过
-                                    if msg_id and msg_id in emitted_message_ids:
-                                        continue
-                                    
-                                    # B. 如果内容完全匹配已收集的内容，跳过（防止无 ID 时的重复）
-                                    full_collected = "".join(collected_content)
-                                    if msg_content and msg_content in full_collected:
-                                        # 只有当内容较长时才认为是重复，避免短词误判
-                                        if len(msg_content) > 10:
-                                            continue
-                                        # 或者如果它是 collected 的后缀？
-                                        # 简单起见，如果完全包含且 ID 缺失，假设已发
-                                        continue
-                                    
-                                    # 发送补漏消息
-                                    if msg_content:
-                                        logger.info(f"[{name}] values 模式补发消息: {msg_content[:30]}...")
-                                        # 检查是否有 additional_kwargs（如 data_type, data），使用 emit_result 发送完整数据
-                                        additional = getattr(new_msg, 'additional_kwargs', {})
-                                        data_type = additional.get('data_type')
-                                        if data_type:
-                                            from app.ai.events import emit_result
-                                            emit_result(writer, 
-                                                       data_type=data_type,
-                                                       data=additional.get('data', {}),
-                                                       message=msg_content,
-                                                       node=name)
-                                        else:
-                                            emit_token(writer, msg_content, node=name)
-                                        
-                                        collected_content.append(msg_content)
-                                        if msg_id:
-                                            emitted_message_ids.add(msg_id)
-                        
-                        # 关键修复：更新 input_message_count，防止后续 values 更新重复处理同一条消息
-                        # 参见 SP-001 消息去重机制
-                        input_message_count = len(messages)
-                
-                # 调试日志：打印 LLM 输出统计
-                full_output = "".join(collected_content)
-                import re
-                output_image_count = len(re.findall(r'!\[[^\]]*\]\([^)]+\)', full_output))
-                
-                logger.debug("="*60)
-                logger.debug(f"[{name}] LLM 输出统计:")
-                logger.debug(f"  总长度: {len(full_output)} 字符")
-                logger.debug(f"  包含图片: {output_image_count} 张")
-                
-                logger.debug(f"  输出预览（前 500 字符）:")
-                logger.debug(f"  {full_output[:500]}")
-                logger.debug("="*60)
-                
-                # 方案4：统一状态管理 - 只返回增量消息
-                # 背景：
-                #   1. LangGraph add_messages reducer 通过消息 ID 去重
-                #   2. 消息工厂（message_factory.py）确保所有消息有唯一 ID
-                #   3. 但 LangGraph Issue #3648 显示子图仍可能返回完整状态
-                # 策略：
-                #   保留 delta_messages 计算作为兜底，即使消息有 ID
-                #   等待 LangGraph 修复 #3648 后可考虑简化
-                # 参见：docs/开发文档/架构设计/防屎山记录手册.md SP-001, SP-013
-                if final_state:
-                    messages = final_state.get("messages", [])
-                    # 使用 initial_input_count（流开始时的消息数），而非 input_message_count（已被更新）
-                    delta_messages = messages[initial_input_count:] if len(messages) > initial_input_count else []
-                    
-                    # 保留其他状态字段（user_id, thread_id, pending_operation 等）
-                    other_keys = {k: v for k, v in final_state.items() if k != "messages"}
-                    ret = other_keys.copy()
-                    ret["messages"] = delta_messages
-                    
-                    logger.debug(f"[{name}] 返回增量消息: {len(delta_messages)} 条 (原 {len(messages)} 条, 初始 {initial_input_count} 条)")
-                    return ret
-                return {}
-                
-            except GraphInterrupt:
-                raise
-            except Exception as e:
-                logger.error(f"[{name}]流式输出异常: {e}", exc_info=True)
-                error_text = str(e)
-
-                # Supervisor 配额/订阅类失败兜底：优先降级到待办专家，避免直接透传系统错误
-                if name == "supervisor":
-                    fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
-                    if fallback_handoff:
-                        logger.warning(
-                            "[%s] 命中模型权限错误，降级兜底路由到 %s",
-                            name,
-                            fallback_handoff.get("target_agent"),
-                        )
-                        emit_status(
-                            writer,
-                            message="模型服务暂不可用，已切换到待办兜底路由继续处理。",
-                            node=name,
-                        )
-                        return {
-                            "messages": [],
-                            "pending_handoff": fallback_handoff,
-                        }
-
-                # 发生异常时返回友好文案，避免将底层错误详情暴露给前端
-                error_msg = _build_stream_error_message(error_text)
-                emit_token(writer, error_msg, node=name)
-                return {"messages": [create_ai_message(error_msg)]}
-        
-        return streaming_wrapper
-
-    # 5. 定义后处理节点
+    # 7. 定义后处理节点
     def _postprocess(state: MultiAgentState) -> dict:
         """后处理节点：调试日志 + 保存对话到数据库 + 清理缓存。"""
         messages = state.get("messages", [])
@@ -1315,7 +1682,7 @@ async def create_multi_agent_graph(
             "skill_injection_meta": None,
         }
 
-    # 6. 定义评估节点（判断专家工作是否完成）
+    # 8. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
         """评估专家工作节点：判断是否需要继续委派其他专家。
         
@@ -1362,7 +1729,7 @@ async def create_multi_agent_graph(
             "iteration_count": iteration_count + 1
         }
     
-    # 7. 条件路由函数
+    # 9. 条件路由函数
     def should_continue_routing(state: MultiAgentState) -> Literal["postprocess", "supervisor"]:
         """根据评估结果决定下一步:
         - complete: 流向 postprocess 结束
@@ -1373,7 +1740,7 @@ async def create_multi_agent_graph(
             return "supervisor"
         return "postprocess"
 
-    # 8. 构建 StateGraph（简化架构：移除 knowledge_expert）
+    # 10. 构建 StateGraph（简化架构：移除 knowledge_expert）
     workflow = StateGraph(MultiAgentState)
 
     # 添加节点
@@ -1385,52 +1752,6 @@ async def create_multi_agent_graph(
     workflow.add_node("evaluate", _evaluate_expert_work)
     workflow.add_node("postprocess", _postprocess)
 
-    # Phase 2: 意图识别节点（借鉴 Flock + OpenAI Agents SDK routing）
-    async def _classify_intent(state: MultiAgentState) -> dict:
-        """意图识别节点：使用轻量级模型快速分类用户意图。"""
-        from app.ai.intent_classifier import classify_intent
-        
-        messages = state.get("messages", [])
-        if not messages:
-            return {"detected_intent": "unknown", "intent_route": "supervisor"}
-        
-        last_msg = messages[-1]
-        content = str(getattr(last_msg, "content", ""))
-        
-        # 跳过空消息或内部消息
-        if not content or getattr(last_msg, "name", None) == "supervisor_handoff":
-            return {"detected_intent": "unknown", "intent_route": "supervisor"}
-        
-        model_id = state.get("model_id")
-        result = await classify_intent(content, model_id)
-        
-        # 发送意图识别状态
-        writer = get_stream_writer()
-        emit_status(writer, message=f"意图识别: {result.intent}", node="intent_classify")
-        
-        return {
-            "detected_intent": result.intent,
-            "intent_route": result.route_to
-        }
-    
-    # 意图路由函数
-    def route_by_intent(state: MultiAgentState) -> str:
-        """根据意图识别结果路由到对应节点。"""
-        route = state.get("intent_route", "supervisor")
-        intent = state.get("detected_intent", "unknown")
-        
-        # 高置信度直接路由
-        if route == "data_expert" and intent == "data_analysis":
-            logger.info("意图路由: 直接到 data_expert")
-            return "data_expert"
-        elif route == "todo_expert" and intent == "todo_management":
-            logger.info("意图路由: 直接到 todo_expert")
-            return "todo_expert"
-        
-        # 其他情况走 Supervisor
-        logger.info("意图路由: 到 supervisor (intent=%s)", intent)
-        return "supervisor"
-    
     # 架构规则：不使用独立的 intent_classify 节点，由 Supervisor 统一处理意图路由
     
     # 添加边
@@ -1464,35 +1785,29 @@ async def create_multi_agent_graph(
             
             logger.info(f"Supervisor 检测到 pending_handoff，目标: {target_agent}, 意图: {detected_intent}")
             
-            # 有效的 Agent 列表
-            VALID_AGENTS = {AgentType.DATA, AgentType.TODO}
+            # 有效的 Agent 列表（与图内实际可路由节点保持一致）
+            valid_targets = set(WORKFLOW_AGENT_NODE_BY_TYPE.keys())
             
             # 使用 Schema 路由增强（借鉴 TypeAgent Dispatcher）
             # 如果 target_agent 无效但有 detected_intent，尝试使用 Schema 路由
-            if target_agent not in VALID_AGENTS and detected_intent:
+            if target_agent not in valid_targets and detected_intent:
                 schema_route = route_by_schema(detected_intent)
-                if schema_route in ["data_expert", "todo_expert"]:
+                if schema_route in WORKFLOW_AGENT_NODES:
                     logger.info(f"Schema 路由增强: intent={detected_intent} -> {schema_route}")
                     return schema_route
             
-            if target_agent in VALID_AGENTS:
+            if target_agent in valid_targets:
                 # 有效的 Handoff
-                if target_agent == AgentType.DATA:
-                    return "data_expert"
-                elif target_agent == AgentType.TODO:
-                    return "todo_expert"
+                return WORKFLOW_AGENT_NODE_BY_TYPE[target_agent]
             else:
                 # 无效的 target_agent - 记录错误并处理
                 error = HandoffValidationError(
                     f"无效的 Handoff 目标 Agent: {target_agent}，"
-                    f"有效值为 {list(VALID_AGENTS)}",
+                    f"有效值为 {list(valid_targets)}",
                     invalid_target=target_agent
                 )
                 logger.error(str(error))
-                
-                # 清理无效的 pending_handoff，避免后续节点再次处理
-                state["pending_handoff"] = None
-                
+
                 # 策略：直接结束（也可以选择重新路由回 Supervisor 让 LLM 重试）
                 # 这里选择直接结束，避免无限循环
                 logger.warning("清除无效 Handoff，直接进入 postprocess")

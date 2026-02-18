@@ -106,7 +106,7 @@
 
 ---
 
-## 8. card_export（/vk 机读，必填）
+## 8. card_export（机读，必填）
 
 ```yaml
 card_export:

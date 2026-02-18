@@ -115,26 +115,6 @@ def _resolve_reasoning_effort(extra_config: dict):
     return None
 
 
-def _map_legacy_scene(scene: str) -> str:
-    """兼容历史 scene 名称到 scene_key。"""
-
-    from app.ai.scene_registry import (
-        SCENE_KEY_DATA_INTENT_ANALYSIS,
-        SCENE_KEY_INTENT_CLASSIFIER,
-        SCENE_KEY_MULTI_AGENT_SUPERVISOR,
-    )
-
-    legacy_map = {
-        "default_chat": SCENE_KEY_MULTI_AGENT_SUPERVISOR,
-        "lightweight": SCENE_KEY_INTENT_CLASSIFIER,
-        "sql_generation": SCENE_KEY_DATA_INTENT_ANALYSIS,
-    }
-    if scene not in legacy_map:
-        raise ValueError(f"不支持的历史场景标识: {scene}")
-    logger.warning("get_scene_llm(scene=...) 已废弃，请改为 scene_key，当前自动映射: %s", scene)
-    return legacy_map[scene]
-
-
 def _resolve_scene_model_id(scene_key: str, model_id: str = None) -> str:
     """按调用场景键解析目标模型代码。"""
 
@@ -146,19 +126,17 @@ def _resolve_scene_model_id(scene_key: str, model_id: str = None) -> str:
 def get_scene_llm(
     scene_key: str = None,
     model_id: str = None,
-    *,
-    scene: str = None,
     **kwargs,
 ):
     """按调用场景键获取 LLM 实例。"""
 
-    resolved_scene_key = scene_key
-    if not resolved_scene_key:
-        if not scene:
-            raise ValueError("调用 get_scene_llm 时必须提供 scene_key")
-        resolved_scene_key = _map_legacy_scene(scene)
+    if "scene" in kwargs:
+        raise TypeError("get_scene_llm() 不再支持 scene 参数，请改用 scene_key")
 
-    resolved_model_id = _resolve_scene_model_id(scene_key=resolved_scene_key, model_id=model_id)
+    if not scene_key:
+        raise ValueError("调用 get_scene_llm 时必须提供 scene_key")
+
+    resolved_model_id = _resolve_scene_model_id(scene_key=scene_key, model_id=model_id)
     return get_llm(model_id=resolved_model_id, **kwargs)
 
 

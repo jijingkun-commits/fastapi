@@ -8,6 +8,7 @@ from app.services.result_enrichment_rule_service import ResultLookupEnrichmentRu
 from app.ai.workflow.data_graph import (
     _build_column_display_names,
     _build_display_sql,
+    _build_sql_result_additional_kwargs,
     _build_sql_result_chart_payload,
     _coerce_chart_number,
     _derive_metric_sql,
@@ -16,7 +17,9 @@ from app.ai.workflow.data_graph import (
     _is_sql_semantically_compatible,
     _load_column_display_name_map,
     _pick_chart_axes,
+    _resolve_sql_empty_result_fallback_policy,
     _requires_detail_query,
+    route_after_execute,
 )
 
 
@@ -65,6 +68,51 @@ class TestDataGraphSemanticGuard(unittest.TestCase):
         self.assertEqual(_extract_top_n("贷款余额前10名客户"), 10)
         self.assertEqual(_extract_top_n("贷款余额top25客户"), 25)
         self.assertEqual(_extract_top_n("贷款余额客户排名"), 10)
+
+    def test_build_sql_result_additional_kwargs_uses_shared_payload_schema(self):
+        additional_kwargs = _build_sql_result_additional_kwargs(
+            sql="SELECT org_nm, loan_bal FROM fdmdata.f_mid_loan_tb LIMIT 100",
+            display_sql="SELECT 机构名称, 贷款余额 FROM fdmdata.f_mid_loan_tb LIMIT 100",
+            columns=["org_nm", "loan_bal"],
+            column_display_names=["机构名称", "贷款余额"],
+            result_data=[
+                {"org_nm": "嘉兴分行", "loan_bal": 1526000000.0},
+                {"org_nm": "绍兴分行", "loan_bal": 692000000.0},
+            ],
+            sql_source="metric",
+            iterations=1,
+            chart_payload={"type": "bar"},
+            permission_rewritten=True,
+            permission_scope_summary={"display_text": "浙江省分行"},
+        )
+
+        self.assertEqual(additional_kwargs.get("data_type"), "sql_result")
+        data = additional_kwargs.get("data")
+        assert isinstance(data, dict)
+        self.assertEqual(data.get("total_rows"), 2)
+        self.assertEqual(data.get("sql_source"), "metric")
+        self.assertEqual(data.get("iterations"), 1)
+        self.assertEqual(data.get("permission_scope_applied"), True)
+        self.assertEqual(data.get("permission_scope_summary"), {"display_text": "浙江省分行"})
+        self.assertEqual(data.get("rows"), [
+            {"org_nm": "嘉兴分行", "loan_bal": 1526000000.0},
+            {"org_nm": "绍兴分行", "loan_bal": 692000000.0},
+        ])
+
+    def test_resolve_sql_empty_result_fallback_policy(self):
+        self.assertEqual(
+            _resolve_sql_empty_result_fallback_policy("metric"),
+            ("training", "指标模板未查到数据，正在尝试训练集SQL..."),
+        )
+        self.assertEqual(
+            _resolve_sql_empty_result_fallback_policy("training"),
+            ("schema", "训练集SQL未查到数据，正在尝试通过表结构生成查询..."),
+        )
+        self.assertIsNone(_resolve_sql_empty_result_fallback_policy("unknown"))
+
+    def test_route_after_execute_routes_by_fallback_map(self):
+        self.assertEqual(route_after_execute({"fallback_target": "training"}), "fallback_training")
+        self.assertEqual(route_after_execute({"fallback_target": "schema"}), "fallback_schema")
 
     def test_coerce_chart_number_supports_chinese_units(self):
         self.assertEqual(_coerce_chart_number("15.26亿"), 1526000000.0)

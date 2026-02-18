@@ -20,7 +20,7 @@
 
 ```text
 想法 -> /clarify -> /plan parallel（或 /plan core） -> /vkplan
-     -> /vkkb <任务拆解目录>（或 /vktodo <任务拆解目录>）
+     -> /vktodo <任务拆解目录>
      -> /imp-ws @workstreams/WS-01...WS-N（并行层）
      -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
      -> /imp-ws @workstreams/WS-G2_文档终稿门禁.md
@@ -40,9 +40,9 @@
 
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
-| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | 默认 `requirements.md` + `implementation_plan.md`（或按命名规范落到 `<topic>_requirements.md` + `<topic>_implementation_plan.md`） | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
+| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | 默认 `<topic>_requirements.md` + `<topic>_implementation_plan.md` | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
 | 2. 并行拆解 | `/vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
-| 3. 看板一体落地 | `/vkkb <任务拆解目录>`（或 `/vktodo <任务拆解目录>`） | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
+| 3. 看板落地 | `/vktodo <任务拆解目录>` | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
 | 4. 子任务执行 | `/imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
 | 5. Gate 回填 | `/imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
@@ -56,9 +56,7 @@
 | 规划（不拆卡） | `/plan` 或 `/plan core` | 只产出需求与技术方案 |
 | 规划 + 并行拆解（推荐） | `/plan parallel -> /vkplan`（或 `/plan core -> /vkplan`） | 含 G0 冻结与落卡前产物 |
 | 基线同步（调试） | `/vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
-| 看板一体落地（推荐） | `/vkkb <任务拆解目录>` | 自动补导出并落卡 |
-| 看板落卡（兼容） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
-| 看板导出（可选） | `/vk` | 仅在需要审阅 payload 或排障时使用 |
+| 看板落卡（推荐） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
 | 看板推进（简化） | `/vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
 | 执行单个 WS | `/imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/imp` | 不走并行流程时使用 |

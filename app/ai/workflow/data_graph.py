@@ -44,6 +44,10 @@ from app.ai.workflow.session_intent_kernel import (
     advance_clarify_fsm_state,
 )
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
+from app.ai.protocol import (
+    build_streaming_result_payload_from_fields,
+    build_result_additional_kwargs_payload,
+)
 from app.ai.utils.state_helpers import get_user_id
 from app.ai.utils.schema_router import route_schema
 from app.ai.utils.sql_parser import extract_tables_from_sql
@@ -74,6 +78,24 @@ AVAILABLE_METRICS = """
 - 存款户数: 存款类指标，同义词：存款客户数
 - 分机构存款余额 / 分行存款: 按机构维度的存款统计
 """
+
+
+_SQL_EMPTY_RESULT_FALLBACK_POLICY: Dict[str, Dict[str, str]] = {
+    "metric": {
+        "next_target": "training",
+        "hint": "指标模板未查到数据，正在尝试训练集SQL...",
+    },
+    "training": {
+        "next_target": "schema",
+        "hint": "训练集SQL未查到数据，正在尝试通过表结构生成查询...",
+    },
+}
+
+
+_EXECUTE_FALLBACK_ROUTE_MAP: Dict[str, str] = {
+    "training": "fallback_training",
+    "schema": "fallback_schema",
+}
 
 
 # ==================== 节点函数 ====================
@@ -3501,6 +3523,53 @@ def _build_sql_result_chart_payload(
     }
 
 
+def _build_sql_result_additional_kwargs(
+    sql: str,
+    display_sql: str,
+    columns: List[str],
+    column_display_names: List[str],
+    result_data: List[Dict[str, Any]],
+    sql_source: str,
+    iterations: int,
+    chart_payload: Optional[Dict[str, Any]],
+    permission_rewritten: bool,
+    permission_scope_summary: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """构建 SQL 结果消息的 additional_kwargs。"""
+    result_payload = build_result_additional_kwargs_payload(
+        data_type="sql_result",
+        data={
+            "sql": sql,
+            "display_sql": display_sql,
+            "columns": columns,
+            "column_display_names": column_display_names,
+            "rows": result_data[:100],
+            "total_rows": len(result_data),
+            "sql_source": sql_source,
+            "iterations": iterations,
+            "chart": chart_payload,
+            "permission_scope_applied": permission_rewritten,
+            "permission_scope_summary": permission_scope_summary,
+        },
+    )
+    return result_payload or {}
+
+
+def _resolve_sql_empty_result_fallback_policy(sql_source: Any) -> Optional[Tuple[str, str]]:
+    """解析空结果降级策略（source -> next_target/hint）。"""
+    normalized_source = str(sql_source or "").strip()
+    policy = _SQL_EMPTY_RESULT_FALLBACK_POLICY.get(normalized_source)
+    if not isinstance(policy, dict):
+        return None
+
+    next_target = str(policy.get("next_target") or "").strip()
+    hint = str(policy.get("hint") or "").strip()
+    if not next_target:
+        return None
+
+    return next_target, hint
+
+
 def sql_execute(state: DataAgentState) -> Dict:
     """执行 SQL 并返回结果（支持错误自愈）。
     
@@ -3587,19 +3656,15 @@ def sql_execute(state: DataAgentState) -> Dict:
                 is_empty = True
         
         # 三级降级：metric 空结果 → 训练集，训练集空结果 → 通用 RAG
-        if is_empty and sql_source in ("metric", "training"):
-            if sql_source == "metric":
-                next_target = "training"
-                hint = "指标模板未查到数据，正在尝试训练集SQL..."
-            else:
-                next_target = "schema"
-                hint = "训练集SQL未查到数据，正在尝试通过表结构生成查询..."
-            
+        fallback_policy = _resolve_sql_empty_result_fallback_policy(sql_source)
+        if is_empty and fallback_policy:
+            next_target, hint = fallback_policy
             logger.info(
                 "空结果降级: sql_source=%s → fallback_target=%s",
                 sql_source, next_target
             )
-            emit_status(writer, hint, node="sql_execute")
+            if hint:
+                emit_status(writer, hint, node="sql_execute")
             
             return {
                 "fallback_target": next_target,
@@ -3643,26 +3708,21 @@ def sql_execute(state: DataAgentState) -> Dict:
         # 构建响应消息
         response_msg = create_ai_message(
             interpretation,
-            additional_kwargs={
-                "data_type": "sql_result",
-                "data": {
-                    "sql": sql,
-                    "display_sql": display_sql,
-                    "columns": columns,
-                    "column_display_names": column_display_names,
-                    "rows": result_data[:100],  # 限制返回行数
-                    "total_rows": len(result_data),
-                    "sql_source": state.get("sql_source", "unknown"),
-                    "iterations": iterations,  # 记录重试次数
-                    "chart": chart_payload,
-                    "permission_scope_applied": permission_rewritten,
-                    "permission_scope_summary": permission_scope_summary,
-                }
-            }
+            additional_kwargs=_build_sql_result_additional_kwargs(
+                sql=sql,
+                display_sql=display_sql,
+                columns=columns,
+                column_display_names=column_display_names,
+                result_data=result_data,
+                sql_source=state.get("sql_source", "unknown"),
+                iterations=iterations,
+                chart_payload=chart_payload,
+                permission_rewritten=permission_rewritten,
+                permission_scope_summary=permission_scope_summary,
+            ),
         )
         
-        emit_result(
-            writer,
+        stream_result_payload = build_streaming_result_payload_from_fields(
             data_type="sql_result",
             data={
                 "rows": result_data[:20],
@@ -3674,8 +3734,15 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "permission_scope_summary": permission_scope_summary,
             },
             message=interpretation,
-            node="sql_execute"
         )
+        if stream_result_payload:
+            emit_result(
+                writer,
+                data_type=stream_result_payload["data_type"],
+                data=stream_result_payload["data"],
+                message=stream_result_payload["message"],
+                node="sql_execute",
+            )
         
         # 执行成功后进行质量评估（异步，不阻塞主流程）
         evaluation_result = None
@@ -3964,13 +4031,14 @@ def route_after_execute(state: DataAgentState) -> Literal[
     错误自愈：执行报错 → 重新生成 SQL（最多 3 次）
     """
     # 三级降级链
-    fallback = state.get("fallback_target")
-    if fallback == "training":
-        logger.info("空结果降级: metric → training")
-        return "fallback_training"
-    elif fallback == "schema":
-        logger.info("空结果降级: training → schema(通用RAG)")
-        return "fallback_schema"
+    fallback = str(state.get("fallback_target") or "").strip()
+    fallback_route = _EXECUTE_FALLBACK_ROUTE_MAP.get(fallback)
+    if fallback_route:
+        if fallback == "training":
+            logger.info("空结果降级: metric → training")
+        elif fallback == "schema":
+            logger.info("空结果降级: training → schema(通用RAG)")
+        return fallback_route
     
     execution_success = state.get("execution_success", True)
     iterations = state.get("iterations", 1)

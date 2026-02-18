@@ -9,7 +9,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260216-TOOL-GOVERNANCE`
-- 来源主计划：`docs/内部参考/迭代需求/implementation_plan.md`
+- 来源主计划：`docs/内部参考/迭代需求/ai_tools_governance_implementation_plan.md`
 - 来源并行计划：`docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/parallel_plan.md`
 
 ---
@@ -101,7 +101,7 @@
 
 ---
 
-## 8. card_export（/vk 机读，必填）
+## 8. card_export（机读，必填）
 
 ```yaml
 card_export:
@@ -139,4 +139,3 @@ card_export:
   dod:
     - G1 门禁执行并完成责任 WS 归因
 ```
-

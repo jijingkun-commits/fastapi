@@ -140,3 +140,23 @@
 1. 发布前执行迁移脚本。
 2. 默认可在灰度环境开启 `ENABLE_USER_PREFERENCE_MEMORY=true`。
 3. 若出现异常，可通过开关快速回滚到“无记忆”模式，无需回滚表结构。
+
+---
+
+## 8. 与总控迁移方案映射
+
+对应总控文档：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
+
+1. 批次映射：本专题对应 **Batch-4（跨会话偏好记忆接线）**。
+2. 进入条件：Batch-0 文档治理拆分完成，批次映射已回挂。
+3. 本批产出：
+   - `t_user_memory` 记忆读写闭环；
+   - `ChatService` 读取注入与显式写入接线；
+   - 开关化发布与快速回滚能力。
+4. 退出条件：
+   - 本文 2~7 节能力落地并通过测试；
+   - 记忆异常不阻断主对话；
+   - 配置与文档同步完成。
+5. 回滚锚点：
+   - `ENABLE_USER_PREFERENCE_MEMORY`
+   - `USER_PREFERENCE_MEMORY_MAX_ITEMS`

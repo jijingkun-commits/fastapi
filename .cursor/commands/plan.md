@@ -1,5 +1,5 @@
 ---
-description: 正式规划：默认产出 requirements.md 与技术方案，可选生成并行 card_seed
+description: 正式规划：默认产出专题前缀需求与技术方案，可选生成并行 card_seed
 ---
 
 > 参考规则: @dual-database
@@ -19,27 +19,35 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 | 只想快速澄清理解 | `/clarify` |
 | 一站式从需求到交付 | `/feature` |
 
-> **与 `/clarify` 的区别**: `/plan` 会产出 `requirements.md` 与 `implementation_plan.md`；`/clarify` 只做问答确认。
+> **与 `/clarify` 的区别**: `/plan` 会产出 `<topic>_requirements.md` 与 `<topic>_implementation_plan.md`；`/clarify` 只做问答确认。
 
 ---
 
 ## 输入模式（新增）
 
+### 命名对齐要求（新增）
+
+`<topic>` 默认与任务拆解目录 `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/` 的 `<主题>` 对齐，优先使用中文主题短语。
+
+1. 新增规划文档默认使用中文主题前缀：`<主题>_requirements.md`、`<主题>_implementation_plan.md`。
+2. 若已存在同主题任务拆解目录，命名必须复用同一 `<主题>` 语义，不允许漂移。
+3. `task_key` 的英文机读标识独立维护，不强制写入文件名前缀。
+
 ### 1) core 模式（默认）
 
 `/plan` 或 `/plan core`
 
-- 产出：`requirements.md` + `implementation_plan.md`
+- 产出：`<topic>_requirements.md` + `<topic>_implementation_plan.md`
 - 不强制产出 `card_seed`
 - 适用于单人/单 AI 主导规划，改动范围可小可大（含跨模块/全局架构）
 - 默认无需并行落卡；若后续需要多人并行再切换 `/plan parallel` + `/vkplan`
-- 若属于全局改造，`implementation_plan.md` 必须显式包含：分阶段路线图、跨模块依赖矩阵、回滚与观测方案
+- 若属于全局改造，`<topic>_implementation_plan.md` 必须显式包含：分阶段路线图、跨模块依赖矩阵、回滚与观测方案
 
 ### 2) parallel 模式（并行规划）
 
 `/plan parallel`
 
-- 产出：`requirements.md` + `implementation_plan.md` + 最小 `card_seed`
+- 产出：`<topic>_requirements.md` + `<topic>_implementation_plan.md` + 最小 `card_seed`
 - 要求给出 `task_key`（后续卡片前缀）
 - 适用于多人/多 AI/多 worktree 并行
 - 并行拆解与落卡前准备由后续 `/vkplan` 承接
@@ -49,7 +57,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 ## 1. 需求分析 (Requirement Analysis)
 
 **产出**:
-1. 迭代级概览：`docs/内部参考/迭代需求/requirements.md`
+1. 迭代级概览：`docs/内部参考/迭代需求/<topic>_requirements.md`
 2. 模块级需求：`docs/产品文档/<模块>需求.md`
 
 **必须包含**:
@@ -64,9 +72,9 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 ## 2. 技术方案 (Technical Design)
 
-**产出**: `docs/内部参考/迭代需求/implementation_plan.md` (Artifact)
+**产出**: `docs/内部参考/迭代需求/<topic>_implementation_plan.md` (Artifact)
 
-> **唯一产出路径**: `implementation_plan.md` 统一放在 `docs/内部参考/迭代需求/`，不再使用仓库根目录路径。
+> **唯一产出路径**: `<topic>_implementation_plan.md` 统一放在 `docs/内部参考/迭代需求/`，不再使用仓库根目录路径。
 
 **内容**:
 1. **架构变更**: 涉及哪些模块？数据库要改吗？
@@ -75,7 +83,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 ### 架构评审必查项
 
-在输出 `docs/内部参考/迭代需求/implementation_plan.md` 前，必须补充“架构影响与约束”，至少包含：
+在输出 `docs/内部参考/迭代需求/<topic>_implementation_plan.md` 前，必须补充“架构影响与约束”，至少包含：
 
 1. **模块边界**：策略属于哪个层（Prompt / Workflow / Node / Frontend），是否越层；避免同一决策分散在多个节点重复实现。
 2. **状态契约**：关键字段 canonical 定义、来源优先级、生命周期（创建/合并/清理），是否存在别名漂移风险。
@@ -87,8 +95,8 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 当某个子域存在“专项架构重构”且复杂度明显高于主计划时，采用“主计划 + 专项附录”模式：
 
-1. 主计划固定为：`docs/内部参考/迭代需求/implementation_plan.md`
-2. 专项附录命名：`docs/内部参考/迭代需求/implementation_plan_<主题>.md`
+1. 主计划固定为：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+2. 专项附录命名：`docs/内部参考/迭代需求/<topic>_<appendix>_implementation_plan.md`
 3. 主计划必须新增“文档分层与引用关系”段，明确：
    - 主从关系
    - 执行顺序（先主计划门禁，再专项 phase）
@@ -110,7 +118,7 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 ### 2.3 并行拆解种子（仅 parallel 模式必填）
 
-仅当命令为 `/plan parallel` 时，`implementation_plan.md` 必须追加“可拆解种子信息”。
+仅当命令为 `/plan parallel` 时，`<topic>_implementation_plan.md` 必须追加“可拆解种子信息”。
 
 最小字段：
 
@@ -137,13 +145,13 @@ description: 正式规划：默认产出 requirements.md 与技术方案，可�
 
 1. `/plan` 负责“需求与架构正确性”。
 2. `/vkplan` 负责“并行拆包与可执行边界”。
-3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo（或 /vkkb） -> /imp-ws`。
+3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo -> /imp-ws`。
 
 ## 4. 衔接下游
 
 规划完成后：
 - 并行场景：执行 `/vkplan` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
-- 看板场景：执行 `/vktodo`（或 `/vkkb`）直接落卡；其前置会自动完成 G0 基线校验
+- 看板场景：执行 `/vktodo` 直接落卡；其前置会自动完成 G0 基线校验
 - 单任务实现：执行 `/imp`
 - 测试设计：执行 `/test` 基于模块需求文档生成测试用例
 

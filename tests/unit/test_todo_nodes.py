@@ -632,7 +632,7 @@ class TestTodoSupplementConvergence:
             '{"intent":"clarify","action_state":"need_clarify",'
             '"response_message":"",'
             '"extracted_info":{"time":"明天下午3点"},'
-            '"missing_info":["时间"]}'
+            '"missing_info":["time_range"]}'
         )
         mock_get_llm.return_value = mock_llm
 
@@ -691,7 +691,7 @@ class TestTodoWorkflowStateSemantics:
             '{"intent":"clarify","action_state":"need_clarify",'
             '"response_message":"",'
             '"extracted_info":{"title":"项目汇报"},'
-            '"missing_info":["操作动作","操作动作",""]}'
+            '"missing_info":["todo_action","todo_action",""]}'
         )
         mock_get_llm.return_value = mock_llm
 
@@ -772,6 +772,204 @@ class TestTodoWorkflowStateSemantics:
         assert result.get("clarify_round") == 0
         assert result.get("pending_operation", {}).get("action") == "update"
         assert result.get("pending_operation", {}).get("needs_clarification") is False
+
+
+class TestTodoRejectSupplementRecovery:
+    """拒绝后补充应恢复创建草稿（需求 §3.4）。"""
+
+    def test_global_todo_state_should_include_response_message(self):
+        """全局 Todo 状态契约必须包含 response_message，避免 clarify 节点丢字段。"""
+        from app.ai import state as ai_state
+
+        assert "response_message" in ai_state.TodoAgentState.__annotations__
+
+    def test_normalize_missing_info_should_only_accept_canonical_slots(self):
+        """missing_info 仅接受 canonical slot，非法字段应被忽略。"""
+        from app.ai.workflow.todo_graph import _normalize_missing_info
+
+        normalized = _normalize_missing_info(["target_todo", "todo_id", "time_range", "todo_action"])
+        assert normalized == ["时间范围", "操作动作"]
+
+    def test_normalize_missing_slots_should_return_canonical_slots(self):
+        """missing_info 内部处理应统一为 canonical slot。"""
+        from app.ai.workflow.todo_graph import _normalize_missing_slots
+
+        normalized_slots = _normalize_missing_slots(
+            ["todo_target", "todo_target", "time_range", "todo_action", "target_todo", "操作动作"]
+        )
+        assert normalized_slots == ["todo_target", "time_range", "todo_action"]
+
+    def test_normalize_missing_slots_should_drop_non_canonical_values(self):
+        """strict 模式下，非 canonical 槽位必须被丢弃。"""
+        from app.ai.workflow.todo_graph import _normalize_missing_slots
+
+        normalized_slots = _normalize_missing_slots(["target_todo", "todo_id", "目标待办", "时间范围"])
+        assert normalized_slots == []
+
+    def test_clarify_goal_template_missing_info_should_use_canonical_slots(self):
+        """Goal 模板中的 clarify 示例必须只使用 canonical slot。"""
+        from app.ai.config.goal_templates import GOAL_TEMPLATES
+
+        allowed_slots = {"todo_target", "time_range", "todo_action"}
+        examples = GOAL_TEMPLATES["clarify"].few_shot_examples
+        for _, expected in examples:
+            for slot in expected.get("missing_info", []):
+                assert slot in allowed_slots
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_reject_then_supplement_should_recover_create_draft(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """场景：创建待办被拒绝后，用户补充信息应恢复同一创建草稿。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"update","action_state":"need_clarify",'
+            '"response_message":"我可以帮你把补充信息更新到待办里，你想更新哪一个？",'
+            '"extracted_info":{"description":"需要带纸和笔"},'
+            '"missing_info":["todo_target"]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [
+                HumanMessage(content="明天上午9点去陆家嘴和张三开会"),
+                AIMessage(
+                    content="好的，我帮你记录这个待办",
+                    additional_kwargs={
+                        "operation": {
+                            "action": "create",
+                            "data": {
+                                "title": "和张三开会",
+                                "time": "明天上午9点",
+                                "due_date": "2026-02-19T09:00:00",
+                                "location": "陆家嘴",
+                                "description": "与张三开会",
+                            },
+                        }
+                    },
+                ),
+                HumanMessage(content="拒绝"),
+                AIMessage(content="好的，已取消操作。有其他需要帮助的吗？"),
+                HumanMessage(content="需要带纸和笔"),
+            ],
+            "user_id": 1,
+            "pending_operation": None,
+            "pending_clarifications": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "response_message": None,
+            "clarify_fsm_state": "idle",
+            "clarify_round": 0,
+        }
+
+        result = analyze_intent(state)
+
+        pending = result.get("pending_operation", {})
+        assert pending.get("action") == "create"
+        assert pending.get("needs_clarification") is False
+        assert result.get("clarify_fsm_state") == "done"
+
+        merged_desc = str((pending.get("data") or {}).get("description") or "")
+        assert "与张三开会" in merged_desc
+        assert "需要带纸和笔" in merged_desc
+        assert "确认创建" in str(result.get("response_message") or "")
+
+
+class TestTodoOperationPayloadHelpers:
+    """待办 operation 载荷 helper 测试。"""
+
+    def test_build_operation_additional_kwargs_payload_normalizes_structure(self):
+        from app.ai.protocol import build_operation_additional_kwargs_payload
+
+        additional_kwargs = build_operation_additional_kwargs_payload(
+            {
+                "action": " update ",
+                "data": "invalid",
+                "summary": "更新待办",
+            }
+        )
+
+        assert additional_kwargs == {
+            "operation": {
+                "action": "update",
+                "data": {},
+                "summary": "更新待办",
+            }
+        }
+
+    def test_extract_operation_from_ai_message(self):
+        from app.ai.protocol import extract_operation_from_ai_message
+
+        message = AIMessage(
+            content="确认创建",
+            additional_kwargs={
+                "operation": {
+                    "action": "create",
+                    "data": {"title": "项目汇报"},
+                }
+            },
+        )
+
+        operation = extract_operation_from_ai_message(message)
+        assert operation == {"action": "create", "data": {"title": "项目汇报"}}
+
+        assert extract_operation_from_ai_message(HumanMessage(content="hello")) is None
+
+    def test_build_todo_operation_payload_for_update(self):
+        from app.ai.workflow.todo_graph import _build_todo_operation_payload
+
+        operation_data = _build_todo_operation_payload(
+            action="update",
+            data={
+                "todo_id": 101,
+                "resolved_title": "项目汇报",
+                "due_date": "2026-02-20 10:00",
+                "priority": "高",
+            },
+            summary="更新待办",
+            update_title_fallback="待办",
+        )
+
+        assert operation_data["action"] == "update"
+        assert operation_data["target_task"] == {"id": 101, "title": "项目汇报"}
+        assert operation_data["diff"] == {
+            "due_date": {"old": None, "new": "2026-02-20 10:00"},
+            "priority": {"old": None, "new": "高"},
+        }
+
+    def test_build_todo_operation_payload_for_delete(self):
+        from app.ai.workflow.todo_graph import _build_todo_operation_payload
+
+        operation_data = _build_todo_operation_payload(
+            action="delete",
+            data={
+                "todo_id": 102,
+                "title": "回访客户",
+            },
+            summary="删除待办",
+            update_title_fallback="待办",
+        )
+
+        assert operation_data["action"] == "delete"
+        assert operation_data["target_task"] == {"id": 102, "title": "回访客户"}
+        assert "diff" not in operation_data
 
 
 if __name__ == "__main__":

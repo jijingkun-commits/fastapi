@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-YYYYMMDD-XXX  
 > 主题: <需求主题>  
-> 输入来源: `docs/内部参考/迭代需求/requirements.md` / `docs/内部参考/迭代需求/implementation_plan.md`
+> 输入来源: `docs/内部参考/迭代需求/<topic>_requirements.md` / `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
 
 ## 0. G0 协议冻结
 
