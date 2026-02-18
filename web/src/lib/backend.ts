@@ -86,11 +86,22 @@ export interface Attachment {
 }
 
 /**
+ * 当前登录用户信息。
+ */
+export interface CurrentUserProfile {
+  id: number;
+  username: string | null;
+  mobile: string | null;
+  data_role: string | null;
+  data_role_label: string | null;
+}
+
+/**
  * 获取当前用户信息：
  * - 若显式传入 `token`，使用该令牌；
  * - 否则自动走默认的 `apiFetch` 注入逻辑。
  */
-export async function getMe(token?: string) {
+export async function getMe(token?: string): Promise<CurrentUserProfile> {
   const r = await apiFetch(`/api/v1/me`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   if (!r.ok) throw new Error("me failed");
   return r.json();

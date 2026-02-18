@@ -34,27 +34,7 @@ interface CurrentUser {
     username: string | null;
     mobile: string | null;
     dataRole: string | null;
-}
-
-type UserDataRole = "head_president" | "department_gm" | "department_vgm" | "staff";
-
-const USER_DATA_ROLE_LABEL: Record<UserDataRole, string> = {
-    head_president: "总行行长",
-    department_gm: "部门总经理",
-    department_vgm: "部门副总经理",
-    staff: "普通员工",
-};
-
-function getUserDataRoleLabel(dataRole: string | null | undefined): string | null {
-    if (!dataRole) {
-        return null;
-    }
-
-    if (dataRole in USER_DATA_ROLE_LABEL) {
-        return USER_DATA_ROLE_LABEL[dataRole as UserDataRole];
-    }
-
-    return dataRole;
+    dataRoleLabel: string | null;
 }
 
 export interface ChatHeaderProps {
@@ -110,6 +90,7 @@ export function ChatHeader({
                     username: me.username ?? null,
                     mobile: me.mobile ?? null,
                     dataRole: me.data_role ?? null,
+                    dataRoleLabel: me.data_role_label ?? null,
                 });
             } catch {
                 if (!mounted) {
@@ -159,7 +140,7 @@ export function ChatHeader({
             });
         }
 
-        const dataRoleLabel = getUserDataRoleLabel(currentUser?.dataRole);
+        const dataRoleLabel = currentUser?.dataRoleLabel?.trim() || currentUser?.dataRole?.trim() || null;
         if (dataRoleLabel) {
             items.push({
                 label: "数据角色",

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.schemas.user import LoginRequest, Token, UserOut
+from app.schemas.user import LoginRequest, Token, UserOut, get_data_role_label
 from app.core.security import create_access_token
 from app.services.user_service import authenticate
 from app.services.token_service import logout as token_logout
@@ -53,4 +53,11 @@ def logout(
 @router.get("/me", response_model=UserOut)
 def me(current_user = Depends(get_current_user)):
     """获取当前登录用户信息。"""
-    return UserOut.model_validate(current_user)
+    user_out = UserOut(
+        id=current_user.id,
+        username=getattr(current_user, "username", None),
+        mobile=getattr(current_user, "mobile", None),
+        data_role=getattr(current_user, "data_role", None),
+    )
+    user_out.data_role_label = get_data_role_label(user_out.data_role)
+    return user_out

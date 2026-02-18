@@ -95,5 +95,7 @@ class TestMeAPI:
             data = response.json()
             assert data["id"] == 1
             assert data["username"] == "testuser"
+            assert data["data_role"] == "staff"
+            assert data["data_role_label"] == "普通员工"
         finally:
             app.dependency_overrides.clear()
