@@ -1292,6 +1292,39 @@ def _build_clarification_message(missing_slots: List[str]) -> str:
     return "请补充查询所需的关键信息。"
 
 
+def _is_schema_metadata_query(text: str) -> bool:
+    """识别“表/字段/schema”类元数据查询，避免误追问指标与时间。"""
+    compact = re.sub(r"\s+", "", str(text or "")).lower()
+    if not compact:
+        return False
+
+    # 显式 schema/元数据关键词
+    metadata_keywords = (
+        "schema",
+        "information_schema",
+        "元数据",
+        "表结构",
+        "字段",
+        "列名",
+        "数据字典",
+        "showtables",
+        "showtable",
+        "describe",
+        "desc",
+        "ddl",
+    )
+    if any(keyword in compact for keyword in metadata_keywords):
+        return True
+
+    sanitized = compact.replace("图表", "").replace("报表", "")
+    metadata_patterns = (
+        r"(几张|多少张|多少个|哪些|有哪些|有什么).{0,6}表",
+        r"(表名|表列表|所有表)",
+        r"(有几列|多少列|字段有哪些|列有哪些|字段列表)",
+    )
+    return any(re.search(pattern, sanitized) for pattern in metadata_patterns)
+
+
 def _resolve_clarification(
     *,
     analysis_clarification: str,
@@ -1300,16 +1333,19 @@ def _resolve_clarification(
     merged_time: str,
     need_org_level: bool,
     merged_org_level: str,
+    require_metric_time_slots: bool,
+    allow_metric_time_analysis_clarify: bool,
     continuation_mode: bool,
     last_clarify_slot: str,
     clarify_count: int,
 ) -> Tuple[Optional[str], Optional[str], int, str]:
     """按缺项驱动澄清，并做重复澄清保护。"""
     missing_slots: List[str] = []
-    if not merged_metric:
-        missing_slots.append("metric")
-    if not merged_time:
-        missing_slots.append("time_range")
+    if require_metric_time_slots:
+        if not merged_metric:
+            missing_slots.append("metric")
+        if not merged_time:
+            missing_slots.append("time_range")
     if need_org_level and not merged_org_level:
         missing_slots.append("org_level")
 
@@ -1328,6 +1364,9 @@ def _resolve_clarification(
         return None, None, 0, "skip_optional_clarify_level"
 
     analysis_slot = _infer_clarify_slot(clarification)
+
+    if not allow_metric_time_analysis_clarify and analysis_slot in {"metric", "time_range", "metric_time"}:
+        return None, None, 0, "skip_metric_time_clarify_for_metadata_query"
 
     # 重复澄清保护：上一轮已问展示方式，本轮补充后不再追问指标/时间
     if continuation_mode and last_clarify_slot == "display_mode":
@@ -1640,6 +1679,10 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             merged_org_level = "分行"
             used_default_org_level = True
 
+        is_schema_metadata_query = _is_schema_metadata_query(normalized_last_message)
+        require_metric_time_slots = not is_schema_metadata_query
+        allow_metric_time_analysis_clarify = not is_schema_metadata_query
+
         previous_clarify_slot = str(state.get("last_clarify_slot") or "").strip()
         previous_clarify_count = int(state.get("clarify_count") or 0)
         previous_clarify_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
@@ -1651,16 +1694,19 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             merged_time=merged_time,
             need_org_level=has_chart_request and org_dimension_requested and not bool(merged_org_level),
             merged_org_level=merged_org_level,
+            require_metric_time_slots=require_metric_time_slots,
+            allow_metric_time_analysis_clarify=allow_metric_time_analysis_clarify,
             continuation_mode=continuation_mode,
             last_clarify_slot=previous_clarify_slot,
             clarify_count=previous_clarify_count,
         )
 
         missing_slots_for_fsm: List[str] = []
-        if not merged_metric:
-            missing_slots_for_fsm.append("metric")
-        if not merged_time:
-            missing_slots_for_fsm.append("time_range")
+        if require_metric_time_slots:
+            if not merged_metric:
+                missing_slots_for_fsm.append("metric")
+            if not merged_time:
+                missing_slots_for_fsm.append("time_range")
         if has_chart_request and org_dimension_requested and not bool(merged_org_level):
             missing_slots_for_fsm.append("org_level")
 
@@ -1733,7 +1779,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         logger.info(
             "意图融合: turn_act=%s, continuation=%s(reason=%s), used_handoff_context=%s, "
             "used_default_org_level=%s, clarify_reason=%s, clarify_fsm=%s, reset_for_new_query=%s, "
-            "policy_source=%s, policy_cache_hit=%s, policy_cache_age_sec=%s",
+            "schema_metadata_query=%s, policy_source=%s, policy_cache_hit=%s, policy_cache_age_sec=%s",
             turn_act,
             continuation_mode,
             continuation_reason,
@@ -1742,6 +1788,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             clarify_reason,
             next_clarify_fsm_state,
             context_reset_for_new_query,
+            is_schema_metadata_query,
             policy_meta.get("source"),
             policy_meta.get("cache_hit"),
             policy_meta.get("cache_age_sec"),
@@ -1777,6 +1824,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "clarify_reason": clarify_reason,
                 "clarify_fsm_state": next_clarify_fsm_state,
                 "clarify_round": next_clarify_round,
+                "is_schema_metadata_query": is_schema_metadata_query,
                 "context_reset_for_new_query": context_reset_for_new_query,
                 "intent_policy_source": policy_meta.get("source"),
                 "intent_policy_cache_hit": policy_meta.get("cache_hit"),
