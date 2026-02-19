@@ -1,7 +1,7 @@
 # 迁移执行波次实施方案（P1~P6）
 
 > 文档状态：实施基线（`/plan core`）
-> 更新时间：2026-02-19
+> 更新时间：2026-02-20
 > 对应总控：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
 
 ---
@@ -40,6 +40,39 @@
 4. 状态轻量化：state 仅存摘要与引用，明细 ledger 落库或外部存储。
 5. 插件化后置：先把 Tool Registry/Policy 与运行时稳定性打牢，再推进 Plugin Registry。
 
+### 2.2 C00 预检卡（迁移前置门禁）
+
+在进入 `C01/P1-01` 前，必须先完成 `C00`，用于固化“四风险修订”并防止执行跑偏。
+
+1. R1 证据门禁收敛：`evidence` 由一刀切改为按 `task_mode/requires_evidence` 启用。
+2. R2 模型 fallback 接线：统一收敛到 `LLMSceneService.resolve_model_code` 链路。
+3. R3 插件后置：`Plugin Registry` 不得阻塞 `P1~P4` 主线。
+4. R4 引用锚点修订：实现文档优先使用函数/模块锚点，避免行号漂移。
+
+`C00` 完成定义（DoD）：
+
+1. 变更文件：总控文档 + 波次文档 + P1 专题文档同步完成。
+2. 测试与校验：至少完成一次 `python3 scripts/docs_guard.py --strict`。
+3. 回滚开关：P1 仍以 `ENABLE_RUN_CONTROL` 与 `ENABLE_SSE_STOPPED_EVENT` 为唯一回滚锚点。
+4. 证据链接：Gate 看板、专题工单、回查四元组可相互追踪。
+
+### 2.3 C00 执行记录（2026-02-20）
+
+1. [x] 三份文档同步：`openclaw全量迁移_implementation_plan.md`、`迁移执行波次_implementation_plan.md`、`runtime_cancel_control_implementation_plan.md`。
+2. [x] 口径统一：取消接口统一为 `POST /api/v1/chat/runs/{run_id}/cancel`。
+3. [x] 引用规范：改为“函数/模块锚点优先”。
+4. [x] 校验通过：`python3 scripts/docs_guard.py --strict`（errors=0, warnings=0）。
+5. [x] 证据回填：Gate 看板与 P1 工单模板已挂接 C00 与 Gate 关联。
+
+结论：`C00` 已通过，可进入 `C01/P1-01`。
+
+### 2.4 进度回填协议（唯一入口）
+
+1. 执行进度唯一回填入口：本文 `11.5 本周 Gate 状态看板` + 当前卡执行记录区。
+2. 总控文档仅做状态镜像，不作为执行同学的主回填位置。
+3. 专题文档仅回填实现细节与测试证据，不更新跨波次总状态。
+4. 若出现状态不一致，以本文为准，并要求 24 小时内完成镜像同步。
+
 ---
 
 ## 3. P1 运行时可取消（最高优先）
@@ -57,7 +90,7 @@
 3. `app/services/chat_service.py`（`stream` / `sse_stream` / `sse_resume_stream` 接线）。
 4. `app/ai/workflow/multi_agent_graph.py`（关键节点取消检查）。
 5. `app/schemas/chat.py`（补 `run_id` 字段）。
-6. `app/api/v1/endpoints/chat_api.py`（`POST /chat/runs/{run_id}/cancel`）。
+6. `app/api/v1/endpoints/chat_api.py`（`POST /api/v1/chat/runs/{run_id}/cancel`，权威口径）。
 
 ### 3.3 契约与测试
 
@@ -199,6 +232,7 @@
 4. 同步 `docs/内部参考/迭代需求/README.md` 与 `docs/SUMMARY.md`。
 5. 同步契约权威文档：`docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md`。
 6. 每周仅维护一个状态看板入口（本文），统一更新 Wave 状态、风险与回滚记录。
+7. 统一取消接口权威口径为 `POST /api/v1/chat/runs/{run_id}/cancel`，并将实现引用从“行号”迁移为“函数/模块锚点”。
 
 ---
 
@@ -257,7 +291,7 @@
 
 | Gate | 责任人 | 目标日期 | 当前状态 | 证据链接 | 下一步 |
 |---|---|---|---|---|---|
-| G-1 实测证据闭环 | 待指派 | 2026-02-26 | 待执行 | 待补 | 启动 B0/B1-B2 场景实跑并留痕 |
-| G-2 复合任务编排实证 | 待指派 | 2026-02-26 | 待执行 | 待补 | 建立 20 条复合用例并开始统计 |
-| G-3 契约一致性证据 | 待指派 | 2026-02-26 | 待执行 | 待补 | 对齐 API/SSE/DB 文档与实现 |
-| G-4 P1 回滚演练证据 | 待指派 | 2026-02-26 | 待执行 | 待补 | 设计并执行 1 轮回滚演练 |
+| G-1 实测证据闭环 | 纪景锟 | 2026-02-26 | 进行中（C00已通过） | `迁移执行波次_implementation_plan.md` 第 2.3 节 | 启动 B0/B1-B2 场景实跑并留痕 |
+| G-2 复合任务编排实证 | 纪景锟 | 2026-02-26 | 待执行 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md`（待回填） | 建立 20 条复合用例并开始统计 |
+| G-3 契约一致性证据 | 纪景锟 | 2026-02-26 | 进行中（口径统一） | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md` | 对齐 API/SSE/DB 文档与实现 |
+| G-4 P1 回滚演练证据 | 纪景锟 | 2026-02-26 | 待执行 | `runtime_cancel_control_implementation_plan.md`（第 7 节回滚记录） | 设计并执行 1 轮回滚演练 |

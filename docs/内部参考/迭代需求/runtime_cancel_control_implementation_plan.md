@@ -1,7 +1,7 @@
 # 运行时可取消控制实施方案（P1）
 
 > 文档状态：实施基线（`/plan core`）
-> 更新时间：2026-02-19
+> 更新时间：2026-02-20
 > 对应总控：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
 
 ---
@@ -13,7 +13,7 @@
 交付：
 
 1. 每次流式请求具备唯一 `run_id`。
-2. 提供取消接口：`POST /chat/runs/{run_id}/cancel`。
+2. 提供取消接口：`POST /api/v1/chat/runs/{run_id}/cancel`（权威口径）。
 3. SSE 提供可机器识别的 `stopped` 事件。
 4. 取消后停止继续产出，且保留已生成内容。
 
@@ -111,6 +111,11 @@
 2. 后续用户输入应创建新 run，并复用 thread 历史而非旧 run 继续。
 3. 若处于 HITL interrupt，取消后再 resume 必须返回明确提示（需重新发起）。
 
+### 5.4 文档引用规范（防漂移）
+
+1. 本专题默认以函数/模块锚点引用实现，不以固定行号作为唯一定位依据。
+2. 涉及取消链路时，统一引用：`chat_api.py` 取消路由、`chat_service.py` 流式收口、`multi_agent_graph.py` 节点取消检查。
+
 ---
 
 ## 6. 测试计划
@@ -153,7 +158,40 @@
 
 ---
 
-## 9. P1 工单拆解模板（可直接贴 Jira/飞书）
+## 9. C00 预检卡（P1 开工前强制）
+
+卡片名称：`[C00] 迁移前置四风险修订收口`
+
+阻断规则：`C00` 未通过前，不得进入 `[P1-01]`。
+
+预检项（全部必过）：
+
+1. `evidence` 门禁按 `task_mode/requires_evidence` 启用（闲聊不误伤）。
+2. 模型 fallback 入口统一为 `LLMSceneService.resolve_model_code` 链路。
+3. `Plugin Registry` 后置，不阻塞 `P1~P4` 主线。
+4. 引用由行号改为函数/模块锚点，避免漂移。
+
+`C00` 验收 DoD（全部满足才可结单）：
+
+1. 变更文件：`迁移执行波次_implementation_plan.md`、`openclaw全量迁移_implementation_plan.md`、`runtime_cancel_control_implementation_plan.md` 同步完成。
+2. 测试用例：执行 `python3 scripts/docs_guard.py --strict` 通过。
+3. 回滚开关：`ENABLE_RUN_CONTROL`、`ENABLE_SSE_STOPPED_EVENT` 仍可独立回滚且语义不变。
+4. 证据链接：Gate 看板条目与 P1 工单条目已回填，且可追踪到同一责任人/日期。
+
+执行记录（2026-02-20）：
+
+1. DoD-1：通过。
+2. DoD-2：通过（docs_guard 严格模式 `errors=0, warnings=0`）。
+3. DoD-3：通过（回滚开关保持不变）。
+4. DoD-4：通过（Gate 看板与工单模板已回填）。
+
+结论：`C00` 已通过，允许进入 `[P1-01]`。
+
+说明：跨波次执行状态以 `迁移执行波次_implementation_plan.md` 为唯一权威；本文仅维护 P1 细节、测试证据与工单模板。
+
+---
+
+## 10. P1 工单拆解模板（可直接贴 Jira/飞书）
 
 统一字段模板：
 
@@ -179,7 +217,7 @@
    - 验收：并发取消与终态重复取消均通过，审计字段完整。
 3. `[P1-03] chat_api 取消接口`
    - 输入：`app/api/v1/endpoints/chat_api.py`。
-   - 输出：`POST /chat/runs/{run_id}/cancel`，包含权限校验与幂等返回语义。
+   - 输出：`POST /api/v1/chat/runs/{run_id}/cancel`，包含权限校验与幂等返回语义。
    - 验收：`tests/api/test_chat_api.py` 覆盖权限、状态码、幂等。
 4. `[P1-04] chat_service run 贯穿与流式收口`
    - 输入：`app/services/chat_service.py`、`app/schemas/chat.py`。
