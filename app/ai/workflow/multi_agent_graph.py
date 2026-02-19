@@ -1268,9 +1268,11 @@ def _get_common_tools():
     
     # 文件读取工具
     try:
-        from app.ai.tools.file_tools import read_uploaded_file
+        from app.ai.tools.file_tools import read_uploaded_file, read
+
         tools.append(read_uploaded_file)
-        logger.debug("共享工具: 已加载 read_uploaded_file")
+        tools.append(read)
+        logger.debug("共享工具: 已加载 read_uploaded_file/read")
     except Exception as e:
         logger.warning("文件读取工具加载失败: %s", e)
     

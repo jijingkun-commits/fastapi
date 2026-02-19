@@ -38,7 +38,7 @@ app/ai/
 │   ├── todo_tools.py          # 待办工具集
 │   ├── chatTools.py           # MCP 数据库工具
 │   ├── data_query_tools.py    # 问数查询入口工具
-│   ├── file_tools.py          # 文件读取工具
+│   ├── file_tools.py          # 文件读取工具（上传文件 + admin 本地 read）
 │   ├── vision_tool.py         # 图片分析工具
 │   ├── ragflow_tool.py        # 知识库检索工具
 │   └── ...
@@ -453,6 +453,21 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | `update_progress` | 更新进度 (自动联动状态) |
 | `complete_todo` | 标记完成 |
 | `delete_todo` | 软删除 |
+
+### File Tools（2026-02）
+
+**文件**: `app/ai/tools/file_tools.py`
+
+| 工具 | 用途 | 权限与约束 |
+|------|------|------------|
+| `read_uploaded_file` | 读取 MinIO 已上传附件（Excel/CSV/JSON/TXT/PDF） | 沿用既有行为，兼容历史流程 |
+| `read` | 读取仓库内本地文本文件，支持 `path/file_path` + `offset/limit` 分页 | 仅 `admin` 可调用；通过 `RunnableConfig.configurable.user_id` 查询 `t_user.role` 判定 |
+
+`read` 工具安全边界：
+- 仅允许访问 FastAPI 仓库根目录内文件（防越界/路径穿越，含符号链接解析后的真实路径）。
+- 默认按文本读取，二进制或不支持类型返回友好错误，不抛异常。
+- 输出限制与 OpenClaw 风格对齐：最多 2000 行或 50KB（先到先截断），并返回 `next_offset` 用于续读。
+- 已在 `multi_agent_graph._get_common_tools()` 注册，Supervisor 可直接调用。
 
 ---
 
