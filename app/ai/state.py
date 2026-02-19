@@ -57,6 +57,10 @@ class BaseAgentState(TypedDict, total=False):
     thread_id: str
     current_todo_id: int            # 前端选中待办锚点（可选，供 supervisor/todo 共享）
     pending_handoff: Dict           # 当前轮 Supervisor 委派上下文（含 frame/tool_observations，供专家子图消费）
+    handoff_queue: List[Dict]       # 复合任务待执行队列（除当前 pending_handoff 外的后续委派）
+    completed_handoffs: List[Dict]  # 已执行的委派记录（按执行顺序）
+    handoff_execution_trace: List[Dict]  # 复合任务执行轨迹（用于最终统一汇总）
+    multi_intent_mode: bool         # 是否命中复合任务执行模式
     
     # 模型配置（由 chat_service 注入，所有节点可读取）
     enable_thinking: bool          # 是否启用深度思考模式
@@ -92,6 +96,7 @@ class MultiAgentState(BaseAgentState, total=False):
     # 运行时状态（enable_thinking / model_id 已提升至 BaseAgentState）
     attachment_analysis: str       # 附件分析结果（由 preprocess 节点填充）
     evaluation: str                # 专家工作评估结果（由 evaluate 节点填充）
+    evaluation_route: str          # evaluate 下一跳路由（postprocess/supervisor/expert/summarize）
     iteration_count: int           # 当前迭代次数（防止无限循环）
     thinking_content: str          # 深度思考内容
     

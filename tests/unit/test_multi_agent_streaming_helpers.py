@@ -60,11 +60,16 @@ def test_build_streaming_protocol_adapter_maps_parser_functions() -> None:
         def extract_latest_handoff_from_messages(_messages):
             return {"target_agent": "todo_expert"}
 
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return [{"target_agent": "todo_expert"}]
+
     adapter = _build_streaming_protocol_adapter(_FakeParser)
 
     assert adapter["parse_kb_images"]("x") == {"img": "https://example.com/a.png"}
     assert adapter["should_filter_content"]("internal") is True
     assert adapter["extract_latest_handoff_from_messages"]([])["target_agent"] == "todo_expert"
+    assert adapter["extract_all_handoffs_from_messages"]([])[0]["target_agent"] == "todo_expert"
 
 
 def test_build_streaming_event_emitter_adapter_maps_event_emitters() -> None:
@@ -236,6 +241,10 @@ def test_handle_messages_mode_tool_message_emits_tool_end_and_kb_images() -> Non
         def extract_latest_handoff_from_messages(_messages):
             return None
 
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
+
     emitted_events = []
 
     def _fake_emit_tool_end(writer, tool_name, tool_output, node):
@@ -284,6 +293,10 @@ def test_emit_messages_mode_token_filters_internal_content() -> None:
         @staticmethod
         def extract_latest_handoff_from_messages(_messages):
             return None
+
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
 
     emitted_tokens = []
     collected_content: list[str] = []
@@ -394,6 +407,10 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
         def extract_latest_handoff_from_messages(_messages):
             return None
 
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
+
     emitted_ids: set[str] = set()
     collected_content: list[str] = []
     token_events = []
@@ -424,6 +441,7 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
         event_emitter_adapter=event_emitter_adapter,
         writer=SimpleNamespace(),
         node_name="supervisor",
+        state={"multi_intent_mode": False},
     )
 
     assert emitted_ids == {"ai-msg-1"}
@@ -439,6 +457,10 @@ def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:
         @staticmethod
         def extract_latest_handoff_from_messages(_messages):
             return None
+
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
 
         @staticmethod
         def parse_kb_images(_tool_content: str):
@@ -496,6 +518,10 @@ def test_dispatch_values_mode_chunk_uses_result_emitter_for_structured_payload()
         @staticmethod
         def extract_latest_handoff_from_messages(_messages):
             return None
+
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
 
         @staticmethod
         def parse_kb_images(_tool_content: str):
@@ -563,6 +589,10 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
             return None
 
         @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
+
+        @staticmethod
         def parse_kb_images(_tool_content: str):
             return {"img-1": "https://example.com/kb.png"}
 
@@ -609,6 +639,75 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
     assert kb_image_events == [({"img-1": "https://example.com/kb.png"}, "todo_expert")]
 
 
+def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> None:
+    """supervisor values 模式应保留 handoff 顺序并构造队列。"""
+
+    class _FakeParser:
+        @staticmethod
+        def extract_latest_handoff_from_messages(_messages):
+            return None
+
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return [
+                {
+                    "action": "handoff",
+                    "target_agent": "data_expert",
+                    "task_description": "查询网银功能",
+                },
+                {
+                    "action": "handoff",
+                    "target_agent": "todo_expert",
+                    "task_description": "创建待办提醒输出网银汇总",
+                },
+            ]
+
+        @staticmethod
+        def parse_kb_images(_tool_content: str):
+            return {}
+
+        @staticmethod
+        def should_filter_content(_content):
+            return False
+
+    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
+    event_emitter_adapter = _build_streaming_event_emitter_adapter(
+        emit_token=lambda *_args, **_kwargs: None,
+        emit_thinking=lambda *_args, **_kwargs: None,
+        emit_tool_start=lambda *_args, **_kwargs: None,
+        emit_tool_end=lambda *_args, **_kwargs: None,
+        emit_status=lambda *_args, **_kwargs: None,
+        emit_result=lambda *_args, **_kwargs: None,
+        emit_kb_images=lambda *_args, **_kwargs: None,
+    )
+
+    final_state = {
+        "messages": [ToolMessage(content="handoff-json", tool_call_id="tc-1", name="assign_to_data_expert")],
+        "thread_id": "thread-1",
+    }
+
+    updated_count, handoff_return = _dispatch_values_mode_chunk(
+        final_state=final_state,
+        protocol_adapter=protocol_adapter,
+        state={"messages": [HumanMessage(content="复合任务")], "thread_id": "thread-1"},
+        initial_input_count=0,
+        input_message_count=0,
+        kb_images={},
+        sent_tool_call_ids=set(),
+        emitted_message_ids=set(),
+        collected_content=[],
+        event_emitter_adapter=event_emitter_adapter,
+        writer=SimpleNamespace(),
+        node_name="supervisor",
+    )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["handoff_queue"][0]["target_agent"] == "todo_expert"
+    assert handoff_return["multi_intent_mode"] is True
+
+
 @pytest.mark.asyncio
 async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     """streaming 分发循环应按 messages/values 顺序处理并返回最终状态。"""
@@ -617,6 +716,10 @@ async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
         @staticmethod
         def extract_latest_handoff_from_messages(_messages):
             return None
+
+        @staticmethod
+        def extract_all_handoffs_from_messages(_messages):
+            return []
 
         @staticmethod
         def parse_kb_images(_tool_content: str):

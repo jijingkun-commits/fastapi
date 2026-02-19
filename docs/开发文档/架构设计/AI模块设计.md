@@ -140,12 +140,17 @@ class BaseAgentState(TypedDict, total=False):
     enable_thinking: Optional[bool]           # 是否启用深度思考
     model_id: Optional[str]                   # 模型标识
     pending_handoff: Optional[Dict]           # 当前轮委派上下文（供专家子图消费）
+    handoff_queue: Optional[List[Dict]]       # 复合任务剩余委派队列
+    completed_handoffs: Optional[List[Dict]]  # 已执行委派记录
+    handoff_execution_trace: Optional[List[Dict]]  # 执行轨迹（统一汇总输入）
+    multi_intent_mode: Optional[bool]         # 是否进入复合任务串行模式
 
 
 class MultiAgentState(BaseAgentState, total=False):
     """多智能体 Supervisor 扩展状态。"""
     attachment_analysis: Optional[str]        # 附件分析结果
     evaluation: Optional[str]                 # 评估结果
+    evaluation_route: Optional[str]           # evaluate 下一跳路由
     iteration_count: Optional[int]            # 迭代计数
     thinking_content: Optional[str]           # 思考内容
     detected_intent: Optional[str]            # 识别到的意图类型
@@ -157,7 +162,7 @@ class MultiAgentState(BaseAgentState, total=False):
     system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
 ```
 
-说明：`pending_handoff` 放在 `BaseAgentState`，确保 `DataAgentState` / `TodoAgentState` 子图都能读取同一份委派上下文，避免补充轮次丢失历史语义。
+说明：`pending_handoff + handoff_queue` 放在 `BaseAgentState`，确保 `DataAgentState` / `TodoAgentState` 子图都能读取同一份委派上下文；`handoff_execution_trace` 由 evaluate 累积，最终在 summarize 节点统一汇总，避免复合任务中途提前收口。
 
 ### 状态生命周期管理 (2026-02)
 
@@ -169,7 +174,7 @@ class MultiAgentState(BaseAgentState, total=False):
 | 类型 | 字段 | 说明 |
 |------|------|------|
 | **持久化状态** | `messages`, `user_id`, `thread_id`, `model_id`, `enable_thinking` | 跨轮次保留，用于上下文连续性 |
-| **瞬态状态** | `pending_handoff`, `pending_operation`, `evaluation`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_candidates`, `selected_skill_ids`, `skill_context`, `skill_injection_meta` | 仅在单轮有效，每轮结束时清理 |
+| **瞬态状态** | `pending_handoff`, `handoff_queue`, `completed_handoffs`, `handoff_execution_trace`, `multi_intent_mode`, `pending_operation`, `evaluation`, `evaluation_route`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_candidates`, `selected_skill_ids`, `skill_context`, `skill_injection_meta` | 仅在单轮有效，每轮结束时清理 |
 
 #### 清理机制
 
@@ -185,12 +190,17 @@ def _postprocess(state: MultiAgentState) -> dict:
     return {
         # 委派控制
         "pending_handoff": None,
+        "handoff_queue": [],
+        "completed_handoffs": [],
+        "handoff_execution_trace": [],
+        "multi_intent_mode": False,
         # 操作状态
         "pending_operation": None,
         "user_confirmed": None,
         "quick_mode": None,
         # 评估状态
         "evaluation": None,
+        "evaluation_route": "postprocess",
         "iteration_count": 0,
         # 意图识别
         "detected_intent": None,
@@ -631,6 +641,14 @@ llm = get_scene_llm(
   "verbosity": "low"
 }
 ```
+
+### 复合任务串行执行（2026-02-19）
+
+`multi_agent_graph` 在不改现有 Supervisor + Expert 主架构前提下，新增最小串行多意图闭环：
+
+1. Supervisor 当前轮识别到多个 `assign_to_*` 时，按出现顺序写入 `pending_handoff + handoff_queue`。
+2. `evaluate` 每轮消费一个专家结果并记录到 `handoff_execution_trace`，队列未空时直接路由下一个专家，避免提前 `complete`。
+3. 队列清空且命中 `multi_intent_mode` 时进入 `summarize` 节点，统一输出天气/知识检索 + 专家执行结论。
 
 **不影响生产的约束**：
 - 生产环境默认不启用实验适配分支。

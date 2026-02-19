@@ -223,6 +223,27 @@ class AgentOutputParser:
                 return handoff
         
         return None
+
+    @staticmethod
+    def extract_all_handoffs_from_messages(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+        """按消息出现顺序提取当前增量中的全部 handoff 指令。"""
+        if not messages:
+            return []
+
+        handoffs: List[Dict[str, Any]] = []
+        for msg in messages:
+            if not isinstance(msg, ToolMessage):
+                continue
+
+            content = str(getattr(msg, "content", ""))
+            if not content:
+                continue
+
+            handoff = AgentOutputParser.parse_handoff(content)
+            if handoff:
+                handoffs.append(handoff)
+
+        return handoffs
     
     @staticmethod
     def parse_handoff_typed(content: str) -> Optional["HandoffResult"]:

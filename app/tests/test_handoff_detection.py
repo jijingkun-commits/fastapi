@@ -45,6 +45,31 @@ def test_extract_latest_handoff_from_messages_returns_none_when_missing():
     assert AgentOutputParser.extract_latest_handoff_from_messages(delta_messages) is None
 
 
+def test_extract_all_handoffs_from_messages_preserves_order():
+    """应按 ToolMessage 出现顺序返回全部 handoff。"""
+    from app.ai.protocol import AgentOutputParser, HandoffResult
+
+    data_handoff = HandoffResult(
+        target_agent="data_expert",
+        task_description="先查询嘉兴天气并补充到分析上下文",
+    ).model_dump_json(ensure_ascii=False)
+    todo_handoff = HandoffResult(
+        target_agent="todo_expert",
+        task_description="创建待办：跟进网银功能评审",
+    ).model_dump_json(ensure_ascii=False)
+
+    delta_messages = [
+        ToolMessage(content=data_handoff, tool_call_id="1"),
+        ToolMessage(content=todo_handoff, tool_call_id="2"),
+        AIMessage(content="两个委派都已生成"),
+    ]
+
+    handoffs = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages)
+    assert [item["target_agent"] for item in handoffs] == ["data_expert", "todo_expert"]
+    assert "嘉兴天气" in handoffs[0]["task_description"]
+    assert "网银功能评审" in handoffs[1]["task_description"]
+
+
 def test_augment_data_handoff_payload_should_use_user_raw_question():
     """data handoff 规范化应保留用户原始问题并避免过度推断。"""
     from app.ai.state import AgentType
@@ -91,4 +116,3 @@ def test_augment_data_handoff_payload_should_keep_existing_frame():
     assert normalized["frame"] == {"metric": "贷款余额", "time_range": "2025-06-30"}
     assert normalized["turn_act_hint"] == "NEW_QUERY"
     assert normalized["task_description"] == "用户原始问题：查询2025年6月30日贷款余额"
-

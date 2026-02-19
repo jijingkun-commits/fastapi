@@ -31,7 +31,7 @@ from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
 from langgraph.config import get_stream_writer
-from app.ai.events import emit_status
+from app.ai.events import emit_status, emit_token
 from app.ai.protocol import (
     HandoffResult,
     StreamingToolStartPayload,
@@ -63,6 +63,7 @@ class StreamingProtocolAdapter(TypedDict):
     parse_kb_images: Callable[[str], Dict[str, str]]
     should_filter_content: Callable[[Any], bool]
     extract_latest_handoff_from_messages: Callable[[Sequence[BaseMessage]], Optional[Dict[str, Any]]]
+    extract_all_handoffs_from_messages: Callable[[Sequence[BaseMessage]], list[Dict[str, Any]]]
 
 
 class StreamingEventEmitterAdapter(TypedDict):
@@ -84,6 +85,7 @@ def _build_streaming_protocol_adapter(parser: Any) -> StreamingProtocolAdapter:
         "parse_kb_images": parser.parse_kb_images,
         "should_filter_content": parser.should_filter_content,
         "extract_latest_handoff_from_messages": parser.extract_latest_handoff_from_messages,
+        "extract_all_handoffs_from_messages": parser.extract_all_handoffs_from_messages,
     }
 
 
@@ -575,13 +577,216 @@ def _build_streaming_handoff_return(
     final_state: Dict[str, Any],
     delta_messages: Sequence[BaseMessage],
     handoff_data: Dict[str, Any],
+    *,
+    handoff_queue: Optional[list[Dict[str, Any]]] = None,
+    multi_intent_mode: bool = False,
 ) -> Dict[str, Any]:
     """构造命中 handoff 后的增量返回结构。"""
     other_keys = {k: v for k, v in final_state.items() if k != "messages"}
     ret = other_keys.copy()
     ret["messages"] = list(delta_messages)
     ret["pending_handoff"] = handoff_data
+    ret["handoff_queue"] = list(handoff_queue or [])
+    ret["multi_intent_mode"] = bool(multi_intent_mode)
+    ret["completed_handoffs"] = []
+    ret["handoff_execution_trace"] = []
     return ret
+
+
+def _normalize_handoff_batch_for_supervisor(
+    handoffs: Sequence[Dict[str, Any]],
+    *,
+    delta_messages: Sequence[BaseMessage],
+    state: MultiAgentState,
+) -> list[Dict[str, Any]]:
+    """标准化 Supervisor 当前轮提取到的 handoff 列表。"""
+    normalized: list[Dict[str, Any]] = []
+    for handoff in handoffs or []:
+        handoff_data = _augment_todo_handoff_with_observations(handoff, delta_messages, state)
+        handoff_data = _augment_data_handoff_payload(handoff_data, state)
+        normalized.append(handoff_data)
+    return normalized
+
+
+def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bool:
+    """决定是否抑制专家节点文本直出（复合任务改为最终统一汇总）。"""
+    if node_name == "data_expert":
+        return True
+    if node_name == "todo_expert" and bool(state.get("multi_intent_mode")):
+        return True
+    return False
+
+
+def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
+    """提取最近一条可展示的 AI 输出摘要。"""
+    from app.ai.protocol import AgentOutputParser
+
+    for message in reversed(messages or []):
+        if str(getattr(message, "type", "")).lower().strip() != "ai":
+            continue
+        content = _normalize_text_content(getattr(message, "content", ""))
+        if not content:
+            continue
+        if AgentOutputParser.should_filter_content(content):
+            continue
+        return _normalize_tool_summary_text(content, limit=limit)
+    return ""
+
+
+def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[str, str]]:
+    """提取 Supervisor 直接工具（天气/知识库）结果，供最终汇总使用。"""
+    findings: list[Dict[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+
+    for message in messages or []:
+        if not isinstance(message, ToolMessage):
+            continue
+
+        tool_name = str(getattr(message, "name", "") or "")
+        lowered_name = tool_name.lower()
+        content = str(getattr(message, "content", "") or "")
+        if not content:
+            continue
+
+        if "tavily" in lowered_name:
+            summary = _summarize_tavily_tool_output(content)
+            label = "天气/实时信息"
+        elif "knowledge_search" in lowered_name:
+            summary = _normalize_tool_summary_text(content, limit=220)
+            label = "知识库检索"
+        else:
+            continue
+
+        if not summary:
+            continue
+
+        key = (label, summary)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({"label": label, "summary": summary})
+
+    return findings[:3]
+
+
+def _build_multi_intent_summary_content(state: MultiAgentState) -> str:
+    """构造复合任务统一汇总文本。"""
+    trace = list(state.get("handoff_execution_trace") or [])
+    direct_findings = _build_direct_lookup_findings(state.get("messages", []))
+
+    lines: list[str] = ["我已按顺序完成这条复合请求，汇总如下："]
+    index = 1
+
+    for finding in direct_findings:
+        lines.append(f"{index}. {finding['label']}：{finding['summary']}")
+        index += 1
+
+    for item in trace:
+        target_agent = str(item.get("target_agent") or "")
+        if target_agent == AgentType.DATA:
+            agent_name = "数据专家"
+        elif target_agent == AgentType.TODO:
+            agent_name = "待办专家"
+        else:
+            agent_name = target_agent or "专家"
+
+        task_description = _normalize_tool_summary_text(item.get("task_description"), limit=80) or "按当前上下文执行"
+        result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=200) or "已执行完成"
+        lines.append(f"{index}. {agent_name}（{task_description}）：{result_excerpt}")
+        index += 1
+
+    lines.append("如果你希望，我可以基于以上结果继续下一步（例如补充细节或改写待办）。")
+    return "\n".join(lines)
+
+
+def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
+    """评估复合任务进度，返回带 evaluation_route 的状态更新。"""
+    messages = state.get("messages", [])
+    iteration_count = state.get("iteration_count") or 0
+    pending_handoff = state.get("pending_handoff")
+    handoff_queue = list(state.get("handoff_queue") or [])
+    completed_handoffs = list(state.get("completed_handoffs") or [])
+    execution_trace = list(state.get("handoff_execution_trace") or [])
+
+    max_iterations = 6
+    if iteration_count >= max_iterations:
+        logger.warning("评估节点: 达到最大迭代次数 (%d)，结束任务", max_iterations)
+        return {
+            "evaluation": "complete",
+            "evaluation_route": "postprocess",
+            "pending_handoff": None,
+            "handoff_queue": handoff_queue,
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+        }
+
+    if pending_handoff:
+        latest_completed = completed_handoffs[-1] if completed_handoffs else None
+        if latest_completed != pending_handoff:
+            completed_handoffs.append(dict(pending_handoff))
+            execution_trace.append(
+                {
+                    "target_agent": pending_handoff.get("target_agent"),
+                    "task_description": pending_handoff.get("task_description"),
+                    "result_excerpt": _extract_latest_visible_ai_excerpt(messages),
+                }
+            )
+
+    if handoff_queue:
+        next_handoff = handoff_queue.pop(0)
+        next_agent = str(next_handoff.get("target_agent") or "")
+        route = WORKFLOW_AGENT_NODE_BY_TYPE.get(next_agent, "supervisor")
+        return {
+            "evaluation": "continue",
+            "evaluation_route": route,
+            "iteration_count": iteration_count + 1,
+            "pending_handoff": next_handoff,
+            "handoff_queue": handoff_queue,
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+        }
+
+    if bool(state.get("multi_intent_mode")) and len(execution_trace) >= 2:
+        return {
+            "evaluation": "summarize",
+            "evaluation_route": "summarize",
+            "pending_handoff": None,
+            "handoff_queue": [],
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+        }
+
+    if not messages:
+        return {
+            "evaluation": "complete",
+            "evaluation_route": "postprocess",
+            "pending_handoff": None,
+            "handoff_queue": handoff_queue,
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+        }
+
+    last_msg = messages[-1]
+    has_tool_calls = hasattr(last_msg, "tool_calls") and last_msg.tool_calls
+    if last_msg.type == "ai" and not has_tool_calls:
+        return {
+            "evaluation": "complete",
+            "evaluation_route": "postprocess",
+            "pending_handoff": None,
+            "handoff_queue": handoff_queue,
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+        }
+
+    return {
+        "evaluation": "continue",
+        "evaluation_route": "supervisor",
+        "iteration_count": iteration_count + 1,
+        "pending_handoff": pending_handoff,
+        "handoff_queue": handoff_queue,
+        "completed_handoffs": completed_handoffs,
+        "handoff_execution_trace": execution_trace,
+    }
 
 
 def _emit_kb_images_from_delta_messages(
@@ -906,6 +1111,7 @@ def _dispatch_messages_mode_chunk(
     event_emitter_adapter: StreamingEventEmitterAdapter,
     writer,
     node_name: str,
+    state: Dict[str, Any],
 ) -> None:
     """分发处理 stream_mode=messages 的单个 chunk。"""
     from langchain_core.messages import AIMessage, AIMessageChunk
@@ -916,7 +1122,7 @@ def _dispatch_messages_mode_chunk(
     message, _metadata = chunk
     _record_emitted_message_id(message, emitted_message_ids)
 
-    if node_name == "data_expert":
+    if _should_mute_expert_text_output(state, node_name):
         return
 
     handled_tool_message = _handle_messages_mode_tool_message(
@@ -972,22 +1178,31 @@ def _dispatch_values_mode_chunk(
     messages = final_state.get("messages", [])
     delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
 
-    handoff_data = protocol_adapter["extract_latest_handoff_from_messages"](delta_messages_for_scan)
-    if handoff_data and node_name == "supervisor":
-        handoff_data = _augment_todo_handoff_with_observations(
-            handoff_data,
-            delta_messages_for_scan,
-            state,
-        )
-        handoff_data = _augment_data_handoff_payload(handoff_data, state)
-        target_agent = handoff_data.get("target_agent")
-        logger.info("[%s] values模式检测到 handoff: target=%s", node_name, target_agent)
-        handoff_return = _build_streaming_handoff_return(
-            final_state=final_state,
-            delta_messages=delta_messages_for_scan,
-            handoff_data=handoff_data,
-        )
-        return input_message_count, handoff_return
+    if node_name == "supervisor":
+        handoff_batch = protocol_adapter["extract_all_handoffs_from_messages"](delta_messages_for_scan)
+        if handoff_batch:
+            normalized_batch = _normalize_handoff_batch_for_supervisor(
+                handoff_batch,
+                delta_messages=delta_messages_for_scan,
+                state=state,
+            )
+            first_handoff = normalized_batch[0]
+            remaining_handoffs = normalized_batch[1:]
+            target_agent = first_handoff.get("target_agent")
+            logger.info(
+                "[%s] values模式检测到 handoff_batch: total=%d, first_target=%s",
+                node_name,
+                len(normalized_batch),
+                target_agent,
+            )
+            handoff_return = _build_streaming_handoff_return(
+                final_state=final_state,
+                delta_messages=delta_messages_for_scan,
+                handoff_data=first_handoff,
+                handoff_queue=remaining_handoffs,
+                multi_intent_mode=len(normalized_batch) > 1,
+            )
+            return input_message_count, handoff_return
 
     _emit_kb_images_from_delta_messages(
         delta_messages=delta_messages_for_scan,
@@ -1001,6 +1216,9 @@ def _dispatch_values_mode_chunk(
     new_messages = messages[input_message_count:] if len(messages) > input_message_count else []
     for new_message in new_messages:
         if not isinstance(new_message, AIMessage):
+            continue
+
+        if _should_mute_expert_text_output(state, node_name):
             continue
 
         emitted_tool_calls = _emit_tool_start_events_from_ai_message(
@@ -1076,6 +1294,7 @@ async def _run_streaming_dispatch_loop(
                 event_emitter_adapter=event_emitter_adapter,
                 writer=writer,
                 node_name=node_name,
+                state=state,
             )
             continue
 
@@ -1127,6 +1346,10 @@ def _handle_streaming_wrapper_exception(
             return {
                 "messages": [],
                 "pending_handoff": fallback_handoff,
+                "handoff_queue": [],
+                "completed_handoffs": [],
+                "handoff_execution_trace": [],
+                "multi_intent_mode": False,
             }
 
     error_msg = _build_stream_error_message(error_text)
@@ -1662,6 +1885,10 @@ async def create_multi_agent_graph(
         return {
             # === 委派控制 ===
             "pending_handoff": None,
+            "handoff_queue": [],
+            "completed_handoffs": [],
+            "handoff_execution_trace": [],
+            "multi_intent_mode": False,
             
             # === 操作状态 ===
             "pending_operation": None,
@@ -1670,6 +1897,7 @@ async def create_multi_agent_graph(
             
             # === 评估状态 ===
             "evaluation": None,
+            "evaluation_route": "postprocess",
             "iteration_count": 0,  # 重置为 0，而非 None
             
             # === 意图识别 ===
@@ -1686,57 +1914,57 @@ async def create_multi_agent_graph(
 
     # 8. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
-        """评估专家工作节点：判断是否需要继续委派其他专家。
-        
-        判断逻辑：
-        1. 检查是否达到最大迭代次数（3次）
-        2. 检查最后一条消息是否是 AI 回复（无 tool_calls）
-        3. 如果任务完成或达到迭代限制，返回 'complete'
-        4. 否则返回 'continue'，让 Supervisor 重新评估
-        """
-        messages = state.get("messages", [])
-        iteration_count = state.get("iteration_count") or 0
-        
-        # 防止无限循环：最多 3 轮迭代
-        MAX_ITERATIONS = 3
-        if iteration_count >= MAX_ITERATIONS:
-            logger.warning(
-                "评估节点: 达到最大迭代次数 (%d)，结束任务",
-                MAX_ITERATIONS
-            )
-            return {"evaluation": "complete"}
-        
-        # 检查最后一条消息
-        if not messages:
-            return {"evaluation": "complete"}
-        
-        last_msg = messages[-1]
-        
-        # 如果最后一条是 AI 消息且没有 tool_calls，认为任务完成
-        has_tool_calls = hasattr(last_msg, 'tool_calls') and last_msg.tool_calls
-        
-        if last_msg.type == "ai" and not has_tool_calls:
-            logger.info("评估节点: 专家已完成任务，结束流程")
-            return {"evaluation": "complete"}
-        
-        # 否则可能需要继续处理（由 Supervisor 重新评估）
-        logger.info("评估节点: 任务可能需要继续，返回 Supervisor")
-        
-        # 发送协调状态给前端
+        """评估专家工作节点：支持 handoff 队列串行消费与复合任务汇总收口。"""
+        decision = _evaluate_handoff_progress(state)
+        route = str(decision.get("evaluation_route") or "postprocess")
+
         writer = get_stream_writer()
-        emit_status(writer, message="专家工作需要继续，正在协调其他专家...", node="evaluate")
-        
+        if route in WORKFLOW_AGENT_NODES:
+            pending_handoff = decision.get("pending_handoff") or {}
+            target_agent = pending_handoff.get("target_agent") or "unknown"
+            queue_left = len(decision.get("handoff_queue") or [])
+            emit_status(
+                writer,
+                message=f"复合任务继续执行：即将委派 {target_agent}，剩余队列 {queue_left} 项。",
+                node="evaluate",
+            )
+        elif route == "summarize":
+            emit_status(
+                writer,
+                message="复合任务子步骤已完成，正在统一汇总输出...",
+                node="evaluate",
+            )
+        elif route == "supervisor":
+            emit_status(writer, message="专家工作需要继续，正在协调其他专家...", node="evaluate")
+
+        return decision
+
+    def _summarize_multi_intent(state: MultiAgentState) -> dict:
+        """复合任务汇总节点：将 direct tool + 专家执行结果合并为单条总结。"""
+        trace = list(state.get("handoff_execution_trace") or [])
+        if not bool(state.get("multi_intent_mode")) or len(trace) < 2:
+            return {}
+
+        summary_text = _build_multi_intent_summary_content(state)
+        writer = get_stream_writer()
+        emit_status(writer, message="复合任务汇总完成，正在输出结论...", node="summarize")
+        emit_token(writer, summary_text, node="summarize")
+
         return {
-            "evaluation": "continue",
-            "iteration_count": iteration_count + 1
+            "messages": [create_ai_message(summary_text)],
+            "evaluation": "complete",
+            "evaluation_route": "postprocess",
         }
-    
+
     # 9. 条件路由函数
-    def should_continue_routing(state: MultiAgentState) -> Literal["postprocess", "supervisor"]:
-        """根据评估结果决定下一步:
-        - complete: 流向 postprocess 结束
-        - continue: 返回 supervisor 重新评估
-        """
+    def should_continue_routing(
+        state: MultiAgentState,
+    ) -> Literal["postprocess", "supervisor", "data_expert", "todo_expert", "summarize"]:
+        """根据评估结果决定下一步。"""
+        evaluation_route = str(state.get("evaluation_route") or "").strip()
+        if evaluation_route in {"postprocess", "supervisor", "data_expert", "todo_expert", "summarize"}:
+            return evaluation_route  # type: ignore[return-value]
+
         evaluation = state.get("evaluation", "complete")
         if evaluation == "continue":
             return "supervisor"
@@ -1752,6 +1980,7 @@ async def create_multi_agent_graph(
     workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_graph_app, "data_expert"))
     workflow.add_node("todo_expert", _create_streaming_agent_wrapper(todo_graph_app, "todo_expert"))
     workflow.add_node("evaluate", _evaluate_expert_work)
+    workflow.add_node("summarize", _summarize_multi_intent)
     workflow.add_node("postprocess", _postprocess)
 
     # 架构规则：不使用独立的 intent_classify 节点，由 Supervisor 统一处理意图路由
@@ -1848,8 +2077,13 @@ async def create_multi_agent_graph(
         {
             "postprocess": "postprocess",  # 任务完成
             "supervisor": "supervisor",    # 返回 Supervisor 重新评估
+            "data_expert": "data_expert",  # 队列中下一位专家
+            "todo_expert": "todo_expert",  # 队列中下一位专家
+            "summarize": "summarize",      # 复合任务统一汇总
         }
     )
+
+    workflow.add_edge("summarize", "postprocess")
     
     # Postprocess -> END
     workflow.add_edge("postprocess", END)
