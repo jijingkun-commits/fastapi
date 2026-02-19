@@ -79,6 +79,37 @@ def test_evaluate_handoff_progress_enters_summarize_after_last_handoff() -> None
     assert len(decision["handoff_execution_trace"]) == 2
 
 
+def test_evaluate_handoff_progress_summarizes_direct_plus_single_expert() -> None:
+    """direct tool + 1 个专家也应进入 summarize，避免直接结束丢失统一汇总。"""
+    state = {
+        "messages": [
+            HumanMessage(content="嘉兴天气并创建待办"),
+            ToolMessage(
+                content='{"answer":"嘉兴今天多云，气温 18-24 摄氏度"}',
+                tool_call_id="t1",
+                name="tavily_search",
+            ),
+            AIMessage(content="待办已创建：明天 10:00 跟进天气变化。"),
+        ],
+        "pending_handoff": {
+            "target_agent": AgentType.TODO,
+            "task_description": "创建待办：跟进嘉兴天气变化",
+        },
+        "handoff_queue": [],
+        "completed_handoffs": [],
+        "handoff_execution_trace": [],
+        "multi_intent_mode": True,
+        "iteration_count": 0,
+    }
+
+    decision = _evaluate_handoff_progress(state)
+
+    assert decision["evaluation"] == "summarize"
+    assert decision["evaluation_route"] == "summarize"
+    assert decision["pending_handoff"] is None
+    assert len(decision["handoff_execution_trace"]) == 1
+
+
 def test_build_multi_intent_summary_content_contains_direct_and_expert_results() -> None:
     """统一汇总应覆盖 direct tool 与专家执行结果。"""
     state = {
