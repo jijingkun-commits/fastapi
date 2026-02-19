@@ -746,15 +746,20 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
             "handoff_execution_trace": execution_trace,
         }
 
-    if bool(state.get("multi_intent_mode")) and len(execution_trace) >= 2:
-        return {
-            "evaluation": "summarize",
-            "evaluation_route": "summarize",
-            "pending_handoff": None,
-            "handoff_queue": [],
-            "completed_handoffs": completed_handoffs,
-            "handoff_execution_trace": execution_trace,
-        }
+    if bool(state.get("multi_intent_mode")):
+        direct_findings = _build_direct_lookup_findings(messages)
+        should_summarize = len(execution_trace) >= 2 or (
+            len(execution_trace) >= 1 and bool(direct_findings)
+        )
+        if should_summarize:
+            return {
+                "evaluation": "summarize",
+                "evaluation_route": "summarize",
+                "pending_handoff": None,
+                "handoff_queue": [],
+                "completed_handoffs": completed_handoffs,
+                "handoff_execution_trace": execution_trace,
+            }
 
     if not messages:
         return {
@@ -1942,7 +1947,9 @@ async def create_multi_agent_graph(
     def _summarize_multi_intent(state: MultiAgentState) -> dict:
         """复合任务汇总节点：将 direct tool + 专家执行结果合并为单条总结。"""
         trace = list(state.get("handoff_execution_trace") or [])
-        if not bool(state.get("multi_intent_mode")) or len(trace) < 2:
+        direct_findings = _build_direct_lookup_findings(state.get("messages", []))
+        has_enough_inputs = len(trace) >= 2 or (len(trace) >= 1 and bool(direct_findings))
+        if not bool(state.get("multi_intent_mode")) or not has_enough_inputs:
             return {}
 
         summary_text = _build_multi_intent_summary_content(state)
