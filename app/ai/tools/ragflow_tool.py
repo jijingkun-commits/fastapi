@@ -93,7 +93,8 @@ def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
         return "未找到相关信息。", {}
     
     results = []
-    kb_images = {}  # 图片映射
+    kb_images = {}  # 图片映射 {占位符索引: URL}
+    image_url_to_idx: dict[str, int] = {}
     # 仅处理前 30 个片段
     chunks = chunks[:30]
     logger.debug("JJK-ragchunks tool返回的前10条: %s", chunks)
@@ -117,11 +118,24 @@ def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
         result_text = f"【{i}】{content}\n   📄 来源: {source}{source_link} | 相关度: {score:.2%}"
         
         # 如果有图片，使用占位符 [IMG-N]
+        # 约束：同一图片 URL 在一次检索结果中只分配一个占位符，避免回答重复渲染相同图片
         image_id = chunk.get("image_id") or chunk.get("img_id")
         if image_id:
-            image_url = f"/api/v1/assets/proxy/ragflow/{image_id}"
-            kb_images[i] = image_url
-            result_text += f"\n   相关图片: [IMG-{i}]"
+            image_id_str = str(image_id).strip()
+            if image_id_str:
+                image_url = f"/api/v1/assets/proxy/ragflow/{image_id_str}"
+                if image_url not in image_url_to_idx:
+                    placeholder_idx = len(image_url_to_idx)
+                    image_url_to_idx[image_url] = placeholder_idx
+                    kb_images[placeholder_idx] = image_url
+                    result_text += f"\n   相关图片: [IMG-{placeholder_idx}]"
+                else:
+                    logger.info(
+                        "跳过重复知识库图片: chunk_idx=%s, image_id=%s, placeholder=IMG-%s",
+                        i,
+                        image_id_str,
+                        image_url_to_idx[image_url],
+                    )
 
         results.append(result_text)
     

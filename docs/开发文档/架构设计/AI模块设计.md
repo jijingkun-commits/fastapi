@@ -1096,13 +1096,25 @@ sequenceDiagram
 
 **文件**: `app/ai/tools/ragflow_tool.py`
 
+**占位符分配规则（2026-02-18 更新）**
+
+- 同一轮检索中，按图片 URL 首次出现顺序分配 `[IMG-N]`。
+- 若多个 chunk 引用同一 `image_id`，仅首个 chunk 写入 `相关图片: [IMG-N]`，后续 chunk 跳过，避免前端重复渲染同图。
+
 ```python
 def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
     """格式化检索结果，返回占位符和映射。"""
     kb_images = {}
-    for idx, chunk in enumerate(chunks):
-        if image_id := chunk.get("image_id"):
-            image_url = f"/api/v1/assets/proxy/ragflow/{image_id}"
+    image_url_to_idx = {}
+    for chunk in chunks:
+        image_id = chunk.get("image_id") or chunk.get("img_id")
+        if not image_id:
+            continue
+
+        image_url = f"/api/v1/assets/proxy/ragflow/{str(image_id).strip()}"
+        if image_url not in image_url_to_idx:
+            idx = len(image_url_to_idx)
+            image_url_to_idx[image_url] = idx
             kb_images[idx] = image_url
             result_text += f"\n   相关图片: [IMG-{idx}]"
 
