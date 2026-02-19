@@ -28,8 +28,9 @@
 
 ### 2.2 状态契约
 
-治理输入上下文字段冻结为：`user_id`、`thread_id`、`agent_name`、`scene_key`、`role_codes`。  
+治理输入上下文字段冻结为：`user_id`、`thread_id`、`agent_name`、`scene_key`、`role_codes`、`task_mode`、`requires_evidence`。  
 治理输出契约冻结为：`allowed_tools`、`decision_trace`、`fallback_reason`。
+补充约束：`requires_evidence` 仅在执行型任务生效，闲聊任务不强制工具证据门禁。
 
 ### 2.3 路由闭环
 
@@ -44,6 +45,12 @@
 1. 前端上下文（用户、线程、场景）在请求进入图编排前完成注入。
 2. 治理层仅做工具集合裁剪，不修改主业务消息内容。
 3. DB 策略刷新与请求处理解耦，避免阻塞主链路。
+
+### 2.5 状态与存储约束（修订）
+
+1. Workflow state 仅保留摘要与引用（如 `ledger_ref`、计数、状态位）。
+2. 大对象（tool ledger/evidence ledger 明细）落库或外部存储。
+3. checkpoint 热路径禁止写入大体积事件明细，避免恢复与性能回退。
 
 ---
 
@@ -96,11 +103,13 @@
 
 1. 工具事件增加 `tool_call_id`（可选字段）。
 2. 为后续 `start/update/result` 三阶段预留字段。
+3. 事件演进采用“少量新事件 + metadata 扩展 + version 字段”策略。
 
 门禁（G3）：
 
 1. 前端兼容旧事件消费。
 2. 并发工具调用可稳定关联。
+3. 枚举新增不影响旧版解析器默认分支。
 
 ### Phase 4：治理增强（P2）
 
@@ -114,6 +123,19 @@
 
 1. 压测与故障演练通过。
 2. 回滚演练完成并留档。
+
+### Phase 4.5：插件扩展基线（后置，非阻塞）
+
+交付：
+
+1. `Plugin Registry` 最小骨架（元数据、注册、禁用、生命周期状态）。
+2. 与策略层对齐：`group:plugins`、插件 allowlist 防误杀规则。
+3. 插件失败降级路径：自动回退核心工具集，不中断主流程。
+
+门禁（G4.5）：
+
+1. 插件加载失败不影响核心链路。
+2. 插件相关事件可观测（loaded/blocked/failed）。
 
 ---
 
@@ -162,6 +184,7 @@
    - 回滚演练留档；
    - 需求与实施、测试与观测保持可追溯。
 5. 回滚锚点：治理开关、策略源回退、事件可选字段兼容。
+6. Wave 对齐：执行波次归属 **P2（工具治理一期）**，详见 `迁移执行波次_implementation_plan.md`。
 
 ---
 

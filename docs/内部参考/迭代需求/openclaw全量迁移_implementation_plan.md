@@ -17,7 +17,7 @@
 边界约束：
 
 1. 继续采用“`requirements + implementation_plan`”成对结构，不做大规模文档合并。
-2. 本轮仅做文档结构治理与分批挂载，不变更运行时 API/DB/SSE 契约。
+2. Batch-0 仅做文档结构治理与分批挂载，不变更运行时 API/DB/SSE 契约；后续 Wave 允许按专题增量改造契约。
 3. 目录保持单层，不新增日期分层归档。
 
 ---
@@ -35,6 +35,21 @@
 | Batch-6 | 稳态收口与回滚演练 | 文档治理 + 各专题联动 | 全链路回归、回滚演练、终稿归档 |
 
 ---
+
+## 2.1 执行波次（P1~P6）
+
+为对齐当前研发优先级，新增执行波次视图（不替代 Batch）：
+
+| Wave | 目标 | 对应实施文档 |
+|---|---|---|
+| P1 | 运行时可取消控制 | `runtime_cancel_control_implementation_plan.md` |
+| P2 | 工具治理一期 | `ai_tools_governance_implementation_plan.md` |
+| P3 | Skill 多用户版本治理 | `skill_multi_user_versioning_implementation_plan.md` |
+| P4 | 记忆检索增强 | `user_preference_memory_implementation_plan.md` |
+| P5 | 稳态增强（恢复/隔离/观测） | `迁移执行波次_implementation_plan.md` |
+| P6 | 收口与回滚演练 | `docs_governance_implementation_plan.md` |
+
+执行顺序以 P1~P6 为准，Batch 继续用于跨专题门禁管理。
 
 ## 3. Batch-0（当前批次）交付清单
 
@@ -64,6 +79,9 @@
 | `ai_tools_governance_implementation_plan.md` | Batch-2 / Batch-5 |
 | `askdata_dual_role_permission_implementation_plan.md` | Batch-3 |
 | `user_preference_memory_implementation_plan.md` | Batch-4 |
+| `runtime_cancel_control_implementation_plan.md` | Batch-1 前置能力 |
+| `skill_multi_user_versioning_implementation_plan.md` | Batch-2 / Batch-4 衔接 |
+| `迁移执行波次_implementation_plan.md` | Wave 执行基线（跨 Batch） |
 | `docs_governance_implementation_plan.md` | Batch-0 / Batch-6 |
 
 ---
@@ -71,8 +89,9 @@
 ## 5. 执行顺序（总控）
 
 1. 先完成 Batch-0 文档拆分与索引收敛。
-2. 再按 Batch-1 -> Batch-5 推进专题实现改造。
-3. 最后由 Batch-6 统一收口（回归、回滚演练、终稿归档）。
+2. 实施阶段按 Wave 顺序执行：P1（运行时可取消）-> P2（工具治理一期）-> P3（Skill 多用户版本治理）-> P4（记忆检索增强）-> P5（稳态增强）。
+3. Batch-1 ~ Batch-5 继续作为跨专题门禁与依赖管理视图。
+4. 最后由 Batch-6 统一收口（回归、回滚演练、终稿归档）。
 
 ---
 
@@ -84,6 +103,8 @@
    缓解：以本总控批次映射为准，专题文档只做局部扩展。
 3. **风险三：拆分后信息丢失**  
    缓解：入口文档必须指向专题正文，旧内容不得直接删除。
+4. **风险四：事件/状态扩展过快导致兼容与性能回退**  
+   缓解：采用“少量新事件 + metadata/version 扩展”，并执行 state 轻量化约束（明细外置）。
 
 回滚原则：
 

@@ -80,6 +80,9 @@
 - `agent_despecialization_progress_log.md`
 - `agent_despecialization_evaluation_report.md`
 - `openclaw全量迁移_implementation_plan.md`
+- `迁移执行波次_implementation_plan.md`
+- `runtime_cancel_control_implementation_plan.md`
+- `skill_multi_user_versioning_implementation_plan.md`
 - `evaluation_report.md`
 - `skill_retrieval_evaluation_report_20260213.md`
 - `fix_plan.md`

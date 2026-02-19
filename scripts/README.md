@@ -55,6 +55,7 @@ scripts/                    # 运维和数据脚本
 ├── extract_metric_sql.py  # 提取指标 SQL
 ├── setup_data.py          # 数据初始化入口
 ├── sync-repos.sh          # 仓库同步脚本
+├── tmux_codex_suite.sh    # tmux + codex 双会话多窗口启动器
 │
 ├── # === Vibe Kanban 多 worktree 本机开发 ===
 ├── vk_ports.sh            # 计算当前 worktree 端口
@@ -151,6 +152,30 @@ bash scripts/vk_cleanup.sh
 > 共享 venv 建议：`VK_SHARED_VENV_MODE=auto`（默认）。当本地 `venv` 不可用时，`vk_setup.sh` 会通过 `.vibe/venv` 复用主 worktree 的 `venv`。
 >
 > `vk_dev.sh` 启动 `web` 时会检查 `web/node_modules` 与 `next` CLI；若依赖缺失，会自动执行 `pnpm install --frozen-lockfile`（失败回退 `pnpm install`）或 `npm ci`（失败回退 `npm install`）。
+
+### tmux + codex 多窗口（开发 + Bug 排查）
+
+```bash
+# 一键创建两套会话并进入开发会话（dev-hub）
+bash scripts/tmux_codex_suite.sh up
+
+# 仅创建不附着（适合后台先拉起）
+bash scripts/tmux_codex_suite.sh up-no-attach
+
+# 查看会话/窗口状态
+bash scripts/tmux_codex_suite.sh status
+
+# 在 tmux 中切到 bug 会话
+bash scripts/tmux_codex_suite.sh attach bug
+
+# 安全下发任务（文本+Enter 分开发送）
+bash scripts/tmux_codex_suite.sh send dev-hub:browser-codex "打开浏览器测试当前项目"
+
+# 查看最近输出
+bash scripts/tmux_codex_suite.sh tail dev-hub:browser-codex 80
+```
+
+默认会创建两套会话：`dev-hub`（开发链路）和 `bug-room`（故障排查链路）。
 
 ### 数据清理
 

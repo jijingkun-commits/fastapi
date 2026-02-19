@@ -160,3 +160,4 @@
 5. 回滚锚点：
    - `ENABLE_USER_PREFERENCE_MEMORY`
    - `USER_PREFERENCE_MEMORY_MAX_ITEMS`
+6. Wave 对齐：执行波次归属 **P4（记忆检索增强）**，详见 `迁移执行波次_implementation_plan.md`。
