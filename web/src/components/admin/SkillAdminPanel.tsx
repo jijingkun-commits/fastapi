@@ -111,16 +111,15 @@ export function SkillAdminPanel() {
 
       toast.error(getErrorMessage(error, "加载数据失败"));
     } finally {
-      if (requestId !== requestIdRef.current) {
-        return;
-      }
+      const isLatestRequest = requestId === requestIdRef.current;
+      if (isLatestRequest) {
+        if (shouldShowInitialLoading) {
+          hasInitializedRef.current = true;
+          setInitialLoading(false);
+        }
 
-      if (shouldShowInitialLoading) {
-        hasInitializedRef.current = true;
-        setInitialLoading(false);
+        setListLoading(false);
       }
-
-      setListLoading(false);
     }
   }, [filterEmbedding, searchQuery]);
 
