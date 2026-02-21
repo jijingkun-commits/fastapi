@@ -146,6 +146,6 @@ card_export:
     - venv/bin/python -m pytest -q tests/unit/test_x.py
   handoff_artifacts:
     - docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/contracts/sse_events_v1.json
-  dod:
+  done_gate:
     - DoD-1
 ```
