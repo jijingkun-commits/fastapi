@@ -4,6 +4,16 @@
 > 主题: <需求主题>  
 > 输入来源: `docs/内部参考/迭代需求/<topic>_requirements.md` / `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
 
+## -1. 执行策略（新增）
+
+- execution_mode: `serial | parallel`
+- single_active_card: `true | false`
+- card_order: `[]`（serial 模式必填）
+- auto_done_policy:
+  - implementation-card: `manual_gate`
+  - inspection/question-card: `policy_gate`
+- 说明：若 implementation_plan 中存在 `planning_contract`，此处必须与其一致。
+
 ## 0. G0 协议冻结
 
 - 冻结范围：`done/result/interrupt`
@@ -18,6 +28,12 @@
 - 来源：`plan` / `vkplan 推导`
 - `card_seed` 来源：
 - 推导依据与风险：
+
+### 1.1 功能机制包映射（必填）
+
+| card_id | wave | feature_ids | 机制摘要 | 代码锚点 | 验证命令 | 回滚锚点 |
+|---|---|---|---|---|---|---|
+| C01 | P1 | P1-01,P1-02,P1-03,P1-04,P1-05 |  |  |  |  |
 
 ## 2. 目标与边界
 
@@ -43,6 +59,8 @@
 | WS-02 |  | Frontend |  | 是 | WS-00 |
 | WS-G1 | 集成回归门禁 | Gate |  | 否 | WS-01, WS-02 |
 | WS-G2 | 文档终稿门禁 | Gate |  | 否 | WS-G1 |
+
+> serial 模式建议：`WS-C01 ... WS-C06` 映射 card 链路；Gate 作为 C 卡内门禁或串行尾卡。
 
 ## 5. 冲突矩阵（互不干涉）
 
@@ -79,6 +97,20 @@
 - 卡片 ID 规则：`<task_key>::<WS-ID>`
 - 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
 
+### 9.1 机读增强字段（必填）
+
+`vk_cards.json.cards[*]` 必须包含：
+
+1. `feature_ids`
+2. `mechanism_summary`
+3. `code_anchor_refs`
+4. `example_refs`
+5. `acceptance_checks`
+6. `rollback_anchors`
+7. `evidence_entry`
+8. `task_mode`
+9. `merge_required`
+
 ## 10. Gate 执行状态
 
 ### 10.1 WS-G1 结果
@@ -99,3 +131,11 @@
 1. `WS-G1` 已执行：
 2. `WS-G2` 已执行：
 3. Gate 结论：
+
+## 12. 信息防丢失检查（新增）
+
+- [ ] 每个 `feature_id` 均落入某个 WS（无遗漏）
+- [ ] 每个 WS 都有机制摘要 + 代码锚点 + 最小样例引用
+- [ ] 每张卡都有可执行 `acceptance_checks`
+- [ ] 卡片 `DoD` 与 `implementation_plan` 的 `done_gate` 一致
+- [ ] `output/**` 仅作为证据引用，未直接复制长文

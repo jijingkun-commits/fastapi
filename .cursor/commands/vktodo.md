@@ -105,7 +105,14 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 1. `action=create`：循环调用 `mcp__vibe_kanban__create_issue`。
 2. `action=move`：先筛选目标卡片，再调用 `mcp__vibe_kanban__update_issue` 修改状态。
 3. 记录每张卡片执行结果（成功 / 失败原因）。
-4. 建卡时建议把 `task_key` 与 `source_ws_file` 放入 description，便于追溯。
+4. 建卡时必须把机读增强字段写入 description（若存在）：
+   - `feature_ids`
+   - `mechanism_summary`
+   - `code_anchor_refs`
+   - `acceptance_checks`
+   - `rollback_anchors`
+   - `evidence_entry`
+5. 若 `vk_cards.json` 中存在 `execution_mode=serial`，建卡后默认只推进首张卡到 Doing，其余保持 Backlog。
 
 ### Step 4: MCP 502 自动兜底
 

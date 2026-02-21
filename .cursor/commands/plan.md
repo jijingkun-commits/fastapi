@@ -52,6 +52,21 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 - 适用于多人/多 AI/多 worktree 并行
 - 并行拆解与落卡前准备由后续 `/vkplan` 承接
 
+### 3) hydrate 模式（旧文档沉淀注入）
+
+`/plan hydrate` 或 `/plan parallel hydrate`
+
+- 适用：已有大量历史方案、`output/**` 分析、专题计划，但执行链已跑偏或信息分散。
+- 目标：把现有沉淀“压缩进”新的 `requirements + implementation_plan`，避免后续 `/vkplan` 丢信息。
+- 约束：`hydrate` 只允许重组与对齐，不新增“第四类主文档”。
+
+`hydrate` 时必须显式列出输入来源（建议写入 implementation plan 的“输入来源清单”）：
+
+1. 总控/波次：`openclaw全量迁移_implementation_plan.md`、`迁移执行波次_implementation_plan.md`
+2. 专题计划：P1~P6 对应 implementation 文档
+3. 分析沉淀：`output/openclaw源码解析/**`（仅抽取与当前功能点直接相关的证据）
+4. 历史并行拆解：`docs/内部参考/任务拆解/**`（仅复用可验证的结构与门禁，不继承失效口径）
+
 ---
 
 ## 1. 需求分析 (Requirement Analysis)
@@ -90,6 +105,55 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. **路由闭环**：从意图分析到澄清/消歧/确认/执行的收敛路径，是否存在“回到同一追问”的循环风险。
 4. **端到端链路**：前端上下文（如 `current_todo_id`）到后端状态注入的时序一致性，是否会在发送前被提前清理。
 5. **可测试性**：以上四项是否有对应单测/联测覆盖，缺口需在计划中显式列出。
+
+### 2.0 轻文档边界（强制）
+
+目标保持“3+1”产物边界，不扩散主文档类型：
+
+1. `docs/内部参考/迭代需求/<topic>_requirements.md`
+2. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/...`（由 `/vkplan` 产出）
+4. 其余仅允许作为“输入来源”被引用，不得升级为新的主计划文档类别。
+
+### 2.A 功能机制包（Feature Packet，必填）
+
+`<topic>_implementation_plan.md` 必须包含“功能机制包总表”，每个功能点至少包含：
+
+1. `feature_id`（建议 `P1-03` / `P2-01` 等稳定编号）
+2. 目标与边界（本功能做什么 / 不做什么）
+3. 触发条件与状态流转（包括异常分支）
+4. 代码锚点（文件 + 函数/类，不允许只写行号）
+5. 关键数据结构/契约字段
+6. 回滚锚点（开关/降级策略）
+7. 验证命令（最小 pytest/API/docs_guard）
+8. 来源证据（来自 output 或既有专题文档的精确引用）
+
+补充：每个 `feature_id` 至少给 1 个“最小代码样例”（可伪代码），用于约束实现形态。
+
+### 2.B 与 `/vkplan` 的机读契约（必填）
+
+`<topic>_implementation_plan.md` 必须在末尾给出一个 YAML 代码块，供 `/vkplan` 直接消费：
+
+```yaml
+planning_contract:
+  execution_mode: serial  # serial | parallel
+  card_order: [C01, C02, C03, C04, C05, C06]
+  strict_single_active_card: true
+  cards:
+    - card_id: C01
+      wave: P1
+      feature_ids: [P1-01, P1-02, P1-03, P1-04, P1-05]
+      depends_on: []
+      done_gate:
+        - P1-01~P1-05 tests green
+        - cancel_after_token_count=0
+```
+
+说明：
+
+1. 若你要串行执行（自动执行场景），`execution_mode` 必须是 `serial`。
+2. `card_id`/`feature_id` 一旦发布，不得在 `/vkplan` 阶段重命名。
+3. `/vkplan` 只能细化，不能改写 `depends_on` 的硬依赖。
 
 ### 2.1 主从文档机制
 
@@ -147,7 +211,17 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 2. `/vkplan` 负责“并行拆包与可执行边界”。
 3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo -> /imp-ws`。
 
-## 4. 衔接下游
+## 4. 信息不丢失要求（新增）
+
+为避免“计划正确但执行跑偏”，`/plan` 输出时必须满足：
+
+1. `implementation_plan` 的每个功能点都能映射到唯一 `feature_id`。
+2. 每个 `feature_id` 都有：机制描述 + 代码锚点 + 验证命令 + 回滚锚点。
+3. 每个卡片（`card_id`）都绑定明确 `feature_id` 列表，禁止“统一模型基线迁移”这类泛化标题替代。
+4. 引用 `output/**` 时只允许“证据引用”，不允许把长篇分析原文直接复制到卡片描述。
+5. 若存在历史执行偏差，需在计划中新增“偏差修复清单”，明确哪些旧卡作废、哪些卡重建。
+
+## 5. 衔接下游
 
 规划完成后：
 - 并行场景：执行 `/vkplan` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）

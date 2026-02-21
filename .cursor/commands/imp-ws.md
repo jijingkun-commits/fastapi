@@ -43,6 +43,9 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 8. `WS-G2` 启动前提：`WS-G1` 已完成且门禁结论已回填。
 9. 若 `WS-G1` 未通过且无批准豁免，不得执行 `WS-G2`。
 10. 执行 Gate WS 前必须通过基线硬拦截：当前 `HEAD` 必须包含本地 `main/master` 最新提交。
+11. 必须消费 WS 的 `feature_id`、`机制摘要`、`代码锚点` 与 `acceptance_checks`；不得仅按标题自由发挥。
+12. 若 `card_export.execution_mode=serial`，未满足前置 `hard_depends_on` 时不得执行当前 WS。
+13. 结果回填时必须附 `evidence_entry` 指向的权威入口，避免“只改代码不回填”或“只回填不改代码”。
 
 ### 2.1 Foundation/Gate 执行顺序（固定）
 

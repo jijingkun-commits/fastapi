@@ -4,16 +4,17 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 
 > 参考规则: @dual-database
 
-# VKPlan 工作流 (Parallel Split Shortcut)
+# VKPlan 工作流 (Split to Executable Cards)
 
-用于在 `/plan` 完成后执行并行拆解，产出可直接供 `/vktodo` 落卡的结果。
+用于在 `/plan` 完成后执行任务拆解，产出可直接供 `/vktodo` 落卡与自动执行器消费的结果。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 定位
 
 - 前置要求：必须先完成 `/plan`
-- 核心目标：完成并行拆解与 G0 冻结，生成 `vk_cards.json` 供 `/vktodo` 直接使用
+- 核心目标：完成“可执行拆解 + G0 冻结”，生成 `vk_cards.json` 供 `/vktodo` 直接使用
+- 关键要求：机读信息不能丢失（机制、代码锚点、验证门禁、回滚锚点都必须落到卡片字段）
 
 ---
 
@@ -22,6 +23,7 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 | 场景 | 推荐命令 |
 |------|----------|
 | 已完成 `/plan`，准备并行拆解 | `/vkplan` ✅ |
+| 已完成 `/plan hydrate`，需要把历史沉淀转成可执行卡 | `/vkplan` ✅ |
 | 尚未完成需求与技术方案 | 先 `/plan` |
 | 已有完整拆解产物，仅需重落卡 | `/vktodo` |
 
@@ -42,14 +44,78 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 
 ---
 
+## 机读契约继承（强制）
+
+`/vkplan` 必须优先读取 implementation plan 末尾 `planning_contract`：
+
+1. `execution_mode`（`serial|parallel`）
+2. `card_order`（例如 `C01..C06`）
+3. `cards[].feature_ids`
+4. `cards[].depends_on`
+5. `cards[].done_gate`
+
+规则：
+
+1. 若 `execution_mode=serial`，必须产出“单活串行”卡片编排（同一时刻仅 1 张卡可进入 Doing）。
+2. 不得在 `/vkplan` 阶段重命名 `card_id` / `feature_id`。
+3. 不得弱化 `depends_on` 的硬依赖。
+4. `feature_id` 必须一一映射到 `WS`（或 `Card WS`）文档中的功能机制段。
+
+---
+
 ## 执行阶段
 
 1. 读取 `/plan` 产物（`<主题>_requirements.md`、`<主题>_implementation_plan.md`）。
-2. 生成并行拆解（`parallel_plan.md` + `workstreams/WS-*.md`）。
-3. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
-4. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`（默认落卡范围不含 `WS-00`）。
+2. 读取 `implementation_plan` 中的“功能机制包（Feature Packet）”与 `planning_contract`。
+3. 生成拆解产物（`parallel_plan.md` + `workstreams/WS-*.md`），并在 WS 中保留机制细节与代码样例锚点。
+4. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
+5. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`（默认落卡范围不含 `WS-00`）。
 
 若任一阶段失败，立即停止并给出系统性修复建议（含架构归因与维护性影响）。
+
+---
+
+## 信息不丢失映射（新增）
+
+`vk_cards.json.cards[*]` 至少包含以下字段（可扩展，不可省略）：
+
+1. `feature_ids`
+2. `mechanism_summary`
+3. `code_anchor_refs`
+4. `example_refs`
+5. `acceptance_checks`
+6. `rollback_anchors`
+7. `evidence_entry`
+8. `task_mode`（`implementation-card|inspection-card|question-card`）
+9. `merge_required`
+
+约束：
+
+1. `mechanism_summary` 必须来自 implementation plan 的功能机制包，不允许自由改写语义。
+2. `example_refs` 只放“最小样例路径/片段锚点”，不塞大段正文。
+3. `acceptance_checks` 必须可直接执行（命令级）。
+4. `evidence_entry` 必须指向权威回填位置（例如 `迁移执行波次_implementation_plan.md` 具体节）。
+
+---
+
+## 串行执行编排（新增）
+
+当 `execution_mode=serial` 时，`/vkplan` 必须满足：
+
+1. `parallel_plan.md` 写明 `single_active_card=true`。
+2. `vk_cards.json` 的 `hard_depends_on` 串成单链（如 `C01 -> C02 -> ...`）。
+3. 仅在前置卡满足 `done_gate` 后，后置卡才允许推进。
+4. Gate 类卡（如 `G1/G2`）默认串行，不可并行推进。
+5. 默认禁止自动 `inreview -> done`（实现卡需人工/门禁确认）。
+
+---
+
+## 与 output 分析的融合规则（新增）
+
+1. `output/**` 只作为“证据来源”，必须先落入 implementation plan 的功能机制包。
+2. `/vkplan` 禁止直接把 `output` 长文塞入卡片描述。
+3. 每个 WS 仅引用与本功能点直接相关的 1~3 条分析证据。
+4. 若分析证据与实现计划冲突，以 implementation plan 为准并记录冲突裁决。
 
 ---
 
@@ -68,6 +134,7 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 
 - `/vktodo`：直接落卡/推进（多 worktree 场景默认执行 `/vksync` 硬拦截）
 - `/imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
+- 自动执行器场景：必须以 `vk_cards.json` 为唯一执行输入，不允许自由重写卡标题与 DoD
 
 手工分步链路（调试用）：`/plan -> /vkplan -> /vksync -> /vktodo`
 
