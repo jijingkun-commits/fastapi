@@ -69,7 +69,7 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 2. 读取 `implementation_plan` 中的“功能机制包（Feature Packet）”与 `planning_contract`。
 3. 生成拆解产物（`parallel_plan.md` + `workstreams/WS-*.md`），并在 WS 中保留机制细节与代码样例锚点。
 4. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
-5. 生成 `vk_cards.json` 与 `vk_import_prompt.txt`（默认落卡范围不含 `WS-00`）。
+5. 生成 `vk_cards.json`（默认落卡范围不含 `WS-00`）；仅在需要批量导入提示时生成 `vk_import_prompt.txt`。
 
 若任一阶段失败，立即停止并给出系统性修复建议（含架构归因与维护性影响）。
 
@@ -95,6 +95,44 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 2. `example_refs` 只放“最小样例路径/片段锚点”，不塞大段正文。
 3. `acceptance_checks` 必须可直接执行（命令级）。
 4. `evidence_entry` 必须指向权威回填位置（例如 `迁移执行波次_implementation_plan.md` 具体节）。
+
+---
+
+## 字段完整性硬拦截（新增）
+
+`/vkplan` 在写入 `vk_cards.json` 前必须做完整性校验。以下任一字段缺失时，直接 `FAIL_FAST` 并停止产出：
+
+1. `feature_ids`
+2. `mechanism_summary`
+3. `code_anchor_refs`
+4. `acceptance_checks`
+5. `rollback_anchors`
+6. `evidence_entry`
+7. `task_mode`
+8. `merge_required`
+
+补充：
+
+1. 不允许“留空后执行期补齐”。
+2. 不允许把缺失字段降级到自然语言备注。
+3. 校验失败时必须输出“缺失字段清单 + 影响 card_id + 修复建议”。
+
+---
+
+## Feature/Card 双向覆盖校验（新增）
+
+为防止 feature 漏卡或重复漂移，`/vkplan` 必须输出双向校验结果：
+
+1. **forward check**：每个 `card_id` 至少绑定 1 个 `feature_id`。
+2. **reverse check**：implementation plan 的每个 `feature_id` 必须且仅能映射到 1 张实现卡。
+3. **orphan check**：不允许存在未被任何卡片承载的 `feature_id`。
+4. **duplicate check**：除明确声明“共享检查卡”外，同一 `feature_id` 不得重复落在多张实现卡。
+
+任一校验失败时：
+
+1. `vk_cards.json` 标记为不可执行；
+2. 不得进入 `/vktodo`；
+3. 必须先回填 `implementation_plan` 或重排卡片映射。
 
 ---
 
@@ -124,7 +162,7 @@ description: 并行拆解入口（前提：已完成 /plan，并继承同主题�
 1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
 3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
-4. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_import_prompt.txt`
+4. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_import_prompt.txt`（可选）
 
 ---
 

@@ -49,7 +49,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 - 产出：`<topic>_requirements.md` + `<topic>_implementation_plan.md` + 最小 `card_seed`
 - 要求给出 `task_key`（后续卡片前缀）
-- 适用于多人/多 AI/多 worktree 并行
+- 适用于多人/多 AI/多 worktree 拆解准备
 - 并行拆解与落卡前准备由后续 `/vkplan` 承接
 
 ### 3) hydrate 模式（旧文档沉淀注入）
@@ -67,13 +67,36 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. 分析沉淀：`output/openclaw源码解析/**`（仅抽取与当前功能点直接相关的证据）
 4. 历史并行拆解：`docs/内部参考/任务拆解/**`（仅复用可验证的结构与门禁，不继承失效口径）
 
+### 4) 参数语义澄清（强制）
+
+1. `parallel` 表示“为 `/vkplan` 产出拆解种子”，不等于最终一定并行执行。
+2. 实际执行并行/串行由 `planning_contract.execution_mode` 决定：
+   - `serial`：单卡推进；
+   - `parallel`：可并行推进。
+3. `hydrate` 表示“输入侧重组模式”：强制先做来源归一化与证据映射，再产出新计划。
+
+### 5) hydrate 覆盖率门禁（强制）
+
+当使用 `/plan hydrate`（含 `/plan parallel hydrate`）时，必须在 implementation plan 输出以下机读统计：
+
+1. `source_atoms_total`：输入细节原子总数。
+2. `source_atoms_mapped`：已映射到 `feature_id` 的原子数。
+3. `source_atoms_unmapped`：未映射原子清单（含 `source_id` 与原因）。
+4. `source_conflicts`：冲突条目与裁决结论。
+
+硬门禁：
+
+1. `source_atoms_unmapped` 非空时，计划状态必须标注 `BLOCKED`，不得进入 `/vkplan`。
+2. 不允许以“摘要已覆盖”替代原子级映射。
+3. 每个 `feature_id` 必须能反查到至少 1 条来源原子。
+
 ---
 
 ## 1. 需求分析 (Requirement Analysis)
 
 **产出**:
 1. 迭代级概览：`docs/内部参考/迭代需求/<topic>_requirements.md`
-2. 模块级需求：`docs/产品文档/<模块>需求.md`
+2. 模块级需求（按需）：`docs/产品文档/<模块>需求.md`（仅在新增模块/业务接口变更/跨团队协作需要时产出）
 
 **必须包含**:
 1. **用户故事**: 谁？在什么场景？想要做什么？为什么？
@@ -83,7 +106,9 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
    - 性能/稳定性: 关键路径耗时、重试/超时
 3. **非功能需求**: 性能、安全、数据一致性
 4. **关联测试**: 预留 TC 编号（便于追溯矩阵）
-5. **业务场景**: 结合银行工作场景（如贷款/存款/分行/合规约束）
+5. **场景约束**:
+   - 业务域任务：结合银行工作场景（如贷款/存款/分行/合规约束）
+   - 平台/架构迁移任务：改为运行场景与系统约束（如路由、状态契约、回滚策略）
 
 ## 2. 技术方案 (Technical Design)
 
@@ -188,14 +213,15 @@ planning_contract:
 
 1. `task_key`（全局唯一，建议 `PP-YYYYMMDD-主题`）
 2. `card_seed`（YAML 或表格）
-   - `cap_id`
+   - `card_id`
    - `title`
+   - `feature_ids`
    - `hard_depends_on`
    - `soft_depends_on`
    - `file_scope`
    - `owner_fields`
    - `check_cmd`
-   - `dod`
+   - `done_gate`
 
 补充规则：
 
