@@ -160,6 +160,8 @@
 * [进展日志（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_progress_log.md)
 * [评估报告（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_evaluation_report.md)
 * [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
+* [需求基线（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_requirements.md)
+* [实施方案（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md)
 * [实施方案（迁移执行波次 P1~P6）](内部参考/迭代需求/迁移执行波次_implementation_plan.md)
 * [实施方案（运行时可取消控制）](内部参考/迭代需求/runtime_cancel_control_implementation_plan.md)
 * [实施方案（Skill 多用户版本治理）](内部参考/迭代需求/skill_multi_user_versioning_implementation_plan.md)

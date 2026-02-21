@@ -119,6 +119,14 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 1. 迭代级概览：`docs/内部参考/迭代需求/<topic>_requirements.md`
 2. 模块级需求（按需）：`docs/产品文档/<模块>需求.md`（仅在新增模块/业务接口变更/跨团队协作需要时产出）
 
+### 索引同步（强制）
+
+当 `/plan` 新增或重命名 `docs/内部参考/迭代需求/*_requirements.md` 或 `*_implementation_plan.md` 时，必须同步更新：
+
+1. `docs/SUMMARY.md` 的“内部参考 -> 迭代需求”条目（新增可点击链接）。
+2. 若已有同名条目，必须校验标题与路径一致，不允许悬挂旧链接。
+3. 在 `/plan` 结束前执行 `python3 scripts/docs_guard.py --strict`；若命中 `summary_missing_doc`，本轮计划视为未完成。
+
 **必须包含**:
 1. **用户故事**: 谁？在什么场景？想要做什么？为什么？
 2. **验收标准**:
