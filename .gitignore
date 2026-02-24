@@ -11,6 +11,7 @@ Thumbs.db
 
 # IDE/Agent 配置目录
 .agent/
+.claude/
 .cursor/
 .trae/
 .cline/
@@ -105,9 +106,12 @@ yarn-error.log*
 /data/
 !/data/README.md
 
-# 过程文档（本地维护，不纳入版本控制）
+# 过程文档与运行态文件（本地维护，不纳入版本控制）
 /docs/内部参考/迭代需求/requirements.md
 /docs/内部参考/迭代需求/implementation_plan.md
+/docs/内部参考/任务拆解/_active_task.json
+/docs/内部参考/任务拆解/_templates/active_task_template.json
+/output/
 
 # 其他（按需扩展）
 *.swp
