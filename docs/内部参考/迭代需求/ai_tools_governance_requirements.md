@@ -1,6 +1,6 @@
 # 2026-02 迭代需求：AI 工具治理架构（全量方案，分期落地）
 
-> 文档状态：`/plan core` 基线  
+> 文档状态：`/jjk-plan core` 基线  
 > 生成日期：2026-02-16  
 > 关联输入：`output/工具治理架构-评审与方案V0.1.md`、`output/OpenClaw对标与智能度提升综合分析报告.md`、`output/openclaw源码解析/OpenClaw深度解析-工具策略管线与权限边界.md`  
 > 关键决策：分期实施但方案全量、配置基线走 `settings.py`、策略来源走 DB、一期先做 `Registry + Policy`

@@ -17,6 +17,7 @@ source: local
 3. DONE 门禁按卡片模式分流：实现卡走 git+测试+门禁，检查/问答卡走评估证据门禁。
 4. 会话过载时先压缩/重置，再继续执行。
 5. 必须按新文档链（requirements -> implementation_plan -> parallel_plan -> WS -> vk_cards）执行，防止信息丢失。
+6. `evidence_entry` 不能只做索引，优先回查到 `output/openclaw源码解析/**` 的原始证据（作为质量增强，不作为硬阻断）。
 
 ## 执行前读取（先读再发指令）
 
@@ -47,6 +48,7 @@ source: local
    - implementation-card: git+测试+文档门禁（如适用）必需；
    - question-card/inspection-card: 不强制 merge，但必须有可核验评估证据。
 6) 证据必须绑定当前卡：target_task_id 必须等于 evidence_task_id，否则输出 BLOCKED_EVIDENCE_BINDING。
+7) 每轮执行前优先完成证据链回查：feature_id -> FP-id -> atom_id -> source_id -> source_path（output/openclaw源码解析/**）；若缺失，输出 WARN_EVIDENCE_TRACE_MISSING 并继续执行。
 
 本轮标准执行顺序：
 0. CLASSIFY
@@ -64,6 +66,7 @@ source: local
    - implementation-card: 最小必要测试 + docs_guard（如适用）+ 关键文件检查
    - question/inspection-card: 验收标准逐条评估 + 证据引用
    - 统一证据绑定检查：target_task_id == evidence_task_id
+   - 统一证据回查检查：evidence_entry 是否已落到 output 源文档（普通步骤建议 >=1 条，Gate/跨模块步骤建议 >=2 条）
 4. REPORT
    - 严格按固定格式输出（见下）
 
@@ -95,6 +98,7 @@ status
 - result: {{DONE|PARTIAL|BLOCKED|NO_INCREMENT|SKIP_ALREADY_DONE}}
 - transition_gate: {{PASS|FAIL}} ({{REASON}})
 - evidence_binding: {{target_task_id={{TASK_ID}}; evidence_task_id={{EVIDENCE_TASK_ID}}; bind={{YES|NO}}}}
+- evidence_trace: {{checked={{YES|NO}}; refs=[feature_id,FP-id,atom_id,source_path]}}
 - evidence: {{task_id,turn_id,process_id,status,commit_or_none,merge_commit_or_none}}
 
 changed files
@@ -126,6 +130,7 @@ next actions
 3. 若出现“卡状态 done 但证据不闭环”，立即回退为 `BLOCKED` 并给一条最小恢复动作。
 4. 若卡片缺 `feature_ids` / `mechanism_summary` / `code_anchor_refs` / `acceptance_checks` / `rollback_anchors` / `evidence_entry` 任一字段，判定 `BLOCKED_DOC_CONTEXT`。
 5. 若 `execution_mode=serial` 且前置 `hard_depends_on` 未完成，不得推进当前卡。
+6. 若 `evidence_entry` 无法回查到 `output/openclaw源码解析/**` 的原始证据，输出 `WARN_EVIDENCE_TRACE_MISSING` 并在汇报中注明风险与缺失链路。
 
 ## 会话与稳定性策略
 

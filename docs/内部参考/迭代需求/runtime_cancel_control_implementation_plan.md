@@ -1,6 +1,6 @@
 # 运行时可取消控制实施方案（P1）
 
-> 文档状态：实施基线（`/plan core`）
+> 文档状态：实施基线（`/jjk-plan core`）
 > 更新时间：2026-02-20
 > 对应总控：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
 

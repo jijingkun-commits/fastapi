@@ -164,10 +164,10 @@
 
 ---
 
-## 7. 并行拆解索引（`/vkplan`）
+## 7. 并行拆解索引（`/jjk-vkplan`）
 
 1. `task_key`：`PP-20260216-TOOL-GOVERNANCE`。
 2. 拆解目录：`docs/内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/`。
 3. 契约文件：`contracts/sse_events_v1.json`（冻结 `done/result/interrupt` required 语义）。
 4. 卡片导出：`vk_cards.json`（共 5 张落卡卡片，不含 `WS-00` Foundation）。
-5. 导入提示：`vk_import_prompt.txt`（供 `/vktodo` 直接落卡）。
+5. 导入提示：`vk_import_prompt.txt`（供 `/jjk-vktodo` 直接落卡）。

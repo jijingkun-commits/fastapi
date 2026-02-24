@@ -10,9 +10,28 @@
 - single_active_card: `true | false`
 - card_order: `[]`（serial 模式必填）
 - auto_done_policy:
-  - implementation-card: `manual_gate`
+  - implementation-card: `manual_gate | hard_gate`
   - inspection/question-card: `policy_gate`
 - 说明：若 implementation_plan 中存在 `planning_contract`，此处必须与其一致。
+
+### -1.1 automation_contract（新增，供自动执行器读取）
+
+```yaml
+automation_contract:
+  source_of_truth: docs/内部参考/任务拆解/_active_task.json
+  required_fields:
+    - project_id
+    - task_split_dir
+    - task_key
+    - execution_mode
+    - single_active_card
+    - auto_done_policy
+    - preflight_required
+  scope_match_rule:
+    - title_contains_[task_key]
+    - labels_contains_task_key
+    - card_key_prefix_task_key
+```
 
 ## 0. G0 协议冻结
 

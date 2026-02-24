@@ -73,7 +73,7 @@ bash scripts/vk_dev.sh up
 
 ### 2) 门禁 worktree（全量回归）
 
-- 在 `main`/`master` 上执行 `/review` 与 `/test`。
+- 在 `main`/`master` 上执行 `/jjk-review` 与 `/jjk-test`。
 - 默认走固定端口 `3000/8000`。
 
 ## Vibe Kanban 项目配置建议
@@ -88,7 +88,7 @@ bash scripts/vk_dev.sh up
 
 本次变更遵循以下原则：
 
-1. 子任务阶段（`/imp-ws`）执行最小验证，避免把所有 worktree 都拉到全量测试。
+1. 子任务阶段（`/jjk-imp-ws`）执行最小验证，避免把所有 worktree 都拉到全量测试。
 2. 全量 `review/test` 在门禁层统一执行，保持基线稳定。
 3. 若在主分支执行测试，仍优先使用 `3000/8000`。
 
@@ -100,33 +100,43 @@ bash scripts/vk_dev.sh up
 > 命令权威源：`.cursor/commands/*.md`。本文用于流程落地与本机脚本约定，命令细节冲突时以权威源为准。
 
 ```text
-/clarify -> /plan parallel（或 /plan core） -> /vkplan
-        -> /vktodo <任务拆解目录>
-        -> /imp-ws @workstreams/WS-01...WS-N(并行)
-        -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
-        -> /imp-ws @workstreams/WS-G2_文档终稿门禁.md
-        -> /review -> /test
+/jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
+        -> /jjk-vktodo <任务拆解目录>
+        -> /jjk-imp-ws @workstreams/WS-01...WS-N(并行)
+        -> /jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md
+        -> /jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md
+        -> /jjk-review -> /jjk-test
 ```
 
-`/vktodo` 推荐优先使用路径直传，减少手写 `cards=` 长参数：
+`/jjk-vktodo` 推荐优先使用路径直传，减少手写 `cards=` 长参数：
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp
 ```
 
 推进状态示例：
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
 ```
 
 关键要求：
 
-1. 先执行 `/plan` 产出需求与技术方案；并行推荐 `/plan parallel` 直接给出 `task_key/card_seed`，若使用 `/plan core` 则由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源。
-2. `/vkplan` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
-3. `WS-00` 在 `/vkplan` 阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
-4. `/vktodo` 负责默认落卡，并默认执行基线硬拦截（`/vksync check` 语义）；如需提前排障可手工先执行 `/vksync`。
+1. 先执行 `/jjk-plan` 产出需求与技术方案；并行推荐 `/jjk-plan parallel` 直接给出 `task_key/card_seed`，若使用 `/jjk-plan core` 则由 `/jjk-vkplan` 推导并在 `parallel_plan.md` 标注来源。
+2. `/jjk-vkplan` 固定产出 `WS-00_G0_协议冻结`，并为每个 WS 生成 `card_export`。
+3. `WS-00` 在 `/jjk-vkplan` 阶段生成并冻结；需先将含 `WS-00` 的基线提交合并，再从该基线拆分并行 worktree。
+4. `/jjk-vktodo` 负责默认落卡，并默认执行基线硬拦截（`/jjk-vksync check` 语义）；如需提前排障可手工先执行 `/jjk-vksync`。
 5. `WS-00` 为 master 前置里程碑，不进入 VK 落卡与推进列表。
-6. `/vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
+6. `/jjk-vktodo` 路径模式会自动读取 `vk_cards.json`，建卡时使用卡片 `column`，推进时默认按 `task_key` 前缀筛选。
 7. 卡片唯一键必须为 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
 8. Gate 层按 `WS-G1 -> WS-G2` 串行执行，结果由回填脚本写入 `parallel_plan.md`。
+9. 自动执行器运行前，必须将当前任务写入 `docs/内部参考/任务拆解/_active_task.json`，并确保其中 `task_key` 与目标 `vk_cards.json` 一致。
+10. coder4 自动执行总控细节与排障请看：`docs/开发文档/工作流/Coder4自动执行总控手册.md`。
+
+推荐命令：
+
+```bash
+python3 scripts/set_active_task.py \
+  --task-split-dir <YYYY-MM-DD_主题> \
+  --project-id <VK_PROJECT_ID>
+```

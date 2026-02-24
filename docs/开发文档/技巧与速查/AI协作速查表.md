@@ -13,23 +13,23 @@
 ### 1.1 常规开发（单任务）
 
 ```text
-想法 -> /clarify -> /plan -> /imp -> /review -> /test -> 验收
+想法 -> /jjk-clarify -> /jjk-plan -> /jjk-imp -> /jjk-review -> /jjk-test -> 验收
 ```
 
 ### 1.2 并行开发（多 AI / 多 worktree）
 
 ```text
-想法 -> /clarify -> /plan parallel（或 /plan core） -> /vkplan
-     -> /vktodo <任务拆解目录>
-     -> /imp-ws @workstreams/WS-01...WS-N（并行层）
-     -> /imp-ws @workstreams/WS-G1_集成回归门禁.md
-     -> /imp-ws @workstreams/WS-G2_文档终稿门禁.md
-     -> /review -> /test -> 验收
+想法 -> /jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
+     -> /jjk-vktodo <任务拆解目录>
+     -> /jjk-imp-ws @workstreams/WS-01...WS-N（并行层）
+     -> /jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md
+     -> /jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md
+     -> /jjk-review -> /jjk-test -> 验收
 ```
 
 并行执行顺序固定：
 
-1. `WS-00_G0_协议冻结`（Foundation，由 `/vkplan` 生成并冻结，默认不单独执行 `/imp-ws`）
+1. `WS-00_G0_协议冻结`（Foundation，由 `/jjk-vkplan` 生成并冻结，默认不单独执行 `/jjk-imp-ws`）
 2. `WS-01 ... WS-N`（并行层）
 3. `WS-G1_集成回归门禁`
 4. `WS-G2_文档终稿门禁`
@@ -40,11 +40,11 @@
 
 | 步骤 | 命令 | 关键产物 | 通过条件 |
 |---|---|---|---|
-| 1. 需求与方案 | `/plan parallel`（或 `/plan core`） | 默认 `<topic>_requirements.md` + `<topic>_implementation_plan.md` | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/vkplan` 推导并在 `parallel_plan.md` 标注来源 |
-| 2. 并行拆解 | `/vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
-| 3. 看板落地 | `/vktodo <任务拆解目录>` | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
-| 4. 子任务执行 | `/imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
-| 5. Gate 回填 | `/imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
+| 1. 需求与方案 | `/jjk-plan parallel`（或 `/jjk-plan core`） | 默认 `<topic>_requirements.md` + `<topic>_implementation_plan.md` | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/jjk-vkplan` 推导并在 `parallel_plan.md` 标注来源 |
+| 2. 并行拆解 | `/jjk-vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
+| 3. 看板落地 | `/jjk-vktodo <任务拆解目录>` | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
+| 4. 子任务执行 | `/jjk-imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
+| 5. Gate 回填 | `/jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
 ---
 
@@ -52,22 +52,22 @@
 
 | 场景 | 推荐命令 | 说明 |
 |---|---|---|
-| 快速澄清需求 | `/clarify` | 只问答，不落文档 |
-| 规划（不拆卡） | `/plan` 或 `/plan core` | 只产出需求与技术方案 |
-| 规划 + 并行拆解（推荐） | `/plan parallel -> /vkplan`（或 `/plan core -> /vkplan`） | 含 G0 冻结与落卡前产物 |
-| 基线同步（调试） | `/vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
-| 看板落卡（推荐） | `/vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
-| 看板推进（简化） | `/vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
-| 执行单个 WS | `/imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
-| 单任务实现 | `/imp` | 不走并行流程时使用 |
-| 代码审查 | `/review` | 质量与风险检查 |
-| 测试验证 | `/test` | 回归验证与报告沉淀 |
+| 快速澄清需求 | `/jjk-clarify` | 只问答，不落文档 |
+| 规划（不拆卡） | `/jjk-plan` 或 `/jjk-plan core` | 只产出需求与技术方案 |
+| 规划 + 并行拆解（推荐） | `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`） | 含 G0 冻结与落卡前产物 |
+| 基线同步（调试） | `/jjk-vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
+| 看板落卡（推荐） | `/jjk-vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
+| 看板推进（简化） | `/jjk-vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
+| 执行单个 WS | `/jjk-imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
+| 单任务实现 | `/jjk-imp` | 不走并行流程时使用 |
+| 代码审查 | `/jjk-review` | 质量与风险检查 |
+| 测试验证 | `/jjk-test` | 回归验证与报告沉淀 |
 
 ---
 
 ## 4. 并行前 3 秒判断法
 
-满足以下 4 条才建议 `/vkplan`：
+满足以下 4 条才建议 `/jjk-vkplan`：
 
 1. 子任务可独立开始并独立交付（无需等待他人产出）
 2. 文件白名单互斥（无共享文件并发写）
@@ -76,7 +76,7 @@
 
 若任一不满足：
 
-- 回退单任务 `/imp`
+- 回退单任务 `/jjk-imp`
 - 或先解耦后再拆分
 
 ---
@@ -97,31 +97,31 @@
 ## 6. 常见误区
 
 - “并行 = 随便拆几个 WS”：错误；缺 `task_key/card_export` 会导致看板不可执行。
-- “/plan 一定要出 seed”：错误；只有并行场景才建议 `/vkplan` 或 `/plan parallel`。
+- “/jjk-plan 一定要出 seed”：错误；只有并行场景才建议 `/jjk-vkplan` 或 `/jjk-plan parallel`。
 - “子任务阶段跑全量回归”：错误；并行层做最小验证，全量回归放 Gate 层。
 - “Gate 结果手工改”：错误；必须走回填脚本，保证可追溯。
 
 ---
 
-## 6.1 `/vktodo` 最简用法（新增）
+## 6.1 `/jjk-vktodo` 最简用法（新增）
 
-1. 推荐执行 `/plan parallel -> /vkplan`（或 `/plan core -> /vkplan`），产出 `vk_cards.json`。
+1. 推荐执行 `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`），产出 `vk_cards.json`。
 2. 建卡可直接用路径直传：
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp
 ```
 
 3. 推进状态可直接用：
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing
 ```
 
 4. 若需要指定项目：
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp create Backlog project=fastapi
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp create Backlog project=fastapi
 ```
 
 ---

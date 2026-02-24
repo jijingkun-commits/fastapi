@@ -1,6 +1,6 @@
 # OpenClaw迁移重建基线 实施方案
 
-> 文档状态：`/plan -p -h` 产物（实现侧）  
+> 文档状态：`/jjk-plan -p -h` 产物（实现侧）  
 > 更新时间：2026-02-21  
 > 主题：openclaw迁移重建基线  
 > 执行模式：`serial`（单活卡片）
@@ -347,7 +347,7 @@ source_conflicts:
 ### 5.2 覆盖率判定
 
 1. 当前判定：`READY_FOR_VKPLAN`（`source_atoms_unmapped` 为空）。
-2. 强制规则：若 `source_atoms_unmapped` 非空，计划状态必须改为 `BLOCKED`，并停止进入 `/vkplan`。
+2. 强制规则：若 `source_atoms_unmapped` 非空，计划状态必须改为 `BLOCKED`，并停止进入 `/jjk-vkplan`。
 
 ---
 
@@ -360,12 +360,15 @@ source_conflicts:
 
 ---
 
-## 7. planning_contract（供 `/vkplan` 直接消费）
+## 7. planning_contract（供 `/jjk-vkplan` 直接消费）
 
 ```yaml
 planning_contract:
   execution_mode: serial
   strict_single_active_card: true
+  auto_done_policy:
+    implementation-card: hard_gate
+    inspection/question-card: policy_gate
   status_source_of_truth: docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md
   preflight:
     - card_id: C00
@@ -421,4 +424,3 @@ planning_contract:
         - docs/code/test 三线收口完成
         - 各 Wave 回滚锚点组合演练通过
 ```
-

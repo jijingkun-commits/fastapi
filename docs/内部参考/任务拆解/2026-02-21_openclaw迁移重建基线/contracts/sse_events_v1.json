@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "events": {
+    "required": [
+      "done",
+      "result",
+      "interrupt",
+      "stopped"
+    ],
+    "optional": [
+      "metadata.version"
+    ]
+  },
+  "compatibility": {
+    "policy": "stopped is additive and backward compatible"
+  }
+}

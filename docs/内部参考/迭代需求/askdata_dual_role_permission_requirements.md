@@ -1,6 +1,6 @@
 # 问数双角色权限需求基线（2026-02）
 
-> 文档状态：已澄清基线（`/plan parallel`）
+> 文档状态：已澄清基线（`/jjk-plan parallel`）
 > 更新时间：2026-02-15
 > 关联范围：`app/models/user.py`、`app/services/permission_service.py`、`app/ai/utils/sql_rewriter.py`、`app/api/v1/endpoints/access_admin_api.py`
 

@@ -67,7 +67,7 @@
       ],
       "check_cmd": [
         "python3 scripts/docs_guard.py --strict",
-        "rg -n '/vkplan|/vktodo|/imp-ws' docs/开发文档/技巧与速查/AI协作速查表.md"
+        "rg -n '/jjk-vkplan|/jjk-vktodo|/jjk-imp-ws' docs/开发文档/技巧与速查/AI协作速查表.md"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-02_命令权威源与百科校准.md"
     },

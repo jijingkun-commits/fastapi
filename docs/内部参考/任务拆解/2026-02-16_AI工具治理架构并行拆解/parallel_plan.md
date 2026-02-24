@@ -37,7 +37,7 @@
 ## 1. seed 来源
 
 - `task_key`: `PP-20260216-TOOL-GOVERNANCE`
-- 来源：`vkplan 推导`（本轮 `/plan core` 未强制产出 `card_seed`）
+- 来源：`vkplan 推导`（本轮 `/jjk-plan core` 未强制产出 `card_seed`）
 - `card_seed` 来源：`ai_tools_governance_implementation_plan.md` 的分阶段路线图 + 代码改造清单 + 门禁章节
 - 推导依据与风险：按“先治理底座、再钩子、后编排接线、最后 Gate 收口”拆分；风险在于 WS-02 与 WS-03 存在轻度接线耦合
 

@@ -52,7 +52,7 @@
 ## 1. seed 来源判定
 
 1. `task_key`：`PP-20260214-DOCS-GOVERNANCE`
-2. `task_key` 来源：`vkplan 推导`（本轮 `/plan core` 未产出 parallel seed）
+2. `task_key` 来源：`vkplan 推导`（本轮 `/jjk-plan core` 未产出 parallel seed）
 3. `card_seed` 来源：`vkplan 推导`
 4. 推导依据：
    - `docs_governance_requirements.md` 中的 P0/P1/P2 与验收标准

@@ -1,6 +1,6 @@
 # 文档治理执行实施方案（2026-02）
 
-> 文档状态：实施基线（`/plan core`）
+> 文档状态：实施基线（`/jjk-plan core`）
 > 日期：2026-02-14
 > 对应需求：`docs/内部参考/迭代需求/docs_governance_requirements.md`
 

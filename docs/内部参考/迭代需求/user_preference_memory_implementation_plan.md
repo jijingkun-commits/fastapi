@@ -1,6 +1,6 @@
 # 跨会话用户偏好记忆实施方案（2026-02）
 
-> 文档状态：实施基线（`/plan core`）
+> 文档状态：实施基线（`/jjk-plan core`）
 > 更新时间：2026-02-16
 > 对应需求：`docs/内部参考/迭代需求/user_preference_memory_requirements.md`
 

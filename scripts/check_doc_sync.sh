@@ -31,7 +31,7 @@ if [ -n "$CHANGED_CODE" ] && [ -z "$CHANGED_DOCS" ]; then
     done
     echo ""
     echo "提示："
-    echo "  - 使用 /doc-check 命令查看详细映射"
+    echo "  - 使用 /jjk-doc-check 命令查看详细映射"
     echo "  - 查阅 .cursor/rules/doc_sync.mdc 了解文档映射规则"
     echo ""
     echo "跳过条件（如满足可忽略此警告）："

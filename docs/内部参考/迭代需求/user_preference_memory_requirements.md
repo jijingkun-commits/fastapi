@@ -1,6 +1,6 @@
 # 跨会话用户偏好记忆需求基线（2026-02）
 
-> 文档状态：已澄清基线（`/plan core`）
+> 文档状态：已澄清基线（`/jjk-plan core`）
 > 更新时间：2026-02-16
 > 关联范围：`app/services/chat_service.py`、`app/services/user_preference_memory_service.py`、`app/models/user_memory.py`、`app/repositories/user_memory_repo.py`
 

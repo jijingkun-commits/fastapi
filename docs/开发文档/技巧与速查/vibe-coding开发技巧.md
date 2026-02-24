@@ -113,17 +113,17 @@ npx ai-agent-skills info <skill-name>
 ### 2.1 核心流程
 
 ```
-想法 → /plan → requirements.md → /imp → 代码 → /test → 验收
+想法 → /jjk-plan → requirements.md → /jjk-imp → 代码 → /jjk-test → 验收
 ```
 
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
-| **规划** | `/plan` | `requirements.md` | 明确需求和设计 |
-| **实现** | `/imp` | 代码 + 文档 | AI 实现功能 |
-| **测试** | `/test` | 测试报告 | 验证功能 |
-| **调试** | `/debug` | 修复方案 | 排查问题 |
-| **审查** | `/review` | 审查意见 | 代码质量检查 |
-| **全流程** | `/feature` | 完整功能 | Plan + Imp + Test |
+| **规划** | `/jjk-plan` | `requirements.md` | 明确需求和设计 |
+| **实现** | `/jjk-imp` | 代码 + 文档 | AI 实现功能 |
+| **测试** | `/jjk-test` | 测试报告 | 验证功能 |
+| **调试** | `/jjk-debug` | 修复方案 | 排查问题 |
+| **审查** | `/jjk-review` | 审查意见 | 代码质量检查 |
+| **全流程** | `/jjk-feature` | 完整功能 | Plan + Imp + Test |
 
 ### 2.2 上下文引用策略
 
@@ -359,38 +359,38 @@ description: 命令的简短描述
 你的场景是什么？
 │
 ├─ 需求不明确，想先澄清
-│   └─ /clarify （轻量问答，不产出文档）
+│   └─ /jjk-clarify （轻量问答，不产出文档）
 │
 ├─ 需要正式的需求文档
-│   └─ /plan （产出 requirements.md）
+│   └─ /jjk-plan （产出 requirements.md）
 │
 ├─ 已有明确计划，只需编码
-│   └─ /imp
+│   └─ /jjk-imp
 │
 ├─ 完整的新功能开发
-│   └─ /feature （= plan + imp + review）
+│   └─ /jjk-feature （= plan + imp + review）
 │
 ├─ 代码写完了，需要审查
-│   └─ /review （含快速自测）
+│   └─ /jjk-review （含快速自测）
 │
 ├─ 需要完整的测试流程
-│   └─ /test （用例生成、E2E、报告）
+│   └─ /jjk-test （用例生成、E2E、报告）
 │
 └─ 遇到 Bug 需要排查
-    └─ /debug （重现、定位、修复、预防）
+    └─ /jjk-debug （重现、定位、修复、预防）
 ```
 
 ### 7.2 核心开发流程
 
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
-| `/clarify` | 快速澄清 - 通过问答确认理解，不产出文档 | 无 |
-| `/plan` | 正式规划 - 产出需求文档和技术方案 | `requirements.md` |
-| `/imp` | 代码实现 - 根据计划编写代码，同步文档 | 代码 + 文档 |
-| `/review` | 代码审查 - 功能验证 + 质量检查 + 安全审计 + 快速自测 | 审查意见 |
-| `/test` | 完整测试 - 用例生成、三重验证、报告产出 | `test_report.md` |
-| `/debug` | 问题排查 - 重现、定位、修复、预防 | 修复 + 测试用例 |
-| `/feature` | 全流程 - 一站式从需求到交付 (= plan + imp + review) | 全部 |
+| `/jjk-clarify` | 快速澄清 - 通过问答确认理解，不产出文档 | 无 |
+| `/jjk-plan` | 正式规划 - 产出需求文档和技术方案 | `requirements.md` |
+| `/jjk-imp` | 代码实现 - 根据计划编写代码，同步文档 | 代码 + 文档 |
+| `/jjk-review` | 代码审查 - 功能验证 + 质量检查 + 安全审计 + 快速自测 | 审查意见 |
+| `/jjk-test` | 完整测试 - 用例生成、三重验证、报告产出 | `test_report.md` |
+| `/jjk-debug` | 问题排查 - 重现、定位、修复、预防 | 修复 + 测试用例 |
+| `/jjk-feature` | 全流程 - 一站式从需求到交付 (= plan + imp + review) | 全部 |
 
 ### 7.3 Git 工作流
 
@@ -398,8 +398,8 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/git-commit` | 规范化提交 - 自动分析变更并生成符合规范的提交信息 | `/git-commit` |
-| `/create-pr` | 创建 PR - 生成完整的 PR 描述，包含变更摘要和测试计划 | `/create-pr` |
+| `/jjk-git-commit` | 规范化提交 - 自动分析变更并生成符合规范的提交信息 | `/jjk-git-commit` |
+| `/jjk-create-pr` | 创建 PR - 生成完整的 PR 描述，包含变更摘要和测试计划 | `/jjk-create-pr` |
 
 ### 7.4 代码质量
 
@@ -407,12 +407,12 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/lint` | 代码规范检查 - 运行 ruff/eslint 并自动修复问题 | `/lint @app/services/` |
-| `/refactor` | 代码重构 - 在保持功能不变的前提下改善代码结构 | `/refactor @app/services/chat_service.py` |
-| `/deslop` | 清理 AI 冗余代码 - 移除不必要的复杂性和过度工程 | `/deslop` |
-| `/optimize` | 性能优化 - 分析瓶颈并提供优化方案 | `/optimize 这个查询很慢` |
-| `/error-handling` | 添加错误处理 - 为代码添加健壮的异常处理和验证 | `/error-handling @app/api/` |
-| `/security-audit` | 安全审计 - 检查注入漏洞、认证问题、数据泄露风险 | `/security-audit` |
+| `/jjk-lint` | 代码规范检查 - 运行 ruff/eslint 并自动修复问题 | `/jjk-lint @app/services/` |
+| `/jjk-refactor` | 代码重构 - 在保持功能不变的前提下改善代码结构 | `/jjk-refactor @app/services/chat_service.py` |
+| `/jjk-deslop` | 清理 AI 冗余代码 - 移除不必要的复杂性和过度工程 | `/jjk-deslop` |
+| `/jjk-optimize` | 性能优化 - 分析瓶颈并提供优化方案 | `/jjk-optimize 这个查询很慢` |
+| `/jjk-error-handling` | 添加错误处理 - 为代码添加健壮的异常处理和验证 | `/jjk-error-handling @app/api/` |
+| `/jjk-security-audit` | 安全审计 - 检查注入漏洞、认证问题、数据泄露风险 | `/jjk-security-audit` |
 
 ### 7.5 数据库
 
@@ -420,7 +420,7 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/migration` | 数据库迁移 - 创建带回滚脚本的迁移文件，自动更新文档 | `/migration 添加 user_profile 表` |
+| `/jjk-migration` | 数据库迁移 - 创建带回滚脚本的迁移文件，自动更新文档 | `/jjk-migration 添加 user_profile 表` |
 
 ### 7.6 文档与可视化
 
@@ -428,26 +428,26 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/diagrams` | 生成 Mermaid 图 - 支持流程图、时序图、类图、ER 图等 | `/diagrams 画一下聊天系统时序图` |
-| `/api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/api-docs @app/api/v1/endpoints/` |
-| `/doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/doc-check`（建议在 git commit 前执行） |
+| `/jjk-diagrams` | 生成 Mermaid 图 - 支持流程图、时序图、类图、ER 图等 | `/jjk-diagrams 画一下聊天系统时序图` |
+| `/jjk-api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/jjk-api-docs @app/api/v1/endpoints/` |
+| `/jjk-doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/jjk-doc-check`（建议在 git commit 前执行） |
 
 ### 7.7 并行与看板协作
 
-用于多 AI / 多 worktree 并行开发，核心链路为 `/plan -> /vkplan -> /vktodo -> /imp-ws`。
+用于多 AI / 多 worktree 并行开发，核心链路为 `/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/vkplan` | 并行拆解入口 - 在 `/plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/vkplan` |
-| `/vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/vksync 2026-02-14_文档治理执行 check` |
-| `/vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/vktodo 2026-02-14_文档治理执行 move Doing` |
-| `/imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
+| `/jjk-vkplan` | 并行拆解入口 - 在 `/jjk-plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/jjk-vkplan` |
+| `/jjk-vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/jjk-vksync 2026-02-14_文档治理执行 check` |
+| `/jjk-vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/jjk-vktodo 2026-02-14_文档治理执行 move Doing` |
+| `/jjk-imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/jjk-imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
 
 ### 7.8 问题诊断（只分析不改码）
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/pc` | 问题诊断 - 只做根因分析并产出 `fix_plan.md`，不改代码（命令文档内示例触发词为 `/diagnose`） | `/pc 生产环境出现 500 错误` |
+| `/jjk-pc` | 问题诊断 - 只做根因分析并产出 `fix_plan.md`，不改代码（命令文档内示例触发词为 `/jjk-diagnose`） | `/jjk-pc 生产环境出现 500 错误` |
 
 ---
 
@@ -463,40 +463,40 @@ npx ai-agent-skills update --all    # 更新全部
 # === Commands（在聊天中输入）===
 
 # 核心开发流程 - 覆盖完整开发周期
-/clarify       # 通过问答澄清需求，避免返工
-/plan          # 生成 requirements.md 和技术方案
-/imp           # 根据计划编写代码，自动同步文档
-/test          # 全链路测试：环境准备、用例生成、执行验证
-/debug         # 重现、定位、修复、记录的标准排查流程
-/review        # 检查代码质量、文档同步、规范遵循
-/feature       # 一站式完成从需求到交付的全流程
-/pc            # 仅诊断并输出 fix_plan（命令文档示例触发词 /diagnose）
+/jjk-clarify       # 通过问答澄清需求，避免返工
+/jjk-plan          # 生成 requirements.md 和技术方案
+/jjk-imp           # 根据计划编写代码，自动同步文档
+/jjk-test          # 全链路测试：环境准备、用例生成、执行验证
+/jjk-debug         # 重现、定位、修复、记录的标准排查流程
+/jjk-review        # 检查代码质量、文档同步、规范遵循
+/jjk-feature       # 一站式完成从需求到交付的全流程
+/jjk-pc            # 仅诊断并输出 fix_plan（命令文档示例触发词 /jjk-diagnose）
 
 # 并行与看板 - 多 worktree 协作
-/vkplan        # 在 /plan 后执行并行拆解并产出 vk_cards.json
-/vktodo        # 批量建卡/推进，默认执行基线硬拦截
-/vksync        # 手动执行 G0 基线同步检查（check/apply）
-/imp-ws        # 按单个 WS 白名单执行实现与回填
+/jjk-vkplan        # 在 /jjk-plan 后执行并行拆解并产出 vk_cards.json
+/jjk-vktodo        # 批量建卡/推进，默认执行基线硬拦截
+/jjk-vksync        # 手动执行 G0 基线同步检查（check/apply）
+/jjk-imp-ws        # 按单个 WS 白名单执行实现与回填
 
 # Git 工作流 - 标准化的版本控制操作
-/git-commit    # 自动分析变更并生成规范提交信息
-/create-pr     # 生成完整 PR 描述，含变更摘要和测试计划
+/jjk-git-commit    # 自动分析变更并生成规范提交信息
+/jjk-create-pr     # 生成完整 PR 描述，含变更摘要和测试计划
 
 # 代码质量 - 提升代码健壮性
-/lint          # 运行 ruff/eslint 并自动修复问题
-/refactor      # 在保持功能不变的前提下改善代码结构
-/deslop        # 移除 AI 生成的不必要复杂性
-/optimize      # 分析性能瓶颈并提供优化方案
-/error-handling # 添加健壮的异常处理和输入验证
-/security-audit # 检查注入漏洞、认证问题、数据泄露
+/jjk-lint          # 运行 ruff/eslint 并自动修复问题
+/jjk-refactor      # 在保持功能不变的前提下改善代码结构
+/jjk-deslop        # 移除 AI 生成的不必要复杂性
+/jjk-optimize      # 分析性能瓶颈并提供优化方案
+/jjk-error-handling # 添加健壮的异常处理和输入验证
+/jjk-security-audit # 检查注入漏洞、认证问题、数据泄露
 
 # 数据库 - 安全的数据库操作
-/migration     # 创建带回滚脚本的迁移文件
+/jjk-migration     # 创建带回滚脚本的迁移文件
 
 # 文档与可视化 - 保持文档同步
-/diagrams      # 生成 Mermaid 图（流程图、时序图、ER 图等）
-/api-docs      # 根据代码自动生成接口文档
-/doc-check     # 检查代码变更是否有对应文档更新
+/jjk-diagrams      # 生成 Mermaid 图（流程图、时序图、ER 图等）
+/jjk-api-docs      # 根据代码自动生成接口文档
+/jjk-doc-check     # 检查代码变更是否有对应文档更新
 
 # === 上下文引用 ===
 @文件路径                            # 引用文件
@@ -527,30 +527,30 @@ npx ai-agent-skills update --all    # 更新全部
 
 ```
 .cursor/commands/
-├── api-docs.md        # 生成 API 文档
-├── clarify.md         # 快速澄清需求
-├── create-pr.md       # 创建 PR
-├── debug.md           # 调试问题
-├── deslop.md          # 清理 AI 冗余代码
-├── diagrams.md        # 生成 Mermaid 图表
-├── doc-check.md       # 文档同步检查
-├── error-handling.md  # 添加错误处理
-├── feature.md         # 全流程开发
-├── git-commit.md      # 规范化提交
-├── imp-ws.md          # 子任务实现（WS）
-├── imp.md             # 实现代码
-├── lint.md            # 代码规范检查
-├── migration.md       # 数据库迁移
-├── optimize.md        # 性能优化
-├── pc.md              # 问题诊断（命令文档示例触发词 /diagnose）
-├── plan.md            # 需求规划
-├── refactor.md        # 代码重构
-├── review.md          # 代码审查
-├── security-audit.md  # 安全审计
-├── test.md            # 运行测试
-├── vkplan.md          # 并行拆解
-├── vksync.md          # 基线同步检查
-└── vktodo.md          # 批量建卡/推进
+├── jjk-api-docs.md        # 生成 API 文档
+├── jjk-clarify.md         # 快速澄清需求
+├── jjk-create-pr.md       # 创建 PR
+├── jjk-debug.md           # 调试问题
+├── jjk-deslop.md          # 清理 AI 冗余代码
+├── jjk-diagrams.md        # 生成 Mermaid 图表
+├── jjk-doc-check.md       # 文档同步检查
+├── jjk-error-handling.md  # 添加错误处理
+├── jjk-feature.md         # 全流程开发
+├── jjk-git-commit.md      # 规范化提交
+├── jjk-imp-ws.md          # 子任务实现（WS）
+├── jjk-imp.md             # 实现代码
+├── jjk-lint.md            # 代码规范检查
+├── jjk-migration.md       # 数据库迁移
+├── jjk-optimize.md        # 性能优化
+├── jjk-pc.md              # 问题诊断（命令文档示例触发词 /jjk-diagnose）
+├── jjk-plan.md            # 需求规划
+├── jjk-refactor.md        # 代码重构
+├── jjk-review.md          # 代码审查
+├── jjk-security-audit.md  # 安全审计
+├── jjk-test.md            # 运行测试
+├── jjk-vkplan.md          # 并行拆解
+├── jjk-vksync.md          # 基线同步检查
+└── jjk-vktodo.md          # 批量建卡/推进
 ```
 
 ### 9.3 Rules（8 个）

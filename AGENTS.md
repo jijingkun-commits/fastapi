@@ -46,12 +46,12 @@
 
 常用映射示例：
 
-- `/plan` -> `.cursor/commands/plan.md`
-- `/imp` -> `.cursor/commands/imp.md`
-- `/debug` -> `.cursor/commands/debug.md`
-- `/review` -> `.cursor/commands/review.md`
-- `/test` -> `.cursor/commands/test.md`
-- `/doc-check` -> `.cursor/commands/doc-check.md`
+- `/jjk-plan` -> `.cursor/commands/jjk-plan.md`
+- `/jjk-imp` -> `.cursor/commands/jjk-imp.md`
+- `/jjk-debug` -> `.cursor/commands/jjk-debug.md`
+- `/jjk-review` -> `.cursor/commands/jjk-review.md`
+- `/jjk-test` -> `.cursor/commands/jjk-test.md`
+- `/jjk-doc-check` -> `.cursor/commands/jjk-doc-check.md`
 
 ## 4) 双数据库强约束
 

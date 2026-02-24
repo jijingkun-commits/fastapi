@@ -1,6 +1,6 @@
 # 问数双角色权限实施方案（2026-02）
 
-> 文档状态：实施基线（`/plan parallel`）
+> 文档状态：实施基线（`/jjk-plan parallel`）
 > 更新时间：2026-02-15
 > 对应需求：`docs/内部参考/迭代需求/askdata_dual_role_permission_requirements.md`
 
