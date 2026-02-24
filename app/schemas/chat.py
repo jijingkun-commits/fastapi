@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     prompt: str
     delay_ms: int = 50
     thread_id: Optional[str] = None
+    run_id: Optional[str] = None  # 可选 run_id（用于重连/观测）
     enable_thinking: bool = False  # 是否启用深度思考模式
     model_id: Optional[str] = None  # 可选模型标识
     # use_multi_agent 已废弃（2026-01-31），保留字段仅为兼容旧客户端
@@ -34,6 +35,5 @@ class FeedbackRequest(BaseModel):
     message_id: int
     score: int  # 1: Like, -1: Dislike, 0: Cancel
     reason: Optional[str] = None
-
 
 

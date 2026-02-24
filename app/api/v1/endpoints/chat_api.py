@@ -15,12 +15,18 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 
 from app.services.chat_service import sse_stream, sse_resume_stream
+from app.services.run_control_service import (
+    RunNotFoundError,
+    RunPermissionDeniedError,
+    run_control_service,
+)
 from app.schemas.chat import ChatRequest, FeedbackRequest
 from app.repositories import chat_repo
 from app.api.deps import get_current_user
 from app.core.utils import content_hash as _content_hash
 from app.core.message_content import normalize_legacy_message_content
 
+from app.ai.workflow.multi_agent_graph import cancel_checkpoint
 from app.models.user import User
 
 
@@ -74,8 +80,16 @@ class BatchDeleteRequest(BaseModel):
 class ResumeRequest(BaseModel):
     """恢复中断请求模型。"""
     thread_id: str
+    run_id: Optional[str] = None
     decision: dict  # {"type": "accept"} / {"type": "reject"} / {"type": "edit", "args": {...}}
     delay_ms: int = 0
+
+
+class CancelRunRequest(BaseModel):
+    """取消运行请求模型。"""
+
+    reason: str = "user_cancelled"
+    cancel_mode: str = "soft"
 
 
 # ==================== Stream Endpoint ====================
@@ -94,23 +108,25 @@ async def chat_stream(
     trace_id = request.headers.get("X-Trace-Id", "-")
     remote = getattr(request.client, "host", "-")
     logger.info(
-        "Chat流请求 来自=%s 提示词长度=%d 延迟毫秒=%d trace_id=%s user_id=%d thinking=%s",
+        "Chat流请求 来自=%s 提示词长度=%d 延迟毫秒=%d trace_id=%s user_id=%d thinking=%s run_id=%s",
         remote,
         len(payload.prompt),
         payload.delay_ms,
         trace_id,
         current_user.id,
         payload.enable_thinking,
+        payload.run_id,
     )
     gen = sse_stream(
-        payload.prompt, 
-        payload.delay_ms, 
-        payload.thread_id, 
+        payload.prompt,
+        payload.delay_ms,
+        payload.thread_id,
         current_user.id,
         payload.enable_thinking,
         payload.model_id,
         payload.attachments,
         payload.current_todo_id,
+        payload.run_id,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 
@@ -127,8 +143,9 @@ async def resume_stream(
     """
     trace_id = request.headers.get("X-Trace-Id", "-")
     logger.info(
-        "Resume流请求 thread_id=%s decision=%s trace_id=%s user_id=%d",
+        "Resume流请求 thread_id=%s run_id=%s decision=%s trace_id=%s user_id=%d",
         payload.thread_id,
+        payload.run_id,
         payload.decision.get("type"),
         trace_id,
         current_user.id,
@@ -138,8 +155,57 @@ async def resume_stream(
         payload.decision,
         current_user.id,
         payload.delay_ms,
+        payload.run_id,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(
+    run_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    payload: Optional[CancelRunRequest] = None,
+):
+    """取消指定 run（幂等）。"""
+
+    trace_id = request.headers.get("X-Trace-Id", "-")
+    request_payload = payload or CancelRunRequest()
+
+    logger.info(
+        "取消 run 请求: run_id=%s, user_id=%s, reason=%s, trace_id=%s",
+        run_id,
+        current_user.id,
+        request_payload.reason,
+        trace_id,
+    )
+
+    try:
+        result = run_control_service.cancel_run(
+            run_id=run_id,
+            requester_user_id=current_user.id,
+            is_admin=getattr(current_user, "role", "") == "admin",
+            reason=request_payload.reason,
+            cancel_mode=request_payload.cancel_mode,
+            db=db,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RunPermissionDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    if result.thread_id:
+        await cancel_checkpoint(result.thread_id, run_id=result.run_id)
+
+    return {
+        "accepted": result.accepted,
+        "run_id": result.run_id,
+        "thread_id": result.thread_id,
+        "status": result.status,
+        "idempotent": result.idempotent,
+        "reason": result.reason,
+    }
 
 
 # ==================== History Endpoints ====================

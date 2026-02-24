@@ -239,3 +239,96 @@ class TestFeedbackAPI:
             assert response.status_code == 200
         
         app.dependency_overrides.clear()
+
+
+class TestCancelRunAPI:
+    """运行时取消接口测试。"""
+
+    def test_cancel_run_unauthorized(self):
+        """未认证请求应返回 401。"""
+        response = client.post("/api/v1/chat/runs/run-1/cancel", json={"reason": "user_cancelled"})
+        assert response.status_code == 401
+
+    def test_cancel_run_success(self):
+        """取消 run 成功时返回 accepted 语义。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel, patch(
+            "app.api.v1.endpoints.chat_api.cancel_checkpoint", new_callable=AsyncMock
+        ) as mock_checkpoint:
+            mock_cancel.return_value = MagicMock(
+                accepted=True,
+                run_id="run-1",
+                thread_id="thread-1",
+                status="stopping",
+                idempotent=False,
+                reason="user_cancelled",
+            )
+
+            response = client.post(
+                "/api/v1/chat/runs/run-1/cancel",
+                json={"reason": "user_cancelled", "cancel_mode": "soft"},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["accepted"] is True
+            assert data["run_id"] == "run-1"
+            assert data["status"] == "stopping"
+            mock_checkpoint.assert_awaited_once_with("thread-1", run_id="run-1")
+
+        app.dependency_overrides.clear()
+
+    def test_cancel_run_not_found(self):
+        """取消不存在的 run 返回 404。"""
+        from app.services.run_control_service import RunNotFoundError
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
+            mock_cancel.side_effect = RunNotFoundError("run 不存在: run-missing")
+
+            response = client.post(
+                "/api/v1/chat/runs/run-missing/cancel",
+                json={"reason": "user_cancelled"},
+            )
+
+            assert response.status_code == 404
+
+        app.dependency_overrides.clear()
+
+    def test_cancel_run_forbidden(self):
+        """取消他人 run 返回 403。"""
+        from app.services.run_control_service import RunPermissionDeniedError
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
+            mock_cancel.side_effect = RunPermissionDeniedError("无权限取消 run: run-locked")
+
+            response = client.post(
+                "/api/v1/chat/runs/run-locked/cancel",
+                json={"reason": "user_cancelled"},
+            )
+
+            assert response.status_code == 403
+
+        app.dependency_overrides.clear()

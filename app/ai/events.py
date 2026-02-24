@@ -31,6 +31,7 @@ EventType = Literal[
     "clarification",   # 澄清问题（需要用户补充信息）
     "interrupt",       # 中断等待（Human-in-the-loop）
     "handoff",         # 智能体切换
+    "stopped",         # 运行时停止（兼容事件）
     "done",            # 流结束
     "error",           # 错误
 ]
@@ -57,6 +58,7 @@ class AgentEventType(str, Enum):
     HANDOFF = "handoff"
     KB_IMAGES = "kb_images"
     INTERRUPT = "interrupt"
+    STOPPED = "stopped"
     DONE = "done"
     ERROR = "error"
 
@@ -149,6 +151,27 @@ class AgentEvent(BaseModel):
     def error(cls, message: str, node: str = "") -> "AgentEvent":
         """创建 error 事件。"""
         return cls(type=AgentEventType.ERROR, content={"message": message}, node=node)
+
+    @classmethod
+    def stopped(
+        cls,
+        *,
+        thread_id: str,
+        run_id: str,
+        reason: str = "user_cancelled",
+        node: str = "",
+    ) -> "AgentEvent":
+        """创建 stopped 事件。"""
+        return cls(
+            type=AgentEventType.STOPPED,
+            content={
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "reason": reason,
+                "version": 1,
+            },
+            node=node,
+        )
     
     @classmethod
     def done(cls, thread_id: str = "", node: str = "") -> "AgentEvent":
@@ -374,6 +397,40 @@ def emit_clarification(
             "message": message
         },
         "node": node
+    })
+
+
+def stopped_event(
+    *,
+    thread_id: str,
+    run_id: str,
+    reason: str = "user_cancelled",
+    version: int = 1,
+) -> dict:
+    """构造 stopped 兼容事件载荷。"""
+
+    return {
+        "thread_id": thread_id,
+        "run_id": run_id,
+        "reason": reason,
+        "version": version,
+    }
+
+
+def emit_stopped(
+    writer: StreamWriter,
+    *,
+    thread_id: str,
+    run_id: str,
+    reason: str = "user_cancelled",
+    node: str = "",
+) -> None:
+    """发送 stopped 事件。"""
+
+    writer({
+        "type": "stopped",
+        "data": stopped_event(thread_id=thread_id, run_id=run_id, reason=reason),
+        "node": node,
     })
 
 

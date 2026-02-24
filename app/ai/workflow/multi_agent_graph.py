@@ -50,6 +50,21 @@ from app.ai.schema.agent_schema import route_by_schema
 logger = logging.getLogger(__name__)
 
 
+async def cancel_checkpoint(thread_id: str, run_id: Optional[str] = None) -> bool:
+    """取消态下触发 checkpoint 快照读取，确保队列可被及时 drain。"""
+
+    try:
+        checkpointer = await get_checkpointer()
+        snapshot = await checkpointer.aget({"configurable": {"thread_id": thread_id}})
+        if snapshot is None:
+            return False
+        logger.debug("cancel_checkpoint: thread_id=%s, run_id=%s, has_snapshot=%s", thread_id, run_id, True)
+        return True
+    except Exception as exc:
+        logger.debug("cancel_checkpoint 失败，已降级忽略: thread_id=%s, run_id=%s, error=%s", thread_id, run_id, exc)
+        return False
+
+
 WORKFLOW_AGENT_NODE_BY_TYPE = {
     AgentType.DATA: "data_expert",
     AgentType.TODO: "todo_expert",

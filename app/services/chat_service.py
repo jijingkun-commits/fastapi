@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_human_message
 
+from app.ai.events import stopped_event
 from app.ai.workflow import get_multi_agent_graph
 from app.core.config import ENABLE_USER_PREFERENCE_MEMORY, USER_PREFERENCE_MEMORY_MAX_ITEMS
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
@@ -21,6 +22,7 @@ from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
 from app.db.session import get_db_context
 from app.repositories import chat_repo
+from app.services.run_control_service import run_control_service
 from app.services.user_preference_memory_service import (
     build_user_preference_context,
     persist_explicit_preferences_from_input,
@@ -187,6 +189,7 @@ def _normalize_interrupt_event_payload(
 def _build_done_payload(
     *,
     thread_id: str,
+    run_id: Optional[str],
     message_id: Optional[int],
     final_content: Optional[str] = None,
     meta: Optional[dict[str, Any]] = None,
@@ -194,6 +197,7 @@ def _build_done_payload(
     """构造 done 事件载荷。"""
     payload: dict[str, Any] = {
         "thread_id": thread_id,
+        "run_id": run_id,
         "message_id": message_id,
     }
 
@@ -204,6 +208,12 @@ def _build_done_payload(
         payload["meta"] = meta
 
     return payload
+
+
+def _build_stopped_payload(*, thread_id: str, run_id: str, reason: str) -> dict[str, Any]:
+    """构造 stopped 事件载荷。"""
+
+    return stopped_event(thread_id=thread_id, run_id=run_id, reason=reason)
 
 
 
@@ -232,6 +242,7 @@ class ChatService:
         model_id: Optional[str] = None,
         attachments: Optional[list] = None,  # List[Attachment] objects
         current_todo_id: Optional[int] = None,
+        run_id: Optional[str] = None,
     ) -> AsyncGenerator[bytes, None]:
         """流式处理用户输入，返回 SSE 格式的事件流。
         
@@ -250,13 +261,28 @@ class ChatService:
             user_id: 用户 ID
             delay_ms: Token 输出延迟（毫秒）
             attachments: 附件列表
+            run_id: 运行ID（可选，默认自动生成）
             
         Yields:
             SSE 格式的事件数据
         """
         d = self.default_delay_ms if delay_ms is None else delay_ms
         thread_id = thread_id or str(uuid4())
-        
+
+        run_control_enabled = run_control_service.is_enabled()
+        resolved_run_id = run_id
+        if run_control_enabled:
+            with get_db_context() as db:
+                run_snapshot = run_control_service.create_run(
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    run_id=resolved_run_id,
+                    db=db,
+                )
+            resolved_run_id = run_snapshot.run_id
+        else:
+            resolved_run_id = resolved_run_id or f"run_{uuid4().hex}"
+
         # 构建输入
         # 如果有附件，将信息追加到 prompt 中，供 Agent 通过工具调用
         final_prompt = prompt
@@ -331,7 +357,7 @@ class ChatService:
         if memory_context:
             logger.info("已注入用户偏好上下文: user_id=%s", user_id)
 
-        config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id}}
+        config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id, "run_id": resolved_run_id}}
         
         # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）
         input_state = {
@@ -341,6 +367,7 @@ class ChatService:
             "enable_thinking": enable_thinking,
             "model_id": model_id,
             "current_todo_id": current_todo_id,
+            "run_id": resolved_run_id,
         }
         
         # 用于收集完整回复
@@ -348,9 +375,12 @@ class ChatService:
         tool_data = []
         thinking_content = None
         keyword_logged = False
+        cancelled_stream = False
+        cancel_reason = "user_cancelled"
+        cancel_after_token_count = 0
         
-        logger.info("开始流式处理: thread_id=%s, prompt_len=%d, thinking=%s, model=%s", 
-                    thread_id, len(prompt), enable_thinking, model_id or "默认")
+        logger.info("开始流式处理: thread_id=%s, run_id=%s, prompt_len=%d, thinking=%s, model=%s", 
+                    thread_id, resolved_run_id, len(prompt), enable_thinking, model_id or "默认")
         
         # 在流开始时保存 human 消息（单一入口，确保顺序正确）
         # AI 消息由 interrupt 或 postprocess 保存
@@ -381,7 +411,7 @@ class ChatService:
                     logger.warning("写入用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         
         # 发送初始化事件
-        yield self._format_sse("init", {"thread_id": thread_id})
+        yield self._format_sse("init", {"thread_id": thread_id, "run_id": resolved_run_id})
         
         try:
             graph = await self.get_graph(enable_thinking=enable_thinking, model_id=model_id)
@@ -397,14 +427,41 @@ class ChatService:
                     # chunk 格式: {"type": "token|result|status|...", "data": {...}, "node": "..."}
                     event_type = chunk.get("type", "custom")
                     event_data = chunk.get("data", {})
-                    
+
+                    if run_control_enabled and run_control_service.is_cancelled(resolved_run_id):
+                        if not cancelled_stream:
+                            cancelled_stream = True
+                            cancel_reason = run_control_service.get_cancel_reason(resolved_run_id)
+                            with get_db_context() as db:
+                                run_control_service.mark_stopped(
+                                    run_id=resolved_run_id,
+                                    reason=cancel_reason,
+                                    db=db,
+                                )
+                            logger.info(
+                                "检测到取消信号，进入 drain 模式: thread_id=%s, run_id=%s, reason=%s",
+                                thread_id,
+                                resolved_run_id,
+                                cancel_reason,
+                            )
+                            if run_control_service.is_stopped_event_enabled() and not run_control_service.has_stopped_event_emitted(resolved_run_id):
+                                stopped_payload = _build_stopped_payload(
+                                    thread_id=thread_id,
+                                    run_id=resolved_run_id,
+                                    reason=cancel_reason,
+                                )
+                                yield self._format_sse("stopped", stopped_payload)
+                                run_control_service.mark_stopped_event_emitted(resolved_run_id)
+
+                        continue
+
                     # 收集用于保存的内容
                     if event_type == "token":
                         content = event_data.get("content", "")
                         if content:
                             full_answer.append(content)
                             yield self._format_sse("token", {"content": content, "node": chunk.get("node", "")})
-                    
+
                     elif event_type == "thinking":
                         thinking_text = event_data.get("content", "")
                         if thinking_content is None:
@@ -412,7 +469,7 @@ class ChatService:
                         else:
                             thinking_content += thinking_text
                         yield self._format_sse("thinking", {"content": thinking_text, "node": chunk.get("node", "")})
-                    
+
                     elif event_type == "result":
                         # 结构化结果事件（待办列表、图片等）
                         # 如果有 message 字段，也收集到 full_answer
@@ -423,10 +480,10 @@ class ChatService:
                             node=chunk.get("node", ""),
                         )
                         yield self._format_sse("result", result_payload)
-                    
+
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
                         yield self._format_sse(event_type, event_data)
-                    
+
                     else:
                         # 其他自定义事件直接转发
                         yield self._format_sse(event_type, event_data)
@@ -441,7 +498,7 @@ class ChatService:
             
             # 流结束后检查是否有 interrupt
             snapshot = await graph.aget_state(config)
-            if snapshot and snapshot.tasks:
+            if (not cancelled_stream) and snapshot and snapshot.tasks:
                 for task in snapshot.tasks:
                     if task.interrupts:
                         # 在 interrupt 时只保存 AI 消息
@@ -468,12 +525,37 @@ class ChatService:
                         # 有 interrupt 时不发送 done，等待 resume
                         return
 
+            if cancelled_stream:
+                logger.info(
+                    "run 已取消并完成 drain: thread_id=%s, run_id=%s, cancel_after_token_count=%d",
+                    thread_id,
+                    resolved_run_id,
+                    cancel_after_token_count,
+                )
+                if run_control_enabled:
+                    with get_db_context() as db:
+                        run_control_service.mark_stopped(
+                            run_id=resolved_run_id,
+                            reason=cancel_reason,
+                            db=db,
+                        )
+
+                done_payload = _build_done_payload(
+                    thread_id=thread_id,
+                    run_id=resolved_run_id,
+                    message_id=self._get_latest_ai_message_id(thread_id),
+                    meta={
+                        "status": "stopped",
+                        "reason": cancel_reason,
+                        "cancel_after_token_count": cancel_after_token_count,
+                    },
+                )
+                yield self._format_sse("done", done_payload)
+                return
+
             # 4. 如果没有中断，检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
             # 例如: TodoAgent 的 query/execute 操作直接返回 AIMessage，没有触发 on_chat_model_stream
-            # 4. 如果没有中断，检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
-            # 例如: TodoAgent 的 query/execute 操作直接返回 AIMessage，没有触发 on_chat_model_stream
-            
-            done_payload = _build_done_payload(thread_id=thread_id, message_id=None)
+            done_payload = _build_done_payload(thread_id=thread_id, run_id=resolved_run_id, message_id=None)
             
             if snapshot and "messages" in snapshot.values:
                 messages = snapshot.values["messages"]
@@ -513,12 +595,27 @@ class ChatService:
             message_id = self._get_latest_ai_message_id(thread_id)
             if message_id is not None:
                 done_payload["message_id"] = message_id
-            
+
+            if run_control_enabled:
+                with get_db_context() as db:
+                    run_control_service.complete_run(resolved_run_id, db=db)
+
             yield self._format_sse("done", done_payload)
             
         except Exception as e:
             error_msg = str(e)
-            
+
+            if run_control_enabled:
+                with get_db_context() as db:
+                    if run_control_service.is_cancelled(resolved_run_id, db=db):
+                        run_control_service.mark_stopped(
+                            run_id=resolved_run_id,
+                            reason=run_control_service.get_cancel_reason(resolved_run_id, db=db),
+                            db=db,
+                        )
+                    else:
+                        run_control_service.fail_run(resolved_run_id, error_message=error_msg, db=db)
+
             # 保存错误消息到数据库（确保对话历史不丢失）
             ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
             self._save_conversation_fallback(
@@ -539,6 +636,7 @@ class ChatService:
                     "done",
                     _build_done_payload(
                         thread_id=thread_id,
+                        run_id=resolved_run_id,
                         message_id=self._get_latest_ai_message_id(thread_id),
                     ),
                 )
@@ -639,6 +737,7 @@ async def sse_stream(
     model_id: Optional[str] = None,
     attachments: Optional[list] = None,
     current_todo_id: Optional[int] = None,
+    run_id: Optional[str] = None,
 ) -> AsyncGenerator[bytes, None]:
     """SSE 流式输出入口函数。
     
@@ -655,6 +754,7 @@ async def sse_stream(
         model_id: 模型标识
         attachments: 附件列表
         current_todo_id: 当前讨论的待办 ID
+        run_id: 运行ID（可选）
         
     Yields:
         SSE 格式的事件数据
@@ -662,8 +762,15 @@ async def sse_stream(
     svc = ChatService(default_delay_ms=delay_ms)
     
     async for chunk in svc.stream(
-        prompt, thread_id, user_id, delay_ms, 
-        enable_thinking, model_id, attachments, current_todo_id
+        prompt,
+        thread_id,
+        user_id,
+        delay_ms,
+        enable_thinking,
+        model_id,
+        attachments,
+        current_todo_id,
+        run_id,
     ):
         yield chunk
 
@@ -673,6 +780,7 @@ async def sse_resume_stream(
     decision: dict,
     user_id: Optional[int] = None,
     delay_ms: int = 0,
+    run_id: Optional[str] = None,
 ) -> AsyncGenerator[bytes, None]:
     """恢复被中断的流程，返回 SSE 格式的事件流。
     
@@ -684,22 +792,61 @@ async def sse_resume_stream(
             - {"type": "edit", "args": {...}}: 编辑参数后执行
         user_id: 用户 ID
         delay_ms: Token 输出延迟
+        run_id: 运行ID（可选，默认按 thread_id 推断最近 run）
         
     Yields:
         SSE 格式的事件数据
     """
     from langgraph.types import Command
     
-    d = delay_ms
+    resolved_run_id = run_id
     config = {"configurable": {"thread_id": thread_id}}
-    
+
     # 用于收集完整回复
     full_answer = []
-    
+    cancelled_stream = False
+    cancel_after_token_count = 0
+    cancel_reason = "user_cancelled"
+
     svc = ChatService()
     format_sse = svc._format_sse
-    
-    logger.info("恢复流程: thread_id=%s, decision=%s", thread_id, decision)
+
+    if run_control_service.is_enabled():
+        with get_db_context() as db:
+            if not resolved_run_id:
+                latest_run = run_control_service.get_latest_run(thread_id=thread_id, user_id=user_id, db=db)
+                if latest_run is not None:
+                    resolved_run_id = latest_run.run_id
+
+            if resolved_run_id is not None and not run_control_service.can_resume_run(resolved_run_id, db=db):
+                cancel_reason = run_control_service.get_cancel_reason(resolved_run_id, db=db)
+                run_control_service.mark_stopped(run_id=resolved_run_id, reason=cancel_reason, db=db)
+                if run_control_service.is_stopped_event_enabled() and not run_control_service.has_stopped_event_emitted(resolved_run_id):
+                    yield format_sse(
+                        "stopped",
+                        _build_stopped_payload(
+                            thread_id=thread_id,
+                            run_id=resolved_run_id,
+                            reason=cancel_reason,
+                        ),
+                    )
+                    run_control_service.mark_stopped_event_emitted(resolved_run_id)
+
+                yield format_sse(
+                    "done",
+                    _build_done_payload(
+                        thread_id=thread_id,
+                        run_id=resolved_run_id,
+                        message_id=svc._get_latest_ai_message_id(thread_id),
+                        meta={"status": "stopped", "reason": cancel_reason},
+                    ),
+                )
+                return
+
+    if resolved_run_id:
+        config["configurable"]["run_id"] = resolved_run_id
+
+    logger.info("恢复流程: thread_id=%s, run_id=%s, decision=%s", thread_id, resolved_run_id, decision)
     
     try:
         # 1. 动态检测 Graph 类型和参数
@@ -734,17 +881,40 @@ async def sse_resume_stream(
             ):
                 event_type = chunk.get("type", "custom")
                 event_data = chunk.get("data", {})
-                
+
+                if run_control_service.is_enabled() and resolved_run_id and run_control_service.is_cancelled(resolved_run_id):
+                    if not cancelled_stream:
+                        cancelled_stream = True
+                        cancel_reason = run_control_service.get_cancel_reason(resolved_run_id)
+                        with get_db_context() as db:
+                            run_control_service.mark_stopped(
+                                run_id=resolved_run_id,
+                                reason=cancel_reason,
+                                db=db,
+                            )
+                        if run_control_service.is_stopped_event_enabled() and not run_control_service.has_stopped_event_emitted(resolved_run_id):
+                            yield format_sse(
+                                "stopped",
+                                _build_stopped_payload(
+                                    thread_id=thread_id,
+                                    run_id=resolved_run_id,
+                                    reason=cancel_reason,
+                                ),
+                            )
+                            run_control_service.mark_stopped_event_emitted(resolved_run_id)
+
+                    continue
+
                 # 收集用于保存的内容
                 if event_type == "token":
                     content = event_data.get("content", "")
                     if content:
                         full_answer.append(content)
                         yield format_sse("token", {"content": content, "node": chunk.get("node", "")})
-                
+
                 elif event_type == "thinking":
                     yield format_sse("thinking", {"content": event_data.get("content", ""), "node": chunk.get("node", "")})
-                
+
                 elif event_type == "result":
                     if event_data.get("message"):
                         full_answer.append(event_data["message"])
@@ -753,10 +923,10 @@ async def sse_resume_stream(
                         node=chunk.get("node", ""),
                     )
                     yield format_sse("result", result_payload)
-                
+
                 elif event_type in ("status", "clarification", "confirmation"):
                     yield format_sse(event_type, event_data)
-                
+
                 else:
                     yield format_sse(event_type, event_data)
         except Exception as e:
@@ -767,7 +937,7 @@ async def sse_resume_stream(
         
         # 检查是否还有 interrupt
         snapshot = await graph.aget_state(config)
-        if snapshot and snapshot.tasks:
+        if (not cancelled_stream) and snapshot and snapshot.tasks:
             for task in snapshot.tasks:
                 if task.interrupts:
                     # 有新的 interrupt，发送给前端，不保存消息（等流程结束时统一保存）
@@ -782,13 +952,27 @@ async def sse_resume_stream(
                     return
 
         # 流结束
-        logger.info("恢复流程完成: thread_id=%s, answer_len=%d", thread_id, len("".join(full_answer)))
-        
+        logger.info("恢复流程完成: thread_id=%s, run_id=%s, answer_len=%d", thread_id, resolved_run_id, len("".join(full_answer)))
+
         # 注意：AI 消息保存已由 _postprocess 节点统一处理，此处不再重复保存
         # 这避免了 resume 和 postprocess 同时保存导致的重复记录问题
-        
-        done_payload = _build_done_payload(thread_id=thread_id, message_id=None)
-        
+
+        if cancelled_stream and resolved_run_id:
+            done_payload = _build_done_payload(
+                thread_id=thread_id,
+                run_id=resolved_run_id,
+                message_id=svc._get_latest_ai_message_id(thread_id),
+                meta={
+                    "status": "stopped",
+                    "reason": cancel_reason,
+                    "cancel_after_token_count": cancel_after_token_count,
+                },
+            )
+            yield format_sse("done", done_payload)
+            return
+
+        done_payload = _build_done_payload(thread_id=thread_id, run_id=resolved_run_id, message_id=None)
+
         # 检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
         if snapshot and "messages" in snapshot.values:
             messages = snapshot.values["messages"]
@@ -806,12 +990,27 @@ async def sse_resume_stream(
         if message_id is not None:
             done_payload["message_id"] = message_id
 
+        if run_control_service.is_enabled() and resolved_run_id:
+            with get_db_context() as db:
+                run_control_service.complete_run(resolved_run_id, db=db)
+
         yield format_sse("done", done_payload)
         
     except Exception as e:
         error_msg = str(e)
         logger.exception("恢复流程错误: %s", e)
-        
+
+        if run_control_service.is_enabled() and resolved_run_id:
+            with get_db_context() as db:
+                if run_control_service.is_cancelled(resolved_run_id, db=db):
+                    run_control_service.mark_stopped(
+                        run_id=resolved_run_id,
+                        reason=run_control_service.get_cancel_reason(resolved_run_id, db=db),
+                        db=db,
+                    )
+                else:
+                    run_control_service.fail_run(resolved_run_id, error_message=error_msg, db=db)
+
         # 保存错误消息到数据库（确保对话历史不丢失）
         # 注意：resume 场景不需要保存 human 消息，只保存 AI 错误响应
         ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
