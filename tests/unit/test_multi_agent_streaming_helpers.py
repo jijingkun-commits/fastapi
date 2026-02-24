@@ -14,6 +14,10 @@ from app.ai.protocol import (
     build_streaming_tool_start_payload,
     extract_operation_from_ai_message,
 )
+from app.core.config_contract import TOOL_POLICY_CONTRACT
+from app.services.config_resolver import ConfigResolver
+from app.services.system_config_service import SystemConfigService
+
 from app.ai.workflow.multi_agent_graph import (
     _build_streaming_event_emitter_adapter,
     _build_streaming_protocol_adapter,
@@ -893,3 +897,69 @@ async def test_create_streaming_agent_wrapper_uses_module_stream_writer(monkeypa
     assert len(result.get("messages", [])) == 1
     assert result["messages"][0].content == "wrapper-token"
     assert writer_events
+
+
+def test_config_resolver_tool_governance_settings_enables_evidence_gate(monkeypatch) -> None:
+    """执行型任务且要求证据时，应启用 evidence gate。"""
+
+    monkeypatch.setattr(SystemConfigService, "_initialized", True)
+    monkeypatch.setattr(
+        SystemConfigService,
+        "_cache",
+        {
+            TOOL_POLICY_CONTRACT.enabled_key: True,
+            TOOL_POLICY_CONTRACT.fail_mode_key: "minimal",
+            TOOL_POLICY_CONTRACT.task_mode_key: "implementation-card",
+            TOOL_POLICY_CONTRACT.requires_evidence_key: True,
+        },
+    )
+
+    settings = ConfigResolver.get_tool_governance_settings()
+    chat_mode_settings = ConfigResolver.get_tool_governance_settings(
+        task_mode="chat",
+        requires_evidence=True,
+    )
+
+    assert settings == {
+        "enabled": True,
+        "fail_mode": "minimal",
+        "task_mode": "implementation-card",
+        "requires_evidence": True,
+        "evidence_gate_enabled": True,
+    }
+    assert chat_mode_settings["evidence_gate_enabled"] is False
+
+
+def test_config_resolver_tool_policy_layers_merge_global_and_agent(monkeypatch) -> None:
+    """全局策略与 Agent 策略应按契约合并。"""
+
+    global_policy = {
+        "allow": ["group:file", "knowledge_search"],
+        "deny": ["group:web"],
+        "meta": {"source": "global", "priority": 1},
+    }
+    supervisor_policy = {
+        "allow": ["knowledge_search", "fig_inter"],
+        "deny": ["read"],
+        "meta": {"priority": 2, "agent": "supervisor"},
+    }
+    monkeypatch.setattr(SystemConfigService, "_initialized", True)
+    monkeypatch.setattr(
+        SystemConfigService,
+        "_cache",
+        {
+            TOOL_POLICY_CONTRACT.global_policy_key: global_policy,
+            TOOL_POLICY_CONTRACT.agent_policy_key("supervisor"): supervisor_policy,
+        },
+    )
+
+    layers = ConfigResolver.get_tool_policy_layers("supervisor")
+
+    assert layers["global_policy"] == global_policy
+    assert layers["agent_policy"] == supervisor_policy
+    assert layers["merged_policy"] == {
+        "allow": ["group:file", "knowledge_search", "fig_inter"],
+        "deny": ["group:web", "read"],
+        "meta": {"source": "global", "priority": 2, "agent": "supervisor"},
+    }
+    assert layers["agent_policy_key"] == TOOL_POLICY_CONTRACT.agent_policy_key("supervisor")

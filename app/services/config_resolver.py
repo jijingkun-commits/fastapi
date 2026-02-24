@@ -7,14 +7,22 @@ import logging
 import os
 from typing import Any
 
-from app.core.config_contract import CONFIG_SPECS, ConfigSpec
+from app.core.config_contract import CONFIG_SPECS, ConfigSpec, TOOL_POLICY_CONTRACT
 from app.services.system_config_service import SystemConfigService
 
 logger = logging.getLogger(__name__)
 
 _TRUTHY = {"1", "true", "yes", "on", "enabled"}
 _FALSY = {"0", "false", "no", "off", "disabled"}
-
+_POLICY_FAIL_MODES = {"compat", "allow", "deny", "minimal"}
+_EXECUTION_TASK_MODES = {
+    "execute",
+    "execution",
+    "implementation",
+    "implementation-card",
+    "operation",
+    "workflow",
+}
 
 _UNSET = object()
 
@@ -75,6 +83,78 @@ class ConfigResolver:
         if isinstance(value, bool):
             return value
         return cls._to_bool(value, default)
+
+    @classmethod
+    def get_json_dict(cls, key: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
+        """获取 JSON 字典配置，非字典值自动降级。"""
+
+        fallback: dict[str, Any] = dict(default or {})
+        value = cls.get(key, fallback)
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return fallback
+            try:
+                parsed = json.loads(normalized)
+            except json.JSONDecodeError:
+                logger.warning("配置解析失败(json-dict): key=%s", key)
+                return fallback
+            if isinstance(parsed, dict):
+                return parsed
+        return fallback
+
+    @classmethod
+    def get_tool_governance_settings(
+        cls,
+        *,
+        task_mode: str | None = None,
+        requires_evidence: bool | None = None,
+    ) -> dict[str, Any]:
+        """读取工具治理核心配置，统一 settings+DB 覆盖口径。"""
+
+        resolved_task_mode = str(
+            task_mode if task_mode is not None else cls.get_string(TOOL_POLICY_CONTRACT.task_mode_key, "chat")
+        ).strip().lower()
+        if not resolved_task_mode:
+            resolved_task_mode = "chat"
+
+        if isinstance(requires_evidence, bool):
+            resolved_requires_evidence = requires_evidence
+        else:
+            resolved_requires_evidence = cls.get_bool(TOOL_POLICY_CONTRACT.requires_evidence_key, False)
+
+        enabled = cls.get_bool(TOOL_POLICY_CONTRACT.enabled_key, False)
+        fail_mode_raw = cls.get_string(TOOL_POLICY_CONTRACT.fail_mode_key, "compat").strip().lower()
+        fail_mode = fail_mode_raw if fail_mode_raw in _POLICY_FAIL_MODES else "compat"
+
+        evidence_gate_enabled = resolved_requires_evidence and resolved_task_mode in _EXECUTION_TASK_MODES
+
+        return {
+            "enabled": enabled,
+            "fail_mode": fail_mode,
+            "task_mode": resolved_task_mode,
+            "requires_evidence": resolved_requires_evidence,
+            "evidence_gate_enabled": evidence_gate_enabled,
+        }
+
+    @classmethod
+    def get_tool_policy_layers(cls, agent_name: str) -> dict[str, dict[str, Any]]:
+        """读取工具策略层级（global + agent），并返回合并结果。"""
+
+        normalized_agent = str(agent_name or "").strip().lower() or "common"
+        global_policy = cls.get_json_dict(TOOL_POLICY_CONTRACT.global_policy_key, {})
+        agent_policy_key = TOOL_POLICY_CONTRACT.agent_policy_key(normalized_agent)
+        agent_policy = cls.get_json_dict(agent_policy_key, {})
+
+        merged = cls._merge_policy(global_policy, agent_policy)
+        return {
+            "global_policy": global_policy,
+            "agent_policy": agent_policy,
+            "merged_policy": merged,
+            "agent_policy_key": agent_policy_key,
+        }
 
     @classmethod
     def _read_raw(cls, spec: ConfigSpec) -> Any:
@@ -172,3 +252,30 @@ class ConfigResolver:
             if normalized in _FALSY:
                 return False
         return default
+
+    @classmethod
+    def _merge_policy(cls, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+        """递归合并策略，列表按顺序去重拼接。"""
+
+        merged: dict[str, Any] = dict(base or {})
+        for key, value in (override or {}).items():
+            if key not in merged:
+                merged[key] = value
+                continue
+
+            current = merged[key]
+            if isinstance(current, dict) and isinstance(value, dict):
+                merged[key] = cls._merge_policy(current, value)
+                continue
+
+            if isinstance(current, list) and isinstance(value, list):
+                deduped: list[Any] = []
+                for item in [*current, *value]:
+                    if item not in deduped:
+                        deduped.append(item)
+                merged[key] = deduped
+                continue
+
+            merged[key] = value
+
+        return merged

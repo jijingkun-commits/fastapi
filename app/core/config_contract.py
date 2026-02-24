@@ -30,6 +30,27 @@ class ConfigSpec:
         return (primary, *self.aliases)
 
 
+@dataclass(frozen=True)
+class ToolPolicyContract:
+    """工具治理配置契约。"""
+
+    enabled_key: str = "tool_governance.enabled"
+    fail_mode_key: str = "tool_governance.fail_mode"
+    task_mode_key: str = "tool_governance.task_mode"
+    requires_evidence_key: str = "tool_governance.requires_evidence"
+    global_policy_key: str = "tool_governance.policy.global"
+
+    @classmethod
+    def agent_policy_key(cls, agent_name: str) -> str:
+        """生成 Agent 级策略键。"""
+
+        normalized = str(agent_name or "").strip().lower() or "default"
+        return f"tool_governance.policy.agent.{normalized}"
+
+
+TOOL_POLICY_CONTRACT = ToolPolicyContract()
+
+
 CONFIG_SPECS: Dict[str, ConfigSpec] = {
     # ==================== 模型路由 ====================
     "model_routing.default_chat": ConfigSpec(
@@ -58,6 +79,58 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         value_type="string",
         default="",
         aliases=("model_routing.vision",),
+    ),
+    # ==================== 工具治理（P2） ====================
+    TOOL_POLICY_CONTRACT.enabled_key: ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.enabled_key,
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_TOOL_GOVERNANCE",
+        aliases=("feature.enable_tool_governance",),
+    ),
+    TOOL_POLICY_CONTRACT.fail_mode_key: ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.fail_mode_key,
+        source="db-dynamic",
+        value_type="string",
+        default="compat",
+        env_key="TOOL_POLICY_FAIL_MODE",
+        aliases=("tool_policy.fail_mode",),
+    ),
+    TOOL_POLICY_CONTRACT.task_mode_key: ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.task_mode_key,
+        source="db-dynamic",
+        value_type="string",
+        default="chat",
+        env_key="TASK_MODE",
+    ),
+    TOOL_POLICY_CONTRACT.requires_evidence_key: ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.requires_evidence_key,
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="REQUIRES_EVIDENCE",
+    ),
+    TOOL_POLICY_CONTRACT.global_policy_key: ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.global_policy_key,
+        source="db-dynamic",
+        value_type="json",
+        default={},
+        env_key="TOOL_POLICY_GLOBAL_JSON",
+    ),
+    TOOL_POLICY_CONTRACT.agent_policy_key("common"): ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.agent_policy_key("common"),
+        source="db-dynamic",
+        value_type="json",
+        default={},
+        env_key="TOOL_POLICY_AGENT_COMMON_JSON",
+    ),
+    TOOL_POLICY_CONTRACT.agent_policy_key("supervisor"): ConfigSpec(
+        key=TOOL_POLICY_CONTRACT.agent_policy_key("supervisor"),
+        source="db-dynamic",
+        value_type="json",
+        default={},
+        env_key="TOOL_POLICY_AGENT_SUPERVISOR_JSON",
     ),
     # ==================== 实验开关 ====================
     "feature.proxy_experiment_enabled": ConfigSpec(
