@@ -14,9 +14,9 @@ description: 代码审查：功能验证 + 质量检查 + 安全审计 + 快速�
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 代码写完，需要审查 | `/review` ✅ |
-| 完整测试（用例生成、E2E、报告） | `/test` |
-| 修复 Bug | `/debug` |
+| 代码写完，需要审查 | `/jjk-review` ✅ |
+| 完整测试（用例生成、E2E、报告） | `/jjk-test` |
+| 修复 Bug | `/jjk-debug` |
 
 ---
 
@@ -93,4 +93,4 @@ uvicorn app.main:app --reload
 - [ ] `docs/开发文档/测试管理/测试报告/README.md` 主报告/归档表已同步
 
 ---
-*使用 `/review` 触发。适合在 `/imp` 之后、`/test` 之前执行。*
+*使用 `/jjk-review` 触发。适合在 `/jjk-imp` 之后、`/jjk-test` 之前执行。*

@@ -130,4 +130,4 @@ def get_user_orders(user_id):
 ```
 
 ---
-*提示：使用 `/refactor` 触发此工作流。可以选中特定代码后执行。*
+*提示：使用 `/jjk-refactor` 触发此工作流。可以选中特定代码后执行。*

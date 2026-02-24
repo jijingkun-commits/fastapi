@@ -14,9 +14,9 @@ description: 完整测试流程：环境准备 -> 用例生成 -> 执行验证 -
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 功能开发完成，需要完整测试 | `/test` ✅ |
-| 代码写完，快速冒烟测试 | `/review` (包含快速自测) |
-| 修复 Bug 后验证 | `/debug` (包含回归测试) |
+| 功能开发完成，需要完整测试 | `/jjk-test` ✅ |
+| 代码写完，快速冒烟测试 | `/jjk-review` (包含快速自测) |
+| 修复 Bug 后验证 | `/jjk-debug` (包含回归测试) |
 
 ---
 
@@ -89,7 +89,7 @@ fi
 
 ### Step 0.1: 在线测试硬门禁（禁止以 skip 代替）
 
-执行在线 API/E2E 前，必须先确认后端服务可用；若不可用，`/test` 先尝试自动拉起一次，仍失败则立即中断，不允许用 `skip` 作为通过依据。
+执行在线 API/E2E 前，必须先确认后端服务可用；若不可用，`/jjk-test` 先尝试自动拉起一次，仍失败则立即中断，不允许用 `skip` 作为通过依据。
 
 ```bash
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
@@ -274,4 +274,4 @@ venv/bin/python scripts/backfill_gate_status.py --plan "$PARALLEL_PLAN_PATH"
 - [ ] 数据库变更 -> `docs/开发文档/架构设计/数据库设计.md`
 
 ---
-*使用 `/test` 触发。适合在 `/review` 之后执行。*
+*使用 `/jjk-test` 触发。适合在 `/jjk-review` 之后执行。*

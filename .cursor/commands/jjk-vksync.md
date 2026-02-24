@@ -1,10 +1,10 @@
 ---
-description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到多 worktree
+description: VK 基线同步：在 /jjk-vktodo 前校验并同步 G0（WS-00）到多 worktree
 ---
 
 # VK 基线同步工作流 (VK Sync Workflow)
 
-用于在多 worktree 场景下，确保 `WS-00_G0_协议冻结` 已进入基线并同步到各并行 worktree，再执行 `/vktodo` 落卡。
+用于在多 worktree 场景下，确保 `WS-00_G0_协议冻结` 已进入基线并同步到各并行 worktree，再执行 `/jjk-vktodo` 落卡。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
@@ -12,14 +12,14 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 准备执行 `/vktodo`，且存在多个 worktree | `/vksync` ✅ |
+| 准备执行 `/jjk-vktodo`，且存在多个 worktree | `/jjk-vksync` ✅ |
 | 单 worktree 本地演练 | 可跳过 |
 
 ---
 
 ## 输入约定
 
-`/vksync <task_split_dir_or_path> [mode]`
+`/jjk-vksync <task_split_dir_or_path> [mode]`
 
 - `mode=check`：仅校验，不改动分支（默认）
 - `mode=apply`：对未同步 worktree 自动执行 rebase（失败即停止）
@@ -36,7 +36,7 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 2. `workstreams/WS-00_G0_协议冻结.md`
 3. `contracts/sse_events_v1.json`
 
-若缺失任一文件，直接失败并提示回到 `/vkplan` 重产。
+若缺失任一文件，直接失败并提示回到 `/jjk-vkplan` 重产。
 
 ### Step 2: 解析基线提交
 
@@ -58,27 +58,27 @@ description: VK 基线同步：在 /vktodo 前校验并同步 G0（WS-00）到�
 
 ### Step 5: 通过判定
 
-1. 若全部 worktree 为 READY，方可进入 `/vktodo`。
-2. 若存在 `NOT_READY`，默认阻断 `/vktodo`。
+1. 若全部 worktree 为 READY，方可进入 `/jjk-vktodo`。
+2. 若存在 `NOT_READY`，默认阻断 `/jjk-vktodo`。
 3. 仅当调用方显式声明 `allow_not_ready=true` 时，允许带风险继续，并必须记录风险确认。
 
 ---
 
 ## 推荐链路
 
-`/plan -> /vkplan -> /vksync -> /vktodo -> /imp-ws`
+`/jjk-plan -> /jjk-vkplan -> /jjk-vksync -> /jjk-vktodo -> /jjk-imp-ws`
 
 ---
 
 ## 使用示例
 
 ```text
-/vksync 2026-02-12_skill检索对齐_cursor_mvp
+/jjk-vksync 2026-02-12_skill检索对齐_cursor_mvp
 ```
 
 ```text
-/vksync 2026-02-12_skill检索对齐_cursor_mvp apply
+/jjk-vksync 2026-02-12_skill检索对齐_cursor_mvp apply
 ```
 
 ---
-*使用 `/vksync` 触发。用于多 worktree 并行前的 G0 基线生效校验。*
+*使用 `/jjk-vksync` 触发。用于多 worktree 并行前的 G0 基线生效校验。*

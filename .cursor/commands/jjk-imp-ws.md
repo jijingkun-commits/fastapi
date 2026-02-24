@@ -14,8 +14,8 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 已有并行拆解，执行某个子任务 | `/imp-ws` ✅ |
-| 没有 WS 文档，执行整体实现 | `/imp` |
+| 已有并行拆解，执行某个子任务 | `/jjk-imp-ws` ✅ |
+| 没有 WS 文档，执行整体实现 | `/jjk-imp` |
 
 ---
 
@@ -38,7 +38,7 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 5. 若 WS 同时引用主计划和专项附录：
    - 先满足主计划门禁与兼容约束
    - 再按附录推进专项 phase
-6. 若存在 `WS-00_G0_协议冻结.md`，无需单独执行 `/imp-ws WS-00`；仅需确认其已由 `/vkplan` 生成并在基线分支生效。
+6. 若存在 `WS-00_G0_协议冻结.md`，无需单独执行 `/jjk-imp-ws WS-00`；仅需确认其已由 `/jjk-vkplan` 生成并在基线分支生效。
 7. Gate 层 WS 必须串行执行：`WS-G1 -> WS-G2`。
 8. `WS-G2` 启动前提：`WS-G1` 已完成且门禁结论已回填。
 9. 若 `WS-G1` 未通过且无批准豁免，不得执行 `WS-G2`。
@@ -51,7 +51,7 @@ description: 子任务实现：按单个 WS 文档执行实现与自检
 
 当任务拆解包含 Foundation 与 Gate 层工作包时，执行顺序如下：
 
-1. `WS-00` 在 `/vkplan` 阶段生成并冻结（M0），默认不走 `/imp-ws`。
+1. `WS-00` 在 `/jjk-vkplan` 阶段生成并冻结（M0），默认不走 `/jjk-imp-ws`。
 2. 多 worktree 场景下，需先确保含 `WS-00` 的基线提交已合并，再拆分并行 worktree。
 3. 再执行并行层 `WS-01 ... WS-N`
 4. 并行层完成后执行 `WS-G1_集成回归门禁.md`
@@ -139,10 +139,10 @@ venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务�
 
 ## 6. 常用执行示例
 
-1. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md`
-2. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md`
-3. `/imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md`
+1. `/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md`
+2. `/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md`
+3. `/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md`
 
 ---
-*使用 `/imp-ws` 触发。用于多人并行中的单子任务执行。*
+*使用 `/jjk-imp-ws` 触发。用于多人并行中的单子任务执行。*
 ---

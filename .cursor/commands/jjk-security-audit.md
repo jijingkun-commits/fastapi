@@ -121,4 +121,4 @@ console.log('API Key:', process.env.API_KEY);
 ```
 
 ---
-*提示：使用 `/security-audit` 触发此工作流。建议在每次发布前执行。*
+*提示：使用 `/jjk-security-audit` 触发此工作流。建议在每次发布前执行。*

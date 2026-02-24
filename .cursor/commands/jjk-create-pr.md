@@ -91,4 +91,4 @@ gh pr edit --add-reviewer @username
 | `breaking-change` | 破坏性变更 |
 
 ---
-*提示：使用 `/create-pr` 触发此工作流。*
+*提示：使用 `/jjk-create-pr` 触发此工作流。*

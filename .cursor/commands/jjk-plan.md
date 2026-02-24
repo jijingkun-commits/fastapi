@@ -14,12 +14,12 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 只需要需求与技术方案（不拆卡） | `/plan` ✅ |
-| 需要后续并行拆解与看板落卡 | `/plan`（建议 `parallel`）后接 `/vkplan` ✅ |
-| 只想快速澄清理解 | `/clarify` |
-| 一站式从需求到交付 | `/feature` |
+| 只需要需求与技术方案（不拆卡） | `/jjk-plan` ✅ |
+| 需要后续并行拆解与看板落卡 | `/jjk-plan`（建议 `parallel`）后接 `/jjk-vkplan` ✅ |
+| 只想快速澄清理解 | `/jjk-clarify` |
+| 一站式从需求到交付 | `/jjk-feature` |
 
-> **与 `/clarify` 的区别**: `/plan` 会产出 `<topic>_requirements.md` 与 `<topic>_implementation_plan.md`；`/clarify` 只做问答确认。
+> **与 `/jjk-clarify` 的区别**: `/jjk-plan` 会产出 `<topic>_requirements.md` 与 `<topic>_implementation_plan.md`；`/jjk-clarify` 只做问答确认。
 
 ---
 
@@ -34,10 +34,10 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 等价示例：
 
-1. `/plan parallel hydrate`
-2. `/plan -p -h`
-3. `/plan -ph`
-4. `/plan -hp`
+1. `/jjk-plan parallel hydrate`
+2. `/jjk-plan -p -h`
+3. `/jjk-plan -ph`
+4. `/jjk-plan -hp`
 
 解析规则：
 
@@ -56,29 +56,29 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 ### 1) core 模式（默认）
 
-`/plan` 或 `/plan core`
+`/jjk-plan` 或 `/jjk-plan core`
 
 - 产出：`<topic>_requirements.md` + `<topic>_implementation_plan.md`
 - 不强制产出 `card_seed`
 - 适用于单人/单 AI 主导规划，改动范围可小可大（含跨模块/全局架构）
-- 默认无需并行落卡；若后续需要多人并行再切换 `/plan parallel` + `/vkplan`
+- 默认无需并行落卡；若后续需要多人并行再切换 `/jjk-plan parallel` + `/jjk-vkplan`
 - 若属于全局改造，`<topic>_implementation_plan.md` 必须显式包含：分阶段路线图、跨模块依赖矩阵、回滚与观测方案
 
 ### 2) parallel 模式（并行规划）
 
-`/plan parallel`
+`/jjk-plan parallel`
 
 - 产出：`<topic>_requirements.md` + `<topic>_implementation_plan.md` + 最小 `card_seed`
 - 要求给出 `task_key`（后续卡片前缀）
 - 适用于多人/多 AI/多 worktree 拆解准备
-- 并行拆解与落卡前准备由后续 `/vkplan` 承接
+- 并行拆解与落卡前准备由后续 `/jjk-vkplan` 承接
 
 ### 3) hydrate 模式（旧文档沉淀注入）
 
-`/plan hydrate` 或 `/plan parallel hydrate`
+`/jjk-plan hydrate` 或 `/jjk-plan parallel hydrate`
 
 - 适用：已有大量历史方案、`output/**` 分析、专题计划，但执行链已跑偏或信息分散。
-- 目标：把现有沉淀“压缩进”新的 `requirements + implementation_plan`，避免后续 `/vkplan` 丢信息。
+- 目标：把现有沉淀“压缩进”新的 `requirements + implementation_plan`，避免后续 `/jjk-vkplan` 丢信息。
 - 约束：`hydrate` 只允许重组与对齐，不新增“第四类主文档”。
 
 `hydrate` 时必须显式列出输入来源（建议写入 implementation plan 的“输入来源清单”）：
@@ -90,7 +90,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 ### 4) 参数语义澄清（强制）
 
-1. `parallel` 表示“为 `/vkplan` 产出拆解种子”，不等于最终一定并行执行。
+1. `parallel` 表示“为 `/jjk-vkplan` 产出拆解种子”，不等于最终一定并行执行。
 2. 实际执行并行/串行由 `planning_contract.execution_mode` 决定：
    - `serial`：单卡推进；
    - `parallel`：可并行推进。
@@ -98,7 +98,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 ### 5) hydrate 覆盖率门禁（强制）
 
-当使用 `/plan hydrate`（含 `/plan parallel hydrate`）时，必须在 implementation plan 输出以下机读统计：
+当使用 `/jjk-plan hydrate`（含 `/jjk-plan parallel hydrate`）时，必须在 implementation plan 输出以下机读统计：
 
 1. `source_atoms_total`：输入细节原子总数。
 2. `source_atoms_mapped`：已映射到 `feature_id` 的原子数。
@@ -107,9 +107,22 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 硬门禁：
 
-1. `source_atoms_unmapped` 非空时，计划状态必须标注 `BLOCKED`，不得进入 `/vkplan`。
+1. `source_atoms_unmapped` 非空时，计划状态必须标注 `BLOCKED`，不得进入 `/jjk-vkplan`。
 2. 不允许以“摘要已覆盖”替代原子级映射。
 3. 每个 `feature_id` 必须能反查到至少 1 条来源原子。
+
+### 5.1) hydrate 特性映射闭环（强制，无新增参数）
+
+当使用 `/jjk-plan hydrate`（含 `/jjk-plan -h`、`/jjk-plan -p -h`）时，除“原子级覆盖”外，还必须做 `FP -> implementation feature -> card` 闭环映射：
+
+1. 从 `openclaw迁移_输入归一化草案.md` 的 `D. Feature Packet Draft` 提取 `fp_registry`（例如 `FP-01..FP-11`）。
+2. 在 `<topic>_implementation_plan.md` 输出机读块 `hydrate_feature_linkage`，至少包含：
+   - `fp_registry`
+   - `fp_to_impl_feature_map`（每个 `FP-xx` 映射到至少 1 个实现 `feature_id`）
+   - `fp_unmapped`
+3. `fp_unmapped` 非空时，计划状态必须标注 `BLOCKED`，且不得进入 `/jjk-vkplan`。
+4. 不允许用“已在叙述中覆盖/语义已包含”替代显式映射；必须可机读回查。
+5. 参数维持不变，不新增命令参数；以上校验默认随 `hydrate` 自动生效。
 
 ---
 
@@ -121,11 +134,11 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 ### 索引同步（强制）
 
-当 `/plan` 新增或重命名 `docs/内部参考/迭代需求/*_requirements.md` 或 `*_implementation_plan.md` 时，必须同步更新：
+当 `/jjk-plan` 新增或重命名 `docs/内部参考/迭代需求/*_requirements.md` 或 `*_implementation_plan.md` 时，必须同步更新：
 
 1. `docs/SUMMARY.md` 的“内部参考 -> 迭代需求”条目（新增可点击链接）。
 2. 若已有同名条目，必须校验标题与路径一致，不允许悬挂旧链接。
-3. 在 `/plan` 结束前执行 `python3 scripts/docs_guard.py --strict`；若命中 `summary_missing_doc`，本轮计划视为未完成。
+3. 在 `/jjk-plan` 结束前执行 `python3 scripts/docs_guard.py --strict`；若命中 `summary_missing_doc`，本轮计划视为未完成。
 
 **必须包含**:
 1. **用户故事**: 谁？在什么场景？想要做什么？为什么？
@@ -166,7 +179,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 1. `docs/内部参考/迭代需求/<topic>_requirements.md`
 2. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
-3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/...`（由 `/vkplan` 产出）
+3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/...`（由 `/jjk-vkplan` 产出）
 4. 其余仅允许作为“输入来源”被引用，不得升级为新的主计划文档类别。
 
 ### 2.A 功能机制包（Feature Packet，必填）
@@ -184,15 +197,18 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 补充：每个 `feature_id` 至少给 1 个“最小代码样例”（可伪代码），用于约束实现形态。
 
-### 2.B 与 `/vkplan` 的机读契约（必填）
+### 2.B 与 `/jjk-vkplan` 的机读契约（必填）
 
-`<topic>_implementation_plan.md` 必须在末尾给出一个 YAML 代码块，供 `/vkplan` 直接消费：
+`<topic>_implementation_plan.md` 必须在末尾给出一个 YAML 代码块，供 `/jjk-vkplan` 直接消费：
 
 ```yaml
 planning_contract:
   execution_mode: serial  # serial | parallel
   card_order: [C01, C02, C03, C04, C05, C06]
   strict_single_active_card: true
+  auto_done_policy:
+    implementation-card: hard_gate  # hard_gate | manual_gate
+    inspection/question-card: policy_gate
   cards:
     - card_id: C01
       wave: P1
@@ -206,8 +222,11 @@ planning_contract:
 说明：
 
 1. 若你要串行执行（自动执行场景），`execution_mode` 必须是 `serial`。
-2. `card_id`/`feature_id` 一旦发布，不得在 `/vkplan` 阶段重命名。
-3. `/vkplan` 只能细化，不能改写 `depends_on` 的硬依赖。
+2. `card_id`/`feature_id` 一旦发布，不得在 `/jjk-vkplan` 阶段重命名。
+3. `/jjk-vkplan` 只能细化，不能改写 `depends_on` 的硬依赖。
+4. 若要启用自动 `inreview -> done`，必须在 `planning_contract` 明确 `auto_done_policy`，禁止执行期临时口头约定。
+5. `auto_done_policy=hard_gate` 时，implementation card 自动收口必须满足：`source_chain_loaded=YES`、`feature_ids_matched=YES`、`serial_gate=PASS`、`evidence_binding=YES`、`acceptance_checks` 通过、ledger 追加成功。
+6. `/jjk-plan` 只定义契约，不会生成真实看板卡片；若要让 OpenClaw 自动执行，后续仍需 `/jjk-vkplan -> /jjk-vktodo` 完成可执行落卡。
 
 ### 2.1 主从文档机制
 
@@ -232,11 +251,11 @@ planning_contract:
 2. `result`：必选 / 可选字段
 3. `interrupt`：必选 / 可选字段
 
-并要求 `/vkplan` 在 WS 文档中同步“契约 owner + 消费只读方”关系。
+并要求 `/jjk-vkplan` 在 WS 文档中同步“契约 owner + 消费只读方”关系。
 
 ### 2.3 并行拆解种子（仅 parallel 模式必填）
 
-仅当命令为 `/plan parallel` 时，`<topic>_implementation_plan.md` 必须追加“可拆解种子信息”。
+仅当命令为 `/jjk-plan parallel` 时，`<topic>_implementation_plan.md` 必须追加“可拆解种子信息”。
 
 最小字段：
 
@@ -256,34 +275,35 @@ planning_contract:
 
 1. `hard_depends_on` 仅用于阻塞依赖；非阻塞引用写入 `soft_depends_on`。
 2. `file_scope` 必须可映射到后续 WS 白名单。
-3. 未提供 seed 时，`/vkplan` 可临时补齐，但必须在 `parallel_plan.md` 标注“seed 来源为 vkplan 推导”。
+3. 未提供 seed 时，`/jjk-vkplan` 可临时补齐，但必须在 `parallel_plan.md` 标注“seed 来源为 vkplan 推导”。
 
-## 3. 与 `/vkplan` 的关系（澄清）
+## 3. 与 `/jjk-vkplan` 的关系（澄清）
 
-`/plan` 与 `/vkplan` **不是二选一的替代关系**，而是分工关系：
+`/jjk-plan` 与 `/jjk-vkplan` **不是二选一的替代关系**，而是分工关系：
 
-1. `/plan` 负责“需求与架构正确性”。
-2. `/vkplan` 负责“并行拆包与可执行边界”。
-3. 当走 `core` 模式时，可直接 `/imp`；当走 `parallel` 模式时，推荐 `/vkplan -> /vktodo -> /imp-ws`。
+1. `/jjk-plan` 负责“需求与架构正确性”。
+2. `/jjk-vkplan` 负责“并行拆包与可执行边界”。
+3. 当走 `core` 模式时，可直接 `/jjk-imp`；当走 `parallel` 模式时，推荐 `/jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`。
 
 ## 4. 信息不丢失要求（新增）
 
-为避免“计划正确但执行跑偏”，`/plan` 输出时必须满足：
+为避免“计划正确但执行跑偏”，`/jjk-plan` 输出时必须满足：
 
 1. `implementation_plan` 的每个功能点都能映射到唯一 `feature_id`。
 2. 每个 `feature_id` 都有：机制描述 + 代码锚点 + 验证命令 + 回滚锚点。
 3. 每个卡片（`card_id`）都绑定明确 `feature_id` 列表，禁止“统一模型基线迁移”这类泛化标题替代。
 4. 引用 `output/**` 时只允许“证据引用”，不允许把长篇分析原文直接复制到卡片描述。
 5. 若存在历史执行偏差，需在计划中新增“偏差修复清单”，明确哪些旧卡作废、哪些卡重建。
+6. 当开启 `hydrate` 时，归一化草案中的每个 `FP-xx` 必须显式映射到实现 `feature_id`（不得遗漏）。
 
 ## 5. 衔接下游
 
 规划完成后：
-- 并行场景：执行 `/vkplan` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
-- 看板场景：执行 `/vktodo` 直接落卡；其前置会自动完成 G0 基线校验
-- 单任务实现：执行 `/imp`
-- 测试设计：执行 `/test` 基于模块需求文档生成测试用例
+- 并行场景：执行 `/jjk-vkplan` 进行并行拆解（继承主从关系、契约冻结与 `task_key/card_seed`）
+- 看板场景：执行 `/jjk-vktodo` 直接落卡；其前置会自动完成 G0 基线校验
+- 单任务实现：执行 `/jjk-imp`
+- 测试设计：执行 `/jjk-test` 基于模块需求文档生成测试用例
 
 ---
-*使用 `/plan` 触发。是开发周期的正式起点。*
+*使用 `/jjk-plan` 触发。是开发周期的正式起点。*
 ---

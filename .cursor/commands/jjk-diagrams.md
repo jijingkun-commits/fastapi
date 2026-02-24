@@ -111,4 +111,4 @@ stateDiagram-v2
 3. 可根据需要拆分或扩展
 
 ---
-*提示：使用 `/diagrams` 触发此工作流。例如：`/diagrams 帮我画一下聊天系统的时序图`*
+*提示：使用 `/jjk-diagrams` 触发此工作流。例如：`/jjk-diagrams 帮我画一下聊天系统的时序图`*

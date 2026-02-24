@@ -14,9 +14,9 @@ description: 为代码添加健壮的错误处理
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 为代码添加错误处理 | `/error-handling` ✅ |
-| 安全漏洞审计 | `/security-audit` |
-| 代码重构 | `/refactor` |
+| 为代码添加错误处理 | `/jjk-error-handling` ✅ |
+| 安全漏洞审计 | `/jjk-security-audit` |
+| 代码重构 | `/jjk-refactor` |
 
 ---
 
@@ -79,4 +79,4 @@ try {
 - [ ] 错误处理逻辑变更 -> 更新相关架构文档
 
 ---
-*使用 `/error-handling` 触发此流程。*
+*使用 `/jjk-error-handling` 触发此流程。*

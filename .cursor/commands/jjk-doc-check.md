@@ -12,9 +12,9 @@ description: 文档同步检查：检测代码变更是否有对应文档更新
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 提交前检查文档是否同步 | `/doc-check` ✅ |
-| 代码审查时验证文档 | `/review` |
-| 实现功能时自动同步 | `/imp` |
+| 提交前检查文档是否同步 | `/jjk-doc-check` ✅ |
+| 代码审查时验证文档 | `/jjk-review` |
+| 实现功能时自动同步 | `/jjk-imp` |
 
 ---
 
@@ -115,4 +115,4 @@ git diff --name-only HEAD~1
 
 ---
 
-*使用 `/doc-check` 触发。建议在 `git commit` 前执行。*
+*使用 `/jjk-doc-check` 触发。建议在 `git commit` 前执行。*

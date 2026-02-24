@@ -12,17 +12,17 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 需要批量创建开发卡片 | `/vktodo` ✅ |
-| 需要把一批卡片推进到 Doing/Review/Gate/Done | `/vktodo` ✅ |
+| 需要批量创建开发卡片 | `/jjk-vktodo` ✅ |
+| 需要把一批卡片推进到 Doing/Review/Gate/Done | `/jjk-vktodo` ✅ |
 | 仅查看卡片列表 | 直接用 `list_issues` |
 
-> 多 worktree 场景：`/vktodo` 默认执行基线硬拦截；存在未同步 worktree 时直接失败。
+> 多 worktree 场景：`/jjk-vktodo` 默认执行基线硬拦截；存在未同步 worktree 时直接失败。
 
 ---
 
-## 命名衔接（与 `/plan`、`/vkplan` 强一致）
+## 命名衔接（与 `/jjk-plan`、`/jjk-vkplan` 强一致）
 
-1. `/vktodo` 处理的 `task_split_dir` 必须来自同主题链路：`/plan -> /vkplan`。
+1. `/jjk-vktodo` 处理的 `task_split_dir` 必须来自同主题链路：`/jjk-plan -> /jjk-vkplan`。
 2. 主题一致性要求：
    - 迭代需求文档：`docs/内部参考/迭代需求/<主题>_requirements.md`、`docs/内部参考/迭代需求/<主题>_implementation_plan.md`
    - 拆解目录：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/`
@@ -35,7 +35,7 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 ### 1) 位置参数（推荐）
 
-`/vktodo <task_split_dir_or_path> [action] [status]`
+`/jjk-vktodo <task_split_dir_or_path> [action] [status]`
 
 - 第 1 个参数：任务拆解目录（目录名/相对路径/绝对路径）
 - 第 2 个参数（可选）：`action`，支持 `create` / `move`，默认 `create`
@@ -64,11 +64,11 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
    - 状态：若未传 `status`，使用卡片内 `column`
 3. `action=move` 时，若未传 `move_filter`，从 `vk_cards.json.task_key` 推导：
    - `move_filter=prefix:<task_key>`
-4. 若 `vk_cards.json` 缺失：直接失败并提示先执行 `/vkplan` 重新生成并行拆解产物。
+4. 若 `vk_cards.json` 缺失：直接失败并提示先执行 `/jjk-vkplan` 重新生成并行拆解产物。
 5. 若 `vk_cards.json` 结构非法：直接失败并提示人工修复拆解产物。
 6. `vk_cards.json.cards[*]` 默认仅包含可落卡工作包（`WS-01...WS-G2`），不包含 `WS-00`。
 
-> 推荐最短链路：`/plan -> /vkplan -> /vktodo <任务拆解目录>`
+> 推荐最短链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo <任务拆解目录>`
 
 ---
 
@@ -76,16 +76,16 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 ### Step 0: G0 基线前置校验（必做）
 
-1. 执行 `/vksync <task_split_dir_or_path> check`，获取 READY / NOT_READY 清单。
-2. 默认行为：若存在 `NOT_READY`，立即失败并停止 `/vktodo`。
+1. 执行 `/jjk-vksync <task_split_dir_or_path> check`，获取 READY / NOT_READY 清单。
+2. 默认行为：若存在 `NOT_READY`，立即失败并停止 `/jjk-vktodo`。
 3. 仅当显式传入 `allow_not_ready=true` 时，允许继续；输出“风险确认”并记录跳过原因。
 4. 未显式确认风险时，不得创建/推进任何卡片。
 
 ### Step 1: 解析来源目录、项目与基线
 
 1. 若传入 `task_split_dir`（或位置参数），先按路径规则解析并校验目录合法性。
-2. 校验命名衔接：`task_split_dir` 中 `<主题>` 必须与 `/plan` / `/vkplan` 产物保持一致（`parallel_plan.md`、`vk_cards.json`、WS 来源字段）。
-3. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`；缺失则直接失败并提示先执行 `/vkplan` 重新生成。
+2. 校验命名衔接：`task_split_dir` 中 `<主题>` 必须与 `/jjk-plan` / `/jjk-vkplan` 产物保持一致（`parallel_plan.md`、`vk_cards.json`、WS 来源字段）。
+3. 若未传 `cards`，尝试读取 `<task_split_dir>/vk_cards.json`；缺失则直接失败并提示先执行 `/jjk-vkplan` 重新生成。
 4. 调用 `mcp__vibe_kanban__list_organizations` + `mcp__vibe_kanban__list_projects`，将 `project` 解析为唯一 `project_id`（若 workspace 已绑定项目可省略）。
 5. 调用 `mcp__vibe_kanban__list_issues` 获取变更前统计（按状态聚合）。
 
@@ -151,24 +151,24 @@ VK 的 MCP 可直接操作 issue（`create_issue` / `update_issue`）。
 ## 使用示例
 
 ```text
-/vktodo project=fastapi action=create cards=PP-20260213-TODO::WS-01..PP-20260213-TODO::WS-08 status=Backlog
+/jjk-vktodo project=fastapi action=create cards=PP-20260213-TODO::WS-01..PP-20260213-TODO::WS-08 status=Backlog
 ```
 
 ```text
-/vktodo project=fastapi action=move move_filter=prefix:PP-20260213-TODO,top:3 status=Doing
+/jjk-vktodo project=fastapi action=move move_filter=prefix:PP-20260213-TODO,top:3 status=Doing
 ```
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp
 ```
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp create Backlog project=fastapi
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp create Backlog project=fastapi
 ```
 
 ```text
-/vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing project=fastapi
+/jjk-vktodo 2026-02-12_skill检索对齐_cursor_mvp move Doing project=fastapi
 ```
 
 ---
-*使用 `/vktodo` 触发。适合 VK 看板批量操作与 MCP 故障兜底场景。*
+*使用 `/jjk-vktodo` 触发。适合 VK 看板批量操作与 MCP 故障兜底场景。*

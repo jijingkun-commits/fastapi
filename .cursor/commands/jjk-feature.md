@@ -14,12 +14,12 @@ description: 全流程开发：规划 -> 实现 -> 文档同步 -> 审查 -> 验
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 完整的新功能开发 | `/feature` ✅ |
-| 只需要规划，暂不编码 | `/plan` |
-| 已有计划，只需编码 | `/imp` |
-| 代码已完成，需要审查 | `/review` |
+| 完整的新功能开发 | `/jjk-feature` ✅ |
+| 只需要规划，暂不编码 | `/jjk-plan` |
+| 已有计划，只需编码 | `/jjk-imp` |
+| 代码已完成，需要审查 | `/jjk-review` |
 
-> **等效于**: `/plan` + `/imp` + `/review` + 文档同步闭环
+> **等效于**: `/jjk-plan` + `/jjk-imp` + `/jjk-review` + 文档同步闭环
 
 ---
 
@@ -123,10 +123,10 @@ flowchart TD
 ## 如何使用
 
 ```
-/feature 我想做一个 [xxx] 功能
+/jjk-feature 我想做一个 [xxx] 功能
 ```
 
 或者：
 ```
-/feature 完成 <topic>_requirements.md 里定义的剩余工作
+/jjk-feature 完成 <topic>_requirements.md 里定义的剩余工作
 ```

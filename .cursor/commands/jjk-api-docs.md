@@ -158,4 +158,4 @@ async def send_message(data: MessageCreate):
 - 或直接增强 FastAPI 的 docstring
 
 ---
-*提示：使用 `/api-docs` 触发此工作流。可指定特定端点或模块。*
+*提示：使用 `/jjk-api-docs` 触发此工作流。可指定特定端点或模块。*

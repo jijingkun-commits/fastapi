@@ -85,4 +85,4 @@ git commit -m "PROJ-123: fix(api): 修复空指针异常"
 ```
 
 ---
-*提示：使用 `/git-commit` 触发此工作流。*
+*提示：使用 `/jjk-git-commit` 触发此工作流。*
