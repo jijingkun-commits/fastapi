@@ -4,7 +4,7 @@
 
 本文定位：开发人员一页速查卡。若需命令/技能/规则细节，请配合阅读 `vibe-coding开发技巧.md` 与 `.cursor/commands/*.md`。
 
-> 命令权威源：`.cursor/commands/*.md`。当速查表、工作流文档与命令文档冲突时，一律以命令文档为准。
+> 命令权威源：`.cursor/commands/*.md`（Cursor / Codex）、`.claude/commands/*.md`（Claude Code）。当速查表、工作流文档与命令文档冲突时，一律以命令文档为准。
 
 ---
 
