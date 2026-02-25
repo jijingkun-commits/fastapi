@@ -11,7 +11,9 @@
 import asyncio
 import json
 import logging
+import os
 import re
+from datetime import datetime, timezone
 from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple, Callable
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
@@ -230,6 +232,101 @@ SUPERVISOR_CONTEXT_MIN_TOKENS = 1024
 SUPERVISOR_TOOL_MESSAGE_CHAR_LIMIT = 2400
 SUPERVISOR_TOOL_MESSAGE_HEAD_CHARS = 1500
 SUPERVISOR_TOOL_MESSAGE_TAIL_CHARS = 600
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+PLUGIN_REGISTRY_ERROR_HINTS = (
+    "plugin registry",
+    "plugin_registry",
+    "plugin init",
+    "plugin load",
+    "插件注册",
+    "插件加载",
+)
+
+
+def _is_feature_flag_enabled(env_name: str, fallback: bool = False) -> bool:
+    """读取布尔开关，支持环境变量覆盖。"""
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        return fallback
+    return raw_value.strip().lower() in _TRUE_VALUES
+
+
+def _is_runtime_recovery_enabled() -> bool:
+    """运行时恢复开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_RUNTIME_RECOVERY", True)
+
+
+def _is_plugin_registry_enabled() -> bool:
+    """插件注册表开关（默认关闭，后置接线）。"""
+    return _is_feature_flag_enabled("ENABLE_PLUGIN_REGISTRY", False)
+
+
+def _is_plugin_registry_error(error_text: str) -> bool:
+    """判断异常是否命中插件注册表故障。"""
+    lowered = str(error_text or "").strip().lower()
+    if not lowered:
+        return False
+    return any(hint in lowered for hint in PLUGIN_REGISTRY_ERROR_HINTS)
+
+
+def _parse_non_negative_int(value: Any, default: int = 0) -> int:
+    """解析非负整数，失败时回落默认值。"""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _resolve_plugin_lifecycle_status(state: Dict[str, Any], error_text: str = "") -> str:
+    """解析插件生命周期状态。"""
+    if not _is_plugin_registry_enabled():
+        return "disabled"
+
+    recovery_state = state.get("runtime_recovery_state")
+    if isinstance(recovery_state, dict):
+        current_status = str(recovery_state.get("plugin_lifecycle_status") or "").strip().lower()
+        if current_status in {"healthy", "unhealthy", "disabled"}:
+            return current_status
+        if current_status in {"degraded", "failed", "error"}:
+            return "unhealthy"
+
+    if _is_plugin_registry_error(error_text):
+        return "unhealthy"
+
+    return "healthy"
+
+
+def _build_runtime_recovery_state(
+    state: Dict[str, Any],
+    *,
+    fallback_route: str,
+    error_text: str = "",
+    fallback_triggered: bool = False,
+    plugin_lifecycle_status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """生成运行时恢复状态快照（可序列化）。"""
+    previous_state = state.get("runtime_recovery_state")
+    previous = dict(previous_state) if isinstance(previous_state, dict) else {}
+
+    metrics = dict(previous.get("recovery_metrics") or {})
+    metrics["recovery_attempts"] = _parse_non_negative_int(metrics.get("recovery_attempts"), default=0)
+    metrics["fallback_count"] = _parse_non_negative_int(metrics.get("fallback_count"), default=0)
+    if fallback_triggered:
+        metrics["recovery_attempts"] += 1
+        metrics["fallback_count"] += 1
+
+    if error_text:
+        metrics["last_error"] = str(error_text)[:320]
+    metrics["last_observed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    status = plugin_lifecycle_status or _resolve_plugin_lifecycle_status(state, error_text)
+    return {
+        "recovery_metrics": metrics,
+        "fallback_route": str(fallback_route or "none"),
+        "plugin_lifecycle_status": status,
+    }
 
 
 def _is_model_access_error(error_text: str) -> bool:
@@ -354,6 +451,65 @@ def _build_stream_error_message(error_text: str) -> str:
     if _is_model_access_error(error_text):
         return "模型服务当前不可用（配额/订阅或权限异常），请稍后重试或联系管理员检查模型配置。"
     return "系统繁忙，当前请求暂时无法处理，请稍后重试。"
+
+
+def fallback_router(node_name: str, state: MultiAgentState, error_text: str) -> Dict[str, Any]:
+    """统一决定流式异常 fallback 路由。"""
+    if not _is_runtime_recovery_enabled():
+        return {
+            "route": "friendly_error",
+            "message": _build_stream_error_message(error_text),
+            "runtime_recovery_state": _build_runtime_recovery_state(
+                state,
+                fallback_route="recovery_disabled",
+                error_text=error_text,
+                fallback_triggered=False,
+                plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
+            ),
+        }
+
+    if node_name == "supervisor":
+        fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
+        if fallback_handoff:
+            target_agent = str(fallback_handoff.get("target_agent") or "unknown")
+            return {
+                "route": "handoff",
+                "pending_handoff": fallback_handoff,
+                "status_message": "模型服务暂不可用，已切换到待办兜底路由继续处理。",
+                "runtime_recovery_state": _build_runtime_recovery_state(
+                    state,
+                    fallback_route=f"handoff:{target_agent}",
+                    error_text=error_text,
+                    fallback_triggered=True,
+                    plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
+                ),
+            }
+
+    if _resolve_plugin_lifecycle_status(state, error_text) == "unhealthy":
+        degrade_message = "插件能力暂不可用，已自动降级为核心能力回答。"
+        return {
+            "route": "core_tools_only",
+            "message": degrade_message,
+            "runtime_recovery_state": _build_runtime_recovery_state(
+                state,
+                fallback_route="core_tools_only",
+                error_text=error_text,
+                fallback_triggered=True,
+                plugin_lifecycle_status="unhealthy",
+            ),
+        }
+
+    return {
+        "route": "friendly_error",
+        "message": _build_stream_error_message(error_text),
+        "runtime_recovery_state": _build_runtime_recovery_state(
+            state,
+            fallback_route="friendly_error",
+            error_text=error_text,
+            fallback_triggered=True,
+            plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
+        ),
+    }
 
 
 def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
@@ -1350,31 +1506,44 @@ def _handle_streaming_wrapper_exception(
     writer,
 ) -> Dict[str, Any]:
     """处理 streaming_wrapper 异常：优先 supervisor 兜底，其次统一友好错误。"""
-    if node_name == "supervisor":
-        fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
-        if fallback_handoff:
-            logger.warning(
-                "[%s] 命中模型权限错误，降级兜底路由到 %s",
-                node_name,
-                fallback_handoff.get("target_agent"),
-            )
-            event_emitter_adapter["emit_status"](
-                writer,
-                message="模型服务暂不可用，已切换到待办兜底路由继续处理。",
-                node=node_name,
-            )
-            return {
-                "messages": [],
-                "pending_handoff": fallback_handoff,
-                "handoff_queue": [],
-                "completed_handoffs": [],
-                "handoff_execution_trace": [],
-                "multi_intent_mode": False,
-            }
+    route_decision = fallback_router(node_name=node_name, state=state, error_text=error_text)
+    route = str(route_decision.get("route") or "friendly_error")
+    runtime_recovery_state = route_decision.get("runtime_recovery_state")
 
-    error_msg = _build_stream_error_message(error_text)
+    if route == "handoff":
+        fallback_handoff = route_decision.get("pending_handoff") or {}
+        logger.warning(
+            "[%s] 命中模型权限错误，降级兜底路由到 %s",
+            node_name,
+            fallback_handoff.get("target_agent"),
+        )
+        event_emitter_adapter["emit_status"](
+            writer,
+            message=str(route_decision.get("status_message") or "已触发运行时兜底路由。"),
+            node=node_name,
+        )
+        return {
+            "messages": [],
+            "pending_handoff": fallback_handoff,
+            "handoff_queue": [],
+            "completed_handoffs": [],
+            "handoff_execution_trace": [],
+            "multi_intent_mode": False,
+            "runtime_recovery_state": runtime_recovery_state,
+        }
+
+    error_msg = str(route_decision.get("message") or _build_stream_error_message(error_text))
+    if route == "core_tools_only":
+        event_emitter_adapter["emit_status"](
+            writer,
+            message="插件链路异常，已回退到核心能力路径。",
+            node=node_name,
+        )
     event_emitter_adapter["emit_token"](writer, error_msg, node=node_name)
-    return {"messages": [create_ai_message(error_msg)]}
+    return {
+        "messages": [create_ai_message(error_msg)],
+        "runtime_recovery_state": runtime_recovery_state,
+    }
 
 
 async def _execute_streaming_wrapper(
@@ -1446,14 +1615,27 @@ async def _execute_streaming_wrapper(
             node_name=node_name,
         )
         if handoff_return is not None:
+            handoff_return["runtime_recovery_state"] = _build_runtime_recovery_state(
+                state,
+                fallback_route="none",
+                fallback_triggered=False,
+                plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state),
+            )
             return handoff_return
 
         _log_streaming_output_statistics(node_name=node_name, collected_content=collected_content)
-        return _build_streaming_delta_return(
+        delta_return = _build_streaming_delta_return(
             final_state=final_state,
             initial_input_count=initial_input_count,
             node_name=node_name,
         )
+        delta_return["runtime_recovery_state"] = _build_runtime_recovery_state(
+            state,
+            fallback_route="none",
+            fallback_triggered=False,
+            plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state),
+        )
+        return delta_return
 
     except GraphInterrupt:
         raise
@@ -1618,7 +1800,15 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     writer = get_stream_writer()
     
     # 显式标记 Graph 类型，用于 resume 时检测
-    updates = {"_graph_type": "multi_agent"}
+    updates = {
+        "_graph_type": "multi_agent",
+        "runtime_recovery_state": _build_runtime_recovery_state(
+            state,
+            fallback_route="none",
+            fallback_triggered=False,
+            plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state),
+        ),
+    }
     
     # 注意：临时状态（pending_handoff 等）在 postprocess 节点统一清理
     # 详见：_postprocess 函数的状态清理逻辑
@@ -1930,6 +2120,14 @@ async def create_multi_agent_graph(
             "selected_skill_ids": [],
             "skill_context": None,
             "skill_injection_meta": None,
+
+            # === 稳态恢复观测 ===
+            "runtime_recovery_state": _build_runtime_recovery_state(
+                state,
+                fallback_route="none",
+                fallback_triggered=False,
+                plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state),
+            ),
         }
 
     # 8. 定义评估节点（判断专家工作是否完成）

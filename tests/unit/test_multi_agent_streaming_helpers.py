@@ -28,6 +28,7 @@ from app.ai.workflow.multi_agent_graph import (
     _execute_streaming_wrapper,
     _emit_messages_mode_thinking,
     _emit_messages_mode_token,
+    fallback_router,
     _handle_streaming_wrapper_exception,
     _handle_messages_mode_tool_message,
     _inject_streaming_context_messages,
@@ -35,6 +36,7 @@ from app.ai.workflow.multi_agent_graph import (
     _record_emitted_message_id,
     _run_streaming_dispatch_loop,
 )
+from app.services.chat_service import degrade_on_plugin_failure
 
 
 def test_record_emitted_message_id_only_tracks_existing_id() -> None:
@@ -794,8 +796,11 @@ async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     assert thinking_events == [("messages-thinking", "supervisor")]
 
 
-def test_handle_streaming_wrapper_exception_uses_supervisor_fallback() -> None:
+def test_handle_streaming_wrapper_exception_uses_supervisor_fallback(monkeypatch) -> None:
     """supervisor 命中模型权限错误时应优先返回待办兜底 handoff。"""
+    monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
+    monkeypatch.delenv("ENABLE_PLUGIN_REGISTRY", raising=False)
+
     status_events = []
     token_events = []
     event_emitter_adapter = _build_streaming_event_emitter_adapter(
@@ -818,8 +823,90 @@ def test_handle_streaming_wrapper_exception_uses_supervisor_fallback() -> None:
 
     assert result["messages"] == []
     assert result["pending_handoff"]["target_agent"] == "todo_expert"
+    assert result["runtime_recovery_state"]["fallback_route"] == "handoff:todo_expert"
+    assert result["runtime_recovery_state"]["plugin_lifecycle_status"] == "disabled"
+    assert result["runtime_recovery_state"]["recovery_metrics"]["fallback_count"] == 1
     assert status_events
     assert token_events == []
+
+
+def test_handle_streaming_wrapper_exception_plugin_unhealthy_fallback(monkeypatch) -> None:
+    """插件链路异常时应走核心能力降级路径并返回可见 token。"""
+    monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
+    monkeypatch.setenv("ENABLE_PLUGIN_REGISTRY", "true")
+
+    status_events = []
+    token_events = []
+    event_emitter_adapter = _build_streaming_event_emitter_adapter(
+        emit_token=lambda _writer, content, node: token_events.append((content, node)),
+        emit_thinking=lambda *_args, **_kwargs: None,
+        emit_tool_start=lambda *_args, **_kwargs: None,
+        emit_tool_end=lambda *_args, **_kwargs: None,
+        emit_status=lambda writer, message, node: writer((message, node)),
+        emit_result=lambda *_args, **_kwargs: None,
+        emit_kb_images=lambda *_args, **_kwargs: None,
+    )
+
+    result = _handle_streaming_wrapper_exception(
+        node_name="data_expert",
+        state={
+            "messages": [HumanMessage(content="帮我查下贷款余额")],
+            "runtime_recovery_state": {
+                "plugin_lifecycle_status": "unhealthy",
+                "fallback_route": "none",
+                "recovery_metrics": {"recovery_attempts": 0, "fallback_count": 0},
+            },
+        },
+        error_text="Plugin registry load failed: timeout",
+        event_emitter_adapter=event_emitter_adapter,
+        writer=status_events.append,
+    )
+
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].content == "插件能力暂不可用，已自动降级为核心能力回答。"
+    assert result["runtime_recovery_state"]["fallback_route"] == "core_tools_only"
+    assert result["runtime_recovery_state"]["plugin_lifecycle_status"] == "unhealthy"
+    assert result["runtime_recovery_state"]["recovery_metrics"]["recovery_attempts"] == 1
+    assert result["runtime_recovery_state"]["recovery_metrics"]["fallback_count"] == 1
+    assert token_events == [("插件能力暂不可用，已自动降级为核心能力回答。", "data_expert")]
+    assert status_events
+
+
+def test_fallback_router_respects_runtime_recovery_flag(monkeypatch) -> None:
+    """关闭运行时恢复开关后，应回退到友好错误路径。"""
+    monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "false")
+    monkeypatch.delenv("ENABLE_PLUGIN_REGISTRY", raising=False)
+
+    route_decision = fallback_router(
+        node_name="supervisor",
+        state={"messages": [HumanMessage(content="请查看我的待办")]},
+        error_text="Error Code: 403, subscription_not_found",
+    )
+
+    assert route_decision["route"] == "friendly_error"
+    assert route_decision["runtime_recovery_state"]["fallback_route"] == "recovery_disabled"
+    assert "模型服务" in route_decision["message"]
+
+
+def test_degrade_on_plugin_failure_fallback_enabled(monkeypatch) -> None:
+    """开启插件注册表且命中插件异常时，应返回降级文案。"""
+    monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
+    monkeypatch.setenv("ENABLE_PLUGIN_REGISTRY", "true")
+
+    fallback_message = degrade_on_plugin_failure("plugin registry init failed")
+
+    assert fallback_message is not None
+    assert "核心能力" in fallback_message
+
+
+def test_degrade_on_plugin_failure_fallback_disabled(monkeypatch) -> None:
+    """关闭插件注册表开关时，不应触发插件降级文案。"""
+    monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
+    monkeypatch.setenv("ENABLE_PLUGIN_REGISTRY", "false")
+
+    fallback_message = degrade_on_plugin_failure("plugin registry init failed")
+
+    assert fallback_message is None
 
 
 @pytest.mark.asyncio

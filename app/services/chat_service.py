@@ -32,15 +32,59 @@ from app.services.user_preference_memory_service import (
 
 logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+PLUGIN_REGISTRY_ERROR_HINTS = (
+    "plugin registry",
+    "plugin_registry",
+    "plugin init",
+    "plugin load",
+    "插件注册",
+    "插件加载",
+)
 
 
-def _is_memory_feature_enabled(env_name: str, fallback: bool) -> bool:
-    """读取记忆功能开关，支持环境变量覆盖。"""
+def _is_feature_enabled(env_name: str, fallback: bool) -> bool:
+    """读取布尔开关，支持环境变量覆盖。"""
 
     raw_value = os.getenv(env_name)
     if raw_value is None:
         return fallback
     return raw_value.strip().lower() in _TRUE_VALUES
+
+
+def _is_memory_feature_enabled(env_name: str, fallback: bool) -> bool:
+    """读取记忆功能开关，支持环境变量覆盖。"""
+
+    return _is_feature_enabled(env_name, fallback)
+
+
+def _is_runtime_recovery_enabled() -> bool:
+    """运行时恢复开关（默认开启）。"""
+
+    return _is_feature_enabled("ENABLE_RUNTIME_RECOVERY", True)
+
+
+def _is_plugin_registry_enabled() -> bool:
+    """插件注册表开关（默认关闭，后置接线）。"""
+
+    return _is_feature_enabled("ENABLE_PLUGIN_REGISTRY", False)
+
+
+def degrade_on_plugin_failure(error_text: str) -> Optional[str]:
+    """识别插件链路故障并返回降级文案。"""
+
+    if not _is_runtime_recovery_enabled():
+        return None
+    if not _is_plugin_registry_enabled():
+        return None
+
+    lowered = str(error_text or "").strip().lower()
+    if not lowered:
+        return None
+
+    if any(hint in lowered for hint in PLUGIN_REGISTRY_ERROR_HINTS):
+        return "插件能力暂时不可用，已自动切换到核心能力继续处理。"
+
+    return None
 
 
 # 注意：对话保存逻辑已移至 multi_agent_graph.py 的 postprocess 节点
@@ -628,6 +672,46 @@ class ChatService:
             
         except Exception as e:
             error_msg = str(e)
+
+            plugin_degrade_message = degrade_on_plugin_failure(error_msg)
+            if plugin_degrade_message:
+                logger.warning("检测到插件链路异常，已启用核心能力降级: %s", error_msg)
+                ai_content = "".join(full_answer) if full_answer else plugin_degrade_message
+                self._save_conversation_fallback(
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    prompt=None,  # human 已在 stream 开始保存，降级场景避免重复写入
+                    ai_content=ai_content,
+                    scenario="PluginFallback",
+                )
+
+                if run_control_enabled:
+                    with get_db_context() as db:
+                        run_control_service.complete_run(resolved_run_id, db=db)
+
+                done_payload = _build_done_payload(
+                    thread_id=thread_id,
+                    run_id=resolved_run_id,
+                    message_id=self._get_latest_ai_message_id(thread_id),
+                    meta={
+                        "status": "degraded",
+                        "fallback_route": "core_tools_only",
+                        "plugin_lifecycle_status": "unhealthy",
+                    },
+                )
+
+                yield self._format_sse(
+                    "status",
+                    {
+                        "message": "插件能力暂不可用，已自动降级到核心能力。",
+                        "node": "runtime_recovery",
+                    },
+                )
+                if not full_answer:
+                    yield self._format_sse("token", {"content": plugin_degrade_message})
+                    done_payload["final_content"] = plugin_degrade_message
+                yield self._format_sse("done", done_payload)
+                return
 
             if run_control_enabled:
                 with get_db_context() as db:

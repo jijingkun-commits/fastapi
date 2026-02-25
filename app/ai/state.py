@@ -86,6 +86,20 @@ class BaseAgentState(TypedDict, total=False):
     frame_source_map: Dict             # 槽位来源（current/handoff/state/default）
 
 
+class RuntimeRecoveryState(TypedDict, total=False):
+    """运行时恢复状态。
+
+    关键契约字段：
+    - recovery_metrics: 观测与恢复指标
+    - fallback_route: 本轮触发的降级路径
+    - plugin_lifecycle_status: 插件链路生命周期状态
+    """
+
+    recovery_metrics: Dict[str, Any]   # 恢复观测指标（次数、错误摘要、时间戳等）
+    fallback_route: str                # 降级路由（handoff/core_tools_only/friendly_error/none）
+    plugin_lifecycle_status: str       # 插件状态（disabled/healthy/unhealthy）
+
+
 class MultiAgentState(BaseAgentState, total=False):
     """多智能体 Supervisor 状态定义。
     
@@ -112,6 +126,9 @@ class MultiAgentState(BaseAgentState, total=False):
     
     # 系统上下文
     system_context: str           # 系统级上下文信息（当前时间、用户信息等）
+
+    # 运行时恢复（P5 稳态增强）
+    runtime_recovery_state: RuntimeRecoveryState
 
 
 class TodoAgentState(BaseAgentState, total=False):
