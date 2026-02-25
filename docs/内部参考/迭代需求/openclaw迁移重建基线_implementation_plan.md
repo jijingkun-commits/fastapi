@@ -327,6 +327,10 @@ assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
    - G-1~G-4 全部通过并完成证据链复核。
    - docs/code/test 三线收口完成（`scripts/docs_guard.py` 严格门禁通过）。
    - 各 Wave 回滚锚点组合演练通过并写入 `WAVE_ROLLBACK_DRILL_MATRIX`。
+10. G01（inspection-card）证据闭环补充（2026-02-25）：
+    - evidence 四元组已固化并核验：`task_id/turn_id/process_id/status`。
+    - 证据绑定规则复核通过：`target_task_id == evidence_task_id`。
+    - 留痕入口：`docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md`。
 
 ---
 

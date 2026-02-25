@@ -172,6 +172,7 @@
 * [实施方案（运行时可取消控制）](内部参考/迭代需求/runtime_cancel_control_implementation_plan.md)
 * [实施方案（Skill 多用户版本治理）](内部参考/迭代需求/skill_multi_user_versioning_implementation_plan.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
+* [问题修复卡（总行权限映射缺失，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
 * [评估报告（技能检索对齐，2026-02-13）](内部参考/迭代需求/skill_retrieval_evaluation_report_20260213.md)
 * [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 
@@ -262,6 +263,7 @@
 * [WS-C04 P4 记忆检索增强](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md)
 * [WS-C05 P5 稳态增强与插件后置](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md)
 * [WS-C06 P6 收口与回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md)
+* [WS-G01 G-1 实测证据闭环](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md)
 
 ---
 

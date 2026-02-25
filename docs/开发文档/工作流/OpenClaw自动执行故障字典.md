@@ -25,7 +25,7 @@
 | `BLOCKED_DOC_CONTEXT` | 文档上下文不完整/不一致 | `_active_task.json` 缺字段；`task_key` 对不上；主计划链断裂 | 重新执行 `set_active_task.py`，并核对 `vk_cards.json` 与计划文档 |
 | `BLOCKED_FEATURE_MAPPING` | 卡片字段不完整 | 缺 `feature_ids/mechanism_summary/code_anchor_refs/...` | 回到 `/jjk-vkplan` 重产，直到 fail-fast 校验通过 |
 | `BLOCKED_SERIAL_DEPENDENCY` | 前置依赖未满足 | 当前卡 `hard_depends_on` 未完成 | 先完成前置卡，再推进当前卡 |
-| `BLOCKED_EVIDENCE_GAP` | 证据不足，不能收口 | 证据绑定失败或验收证据缺失 | 补齐 `task_id/turn_id/process_id` 与验收输出，再重试 |
+| `BLOCKED_EVIDENCE_GAP` | 证据不足，不能收口 | 证据绑定失败或验收证据缺失 | 补齐 `task_id/turn_id/process_id/status`，并确认 `target_task_id == evidence_task_id` 后重试 |
 | `BLOCKED_CRON_POLICY_DRIFT` | cron 策略与规则文档冲突 | `WORKFLOW_AUTO.md` 与 cron payload 口径不一致 | 对齐两侧规则后再启用自动任务 |
 | `BLOCKED_STALL` | 卡死恢复失败 | `stop -> continue` 后仍无增量 | 人工介入：检查会话、依赖、网关状态 |
 
