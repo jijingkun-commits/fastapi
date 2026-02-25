@@ -20,6 +20,9 @@ def init_db(seed_admin: bool = True) -> None:
                     password=password,
                     mobile="13800000000",
                     role="admin",
+                    data_role="head_president",
+                    org_code="0000",
+                    org_name="总行",
                 )
                 db.add(user)
                 db.commit()

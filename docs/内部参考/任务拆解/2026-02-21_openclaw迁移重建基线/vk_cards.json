@@ -42,6 +42,7 @@
     "required_done_gate": [
       "四风险修订口径固化完成",
       "取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel",
+      "t_chat_run 草案、SSE 语义、锚点清单三项冻结完成",
       "python3 scripts/docs_guard.py --strict 通过"
     ],
     "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md"
@@ -124,15 +125,14 @@
         "补齐 active_run 恢复与 orphan 清理"
       ],
       "code_anchor_refs": [
-        "app/models/chat_run.py::ChatRun",
-        "app/services/run_control_service.py::RunControlService",
         "app/services/chat_service.py::stream",
         "app/services/chat_service.py::sse_stream",
         "app/services/chat_service.py::sse_resume_stream",
-        "app/api/v1/endpoints/chat_api.py::cancel_run",
-        "app/ai/workflow/multi_agent_graph.py::cancel_checkpoint",
-        "app/ai/events.py::stopped_event",
-        "app/schemas/chat.py::run_id"
+        "app/api/v1/endpoints/chat_api.py::chat_stream",
+        "app/api/v1/endpoints/chat_api.py::resume_stream",
+        "app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper",
+        "app/ai/events.py::EventType",
+        "app/schemas/chat.py::ChatRequest"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
@@ -166,11 +166,15 @@
       "done_gate": [
         "P1-01~P1-05 验收命令全部通过",
         "cancel_after_token_count=0",
+        "多用户并发取消隔离回归通过",
+        "done/stopped/interrupt 终态互斥与顺序语义回归通过",
         "ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过"
       ],
       "dod": [
         "P1-01~P1-05 验收命令全部通过",
         "cancel_after_token_count=0",
+        "多用户并发取消隔离回归通过",
+        "done/stopped/interrupt 终态互斥与顺序语义回归通过",
         "ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过"
       ],
       "check_cmd": [
@@ -212,7 +216,7 @@
         "app/ai/workflow/multi_agent_graph.py::_get_common_tools",
         "app/ai/workflow/multi_agent_graph.py::_get_supervisor_tools",
         "app/services/config_resolver.py::ConfigResolver",
-        "app/core/config_contract.py::ToolPolicyContract"
+        "app/core/config_contract.py::CONFIG_SPECS"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
@@ -276,14 +280,15 @@
       ],
       "code_anchor_refs": [
         "app/models/agent_skill.py::AgentSkill",
-        "app/services/skill_service.py::bind_user_skill",
-        "app/api/v1/endpoints/skill_admin_api.py::bind_skill"
+        "app/services/skill_service.py::search_skills",
+        "app/api/v1/endpoints/skill_admin_api.py::list_skills"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
-        "PYTHONPATH=. pytest app/tests/test_handoff_detection.py"
+        "PYTHONPATH=. pytest tests/unit/test_skill_service.py -k \"version or binding\"",
+        "PYTHONPATH=. pytest tests/api/test_skill_admin_api.py -k \"binding or rollback\""
       ],
       "rollback_anchors": [
         "ENABLE_SKILL_VERSIONING",
@@ -296,18 +301,22 @@
         "app/models/agent_skill.py",
         "app/services/skill_service.py",
         "app/api/v1/endpoints/skill_admin_api.py",
-        "tests/unit/test_multi_agent_streaming_helpers.py"
+        "tests/unit/test_skill_service.py",
+        "tests/api/test_skill_admin_api.py"
       ],
       "done_gate": [
         "Skill 版本发布/回滚/用户绑定回归通过",
+        "多用户并发绑定与检索隔离回归通过",
         "ENABLE_SKILL_VERSIONING 与 ENABLE_USER_SKILL_BINDING 回滚验证通过"
       ],
       "dod": [
         "Skill 版本发布/回滚/用户绑定回归通过",
+        "多用户并发绑定与检索隔离回归通过",
         "ENABLE_SKILL_VERSIONING 与 ENABLE_USER_SKILL_BINDING 回滚验证通过"
       ],
       "check_cmd": [
-        "PYTHONPATH=. pytest app/tests/test_handoff_detection.py"
+        "PYTHONPATH=. pytest tests/unit/test_skill_service.py -k \"version or binding\"",
+        "PYTHONPATH=. pytest tests/api/test_skill_admin_api.py -k \"binding or rollback\""
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md"
     },
@@ -334,19 +343,22 @@
         "P4-01"
       ],
       "mechanism_summary": [
-        "Hybrid recall + pre-compaction flush 记忆闭环",
+        "Hybrid recall + pre-compaction flush 记忆闭环（分阶段）",
+        "C04a: recall MVP（先打通用户隔离与召回接线）",
+        "C04b: pre-compaction flush（在 recall 稳定后增量接入）",
         "用户隔离与降级路径保底",
         "记忆异常不阻断主对话"
       ],
       "code_anchor_refs": [
-        "app/services/user_preference_memory_service.py::recall",
-        "app/services/user_preference_memory_service.py::flush",
-        "app/services/chat_service.py::inject_memory_context"
+        "app/services/user_preference_memory_service.py::build_user_preference_context",
+        "app/services/user_preference_memory_service.py::persist_explicit_preferences_from_input",
+        "app/services/chat_service.py::stream"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k \"context or persist\"",
         "PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py"
       ],
       "rollback_anchors": [
@@ -359,17 +371,24 @@
       "file_scope": [
         "app/services/user_preference_memory_service.py",
         "app/services/chat_service.py",
+        "app/models/user_memory.py",
+        "app/repositories/user_memory_repo.py",
+        "alembic/versions",
+        "tests/unit/test_user_preference_memory_service.py",
         "tests/unit/test_multi_intent_queue_flow.py"
       ],
       "done_gate": [
-        "recall/flush 链路回归通过",
+        "C04a（recall MVP）回归通过",
+        "C04b（flush 增强）回归通过",
         "记忆异常不阻断主对话"
       ],
       "dod": [
-        "recall/flush 链路回归通过",
+        "C04a（recall MVP）回归通过",
+        "C04b（flush 增强）回归通过",
         "记忆异常不阻断主对话"
       ],
       "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k \"context or persist\"",
         "PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md"
@@ -404,9 +423,10 @@
         "fallback、队列与子任务稳定化"
       ],
       "code_anchor_refs": [
-        "app/ai/workflow/multi_agent_graph.py::fallback_router",
-        "app/ai/state.py::runtime_recovery_state",
-        "app/services/chat_service.py::degrade_on_plugin_failure"
+        "app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff",
+        "app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper",
+        "app/ai/state.py::MultiAgentState",
+        "app/services/chat_service.py::sse_stream"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
@@ -429,10 +449,12 @@
       ],
       "done_gate": [
         "恢复任务、观测阈值、降级策略验收通过",
+        "多用户并发流式场景下恢复与降级互不干扰",
         "插件后置接线不阻塞主链"
       ],
       "dod": [
         "恢复任务、观测阈值、降级策略验收通过",
+        "多用户并发流式场景下恢复与降级互不干扰",
         "插件后置接线不阻塞主链"
       ],
       "check_cmd": [

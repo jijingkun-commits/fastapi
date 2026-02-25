@@ -18,6 +18,8 @@
 - 完成定义（DoD）:
   - P1-01~P1-05 验收命令全部通过
   - cancel_after_token_count=0
+  - 多用户并发取消隔离回归通过（A 用户取消不影响 B 用户）
+  - `done/stopped/interrupt` 终态互斥与顺序语义回归通过
   - ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过
 
 ### 1.1 功能机制
@@ -29,15 +31,21 @@
 
 ### 1.2 代码锚点
 
-  - app/models/chat_run.py::ChatRun
-  - app/services/run_control_service.py::RunControlService
   - app/services/chat_service.py::stream
   - app/services/chat_service.py::sse_stream
   - app/services/chat_service.py::sse_resume_stream
-  - app/api/v1/endpoints/chat_api.py::cancel_run
-  - app/ai/workflow/multi_agent_graph.py::cancel_checkpoint
-  - app/ai/events.py::stopped_event
-  - app/schemas/chat.py::run_id
+  - app/api/v1/endpoints/chat_api.py::chat_stream
+  - app/api/v1/endpoints/chat_api.py::resume_stream
+  - app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper
+  - app/ai/events.py::EventType
+  - app/schemas/chat.py::ChatRequest
+
+- 本卡新增实体目标（C01 实现阶段创建）:
+  - app/models/chat_run.py（ChatRun）
+  - app/services/run_control_service.py（RunControlService）
+  - app/api/v1/endpoints/chat_api.py（cancel_run）
+  - app/ai/events.py（stopped_event）
+  - app/schemas/chat.py（run_id）
 
 - 来源证据:
   - docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.2
@@ -68,6 +76,8 @@
 
 ## 4. 测试与验收
 
+- 先决要求:
+  - 若测试文件不存在，先补测试骨架并提交红灯用例，再进入功能实现
 - 验收命令:
   - PYTHONPATH=. pytest tests/unit/test_run_control_service.py
   - PYTHONPATH=. pytest tests/unit/test_chat_service_cancel_stream.py
@@ -113,15 +123,14 @@ card_export:
   - 统一 cancel API 并新增 SSE stopped 兼容事件
   - 补齐 active_run 恢复与 orphan 清理
   code_anchor_refs:
-  - app/models/chat_run.py::ChatRun
-  - app/services/run_control_service.py::RunControlService
   - app/services/chat_service.py::stream
   - app/services/chat_service.py::sse_stream
   - app/services/chat_service.py::sse_resume_stream
-  - app/api/v1/endpoints/chat_api.py::cancel_run
-  - app/ai/workflow/multi_agent_graph.py::cancel_checkpoint
-  - app/ai/events.py::stopped_event
-  - app/schemas/chat.py::run_id
+  - app/api/v1/endpoints/chat_api.py::chat_stream
+  - app/api/v1/endpoints/chat_api.py::resume_stream
+  - app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper
+  - app/ai/events.py::EventType
+  - app/schemas/chat.py::ChatRequest
   acceptance_checks:
   - PYTHONPATH=. pytest tests/unit/test_run_control_service.py
   - PYTHONPATH=. pytest tests/unit/test_chat_service_cancel_stream.py
@@ -134,5 +143,7 @@ card_export:
   done_gate:
   - P1-01~P1-05 验收命令全部通过
   - cancel_after_token_count=0
+  - 多用户并发取消隔离回归通过
+  - done/stopped/interrupt 终态互斥与顺序语义回归通过
   - ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过
 ```

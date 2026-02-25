@@ -40,6 +40,14 @@ automation_contract:
   - required: `done/result/interrupt/stopped`
   - optional: `metadata.version`
 - 兼容策略: `stopped` 为增量事件，不破坏既有消费方
+- 终态语义冻结（同一 `run_id`）:
+  - `done` 与 `stopped` 互斥，二者仅允许其一
+  - `interrupt` 为挂起事件，不与 `done/stopped` 同帧并发
+  - cancel 路径收口为 `stopped`，正常完成收口为 `done`
+- 事件顺序冻结（同一 `run_id`）:
+  - 正常链路: `... -> result|status|tool_* -> done`
+  - 取消链路: `... -> result|status|tool_* -> stopped`
+  - HITL 链路: `... -> interrupt`（resume 后进入正常/取消链路）
 - 协议机读文件: `docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/sse_events_v1.json`
 
 ## 1. seed 来源
@@ -53,11 +61,11 @@ automation_contract:
 
 | card_id | wave | feature_ids | 机制摘要 | 代码锚点 | 验证命令 | 回滚锚点 |
 |---|---|---|---|---|---|---|
-| C01 | P1 | P1-01,P1-02,P1-03,P1-04,P1-05 | run 状态模型、取消控制面与 run_id 全链路接线；取消后阻断 token 回灌并 drain 队列 | app/models/chat_run.py::ChatRun | PYTHONPATH=. pytest tests/unit/test_run_control_service.py | ENABLE_RUN_CONTROL,ENABLE_SSE_STOPPED_EVENT |
+| C01 | P1 | P1-01,P1-02,P1-03,P1-04,P1-05 | run 状态模型、取消控制面与 run_id 全链路接线；取消后阻断 token 回灌并 drain 队列 | app/services/chat_service.py::stream | PYTHONPATH=. pytest tests/unit/test_run_control_service.py | ENABLE_RUN_CONTROL,ENABLE_SSE_STOPPED_EVENT |
 | C02 | P2 | P2-01 | 引入 Tool Registry/Policy/Broker 首期治理链路；按 task_mode/requires_evidence 分层启用证据门禁 | app/ai/workflow/multi_agent_graph.py::_get_common_tools | PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py | ENABLE_TOOL_GOVERNANCE,TOOL_POLICY_FAIL_MODE |
-| C03 | P3 | P3-01 | Skill 定义、版本、用户绑定三层解耦；支持用户级绑定、生效与回滚 | app/models/agent_skill.py::AgentSkill | PYTHONPATH=. pytest app/tests/test_handoff_detection.py | ENABLE_SKILL_VERSIONING,ENABLE_USER_SKILL_BINDING |
-| C04 | P4 | P4-01 | Hybrid recall + pre-compaction flush 记忆闭环；用户隔离与降级路径保底 | app/services/user_preference_memory_service.py::recall | PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py | ENABLE_MEMORY_RECALL,ENABLE_PRE_COMPACTION_FLUSH |
-| C05 | P5 | P5-01 | 恢复/隔离/观测增强与异常降级；插件能力后置接线，不阻塞主链 | app/ai/workflow/multi_agent_graph.py::fallback_router | PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback | ENABLE_RUNTIME_RECOVERY,ENABLE_PLUGIN_REGISTRY |
+| C03 | P3 | P3-01 | Skill 定义、版本、用户绑定三层解耦；支持用户级绑定、生效与回滚 | app/models/agent_skill.py::AgentSkill | PYTHONPATH=. pytest tests/unit/test_skill_service.py -k binding | ENABLE_SKILL_VERSIONING,ENABLE_USER_SKILL_BINDING |
+| C04 | P4 | P4-01 | Hybrid recall + pre-compaction flush 分阶段落地（C04a recall MVP / C04b flush 增强）；用户隔离与降级路径保底 | app/services/user_preference_memory_service.py::build_user_preference_context | PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k context | ENABLE_MEMORY_RECALL,ENABLE_PRE_COMPACTION_FLUSH |
+| C05 | P5 | P5-01 | 恢复/隔离/观测增强与异常降级；插件能力后置接线，不阻塞主链 | app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff | PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback | ENABLE_RUNTIME_RECOVERY,ENABLE_PLUGIN_REGISTRY |
 | C06 | P6 | P6-01 | G-1~G-4 门禁收口与证据链复核；docs/code/test 三线收口 | docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.2 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 
 ## 2. 目标与边界
@@ -78,6 +86,10 @@ automation_contract:
 
 - 模块边界: 运行时控制、工具治理、Skill治理、记忆链路、稳态恢复、发布收口分层推进。
 - 状态契约: run_id/run_status、event_type、task_mode/requires_evidence、user_id 隔离字段。
+- C00 前置冻结:
+  - `t_chat_run` 表结构草案冻结（字段、索引、状态枚举）
+  - `stopped/done/interrupt` 终态互斥与顺序语义冻结
+  - `code_anchor_refs` 可解析校验通过（已存在文件必须可定位符号）
 - 路由闭环: C00 -> C01 -> C02 -> C03 -> C04 -> C05 -> C06。
 - 前后端链路时序: cancel API -> run_control -> workflow checkpoint -> SSE stopped -> 前端状态收口。
 
@@ -125,5 +137,5 @@ automation_contract:
 - [x] 每个 `feature_id` 均落入某张卡（无遗漏）
 - [x] 每张卡均有机制摘要 + 代码锚点 + 验收命令 + 回滚锚点
 - [x] 每张卡均给出 `evidence_entry`
-- [x] `done_gate` 与 implementation plan 一致
+- [x] `done_gate` 与 implementation plan 主线一致，并补充多用户隔离与协议语义冻结门禁
 - [x] 仅引用输入来源，不扩展额外计划来源

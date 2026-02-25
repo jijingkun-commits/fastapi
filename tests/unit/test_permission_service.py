@@ -337,3 +337,56 @@ def test_summarize_permission_scope_falls_back_to_rule_hint(
 
     assert summary["has_explicit_row_filters"] is True
     assert summary["display_text"] == "已命中预设行级权限规则"
+
+
+def test_validate_query_context_head_president_with_org_code_rules(
+    permission_service: PermissionService,
+):
+    """head_president 无 dept_code 但有显式 org_code 行级规则时应放行。"""
+
+    ctx = UserPermissionContext(
+        user_id=1,
+        data_role="head_president",
+        sys_role="admin",
+        org_code="0000",
+        row_filters={"fdmdata.*": [("org_code", "=", "0000")]},
+    )
+
+    allowed, reason = permission_service.validate_query_context(ctx)
+
+    assert allowed is True
+    assert reason is None
+
+
+def test_validate_query_context_staff_no_dept_code_still_blocked(
+    permission_service: PermissionService,
+):
+    """staff 无 dept_code 且无显式行级规则时仍应被拒绝。"""
+
+    ctx = UserPermissionContext(
+        user_id=2,
+        data_role="staff",
+    )
+
+    allowed, reason = permission_service.validate_query_context(ctx)
+
+    assert allowed is False
+    assert "缺少 dept_code" in reason
+
+
+def test_get_row_filters_head_president_uses_explicit_org_code_rule(
+    permission_service: PermissionService,
+):
+    """head_president 有显式 org_code 规则时，不注入默认 dept_code 过滤。"""
+
+    ctx = UserPermissionContext(
+        user_id=1,
+        data_role="head_president",
+        org_code="0000",
+        row_filters={"fdmdata.*": [("org_code", "=", "0000")]},
+    )
+
+    filters = permission_service.get_row_filters_for_table(ctx, "fdmdata", "f_mid_loan_k_tb")
+
+    assert ("org_code", "=", "0000") in filters
+    assert all(f[0] != "dept_code" for f in filters)

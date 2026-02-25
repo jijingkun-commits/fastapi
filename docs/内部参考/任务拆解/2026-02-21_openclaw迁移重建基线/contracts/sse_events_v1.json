@@ -15,5 +15,31 @@
   },
   "compatibility": {
     "policy": "stopped is additive and backward compatible"
+  },
+  "terminal_semantics": {
+    "exclusive_terminal_events": [
+      "done",
+      "stopped"
+    ],
+    "interrupt_role": "suspend_only",
+    "sequence_rules": {
+      "normal_completion": [
+        "result|status|tool_*",
+        "done"
+      ],
+      "cancel_completion": [
+        "result|status|tool_*",
+        "stopped"
+      ],
+      "hitl_suspend": [
+        "result|status|tool_*",
+        "interrupt"
+      ]
+    },
+    "forbidden_sequences": [
+      "stopped->done (same run_id)",
+      "done->stopped (same run_id)",
+      "interrupt with done|stopped in same frame"
+    ]
   }
 }

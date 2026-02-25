@@ -44,8 +44,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--status-source-of-truth",
-        default="docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
-        help="Canonical status source document path",
+        default=None,
+        help=(
+            "Canonical status source document path. "
+            "If omitted, prefer docs/内部参考/任务拆解/<task_split_dir>/preflight_status.json "
+            "when it exists; otherwise fallback to "
+            "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md."
+        ),
     )
     parser.add_argument(
         "--updated-by",
@@ -88,6 +93,20 @@ def main() -> int:
     if isinstance(preflight, dict):
         preflight_required = str(preflight.get("card_id", preflight_required))
 
+    status_source_path: Path
+    if args.status_source_of_truth:
+        status_source_path = Path(args.status_source_of_truth)
+    else:
+        preferred = task_split_dir / "preflight_status.json"
+        fallback = repo_root / "docs" / "内部参考" / "迭代需求" / "迁移执行波次_implementation_plan.md"
+        status_source_path = preferred if preferred.exists() else fallback
+
+    if not status_source_path.is_absolute():
+        status_source_path = (repo_root / status_source_path).resolve()
+
+    if not status_source_path.exists():
+        raise SystemExit(f"status_source_of_truth not found: {status_source_path}")
+
     active_payload = {
         "project_id": args.project_id,
         "task_split_dir": args.task_split_dir,
@@ -96,7 +115,7 @@ def main() -> int:
         "single_active_card": single_active_card,
         "auto_done_policy": auto_done,
         "preflight_required": preflight_required,
-        "status_source_of_truth": args.status_source_of_truth,
+        "status_source_of_truth": str(status_source_path),
         "updated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "updated_by": args.updated_by,
     }
@@ -111,6 +130,7 @@ def main() -> int:
         f"task_split_dir={active_payload['task_split_dir']}",
         f"task_key={active_payload['task_key']}",
         f"auto_done_policy={active_payload['auto_done_policy']}",
+        f"status_source_of_truth={active_payload['status_source_of_truth']}",
         sep=" ",
     )
     return 0

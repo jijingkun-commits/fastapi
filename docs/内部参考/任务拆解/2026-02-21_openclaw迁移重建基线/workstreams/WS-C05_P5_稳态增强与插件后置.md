@@ -17,6 +17,7 @@
 - 本包目标: P5 稳态增强与插件后置接线 的可执行落地。
 - 完成定义（DoD）:
   - 恢复任务、观测阈值、降级策略验收通过
+  - 多用户并发流式场景下恢复与降级互不干扰
   - 插件后置接线不阻塞主链
 
 ### 1.1 功能机制
@@ -27,9 +28,15 @@
 
 ### 1.2 代码锚点
 
-  - app/ai/workflow/multi_agent_graph.py::fallback_router
-  - app/ai/state.py::runtime_recovery_state
-  - app/services/chat_service.py::degrade_on_plugin_failure
+  - app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff
+  - app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper
+  - app/ai/state.py::MultiAgentState
+  - app/services/chat_service.py::sse_stream
+
+- 本卡新增实体目标（C05 实现阶段创建）:
+  - app/ai/workflow/multi_agent_graph.py（fallback_router）
+  - app/ai/state.py（runtime_recovery_state）
+  - app/services/chat_service.py（degrade_on_plugin_failure）
 
 - 来源证据:
   - docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.10
@@ -87,9 +94,10 @@ card_export:
   - 插件能力后置接线，不阻塞主链
   - fallback、队列与子任务稳定化
   code_anchor_refs:
-  - app/ai/workflow/multi_agent_graph.py::fallback_router
-  - app/ai/state.py::runtime_recovery_state
-  - app/services/chat_service.py::degrade_on_plugin_failure
+  - app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff
+  - app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper
+  - app/ai/state.py::MultiAgentState
+  - app/services/chat_service.py::sse_stream
   acceptance_checks:
   - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback
   rollback_anchors:
@@ -98,5 +106,6 @@ card_export:
   evidence_entry: docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.10
   done_gate:
   - 恢复任务、观测阈值、降级策略验收通过
+  - 多用户并发流式场景下恢复与降级互不干扰
   - 插件后置接线不阻塞主链
 ```

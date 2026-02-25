@@ -58,6 +58,9 @@ def seed_users():
                 password="12345678",
                 mobile="13800000000",
                 role="admin",
+                data_role="head_president",
+                org_code="0000",
+                org_name="总行",
                 is_active=True,
                 create_time=None,
                 update_time=None

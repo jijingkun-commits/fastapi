@@ -16,20 +16,28 @@
 
 - 本包目标: P4 记忆检索增强 的可执行落地。
 - 完成定义（DoD）:
-  - recall/flush 链路回归通过
+  - C04a（recall MVP）回归通过：用户隔离检索 + 降级可用
+  - C04b（flush 增强）回归通过：pre-compaction flush 可控开启
   - 记忆异常不阻断主对话
 
 ### 1.1 功能机制
 
-  - Hybrid recall + pre-compaction flush 记忆闭环
+  - Hybrid recall + pre-compaction flush 记忆闭环（分阶段）
+  - C04a: recall MVP（先打通用户隔离与召回接线）
+  - C04b: pre-compaction flush（在 recall 稳定后增量接入）
   - 用户隔离与降级路径保底
   - 记忆异常不阻断主对话
 
 ### 1.2 代码锚点
 
-  - app/services/user_preference_memory_service.py::recall
-  - app/services/user_preference_memory_service.py::flush
-  - app/services/chat_service.py::inject_memory_context
+  - app/services/user_preference_memory_service.py::build_user_preference_context
+  - app/services/user_preference_memory_service.py::persist_explicit_preferences_from_input
+  - app/services/chat_service.py::stream
+
+- 本卡新增实体目标（C04 实现阶段创建）:
+  - app/services/user_preference_memory_service.py（recall）
+  - app/services/user_preference_memory_service.py（flush）
+  - app/services/chat_service.py（inject_memory_context）
 
 - 来源证据:
   - docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.9
@@ -39,6 +47,10 @@
 ### 可修改（白名单）
   - app/services/user_preference_memory_service.py
   - app/services/chat_service.py
+  - app/models/user_memory.py
+  - app/repositories/user_memory_repo.py
+  - alembic/versions
+  - tests/unit/test_user_preference_memory_service.py
   - tests/unit/test_multi_intent_queue_flow.py
 
 ### 禁止修改（黑名单）
@@ -53,6 +65,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
+  - PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k "context or persist"
   - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py
 
 ## 5. 风险与回滚
@@ -79,22 +92,30 @@ card_export:
   file_whitelist:
   - app/services/user_preference_memory_service.py
   - app/services/chat_service.py
+  - app/models/user_memory.py
+  - app/repositories/user_memory_repo.py
+  - alembic/versions
+  - tests/unit/test_user_preference_memory_service.py
   - tests/unit/test_multi_intent_queue_flow.py
   mechanism_summary:
-  - Hybrid recall + pre-compaction flush 记忆闭环
+  - Hybrid recall + pre-compaction flush 记忆闭环（分阶段）
+  - C04a: recall MVP（先打通用户隔离与召回接线）
+  - C04b: pre-compaction flush（在 recall 稳定后增量接入）
   - 用户隔离与降级路径保底
   - 记忆异常不阻断主对话
   code_anchor_refs:
-  - app/services/user_preference_memory_service.py::recall
-  - app/services/user_preference_memory_service.py::flush
-  - app/services/chat_service.py::inject_memory_context
+  - app/services/user_preference_memory_service.py::build_user_preference_context
+  - app/services/user_preference_memory_service.py::persist_explicit_preferences_from_input
+  - app/services/chat_service.py::stream
   acceptance_checks:
+  - PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k "context or persist"
   - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py
   rollback_anchors:
   - ENABLE_MEMORY_RECALL
   - ENABLE_PRE_COMPACTION_FLUSH
   evidence_entry: docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.9
   done_gate:
-  - recall/flush 链路回归通过
+  - C04a（recall MVP）回归通过
+  - C04b（flush 增强）回归通过
   - 记忆异常不阻断主对话
 ```

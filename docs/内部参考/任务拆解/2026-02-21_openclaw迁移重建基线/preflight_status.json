@@ -1,0 +1,12 @@
+{
+  "preflight_required": "C00",
+  "passed": true,
+  "allow_enter": "C01/P1-01",
+  "updated_at": "2026-02-24T20:15:00+08:00",
+  "evidence": [
+    "四风险修订口径固化完成",
+    "取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel",
+    "python3 scripts/docs_guard.py --strict 通过"
+  ],
+  "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md"
+}

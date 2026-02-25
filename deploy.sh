@@ -154,14 +154,19 @@ engine = create_engine(str(DATABASE_URL))
 with open('$sql_file', 'r') as f:
     sql = f.read()
 with engine.begin() as conn:
-    for stmt in sql.split(';'):
-        stmt = stmt.strip()
-        if stmt and not stmt.startswith('--'):
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                if 'already exists' not in str(e):
-                    print(f'警告: {e}', file=sys.stderr)
+    for raw_stmt in sql.split(';'):
+        lines = [
+            line for line in raw_stmt.splitlines()
+            if not line.lstrip().startswith('--')
+        ]
+        stmt = '\\n'.join(lines).strip()
+        if not stmt:
+            continue
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            if 'already exists' not in str(e):
+                print(f'警告: {e}', file=sys.stderr)
 "
         fi
     done
@@ -180,14 +185,19 @@ engine = create_engine(str(DATABASE_URL))
 with open('$sql_file', 'r') as f:
     sql = f.read()
 with engine.begin() as conn:
-    for stmt in sql.split(';'):
-        stmt = stmt.strip()
-        if stmt and not stmt.startswith('--'):
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                if 'already exists' not in str(e) and 'duplicate' not in str(e).lower():
-                    print(f'警告: {e}', file=sys.stderr)
+    for raw_stmt in sql.split(';'):
+        lines = [
+            line for line in raw_stmt.splitlines()
+            if not line.lstrip().startswith('--')
+        ]
+        stmt = '\\n'.join(lines).strip()
+        if not stmt:
+            continue
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            if 'already exists' not in str(e) and 'duplicate' not in str(e).lower():
+                print(f'警告: {e}', file=sys.stderr)
 "
         fi
     done
@@ -272,14 +282,19 @@ engine = create_engine(str(DATABASE_URL))
 with open('$sql_file', 'r') as f:
     sql = f.read()
 with engine.begin() as conn:
-    for stmt in sql.split(';'):
-        stmt = stmt.strip()
-        if stmt and not stmt.startswith('--'):
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                if 'already exists' not in str(e) and 'duplicate' not in str(e).lower():
-                    print(f'警告: {e}', file=sys.stderr)
+    for raw_stmt in sql.split(';'):
+        lines = [
+            line for line in raw_stmt.splitlines()
+            if not line.lstrip().startswith('--')
+        ]
+        stmt = '\\n'.join(lines).strip()
+        if not stmt:
+            continue
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            if 'already exists' not in str(e) and 'duplicate' not in str(e).lower():
+                print(f'警告: {e}', file=sys.stderr)
 "
         fi
     done

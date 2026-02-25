@@ -30,7 +30,10 @@
   - app/ai/workflow/multi_agent_graph.py::_get_common_tools
   - app/ai/workflow/multi_agent_graph.py::_get_supervisor_tools
   - app/services/config_resolver.py::ConfigResolver
-  - app/core/config_contract.py::ToolPolicyContract
+  - app/core/config_contract.py::CONFIG_SPECS
+
+- 本卡新增实体目标（C02 实现阶段创建）:
+  - app/core/config_contract.py（ToolPolicyContract）
 
 - 来源证据:
   - docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.7
@@ -93,7 +96,7 @@ card_export:
   - app/ai/workflow/multi_agent_graph.py::_get_common_tools
   - app/ai/workflow/multi_agent_graph.py::_get_supervisor_tools
   - app/services/config_resolver.py::ConfigResolver
-  - app/core/config_contract.py::ToolPolicyContract
+  - app/core/config_contract.py::CONFIG_SPECS
   acceptance_checks:
   - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py
   rollback_anchors:
