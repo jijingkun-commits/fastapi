@@ -1,7 +1,7 @@
 # 迁移执行波次实施方案（P1~P6）
 
 > 文档状态：实施基线（`/jjk-plan core`）
-> 更新时间：2026-02-20
+> 更新时间：2026-02-25
 > 对应总控：`docs/内部参考/迭代需求/openclaw全量迁移_implementation_plan.md`
 
 ---
@@ -207,6 +207,11 @@
 2. 以 `LLMSceneService.resolve_model_code` 为主入口，不新增绕行解析路径。
 3. fallback 候选链必须继承 scene 白名单/类型校验与审计字段。
 
+### 7.5 回滚锚点
+
+1. `ENABLE_RUNTIME_RECOVERY`
+2. `ENABLE_PLUGIN_REGISTRY`
+
 ---
 
 ## 8. P6 全链路收口
@@ -222,6 +227,12 @@
 1. `python3 scripts/docs_guard.py --strict` 通过。
 2. 关键 API/SSE/DB 契约回归通过。
 3. 每个 Wave 有完成记录与回滚记录。
+
+### 8.3 C06 收口执行记录（2026-02-25）
+
+1. docs 收口：`11.2`、`11.5` 与 `11.6 WAVE_ROLLBACK_DRILL_MATRIX` 已完成统一回填。
+2. code 收口：`scripts/docs_guard.py` 新增 Gate 与回滚矩阵强校验。
+3. test 收口：`python3 scripts/docs_guard.py --strict` 通过（errors=0，warnings=0）。
 
 ---
 
@@ -261,10 +272,10 @@
 
 | Gate | 必过条件 | 最低量化标准 | 证据产物（留痕位置） | 当前状态 |
 |---|---|---|---|---|
-| G-1 实测证据闭环（B0/B1-B2） | `B0-1/B0-2/B0-3/B1-B2` 从“手册”变为“已实跑” | 每个子项至少 1 次通过记录 + 1 条异常样例复盘 | `output/openclaw源码解析/OpenClaw吃透度补强-*.md` 的执行记录区 + 工单链接 | 待执行 |
-| G-2 复合任务编排实证 | 覆盖“三问合一/跨工具/跨轮次”复合任务 | 用例数 >= 20；通过率 >= 85%；失败复盘 >= 3 条 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md` 的实测章节 + 测试报告 | 待执行 |
-| G-3 契约一致性证据 | API/SSE/DB 文档与实现逐项对齐 | 契约差异项 = 0；随机抽检 >= 10 项 | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md` 的回填记录 | 待执行 |
-| G-4 回滚演练证据（P1） | 至少完成 1 轮真实回滚演练并复原 | 演练 >= 1 次；回滚成功率 100%；恢复后核心链路回归通过 | `runtime_cancel_control_implementation_plan.md` 回滚记录 + 发布日志 | 待执行 |
+| G-1 实测证据闭环（B0/B1-B2） | `B0-1/B0-2/B0-3/B1-B2` 从“手册”变为“已实跑” | 每个子项至少 1 次通过记录 + 1 条异常样例复盘 | `output/openclaw源码解析/OpenClaw吃透度补强-*.md` 的执行记录区 + 工单链接 | 已通过（2026-02-25） |
+| G-2 复合任务编排实证 | 覆盖“三问合一/跨工具/跨轮次”复合任务 | 用例数 >= 20；通过率 >= 85%；失败复盘 >= 3 条 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md` 的实测章节 + 测试报告 | 已通过（2026-02-25） |
+| G-3 契约一致性证据 | API/SSE/DB 文档与实现逐项对齐 | 契约差异项 = 0；随机抽检 >= 10 项 | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md` 的回填记录 | 已通过（2026-02-25） |
+| G-4 回滚演练证据（P1） | 至少完成 1 轮真实回滚演练并复原 | 演练 >= 1 次；回滚成功率 100%；恢复后核心链路回归通过 | `runtime_cancel_control_implementation_plan.md` 回滚记录 + 发布日志 | 已通过（2026-02-25） |
 
 ### 11.3 通过口径
 
@@ -288,11 +299,22 @@
 
 ### 11.5 本周 Gate 状态看板（唯一入口）
 
-> 统计周期：2026-02-19 当周（后续按周滚动更新）
+> 统计周期：2026-02-25（C06 收口周）
 
 | Gate | 责任人 | 目标日期 | 当前状态 | 证据链接 | 下一步 |
 |---|---|---|---|---|---|
-| G-1 实测证据闭环 | 纪景锟 | 2026-02-26 | 进行中（C00已通过） | `迁移执行波次_implementation_plan.md` 第 2.3 节 | 启动 B0/B1-B2 场景实跑并留痕 |
-| G-2 复合任务编排实证 | 纪景锟 | 2026-02-26 | 待执行 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md`（待回填） | 建立 20 条复合用例并开始统计 |
-| G-3 契约一致性证据 | 纪景锟 | 2026-02-26 | 进行中（口径统一） | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md` | 对齐 API/SSE/DB 文档与实现 |
-| G-4 P1 回滚演练证据 | 纪景锟 | 2026-02-26 | 待执行 | `runtime_cancel_control_implementation_plan.md`（第 7 节回滚记录） | 设计并执行 1 轮回滚演练 |
+| G-1 实测证据闭环 | 纪景锟 | 2026-02-25 | 已通过 | `output/openclaw源码解析/OpenClaw吃透度补强-*.md`、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 进入周检，若指标回退按 11.4 回查 |
+| G-2 复合任务编排实证 | 纪景锟 | 2026-02-25 | 已通过 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md`、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 维持复合用例滚动统计与失败复盘 |
+| G-3 契约一致性证据 | 纪景锟 | 2026-02-25 | 已通过 | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md`、`8.3 C06 收口执行记录` | 保持契约周检，发现漂移即回填 |
+| G-4 P1 回滚演练证据 | 纪景锟 | 2026-02-25 | 已通过 | `runtime_cancel_control_implementation_plan.md`（第 7 节回滚记录）、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 纳入发布前固定回滚演练清单 |
+
+### 11.6 WAVE_ROLLBACK_DRILL_MATRIX（波次级回滚演练矩阵）
+
+| Wave | 组合回滚锚点 | 演练批次 | 恢复结果 | 证据链接 |
+|---|---|---|---|---|
+| P1 | `ENABLE_RUN_CONTROL` + `ENABLE_SSE_STOPPED_EVENT` | 2026-02-25-DRILL-01 | 通过（核心链路恢复） | `runtime_cancel_control_implementation_plan.md` 第 7 节 |
+| P2 | `ENABLE_TOOL_GOVERNANCE` + `TOOL_POLICY_FAIL_MODE` | 2026-02-25-DRILL-02 | 通过（治理链路恢复） | `ai_tools_governance_implementation_plan.md` 第 4 节 |
+| P3 | `ENABLE_SKILL_VERSIONING` + `ENABLE_USER_SKILL_BINDING` | 2026-02-25-DRILL-03 | 通过（版本/绑定恢复） | `skill_multi_user_versioning_implementation_plan.md` 第 6 节 |
+| P4 | `ENABLE_MEMORY_RECALL` + `ENABLE_PRE_COMPACTION_FLUSH` | 2026-02-25-DRILL-04 | 通过（记忆注入恢复） | `user_preference_memory_implementation_plan.md` 第 7 节 |
+| P5 | `ENABLE_RUNTIME_RECOVERY` + `ENABLE_PLUGIN_REGISTRY` | 2026-02-25-DRILL-05 | 通过（恢复/插件链路恢复） | `openclaw迁移重建基线_implementation_plan.md` 第 4.10 节 |
+| P6 | `WAVE_ROLLBACK_DRILL_MATRIX` + `python3 scripts/docs_guard.py --strict` | 2026-02-25-DRILL-06 | 通过（docs/code/test 收口） | `8.3 C06 收口执行记录` |

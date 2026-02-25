@@ -1,7 +1,7 @@
 # OpenClaw迁移重建基线 实施方案
 
 > 文档状态：`/jjk-plan -p -h` 产物（实现侧）  
-> 更新时间：2026-02-21  
+> 更新时间：2026-02-25  
 > 主题：openclaw迁移重建基线  
 > 执行模式：`serial`（单活卡片）
 
@@ -315,13 +315,18 @@ if plugin_registry_unhealthy():
 4. 关键契约字段：Gate 状态、evidence 四元组、回滚演练记录。
 5. 验收命令：
    - `python3 scripts/docs_guard.py --strict`
-6. 回滚锚点：按 Wave 锚点组合演练并记录恢复结果。
-7. 证据入口：归一化草案 FP-09/FP-10/FP-11 + Conflict `CF-05/CF-08`。
+6. 回滚锚点：`WAVE_ROLLBACK_DRILL_MATRIX`（`迁移执行波次_implementation_plan.md` 第 11.6 节）。
+7. 证据入口：归一化草案 FP-09/FP-10/FP-11 + Conflict `CF-05/CF-08` + `迁移执行波次_implementation_plan.md` 第 8.3/11.5/11.6 节。
 8. 最小代码样例：
 
 ```python
 assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
 ```
+
+9. 执行留痕（2026-02-25）：
+   - G-1~G-4 全部通过并完成证据链复核。
+   - docs/code/test 三线收口完成（`scripts/docs_guard.py` 严格门禁通过）。
+   - 各 Wave 回滚锚点组合演练通过并写入 `WAVE_ROLLBACK_DRILL_MATRIX`。
 
 ---
 
