@@ -8,7 +8,7 @@
 """
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.utils.embedding_util import get_embedding
 from app.db.session import get_db
-from app.models.agent_skill import AgentSkill
+from app.models.agent_skill import AgentSkill, AgentSkillVersion, UserSkillBinding
 from app.services.skill_service import SkillService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,10 @@ class SkillResponse(BaseModel):
     scope: str
     trigger_phrases: List[str]
     conflicts_with: List[str]
+    published_version: Optional[str] = None
+    bound_version: Optional[str] = None
+    binding_status: Optional[str] = None
+    effective_version: Optional[str] = None
     created_at: Optional[str]
     updated_at: Optional[str]
 
@@ -95,6 +99,65 @@ class SkillMetadataUpdateRequest(BaseModel):
     conflicts_with: Optional[List[str]] = None
 
 
+class SkillVersionItem(BaseModel):
+    """技能版本信息。"""
+
+    skill_id: str
+    version: str
+    status: str
+    name: str
+    description: Optional[str]
+    is_enabled: bool
+    auto_enabled: bool
+    priority: int
+    scope: str
+    published_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class PublishVersionRequest(BaseModel):
+    """发布技能版本请求。"""
+
+    version: str = Field(..., min_length=1, max_length=64)
+
+
+class RollbackVersionRequest(BaseModel):
+    """回滚技能版本请求。"""
+
+    target_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+class BindSkillRequest(BaseModel):
+    """用户技能绑定请求。"""
+
+    user_id: int = Field(..., ge=1)
+    skill_id: str = Field(..., min_length=1, max_length=100)
+    version: str = Field(..., min_length=1, max_length=64)
+    is_enabled: bool = True
+    priority_override: Optional[int] = Field(default=None, ge=0, le=10000)
+    config_override: Optional[Dict[str, Any]] = None
+
+
+class RollbackBindingRequest(BaseModel):
+    """用户绑定回滚请求。"""
+
+    user_id: int = Field(..., ge=1)
+    skill_id: str = Field(..., min_length=1, max_length=100)
+
+
+class SkillBindingItem(BaseModel):
+    """用户技能绑定信息。"""
+
+    user_id: int
+    skill_id: str
+    version: Optional[str]
+    binding_status: str
+    is_enabled: bool
+    priority_override: Optional[int]
+    config_override: Dict[str, Any]
+    updated_at: Optional[str]
+
+
 class SearchResultItem(BaseModel):
     """技能搜索结果。"""
 
@@ -105,6 +168,8 @@ class SearchResultItem(BaseModel):
     vector_score: float
     lexical_score: float
     trigger_hit: float
+    effective_version: Optional[str] = None
+    binding_status: Optional[str] = None
 
 
 @router.get("/skills", response_model=List[SkillResponse])
@@ -113,6 +178,7 @@ def list_skills(
     limit: int = Query(50, le=200),
     search: Optional[str] = None,
     has_embedding: Optional[bool] = None,
+    user_id: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
     """获取技能列表。"""
@@ -134,27 +200,94 @@ def list_skills(
 
     skills = query.order_by(AgentSkill.name).offset(skip).limit(limit).all()
 
-    return [
-        SkillResponse(
-            id=skill.id,
-            skill_id=skill.skill_id,
-            name=skill.name,
-            description=skill.description,
-            content_preview=skill.content[:200] + "..." if len(skill.content) > 200 else skill.content,
-            file_hash=skill.file_hash,
-            has_embedding=skill.embedding is not None,
-            embedding_dim=len(skill.embedding) if skill.embedding is not None else None,
-            is_enabled=bool(skill.is_enabled),
-            auto_enabled=bool(skill.auto_enabled),
-            priority=int(skill.priority or 100),
-            scope=skill.scope or SkillService.DEFAULT_SCOPE,
-            trigger_phrases=[str(item) for item in (skill.trigger_phrases or [])],
-            conflicts_with=[str(item) for item in (skill.conflicts_with or [])],
-            created_at=skill.created_at.isoformat() if skill.created_at else None,
-            updated_at=skill.updated_at.isoformat() if skill.updated_at else None,
+    skill_ids = [skill.skill_id for skill in skills]
+    published_version_map: Dict[str, str] = {}
+    binding_map: Dict[str, UserSkillBinding] = {}
+
+    if skill_ids and SkillService._is_skill_versioning_enabled():
+        try:
+            version_rows = (
+                db.query(AgentSkillVersion)
+                .filter(
+                    AgentSkillVersion.skill_id.in_(skill_ids),
+                    AgentSkillVersion.status == SkillService.VERSION_STATUS_PUBLISHED,
+                )
+                .all()
+            )
+            for row in version_rows:
+                current = published_version_map.get(row.skill_id)
+                if current is None:
+                    published_version_map[row.skill_id] = row.version
+                    continue
+
+                current_row = next((item for item in version_rows if item.skill_id == row.skill_id and item.version == current), None)
+                current_ts = (
+                    current_row.published_at or current_row.updated_at or current_row.created_at
+                    if current_row is not None
+                    else None
+                )
+                row_ts = row.published_at or row.updated_at or row.created_at
+                if current_ts is None or (row_ts is not None and row_ts > current_ts):
+                    published_version_map[row.skill_id] = row.version
+        except Exception as exc:  # pragma: no cover - 兼容迁移期
+            logger.warning("查询发布版本失败，回退兼容响应: %s", exc)
+
+    if skill_ids and user_id is not None and SkillService._is_user_skill_binding_enabled():
+        try:
+            binding_rows = (
+                db.query(UserSkillBinding)
+                .filter(
+                    UserSkillBinding.user_id == user_id,
+                    UserSkillBinding.skill_id.in_(skill_ids),
+                )
+                .all()
+            )
+            binding_map = {row.skill_id: row for row in binding_rows}
+        except Exception as exc:  # pragma: no cover - 兼容迁移期
+            logger.warning("查询用户技能绑定失败，忽略绑定信息: %s", exc)
+
+    response: List[SkillResponse] = []
+    for skill in skills:
+        published_version = published_version_map.get(skill.skill_id)
+        binding = binding_map.get(skill.skill_id)
+        bound_version = binding.version if binding is not None else None
+        binding_status = binding.binding_status if binding is not None else None
+
+        effective_version = published_version
+        if (
+            binding is not None
+            and binding.binding_status == SkillService.BINDING_STATUS_ENABLED
+            and bool(binding.is_enabled)
+            and bound_version
+        ):
+            effective_version = bound_version
+
+        response.append(
+            SkillResponse(
+                id=skill.id,
+                skill_id=skill.skill_id,
+                name=skill.name,
+                description=skill.description,
+                content_preview=skill.content[:200] + "..." if len(skill.content) > 200 else skill.content,
+                file_hash=skill.file_hash,
+                has_embedding=skill.embedding is not None,
+                embedding_dim=len(skill.embedding) if skill.embedding is not None else None,
+                is_enabled=bool(skill.is_enabled),
+                auto_enabled=bool(skill.auto_enabled),
+                priority=int(skill.priority or 100),
+                scope=skill.scope or SkillService.DEFAULT_SCOPE,
+                trigger_phrases=[str(item) for item in (skill.trigger_phrases or [])],
+                conflicts_with=[str(item) for item in (skill.conflicts_with or [])],
+                published_version=published_version,
+                bound_version=bound_version,
+                binding_status=binding_status,
+                effective_version=effective_version,
+                created_at=skill.created_at.isoformat() if skill.created_at else None,
+                updated_at=skill.updated_at.isoformat() if skill.updated_at else None,
+            )
         )
-        for skill in skills
-    ]
+
+    return response
 
 
 @router.get("/skills/{skill_id}", response_model=SkillDetailResponse)
@@ -181,6 +314,136 @@ def get_skill(skill_id: str, db: Session = Depends(get_db)):
         trigger_phrases=[str(item) for item in (skill.trigger_phrases or [])],
         conflicts_with=[str(item) for item in (skill.conflicts_with or [])],
     )
+
+
+@router.get("/skills/{skill_id}/versions", response_model=List[SkillVersionItem])
+def list_skill_versions(skill_id: str, db: Session = Depends(get_db)):
+    """获取技能版本列表。"""
+
+    try:
+        versions = SkillService.list_skill_versions(db, skill_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return [SkillVersionItem(**item) for item in versions]
+
+
+@router.post("/skills/{skill_id}/versions/publish")
+def publish_skill_version(skill_id: str, request: PublishVersionRequest, db: Session = Depends(get_db)):
+    """发布指定技能版本。"""
+
+    try:
+        payload = SkillService.publish_skill_version(
+            db=db,
+            skill_id=skill_id,
+            version=request.version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    logger.info("技能版本发布: skill_id=%s version=%s", skill_id, request.version)
+    return payload
+
+
+@router.post("/skills/{skill_id}/versions/rollback")
+def rollback_skill_version(skill_id: str, request: RollbackVersionRequest, db: Session = Depends(get_db)):
+    """回滚技能到指定版本或最近可用版本。"""
+
+    try:
+        payload = SkillService.rollback_skill_version(
+            db=db,
+            skill_id=skill_id,
+            target_version=request.target_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    logger.info(
+        "技能版本回滚: skill_id=%s target=%s active=%s",
+        skill_id,
+        request.target_version,
+        payload.get("active_version"),
+    )
+    return payload
+
+
+@router.get("/bindings", response_model=List[SkillBindingItem])
+def list_skill_bindings(
+    user_id: Optional[int] = Query(None, ge=1),
+    skill_id: Optional[str] = None,
+    binding_status: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """查询用户技能绑定。"""
+
+    try:
+        bindings = SkillService.list_user_skill_bindings(
+            db=db,
+            user_id=user_id,
+            skill_id=skill_id,
+            binding_status=binding_status,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return [SkillBindingItem(**item) for item in bindings]
+
+
+@router.post("/bindings")
+def bind_skill(request: BindSkillRequest, db: Session = Depends(get_db)):
+    """绑定用户技能版本。"""
+
+    try:
+        payload = SkillService.bind_user_skill(
+            db=db,
+            user_id=request.user_id,
+            skill_id=request.skill_id,
+            version=request.version,
+            is_enabled=request.is_enabled,
+            priority_override=request.priority_override,
+            config_override=request.config_override,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    logger.info(
+        "用户技能绑定: user_id=%s skill_id=%s version=%s",
+        request.user_id,
+        request.skill_id,
+        request.version,
+    )
+    return payload
+
+
+@router.post("/bindings/rollback")
+def rollback_skill_binding(request: RollbackBindingRequest, db: Session = Depends(get_db)):
+    """回滚用户技能绑定。"""
+
+    try:
+        payload = SkillService.rollback_user_skill_binding(
+            db=db,
+            user_id=request.user_id,
+            skill_id=request.skill_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    logger.info(
+        "用户技能绑定回滚: user_id=%s skill_id=%s",
+        request.user_id,
+        request.skill_id,
+    )
+    return payload
 
 
 @router.patch("/skills/{skill_id}/meta")
@@ -382,6 +645,7 @@ def search_skills(
     top_k: int = Query(5, ge=1, le=20),
     threshold: Optional[float] = Query(None, ge=0, le=1),
     scope: str = Query("global"),
+    user_id: Optional[int] = Query(None, ge=1),
 ):
     """搜索技能（优先使用 hybrid 检索，返回简化结果）。"""
 
@@ -391,6 +655,7 @@ def search_skills(
         threshold=threshold,
         scope=scope,
         auto_only=False,
+        user_id=user_id,
     )
 
     results = [
@@ -402,6 +667,8 @@ def search_skills(
             vector_score=float(item.get("vector_score", 0.0)),
             lexical_score=float(item.get("lexical_score", 0.0)),
             trigger_hit=float(item.get("trigger_hit", 0.0)),
+            effective_version=item.get("effective_version"),
+            binding_status=item.get("binding_status"),
         ).model_dump()
         for item in debug.get("results", [])
     ]
@@ -421,6 +688,7 @@ def search_skills_hybrid(
     threshold: Optional[float] = Query(None, ge=0, le=1),
     scope: str = Query("global"),
     auto_only: bool = Query(False),
+    user_id: Optional[int] = Query(None, ge=1),
 ):
     """Hybrid 检索调试接口，返回召回与裁决明细。"""
 
@@ -430,4 +698,5 @@ def search_skills_hybrid(
         threshold=threshold,
         scope=scope,
         auto_only=auto_only,
+        user_id=user_id,
     )

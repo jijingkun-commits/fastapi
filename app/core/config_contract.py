@@ -203,6 +203,22 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         value_type="number",
         default=3,
     ),
+    "feature.enable_skill_versioning": ConfigSpec(
+        key="feature.enable_skill_versioning",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_SKILL_VERSIONING",
+        aliases=("skill.enable_versioning",),
+    ),
+    "feature.enable_user_skill_binding": ConfigSpec(
+        key="feature.enable_user_skill_binding",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_USER_SKILL_BINDING",
+        aliases=("skill.enable_user_binding",),
+    ),
     # ==================== 问数权限配置（主键 askdata.*, 兼容 data_access.*） ====================
     "askdata.table_whitelist": ConfigSpec(
         key="askdata.table_whitelist",

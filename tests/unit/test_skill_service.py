@@ -1,8 +1,9 @@
 """SkillService 单元测试（中文注释）。"""
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from app.models.agent_skill import AgentSkillVersion, UserSkillBinding
 from app.services.skill_service import SkillService
 
 
@@ -322,6 +323,7 @@ def test_build_retrieval_log_should_include_trace_fields() -> None:
         query="按分行统计贷款余额",
         thread_id="thread-skill-001",
         trace_id="trace-skill-001",
+        user_id=101,
         retrieval_mode="hybrid",
         scope="data",
         top_k=2,
@@ -336,6 +338,7 @@ def test_build_retrieval_log_should_include_trace_fields() -> None:
 
     assert retrieval_log["thread_id"] == "thread-skill-001"
     assert retrieval_log["trace_id"] == "trace-skill-001"
+    assert retrieval_log["user_id"] == 101
     assert len(retrieval_log["query_hash"]) == 16
     assert retrieval_log["selected_skill_ids"] == ["sql-expert"]
     assert retrieval_log["candidate_count"] == 2
@@ -594,3 +597,141 @@ def test_skill_ingest_import_all_returns_zero_when_missing_dir(tmp_path: Path) -
 
     missing_dir = tmp_path / "missing"
     assert SkillService.import_all_skills(missing_dir) == 0
+
+
+class _SequentialResult:
+    """按调用顺序返回 execute 结果。"""
+
+    def __init__(self, scalar=None, scalars: Optional[List[Any]] = None):  # noqa: ANN001
+        self._scalar = scalar
+        self._scalars = scalars or []
+
+    def scalar_one_or_none(self):  # noqa: ANN001
+        return self._scalar
+
+    def scalars(self):  # noqa: ANN001
+        return self
+
+    def all(self) -> List[Any]:
+        return list(self._scalars)
+
+
+class _SequentialSession:
+    """顺序消费 execute 结果的轻量 Session。"""
+
+    def __init__(self, results: List[_SequentialResult]):
+        self._results = list(results)
+        self.added: List[Any] = []
+        self.commit_count = 0
+
+    def execute(self, statement):  # noqa: ANN001
+        _ = statement
+        if not self._results:
+            raise AssertionError("execute 调用次数超出预期")
+        return self._results.pop(0)
+
+    def add(self, item: Any) -> None:
+        self.added.append(item)
+
+    def commit(self) -> None:
+        self.commit_count += 1
+
+
+def test_skill_version_publish_should_switch_active_version(monkeypatch) -> None:  # noqa: ANN001
+    """发布新版本时应将旧 published 版本标记为 rollbacked。"""
+
+    version_v1 = AgentSkillVersion(
+        definition_id=1,
+        skill_id="loan-advice",
+        version="v1",
+        status=SkillService.VERSION_STATUS_PUBLISHED,
+        name="贷款分析",
+        content="v1",
+    )
+    version_v2 = AgentSkillVersion(
+        definition_id=1,
+        skill_id="loan-advice",
+        version="v2",
+        status=SkillService.VERSION_STATUS_DRAFT,
+        name="贷款分析",
+        content="v2",
+    )
+
+    session = _SequentialSession(results=[_SequentialResult(scalars=[version_v1, version_v2])])
+
+    monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(SkillService, "_bootstrap_versioned_record_from_legacy", classmethod(lambda cls, db, skill_id: None))
+    monkeypatch.setattr(SkillService, "_sync_legacy_record_from_version", classmethod(lambda cls, db, version: None))
+
+    payload = SkillService.publish_skill_version(session, "loan-advice", "v2")
+
+    assert payload["published_version"] == "v2"
+    assert payload["previous_version"] == "v1"
+    assert version_v1.status == SkillService.VERSION_STATUS_ROLLBACKED
+    assert version_v2.status == SkillService.VERSION_STATUS_PUBLISHED
+    assert session.commit_count == 1
+
+
+def test_skill_binding_bind_user_skill_should_create_binding(monkeypatch) -> None:  # noqa: ANN001
+    """用户绑定应写入 version 与状态，避免跨用户污染。"""
+
+    version_v2 = AgentSkillVersion(
+        definition_id=1,
+        skill_id="loan-advice",
+        version="v2",
+        status=SkillService.VERSION_STATUS_PUBLISHED,
+        name="贷款分析",
+        content="v2",
+    )
+
+    session = _SequentialSession(
+        results=[
+            _SequentialResult(scalar=version_v2),
+            _SequentialResult(scalar=None),
+        ]
+    )
+
+    monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(SkillService, "_is_user_skill_binding_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(SkillService, "_bootstrap_versioned_record_from_legacy", classmethod(lambda cls, db, skill_id: None))
+
+    payload = SkillService.bind_user_skill(
+        db=session,
+        user_id=2001,
+        skill_id="loan-advice",
+        version="v2",
+        is_enabled=True,
+        priority_override=12,
+    )
+
+    assert payload["user_id"] == 2001
+    assert payload["version"] == "v2"
+    assert payload["binding_status"] == SkillService.BINDING_STATUS_ENABLED
+    assert session.commit_count == 1
+    assert len(session.added) == 1
+    created_binding = session.added[0]
+    assert created_binding.user_id == 2001
+    assert created_binding.skill_id == "loan-advice"
+
+
+def test_skill_binding_rollback_user_binding_should_disable_override(monkeypatch) -> None:  # noqa: ANN001
+    """绑定回滚后应停用用户覆盖并回退平台版本。"""
+
+    binding = UserSkillBinding(
+        user_id=2002,
+        skill_id="loan-advice",
+        version="v2",
+        binding_status=SkillService.BINDING_STATUS_ENABLED,
+        is_enabled=True,
+    )
+    session = _SequentialSession(results=[_SequentialResult(scalar=binding)])
+
+    monkeypatch.setattr(SkillService, "_is_user_skill_binding_enabled", classmethod(lambda cls: True))
+
+    payload = SkillService.rollback_user_skill_binding(session, user_id=2002, skill_id="loan-advice")
+
+    assert payload["binding_status"] == SkillService.BINDING_STATUS_ROLLBACKED
+    assert payload["rolled_back_version"] == "v2"
+    assert binding.version is None
+    assert binding.is_enabled is False
+    assert session.commit_count == 1

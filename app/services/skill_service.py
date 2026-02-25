@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.ai.utils.embedding_util import get_embedding
 from app.core.config import SKILL_SIMILARITY_THRESHOLD
 from app.db.session import get_db_context
-from app.models.agent_skill import AgentSkill
+from app.models.agent_skill import AgentSkill, AgentSkillDefinition, AgentSkillVersion, UserSkillBinding
 from app.services.config_resolver import ConfigResolver
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,38 @@ class SkillService:
         "description": ("description",),
         "scope": ("scope",),
         "priority": ("priority",),
+        "version": ("version", "skill_version", "skill-version"),
         "auto_enabled": ("auto_enabled", "auto-enabled", "autoEnabled"),
         "is_enabled": ("is_enabled", "is-enabled", "enabled"),
         "trigger_phrases": ("trigger_phrases", "trigger-phrases"),
         "conflicts_with": ("conflicts_with", "conflicts-with"),
+    }
+
+    DEFAULT_VERSION = "v1"
+    VERSION_STATUS_DRAFT = "draft"
+    VERSION_STATUS_PUBLISHED = "published"
+    VERSION_STATUS_ROLLBACKED = "rollbacked"
+    VERSION_STATUS_DEPRECATED = "deprecated"
+    VERSION_STATUS_ORDER = {
+        VERSION_STATUS_PUBLISHED: 3,
+        VERSION_STATUS_ROLLBACKED: 2,
+        VERSION_STATUS_DRAFT: 1,
+        VERSION_STATUS_DEPRECATED: 0,
+    }
+    VALID_VERSION_STATUS = {
+        VERSION_STATUS_DRAFT,
+        VERSION_STATUS_PUBLISHED,
+        VERSION_STATUS_ROLLBACKED,
+        VERSION_STATUS_DEPRECATED,
+    }
+
+    BINDING_STATUS_ENABLED = "enabled"
+    BINDING_STATUS_DISABLED = "disabled"
+    BINDING_STATUS_ROLLBACKED = "rollbacked"
+    VALID_BINDING_STATUS = {
+        BINDING_STATUS_ENABLED,
+        BINDING_STATUS_DISABLED,
+        BINDING_STATUS_ROLLBACKED,
     }
 
     @staticmethod
@@ -78,6 +106,51 @@ class SkillService:
         if len(normalized) > 80:
             normalized = f"{normalized[:77]}..."
         return f"field={field} value={normalized!r} message={message}"
+
+    @staticmethod
+    def _normalize_version_value(raw_value: Any, default: str = DEFAULT_VERSION) -> Tuple[str, bool]:
+        """标准化版本号。"""
+
+        if raw_value is None:
+            return default, True
+
+        normalized = str(raw_value).strip()
+        if not normalized:
+            return default, False
+
+        if len(normalized) > 64:
+            return default, False
+
+        return normalized, True
+
+    @classmethod
+    def _is_skill_versioning_enabled(cls) -> bool:
+        """判断是否启用 Skill 版本治理。"""
+
+        return ConfigResolver.get_bool("feature.enable_skill_versioning", False)
+
+    @classmethod
+    def _is_user_skill_binding_enabled(cls) -> bool:
+        """判断是否启用用户级 Skill 绑定。"""
+
+        return ConfigResolver.get_bool("feature.enable_user_skill_binding", False)
+
+    @classmethod
+    def _is_versioning_runtime_enabled(cls) -> bool:
+        """运行时是否启用版本化检索路径。"""
+
+        return cls._is_skill_versioning_enabled()
+
+    @staticmethod
+    def _normalize_binding_status(raw_value: Any, default: str = BINDING_STATUS_ENABLED) -> str:
+        """标准化绑定状态值。"""
+
+        normalized = str(raw_value or "").strip().lower()
+        if not normalized:
+            return default
+        if normalized in SkillService.VALID_BINDING_STATUS:
+            return normalized
+        return default
 
     @staticmethod
     def _get_frontmatter_value(frontmatter: Dict[str, Any], aliases: Tuple[str, ...]) -> Tuple[Any, bool]:
@@ -245,6 +318,7 @@ class SkillService:
         description = ""
         scope = cls.DEFAULT_SCOPE
         priority = cls.DEFAULT_PRIORITY
+        version = cls.DEFAULT_VERSION
         auto_enabled = True
         is_enabled = True
         trigger_phrases: List[str] = []
@@ -338,6 +412,21 @@ class SkillService:
                     )
                 )
 
+        version_value, has_version = cls._get_frontmatter_value(
+            frontmatter_data,
+            cls.FRONTMATTER_ALIASES["version"],
+        )
+        if has_version:
+            version, valid_version = cls._normalize_version_value(version_value, default=cls.DEFAULT_VERSION)
+            if not valid_version:
+                warnings.append(
+                    cls._format_warning(
+                        "version",
+                        "需为 1-64 字符字符串，已回退默认值",
+                        version_value,
+                    )
+                )
+
         auto_enabled_value, has_auto_enabled = cls._get_frontmatter_value(
             frontmatter_data,
             cls.FRONTMATTER_ALIASES["auto_enabled"],
@@ -425,6 +514,7 @@ class SkillService:
             "content": content,
             "scope": scope,
             "priority": priority,
+            "version": version,
             "auto_enabled": auto_enabled,
             "is_enabled": is_enabled,
             "trigger_phrases": trigger_phrases,
@@ -432,6 +522,93 @@ class SkillService:
             "frontmatter_status": frontmatter_status,
             "warnings": warnings,
         }
+
+    @classmethod
+    def _sync_versioned_records(
+        cls,
+        db: Session,
+        parsed: Dict[str, Any],
+        file_hash: str,
+        embedding: Optional[List[float]],
+    ) -> None:
+        """同步 Skill 定义层与版本层记录。"""
+
+        skill_id = str(parsed["skill_id"])
+
+        definition = db.execute(
+            select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
+        ).scalar_one_or_none()
+
+        if definition is None:
+            definition = AgentSkillDefinition(
+                skill_id=skill_id,
+                name=parsed["name"],
+                description=parsed.get("description"),
+                scope=parsed.get("scope") or cls.DEFAULT_SCOPE,
+                is_enabled=bool(parsed.get("is_enabled", True)),
+            )
+            db.add(definition)
+            db.flush()
+        else:
+            definition.name = parsed["name"]
+            definition.description = parsed.get("description")
+            definition.scope = parsed.get("scope") or cls.DEFAULT_SCOPE
+            definition.is_enabled = bool(parsed.get("is_enabled", True))
+
+        version_value, _ = cls._normalize_version_value(parsed.get("version"), default=cls.DEFAULT_VERSION)
+
+        version_record = db.execute(
+            select(AgentSkillVersion).where(
+                AgentSkillVersion.skill_id == skill_id,
+                AgentSkillVersion.version == version_value,
+            )
+        ).scalar_one_or_none()
+
+        if version_record is None:
+            existing_published = db.execute(
+                select(AgentSkillVersion.id).where(
+                    AgentSkillVersion.skill_id == skill_id,
+                    AgentSkillVersion.status == cls.VERSION_STATUS_PUBLISHED,
+                )
+            ).first()
+            initial_status = cls.VERSION_STATUS_PUBLISHED if existing_published is None else cls.VERSION_STATUS_DRAFT
+            published_at = datetime.now(timezone.utc) if initial_status == cls.VERSION_STATUS_PUBLISHED else None
+
+            version_record = AgentSkillVersion(
+                definition_id=definition.id,
+                skill_id=skill_id,
+                version=version_value,
+                status=initial_status,
+                name=parsed["name"],
+                description=parsed.get("description"),
+                content=parsed["content"],
+                file_hash=file_hash,
+                embedding=embedding,
+                is_enabled=bool(parsed.get("is_enabled", True)),
+                auto_enabled=bool(parsed.get("auto_enabled", True)),
+                priority=int(parsed.get("priority", cls.DEFAULT_PRIORITY)),
+                scope=parsed.get("scope") or cls.DEFAULT_SCOPE,
+                trigger_phrases=parsed.get("trigger_phrases") or [],
+                conflicts_with=parsed.get("conflicts_with") or [],
+                published_at=published_at,
+            )
+            db.add(version_record)
+            return
+
+        version_record.definition_id = definition.id
+        version_record.name = parsed["name"]
+        version_record.description = parsed.get("description")
+        version_record.content = parsed["content"]
+        version_record.file_hash = file_hash
+        version_record.embedding = embedding
+        version_record.is_enabled = bool(parsed.get("is_enabled", True))
+        version_record.auto_enabled = bool(parsed.get("auto_enabled", True))
+        version_record.priority = int(parsed.get("priority", cls.DEFAULT_PRIORITY))
+        version_record.scope = parsed.get("scope") or cls.DEFAULT_SCOPE
+        version_record.trigger_phrases = parsed.get("trigger_phrases") or []
+        version_record.conflicts_with = parsed.get("conflicts_with") or []
+        if version_record.status == cls.VERSION_STATUS_PUBLISHED and version_record.published_at is None:
+            version_record.published_at = datetime.now(timezone.utc)
 
     @classmethod
     def import_skill(cls, skill_path: Path, db: Session, force: bool = False) -> bool:
@@ -454,6 +631,7 @@ class SkillService:
 
         content = parsed["content"]
         file_hash = cls._compute_file_hash(content)
+        embedding = get_embedding(parsed.get("description") or parsed.get("name") or skill_id)
 
         existing = db.execute(
             select(AgentSkill).where(AgentSkill.skill_id == skill_id)
@@ -468,7 +646,7 @@ class SkillService:
             existing.description = parsed["description"]
             existing.content = content
             existing.file_hash = file_hash
-            existing.embedding = get_embedding(parsed["description"])
+            existing.embedding = embedding
             existing.scope = parsed["scope"]
             existing.priority = parsed["priority"]
             existing.auto_enabled = parsed["auto_enabled"]
@@ -477,7 +655,6 @@ class SkillService:
             existing.conflicts_with = parsed["conflicts_with"]
             logger.info("更新技能: %s", skill_id)
         else:
-            embedding = get_embedding(parsed["description"])
             skill = AgentSkill(
                 skill_id=skill_id,
                 name=parsed["name"],
@@ -494,6 +671,14 @@ class SkillService:
             )
             db.add(skill)
             logger.info("导入技能: %s", skill_id)
+
+        if cls._is_skill_versioning_enabled():
+            cls._sync_versioned_records(
+                db=db,
+                parsed=parsed,
+                file_hash=file_hash,
+                embedding=embedding,
+            )
 
         db.commit()
         return True
@@ -555,6 +740,376 @@ class SkillService:
         """同步变化的技能（增量更新）。"""
 
         return cls.import_all_skills(skills_dir, force=False)
+
+    @staticmethod
+    def _version_sort_key(version_record: AgentSkillVersion) -> Tuple[int, float, int]:
+        """版本排序键：状态优先，其次发布时间与主键。"""
+
+        status_rank = SkillService.VERSION_STATUS_ORDER.get(
+            str(version_record.status or SkillService.VERSION_STATUS_DRAFT).lower(),
+            0,
+        )
+        ts_source = version_record.published_at or version_record.updated_at or version_record.created_at
+        ts_value = ts_source.timestamp() if ts_source is not None else 0.0
+        return status_rank, ts_value, int(version_record.id or 0)
+
+    @classmethod
+    def _sync_legacy_record_from_version(cls, db: Session, version_record: AgentSkillVersion) -> None:
+        """将发布版本同步回兼容表，保证回滚开关可用。"""
+
+        legacy = db.execute(
+            select(AgentSkill).where(AgentSkill.skill_id == version_record.skill_id)
+        ).scalar_one_or_none()
+
+        if legacy is None:
+            legacy = AgentSkill(skill_id=version_record.skill_id, name=version_record.name, content=version_record.content)
+            db.add(legacy)
+
+        legacy.name = version_record.name
+        legacy.description = version_record.description
+        legacy.content = version_record.content
+        legacy.file_hash = version_record.file_hash
+        legacy.embedding = version_record.embedding
+        legacy.is_enabled = bool(version_record.is_enabled)
+        legacy.auto_enabled = bool(version_record.auto_enabled)
+        legacy.priority = int(version_record.priority or cls.DEFAULT_PRIORITY)
+        legacy.scope = version_record.scope or cls.DEFAULT_SCOPE
+        legacy.trigger_phrases = version_record.trigger_phrases or []
+        legacy.conflicts_with = version_record.conflicts_with or []
+
+    @classmethod
+    def _bootstrap_versioned_record_from_legacy(cls, db: Session, skill_id: str) -> None:
+        """当版本表缺失记录时，从兼容表补齐基线版本。"""
+
+        definition = db.execute(
+            select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
+        ).scalar_one_or_none()
+        if definition is not None:
+            return
+
+        legacy = db.execute(
+            select(AgentSkill).where(AgentSkill.skill_id == skill_id)
+        ).scalar_one_or_none()
+        if legacy is None:
+            raise ValueError(f"技能不存在: {skill_id}")
+
+        parsed = {
+            "skill_id": legacy.skill_id,
+            "name": legacy.name,
+            "description": legacy.description,
+            "content": legacy.content,
+            "scope": legacy.scope or cls.DEFAULT_SCOPE,
+            "priority": int(legacy.priority or cls.DEFAULT_PRIORITY),
+            "version": cls.DEFAULT_VERSION,
+            "auto_enabled": bool(legacy.auto_enabled),
+            "is_enabled": bool(legacy.is_enabled),
+            "trigger_phrases": legacy.trigger_phrases or [],
+            "conflicts_with": legacy.conflicts_with or [],
+        }
+        cls._sync_versioned_records(
+            db=db,
+            parsed=parsed,
+            file_hash=legacy.file_hash or cls._compute_file_hash(legacy.content or ""),
+            embedding=legacy.embedding,
+        )
+
+    @classmethod
+    def list_skill_versions(cls, db: Session, skill_id: str) -> List[Dict[str, Any]]:
+        """列出技能版本信息。"""
+
+        if not cls._is_skill_versioning_enabled():
+            legacy = db.execute(
+                select(AgentSkill).where(AgentSkill.skill_id == skill_id)
+            ).scalar_one_or_none()
+            if legacy is None:
+                return []
+            return [
+                {
+                    "skill_id": legacy.skill_id,
+                    "version": cls.DEFAULT_VERSION,
+                    "status": cls.VERSION_STATUS_PUBLISHED,
+                    "name": legacy.name,
+                    "description": legacy.description,
+                    "is_enabled": bool(legacy.is_enabled),
+                    "auto_enabled": bool(legacy.auto_enabled),
+                    "priority": int(legacy.priority or cls.DEFAULT_PRIORITY),
+                    "scope": legacy.scope or cls.DEFAULT_SCOPE,
+                    "published_at": legacy.updated_at.isoformat() if legacy.updated_at else None,
+                    "updated_at": legacy.updated_at.isoformat() if legacy.updated_at else None,
+                }
+            ]
+
+        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
+        versions = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
+        ).scalars().all()
+        sorted_versions = sorted(versions, key=cls._version_sort_key, reverse=True)
+        return [
+            {
+                "skill_id": item.skill_id,
+                "version": item.version,
+                "status": item.status,
+                "name": item.name,
+                "description": item.description,
+                "is_enabled": bool(item.is_enabled),
+                "auto_enabled": bool(item.auto_enabled),
+                "priority": int(item.priority or cls.DEFAULT_PRIORITY),
+                "scope": item.scope or cls.DEFAULT_SCOPE,
+                "published_at": item.published_at.isoformat() if item.published_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            for item in sorted_versions
+        ]
+
+    @classmethod
+    def publish_skill_version(cls, db: Session, skill_id: str, version: str) -> Dict[str, Any]:
+        """发布指定技能版本。"""
+
+        if not cls._is_skill_versioning_enabled():
+            raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
+
+        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
+        target_version, valid_version = cls._normalize_version_value(version, default="")
+        if not valid_version or not target_version:
+            raise ValueError("version 非法")
+
+        versions = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
+        ).scalars().all()
+        if not versions:
+            raise ValueError(f"技能不存在: {skill_id}")
+
+        target = next((item for item in versions if item.version == target_version), None)
+        if target is None:
+            raise ValueError(f"版本不存在: {target_version}")
+
+        previous = next((item for item in versions if item.status == cls.VERSION_STATUS_PUBLISHED), None)
+        now = datetime.now(timezone.utc)
+
+        for item in versions:
+            if item.version == target.version:
+                item.status = cls.VERSION_STATUS_PUBLISHED
+                item.published_at = now
+            elif item.status == cls.VERSION_STATUS_PUBLISHED:
+                item.status = cls.VERSION_STATUS_ROLLBACKED
+
+        cls._sync_legacy_record_from_version(db, target)
+        db.commit()
+
+        return {
+            "skill_id": skill_id,
+            "published_version": target.version,
+            "previous_version": previous.version if previous and previous.version != target.version else None,
+        }
+
+    @classmethod
+    def rollback_skill_version(
+        cls,
+        db: Session,
+        skill_id: str,
+        target_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """回滚技能版本到指定版本或最近候选版本。"""
+
+        if not cls._is_skill_versioning_enabled():
+            raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
+
+        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
+        versions = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
+        ).scalars().all()
+        if not versions:
+            raise ValueError(f"技能不存在: {skill_id}")
+
+        current = next((item for item in versions if item.status == cls.VERSION_STATUS_PUBLISHED), None)
+
+        target: Optional[AgentSkillVersion] = None
+        if target_version:
+            normalized_version, valid_version = cls._normalize_version_value(target_version, default="")
+            if not valid_version or not normalized_version:
+                raise ValueError("target_version 非法")
+            target = next((item for item in versions if item.version == normalized_version), None)
+            if target is None:
+                raise ValueError(f"版本不存在: {normalized_version}")
+        else:
+            candidates = [
+                item for item in versions
+                if item.status != cls.VERSION_STATUS_DEPRECATED and (current is None or item.version != current.version)
+            ]
+            if not candidates:
+                raise ValueError("没有可回滚的目标版本")
+            candidates.sort(key=cls._version_sort_key, reverse=True)
+            target = candidates[0]
+
+        if current is not None and current.version != target.version:
+            current.status = cls.VERSION_STATUS_ROLLBACKED
+
+        target.status = cls.VERSION_STATUS_PUBLISHED
+        target.published_at = datetime.now(timezone.utc)
+
+        cls._sync_legacy_record_from_version(db, target)
+        db.commit()
+
+        return {
+            "skill_id": skill_id,
+            "active_version": target.version,
+            "rolled_back_from": current.version if current and current.version != target.version else None,
+        }
+
+    @classmethod
+    def bind_user_skill(
+        cls,
+        db: Session,
+        user_id: int,
+        skill_id: str,
+        version: str,
+        is_enabled: bool = True,
+        priority_override: Optional[int] = None,
+        config_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """绑定用户技能版本。"""
+
+        if not cls._is_skill_versioning_enabled():
+            raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
+        if not cls._is_user_skill_binding_enabled():
+            raise RuntimeError("ENABLE_USER_SKILL_BINDING 未开启")
+
+        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
+
+        normalized_version, valid_version = cls._normalize_version_value(version, default="")
+        if not valid_version or not normalized_version:
+            raise ValueError("version 非法")
+
+        version_record = db.execute(
+            select(AgentSkillVersion).where(
+                AgentSkillVersion.skill_id == skill_id,
+                AgentSkillVersion.version == normalized_version,
+            )
+        ).scalar_one_or_none()
+        if version_record is None:
+            raise ValueError(f"版本不存在: {normalized_version}")
+
+        binding = db.execute(
+            select(UserSkillBinding).where(
+                UserSkillBinding.user_id == user_id,
+                UserSkillBinding.skill_id == skill_id,
+            )
+        ).scalar_one_or_none()
+
+        if binding is None:
+            binding = UserSkillBinding(user_id=user_id, skill_id=skill_id)
+            db.add(binding)
+
+        binding.version = normalized_version
+        binding.binding_status = cls.BINDING_STATUS_ENABLED if is_enabled else cls.BINDING_STATUS_DISABLED
+        binding.is_enabled = bool(is_enabled)
+        binding.priority_override = priority_override
+        binding.config_override = dict(config_override or {})
+
+        db.commit()
+
+        return {
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "version": normalized_version,
+            "binding_status": binding.binding_status,
+            "is_enabled": binding.is_enabled,
+            "priority_override": binding.priority_override,
+        }
+
+    @classmethod
+    def rollback_user_skill_binding(cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
+        """回滚用户绑定，使其回退到平台发布版本。"""
+
+        if not cls._is_user_skill_binding_enabled():
+            raise RuntimeError("ENABLE_USER_SKILL_BINDING 未开启")
+
+        binding = db.execute(
+            select(UserSkillBinding).where(
+                UserSkillBinding.user_id == user_id,
+                UserSkillBinding.skill_id == skill_id,
+            )
+        ).scalar_one_or_none()
+        if binding is None:
+            raise ValueError("用户绑定不存在")
+
+        previous_version = binding.version
+        binding.version = None
+        binding.is_enabled = False
+        binding.binding_status = cls.BINDING_STATUS_ROLLBACKED
+        binding.priority_override = None
+
+        db.commit()
+
+        return {
+            "user_id": user_id,
+            "skill_id": skill_id,
+            "rolled_back_version": previous_version,
+            "binding_status": binding.binding_status,
+        }
+
+    @classmethod
+    def list_user_skill_bindings(
+        cls,
+        db: Session,
+        user_id: Optional[int] = None,
+        skill_id: Optional[str] = None,
+        binding_status: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """查询用户技能绑定。"""
+
+        if not cls._is_user_skill_binding_enabled():
+            return []
+
+        query = select(UserSkillBinding)
+        if user_id is not None:
+            query = query.where(UserSkillBinding.user_id == user_id)
+        if skill_id:
+            query = query.where(UserSkillBinding.skill_id == skill_id)
+        if binding_status:
+            query = query.where(
+                UserSkillBinding.binding_status == cls._normalize_binding_status(binding_status, default="")
+            )
+
+        bindings = db.execute(query).scalars().all()
+        bindings.sort(key=lambda item: (int(item.user_id), str(item.skill_id)))
+
+        return [
+            {
+                "user_id": int(item.user_id),
+                "skill_id": item.skill_id,
+                "version": item.version,
+                "binding_status": item.binding_status,
+                "is_enabled": bool(item.is_enabled),
+                "priority_override": item.priority_override,
+                "config_override": item.config_override or {},
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            for item in bindings
+        ]
+
+    @classmethod
+    def get_user_binding_map(cls, db: Session, user_id: int, skill_ids: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+        """构造用户绑定映射。"""
+
+        if not cls._is_user_skill_binding_enabled():
+            return {}
+
+        query = select(UserSkillBinding).where(UserSkillBinding.user_id == user_id)
+        if skill_ids:
+            query = query.where(UserSkillBinding.skill_id.in_(skill_ids))
+
+        bindings = db.execute(query).scalars().all()
+        return {
+            item.skill_id: {
+                "version": item.version,
+                "binding_status": item.binding_status,
+                "is_enabled": bool(item.is_enabled),
+                "priority_override": item.priority_override,
+                "config_override": item.config_override or {},
+            }
+            for item in bindings
+        }
 
     @staticmethod
     def _normalize_score(raw_score: Optional[float]) -> float:
@@ -680,13 +1235,188 @@ class SkillService:
         return fragment
 
     @classmethod
-    def _fetch_vector_candidates(
+    def _build_runtime_source_sql(cls, user_id: Optional[int]) -> Tuple[str, Dict[str, Any]]:
+        """构建技能检索运行时数据源 SQL。"""
+
+        if not cls._is_versioning_runtime_enabled():
+            return (
+                """
+                SELECT
+                    id,
+                    skill_id,
+                    name,
+                    description,
+                    content,
+                    is_enabled,
+                    auto_enabled,
+                    priority,
+                    scope,
+                    trigger_phrases,
+                    conflicts_with,
+                    embedding,
+                    NULL::text AS effective_version,
+                    NULL::text AS binding_status
+                FROM t_agent_skills
+                """,
+                {},
+            )
+
+        binding_enabled = cls._is_user_skill_binding_enabled() and user_id is not None
+        params: Dict[str, Any] = {
+            "binding_enabled": binding_enabled,
+            "binding_user_id": int(user_id) if user_id is not None else -1,
+            "default_version": cls.DEFAULT_VERSION,
+        }
+
+        source_sql = """
+            WITH published_versions AS (
+                SELECT DISTINCT ON (v.skill_id)
+                    v.id AS version_id,
+                    v.definition_id,
+                    v.skill_id,
+                    v.version,
+                    v.name,
+                    v.description,
+                    v.content,
+                    v.file_hash,
+                    v.embedding,
+                    v.is_enabled,
+                    v.auto_enabled,
+                    v.priority,
+                    v.scope,
+                    v.trigger_phrases,
+                    v.conflicts_with,
+                    v.status,
+                    v.published_at,
+                    v.updated_at,
+                    v.created_at
+                FROM t_agent_skill_versions v
+                WHERE v.status = 'published'
+                ORDER BY v.skill_id, COALESCE(v.published_at, v.updated_at, v.created_at) DESC, v.id DESC
+            ),
+            active_bindings AS (
+                SELECT
+                    b.user_id,
+                    b.skill_id,
+                    b.version,
+                    b.binding_status,
+                    b.is_enabled,
+                    b.priority_override,
+                    b.config_override
+                FROM t_user_skill_bindings b
+                WHERE (:binding_enabled = true)
+                  AND b.user_id = :binding_user_id
+                  AND b.binding_status = 'enabled'
+                  AND b.is_enabled = true
+            ),
+            binding_versions AS (
+                SELECT
+                    b.user_id,
+                    b.skill_id,
+                    b.version AS bound_version,
+                    b.binding_status,
+                    b.priority_override,
+                    b.config_override,
+                    v.id AS version_id,
+                    v.definition_id,
+                    v.name,
+                    v.description,
+                    v.content,
+                    v.file_hash,
+                    v.embedding,
+                    v.is_enabled AS version_is_enabled,
+                    v.auto_enabled,
+                    v.priority,
+                    v.scope,
+                    v.trigger_phrases,
+                    v.conflicts_with,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'scope') = 'string'
+                        THEN lower(trim(both '"' from (b.config_override -> 'scope')::text))
+                        ELSE NULL
+                    END AS scope_override,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'trigger_phrases') = 'array'
+                        THEN b.config_override -> 'trigger_phrases'
+                        ELSE NULL
+                    END AS trigger_phrases_override,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'conflicts_with') = 'array'
+                        THEN b.config_override -> 'conflicts_with'
+                        ELSE NULL
+                    END AS conflicts_with_override
+                FROM active_bindings b
+                JOIN t_agent_skill_versions v
+                  ON v.skill_id = b.skill_id
+                 AND v.version = b.version
+            )
+            SELECT
+                COALESCE(bv.version_id, pv.version_id, -d.id) AS id,
+                d.skill_id,
+                COALESCE(bv.name, pv.name, d.name) AS name,
+                COALESCE(bv.description, pv.description, d.description) AS description,
+                COALESCE(bv.content, pv.content, '') AS content,
+                CASE
+                    WHEN bv.version_id IS NOT NULL THEN COALESCE(bv.version_is_enabled, true)
+                    WHEN pv.version_id IS NOT NULL THEN COALESCE(pv.is_enabled, true)
+                    ELSE true
+                END AS is_enabled,
+                COALESCE(bv.auto_enabled, pv.auto_enabled, true) AS auto_enabled,
+                COALESCE(bv.priority_override, bv.priority, pv.priority, 100) AS priority,
+                COALESCE(bv.scope_override, bv.scope, pv.scope, d.scope, 'global') AS scope,
+                COALESCE(
+                    bv.trigger_phrases_override,
+                    bv.trigger_phrases,
+                    pv.trigger_phrases,
+                    '[]'::jsonb
+                ) AS trigger_phrases,
+                COALESCE(
+                    bv.conflicts_with_override,
+                    bv.conflicts_with,
+                    pv.conflicts_with,
+                    '[]'::jsonb
+                ) AS conflicts_with,
+                COALESCE(bv.embedding, pv.embedding) AS embedding,
+                COALESCE(bv.bound_version, pv.version, :default_version) AS effective_version,
+                COALESCE(bv.binding_status, 'default') AS binding_status
+            FROM t_agent_skill_definitions d
+            LEFT JOIN published_versions pv
+              ON pv.skill_id = d.skill_id
+            LEFT JOIN binding_versions bv
+              ON bv.skill_id = d.skill_id
+            WHERE d.is_enabled = true
+        """
+
+        return source_sql, params
+
+    @classmethod
+    def _build_candidate_from_row(cls, row: Any) -> Dict[str, Any]:
+        """将 SQL 行映射为统一候选结构。"""
+
+        return {
+            "id": row.id,
+            "skill_id": row.skill_id,
+            "name": row.name,
+            "description": row.description,
+            "content": row.content,
+            "is_enabled": row.is_enabled,
+            "auto_enabled": row.auto_enabled,
+            "priority": row.priority,
+            "scope": row.scope,
+            "trigger_phrases": row.trigger_phrases or [],
+            "conflicts_with": row.conflicts_with or [],
+            "effective_version": getattr(row, "effective_version", None),
+            "binding_status": getattr(row, "binding_status", None),
+        }
+
+    @classmethod
+    def _fetch_vector_candidates_legacy(
         cls,
         db: Session,
         query_embedding: List[float],
         limit: int,
     ) -> List[Dict[str, Any]]:
-        """召回向量候选。"""
+        """兼容路径：从 t_agent_skills 召回向量候选。"""
 
         sql = text(
             """
@@ -726,6 +1456,8 @@ class SkillService:
                     "scope": row.scope,
                     "trigger_phrases": row.trigger_phrases or [],
                     "conflicts_with": row.conflicts_with or [],
+                    "effective_version": None,
+                    "binding_status": None,
                     "vector_score": cls._normalize_score(row.vector_score),
                     "lexical_score": 0.0,
                     "trigger_hit": 0.0,
@@ -734,13 +1466,13 @@ class SkillService:
         return candidates
 
     @classmethod
-    def _fetch_lexical_candidates(
+    def _fetch_lexical_candidates_legacy(
         cls,
         db: Session,
         query: str,
         limit: int,
     ) -> List[Dict[str, Any]]:
-        """召回关键词候选。"""
+        """兼容路径：从 t_agent_skills 召回关键词候选。"""
 
         sql = text(
             """
@@ -763,7 +1495,7 @@ class SkillService:
                 CASE
                     WHEN EXISTS (
                         SELECT 1
-                        FROM jsonb_array_elements_text(trigger_phrases) AS phrase
+                        FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
                         WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
                     ) THEN 1.0
                     ELSE 0.0
@@ -774,7 +1506,7 @@ class SkillService:
                 @@ plainto_tsquery('simple', :query)
                 OR EXISTS (
                     SELECT 1
-                    FROM jsonb_array_elements_text(trigger_phrases) AS phrase
+                    FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
                     WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
                 )
             ORDER BY lexical_score DESC, priority ASC
@@ -798,11 +1530,170 @@ class SkillService:
                     "scope": row.scope,
                     "trigger_phrases": row.trigger_phrases or [],
                     "conflicts_with": row.conflicts_with or [],
+                    "effective_version": None,
+                    "binding_status": None,
                     "vector_score": 0.0,
                     "lexical_score": max(0.0, float(row.lexical_score or 0.0)),
                     "trigger_hit": cls._normalize_score(row.trigger_hit),
                 }
             )
+        return candidates
+
+    @classmethod
+    def _fetch_vector_candidates(
+        cls,
+        db: Session,
+        query_embedding: List[float],
+        limit: int,
+        user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """召回向量候选。"""
+
+        source_sql, base_params = cls._build_runtime_source_sql(user_id)
+
+        sql = text(
+            f"""
+            WITH runtime_skills AS (
+                {source_sql}
+            )
+            SELECT
+                id,
+                skill_id,
+                name,
+                description,
+                content,
+                is_enabled,
+                auto_enabled,
+                priority,
+                scope,
+                trigger_phrases,
+                conflicts_with,
+                effective_version,
+                binding_status,
+                1 - (embedding <=> CAST(:query_vec AS vector)) AS vector_score
+            FROM runtime_skills
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:query_vec AS vector)
+            LIMIT :limit
+            """
+        )
+
+        params = {
+            **base_params,
+            "query_vec": query_embedding,
+            "limit": limit,
+        }
+        try:
+            rows = db.execute(sql, params)
+        except Exception as exc:  # pragma: no cover - 兼容路径
+            if cls._is_versioning_runtime_enabled():
+                logger.warning("技能检索: 版本化向量召回失败，回退兼容表 - %s", exc)
+                return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
+            raise
+
+        candidates: List[Dict[str, Any]] = []
+        for row in rows:
+            candidate = cls._build_candidate_from_row(row)
+            candidate.update(
+                {
+                    "vector_score": cls._normalize_score(row.vector_score),
+                    "lexical_score": 0.0,
+                    "trigger_hit": 0.0,
+                }
+            )
+            candidates.append(candidate)
+
+        if not candidates and cls._is_versioning_runtime_enabled():
+            return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
+
+        return candidates
+
+    @classmethod
+    def _fetch_lexical_candidates(
+        cls,
+        db: Session,
+        query: str,
+        limit: int,
+        user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """召回关键词候选。"""
+
+        source_sql, base_params = cls._build_runtime_source_sql(user_id)
+
+        sql = text(
+            f"""
+            WITH runtime_skills AS (
+                {source_sql}
+            )
+            SELECT
+                id,
+                skill_id,
+                name,
+                description,
+                content,
+                is_enabled,
+                auto_enabled,
+                priority,
+                scope,
+                trigger_phrases,
+                conflicts_with,
+                effective_version,
+                binding_status,
+                ts_rank_cd(
+                    to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(content, '')),
+                    plainto_tsquery('simple', :query)
+                ) AS lexical_score,
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
+                        WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
+                    ) THEN 1.0
+                    ELSE 0.0
+                END AS trigger_hit
+            FROM runtime_skills
+            WHERE
+                to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(content, ''))
+                @@ plainto_tsquery('simple', :query)
+                OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
+                    WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
+                )
+            ORDER BY lexical_score DESC, priority ASC
+            LIMIT :limit
+            """
+        )
+
+        params = {
+            **base_params,
+            "query": query,
+            "raw_query": query.lower(),
+            "limit": limit,
+        }
+        try:
+            rows = db.execute(sql, params)
+        except Exception as exc:  # pragma: no cover - 兼容路径
+            if cls._is_versioning_runtime_enabled():
+                logger.warning("技能检索: 版本化关键词召回失败，回退兼容表 - %s", exc)
+                return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
+            raise
+
+        candidates: List[Dict[str, Any]] = []
+        for row in rows:
+            candidate = cls._build_candidate_from_row(row)
+            candidate.update(
+                {
+                    "vector_score": 0.0,
+                    "lexical_score": max(0.0, float(row.lexical_score or 0.0)),
+                    "trigger_hit": cls._normalize_score(row.trigger_hit),
+                }
+            )
+            candidates.append(candidate)
+
+        if not candidates and cls._is_versioning_runtime_enabled():
+            return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
+
         return candidates
 
     @classmethod
@@ -947,6 +1838,7 @@ class SkillService:
         query: str,
         thread_id: Optional[str],
         trace_id: Optional[str],
+        user_id: Optional[int],
         retrieval_mode: str,
         scope: str,
         top_k: int,
@@ -964,6 +1856,7 @@ class SkillService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "thread_id": cls._normalize_trace_key(thread_id),
             "trace_id": cls._normalize_trace_key(trace_id),
+            "user_id": user_id,
             "query_hash": cls._compute_query_hash(query),
             "query_length": len(query.strip()),
             "mode": retrieval_mode,
@@ -991,6 +1884,7 @@ class SkillService:
         auto_only: bool,
         thread_id: Optional[str] = None,
         trace_id: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Tuple[List[AgentSkill], Dict[str, Any]]:
         """统一检索入口，返回技能列表和调试信息。"""
 
@@ -999,6 +1893,7 @@ class SkillService:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "thread_id": cls._normalize_trace_key(thread_id),
                 "trace_id": cls._normalize_trace_key(trace_id),
+                "user_id": user_id,
                 "query_hash": cls._compute_query_hash(query),
                 "query_length": 0,
                 "mode": "none",
@@ -1049,6 +1944,7 @@ class SkillService:
                         db,
                         query_embedding=query_embedding,
                         limit=final_top_k * candidate_multiplier,
+                        user_id=user_id,
                     )
                 except Exception as exc:  # pragma: no cover - 数据库检索异常
                     logger.warning("技能检索: 向量召回失败，降级关键词检索 - %s", exc)
@@ -1063,6 +1959,7 @@ class SkillService:
                         db,
                         query=query,
                         limit=final_top_k * candidate_multiplier,
+                        user_id=user_id,
                     )
                 except Exception as exc:  # pragma: no cover - 数据库检索异常
                     logger.warning("技能检索: 关键词召回失败 - %s", exc)
@@ -1095,6 +1992,8 @@ class SkillService:
                 trigger_phrases=item.get("trigger_phrases") or [],
                 conflicts_with=item.get("conflicts_with") or [],
             )
+            skill._effective_version = item.get("effective_version")
+            skill._binding_status = item.get("binding_status")
             skill._retrieval_score = item.get("final_score", 0.0)
             skill._vector_score = item.get("vector_score", 0.0)
             skill._lexical_score = item.get("lexical_score", 0.0)
@@ -1112,6 +2011,7 @@ class SkillService:
             query=query,
             thread_id=thread_id,
             trace_id=trace_id,
+            user_id=user_id,
             retrieval_mode=retrieval_mode,
             scope=scope,
             top_k=final_top_k,
@@ -1128,6 +2028,7 @@ class SkillService:
             "query": query,
             "mode": retrieval_mode,
             "scope": scope,
+            "user_id": user_id,
             "threshold": base_threshold,
             "effective_threshold": effective_threshold,
             "vector_candidates": [
@@ -1153,6 +2054,8 @@ class SkillService:
                     "scope": item.get("scope") or cls.DEFAULT_SCOPE,
                     "is_enabled": item.get("is_enabled", True),
                     "auto_enabled": item.get("auto_enabled", True),
+                    "effective_version": item.get("effective_version"),
+                    "binding_status": item.get("binding_status"),
                 }
                 for item in merged[: min(20, len(merged))]
             ],
@@ -1161,6 +2064,7 @@ class SkillService:
                     "skill_id": item["skill_id"],
                     "final_score": round(item.get("final_score", 0.0), 4),
                     "priority": item.get("priority", 100),
+                    "effective_version": item.get("effective_version"),
                 }
                 for item in selected
             ],
@@ -1200,18 +2104,23 @@ class SkillService:
         auto_only: bool = True,
         thread_id: Optional[str] = None,
         trace_id: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> List[AgentSkill]:
         """检索相关技能（支持 hybrid/vector 策略）。"""
 
-        skills, _ = cls._search_skills_internal(
-            query=query,
-            top_k=top_k,
-            threshold=threshold,
-            scope=scope,
-            auto_only=auto_only,
-            thread_id=thread_id,
-            trace_id=trace_id,
-        )
+        search_kwargs: Dict[str, Any] = {
+            "query": query,
+            "top_k": top_k,
+            "threshold": threshold,
+            "scope": scope,
+            "auto_only": auto_only,
+            "thread_id": thread_id,
+            "trace_id": trace_id,
+        }
+        if user_id is not None:
+            search_kwargs["user_id"] = user_id
+
+        skills, _ = cls._search_skills_internal(**search_kwargs)
         return skills
 
     @classmethod
@@ -1224,18 +2133,23 @@ class SkillService:
         auto_only: bool = False,
         thread_id: Optional[str] = None,
         trace_id: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """检索技能并返回调试信息。"""
 
-        skills, debug = cls._search_skills_internal(
-            query=query,
-            top_k=top_k,
-            threshold=threshold,
-            scope=scope,
-            auto_only=auto_only,
-            thread_id=thread_id,
-            trace_id=trace_id,
-        )
+        search_kwargs: Dict[str, Any] = {
+            "query": query,
+            "top_k": top_k,
+            "threshold": threshold,
+            "scope": scope,
+            "auto_only": auto_only,
+            "thread_id": thread_id,
+            "trace_id": trace_id,
+        }
+        if user_id is not None:
+            search_kwargs["user_id"] = user_id
+
+        skills, debug = cls._search_skills_internal(**search_kwargs)
 
         context_budget = int(debug.get("context_budget") or 1200)
         context_preview, injection_meta = cls.format_skills_as_context_with_meta(skills, max_length=context_budget)
@@ -1249,6 +2163,8 @@ class SkillService:
                 "vector_score": round(float(getattr(skill, "_vector_score", 0.0)), 4),
                 "lexical_score": round(float(getattr(skill, "_lexical_score", 0.0)), 4),
                 "trigger_hit": round(float(getattr(skill, "_trigger_hit", 0.0)), 4),
+                "effective_version": getattr(skill, "_effective_version", None),
+                "binding_status": getattr(skill, "_binding_status", None),
             }
             for skill in skills
         ]
@@ -1291,6 +2207,7 @@ class SkillService:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "thread_id": cls._normalize_trace_key(thread_id),
                 "trace_id": cls._normalize_trace_key(trace_id),
+                "user_id": user_id,
                 "query_hash": cls._compute_query_hash(query),
                 "query_length": len(query.strip()),
                 "mode": str(debug.get("mode") or "unknown"),
