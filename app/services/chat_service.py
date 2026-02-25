@@ -7,6 +7,7 @@
 """
 import json
 import logging
+import os
 from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -24,12 +25,22 @@ from app.db.session import get_db_context
 from app.repositories import chat_repo
 from app.services.run_control_service import run_control_service
 from app.services.user_preference_memory_service import (
-    build_user_preference_context,
-    persist_explicit_preferences_from_input,
+    flush,
+    recall,
 )
 
 
 logger = logging.getLogger(__name__)
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _is_memory_feature_enabled(env_name: str, fallback: bool) -> bool:
+    """读取记忆功能开关，支持环境变量覆盖。"""
+
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        return fallback
+    return raw_value.strip().lower() in _TRUE_VALUES
 
 
 # 注意：对话保存逻辑已移至 multi_agent_graph.py 的 postprocess 节点
@@ -334,11 +345,20 @@ class ChatService:
             logger.info("已将附件信息追加到 Prompt: %d 个附件 (%d 图片, %d 其他)", 
                        len(attachments), len(image_attachments), len(other_attachments))
 
+        memory_recall_enabled = _is_memory_feature_enabled(
+            "ENABLE_MEMORY_RECALL",
+            ENABLE_USER_PREFERENCE_MEMORY,
+        )
+        pre_compaction_flush_enabled = _is_memory_feature_enabled(
+            "ENABLE_PRE_COMPACTION_FLUSH",
+            ENABLE_USER_PREFERENCE_MEMORY,
+        )
+
         memory_context = ""
-        if ENABLE_USER_PREFERENCE_MEMORY and user_id:
+        if memory_recall_enabled and user_id:
             try:
                 with get_db_context() as db:
-                    memory_context = build_user_preference_context(
+                    memory_context = recall(
                         db,
                         user_id=user_id,
                         max_items=USER_PREFERENCE_MEMORY_MAX_ITEMS,
@@ -396,9 +416,9 @@ class ChatService:
                 title=title,
             )
 
-            if ENABLE_USER_PREFERENCE_MEMORY and user_id:
+            if pre_compaction_flush_enabled and user_id:
                 try:
-                    persisted_count = persist_explicit_preferences_from_input(
+                    persisted_count = flush(
                         db,
                         user_id=user_id,
                         user_text=prompt,
@@ -406,7 +426,11 @@ class ChatService:
                         source_message_id=saved_human.id,
                     )
                     if persisted_count:
-                        logger.info("用户偏好记忆已更新: user_id=%s, count=%d", user_id, persisted_count)
+                        logger.info(
+                            "压缩前偏好记忆 flush 成功: user_id=%s, count=%d",
+                            user_id,
+                            persisted_count,
+                        )
                 except Exception as memory_error:
                     logger.warning("写入用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         

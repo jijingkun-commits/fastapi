@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal
@@ -16,6 +17,9 @@ from typing import Iterable
 from sqlalchemy.orm import Session
 
 from app.repositories import user_memory_repo
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -225,19 +229,18 @@ def _build_compressed_context(memories: list, max_context_chars: int) -> str:
     return f"{prefix}{clipped}{suffix}。"
 
 
-def build_user_preference_context(
+def _load_deduped_memories(
     db: Session,
+    *,
     user_id: int,
-    max_items: int = 8,
-    max_context_chars: int = _DEFAULT_MAX_CONTEXT_CHARS,
-) -> str:
-    """构建用户偏好上下文。"""
+    max_items: int,
+) -> list:
+    """加载并去重活跃记忆。"""
 
     if not user_id or max_items <= 0:
-        return ""
+        return []
 
     fetch_limit = max(max_items, max_items * _FETCH_MULTIPLIER)
-
     memories = user_memory_repo.list_active_memories(
         db,
         user_id=user_id,
@@ -245,10 +248,15 @@ def build_user_preference_context(
         limit=fetch_limit,
     )
     if not memories:
-        return ""
+        return []
 
-    deduped_memories = _dedupe_latest_memories(memories, max_items=max_items)
-    if not deduped_memories:
+    return _dedupe_latest_memories(memories, max_items=max_items)
+
+
+def _render_context(memories: list, max_context_chars: int) -> str:
+    """将记忆列表渲染为可注入上下文。"""
+
+    if not memories:
         return ""
 
     lines = [
@@ -259,14 +267,61 @@ def build_user_preference_context(
             str(getattr(item, "memory_key", "") or ""),
             str(getattr(item, "memory_value", "") or ""),
         )
-        for item in deduped_memories
+        for item in memories
     )
 
     context = "\n".join(lines)
     if max_context_chars > 0 and len(context) > max_context_chars:
-        return _build_compressed_context(deduped_memories, max_context_chars=max_context_chars)
+        return _build_compressed_context(memories, max_context_chars=max_context_chars)
 
     return context
+
+
+def recall(
+    db: Session,
+    *,
+    user_id: int,
+    max_items: int = 8,
+    max_context_chars: int = _DEFAULT_MAX_CONTEXT_CHARS,
+    refresh_last_seen: bool = True,
+) -> str:
+    """召回用户偏好并构建上下文。"""
+
+    memories = _load_deduped_memories(
+        db,
+        user_id=user_id,
+        max_items=max_items,
+    )
+    if not memories:
+        return ""
+
+    if refresh_last_seen:
+        try:
+            user_memory_repo.touch_last_seen(db, memories)
+            db.commit()
+        except Exception as memory_error:
+            logger.warning("刷新记忆命中时间失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+            rollback = getattr(db, "rollback", None)
+            if callable(rollback):
+                rollback()
+
+    return _render_context(memories, max_context_chars=max_context_chars)
+
+
+def build_user_preference_context(
+    db: Session,
+    user_id: int,
+    max_items: int = 8,
+    max_context_chars: int = _DEFAULT_MAX_CONTEXT_CHARS,
+) -> str:
+    """构建用户偏好上下文。"""
+
+    deduped_memories = _load_deduped_memories(
+        db,
+        user_id=user_id,
+        max_items=max_items,
+    )
+    return _render_context(deduped_memories, max_context_chars=max_context_chars)
 
 
 def persist_explicit_preferences_from_input(
@@ -300,3 +355,22 @@ def persist_explicit_preferences_from_input(
 
     db.commit()
     return len(candidates)
+
+
+def flush(
+    db: Session,
+    *,
+    user_id: int,
+    user_text: str,
+    source_thread_id: str | None = None,
+    source_message_id: int | None = None,
+) -> int:
+    """将本轮用户显式偏好 flush 到记忆层。"""
+
+    return persist_explicit_preferences_from_input(
+        db,
+        user_id=user_id,
+        user_text=user_text,
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+    )
