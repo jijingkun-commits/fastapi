@@ -14,7 +14,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Sequence, TypedDict, Optional, Literal, Any, Dict, Tuple, Callable
+from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
@@ -33,8 +33,9 @@ from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
 from langgraph.config import get_stream_writer
-from app.ai.events import emit_status, emit_token
+from app.ai.events import emit_status, emit_token, emit_thinking, emit_tool_start, emit_tool_end, emit_result, emit_kb_images
 from app.ai.protocol import (
+    AgentOutputParser,
     HandoffResult,
     StreamingToolStartPayload,
     StreamingResultPayload,
@@ -74,74 +75,19 @@ WORKFLOW_AGENT_NODE_BY_TYPE = {
 WORKFLOW_AGENT_NODES = set(WORKFLOW_AGENT_NODE_BY_TYPE.values())
 
 
-class StreamingProtocolAdapter(TypedDict):
-    """streaming_wrapper 协议适配层。"""
-
-    parse_kb_images: Callable[[str], Dict[str, str]]
-    should_filter_content: Callable[[Any], bool]
-    extract_latest_handoff_from_messages: Callable[[Sequence[BaseMessage]], Optional[Dict[str, Any]]]
-    extract_all_handoffs_from_messages: Callable[[Sequence[BaseMessage]], list[Dict[str, Any]]]
+from dataclasses import dataclass
 
 
-class StreamingEventEmitterAdapter(TypedDict):
-    """streaming_wrapper 事件发射适配层。"""
-
-    emit_token: Callable[..., None]
-    emit_thinking: Callable[..., None]
-    emit_tool_start: Callable[..., None]
-    emit_tool_end: Callable[..., None]
-    emit_status: Callable[..., None]
-    emit_result: Callable[..., None]
-    emit_kb_images: Callable[..., None]
-
-
-def _build_streaming_protocol_adapter(parser: Any) -> StreamingProtocolAdapter:
-    """构建协议适配器，屏蔽对具体 Parser 类的直接耦合。"""
-
-    return {
-        "parse_kb_images": parser.parse_kb_images,
-        "should_filter_content": parser.should_filter_content,
-        "extract_latest_handoff_from_messages": parser.extract_latest_handoff_from_messages,
-        "extract_all_handoffs_from_messages": parser.extract_all_handoffs_from_messages,
-    }
-
-
-def _build_streaming_event_emitter_adapter(
-    *,
-    emit_token: Callable[..., None],
-    emit_thinking: Callable[..., None],
-    emit_tool_start: Callable[..., None],
-    emit_tool_end: Callable[..., None],
-    emit_status: Callable[..., None],
-    emit_result: Callable[..., None],
-    emit_kb_images: Callable[..., None],
-) -> StreamingEventEmitterAdapter:
-    """构建事件发射适配器，统一管理 streaming_wrapper 事件出口。"""
-
-    def _emit_tool_start_with_schema(writer, payload: StreamingToolStartPayload, node: str = "") -> None:
-        emit_tool_start(writer, payload["name"], payload["input"], node=node)
-
-    def _emit_result_with_schema(writer, payload: StreamingResultPayload, node: str = "") -> None:
-        emit_result(
-            writer,
-            data_type=payload["data_type"],
-            data=payload["data"],
-            message=payload["message"],
-            node=node,
-        )
-
-    def _emit_kb_images_with_schema(writer, payload: StreamingKbImagesPayload, node: str = "") -> None:
-        emit_kb_images(writer, payload["images"], node=node)
-
-    return {
-        "emit_token": emit_token,
-        "emit_thinking": emit_thinking,
-        "emit_tool_start": _emit_tool_start_with_schema,
-        "emit_tool_end": emit_tool_end,
-        "emit_status": emit_status,
-        "emit_result": _emit_result_with_schema,
-        "emit_kb_images": _emit_kb_images_with_schema,
-    }
+@dataclass
+class StreamingContext:
+    """streaming_wrapper 分发上下文，封装流式会话的共享状态。"""
+    writer: Any
+    node_name: str
+    state: Dict[str, Any]
+    collected_content: list[str]
+    kb_images: Dict[str, str]
+    emitted_message_ids: set
+    sent_tool_call_ids: set
 
 
 # AgentType, AGENT_DESCRIPTIONS, MultiAgentState 已迁移到 app/ai/state.py
@@ -967,11 +913,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
 
 def _emit_kb_images_from_delta_messages(
     delta_messages: Sequence[BaseMessage],
-    kb_images: Dict[str, str],
-    protocol_adapter: StreamingProtocolAdapter,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> None:
     """从增量 ToolMessage 中提取 KB_IMAGES 并发送事件。"""
 
@@ -981,20 +923,17 @@ def _emit_kb_images_from_delta_messages(
         tool_content = str(getattr(tool_msg, "content", ""))
         if not tool_content:
             continue
-        new_images = protocol_adapter["parse_kb_images"](tool_content)
+        new_images = AgentOutputParser.parse_kb_images(tool_content)
         if new_images:
-            kb_images.update(new_images)
-            logger.info("[%s] 从 values 模式提取 kb_images: %s 个", node_name, len(new_images))
-            kb_images_payload = build_streaming_kb_images_payload(kb_images)
-            event_emitter_adapter["emit_kb_images"](writer, kb_images_payload, node=node_name)
+            ctx.kb_images.update(new_images)
+            logger.info("[%s] 从 values 模式提取 kb_images: %s 个", ctx.node_name, len(new_images))
+            kb_images_payload = build_streaming_kb_images_payload(ctx.kb_images)
+            emit_kb_images(ctx.writer, kb_images_payload["images"], node=ctx.node_name)
 
 
 def _emit_tool_start_events_from_ai_message(
     ai_message: Any,
-    sent_tool_call_ids: set,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> bool:
     """从 AIMessage 的 tool_calls 发送 tool_start 事件。"""
     if not (hasattr(ai_message, "tool_calls") and ai_message.tool_calls):
@@ -1006,12 +945,12 @@ def _emit_tool_start_events_from_ai_message(
         tool_args = tool_call.get("args", {})
 
         tool_start_payload = build_streaming_tool_start_payload(tool_name, tool_args)
-        if tool_call_id and tool_call_id not in sent_tool_call_ids and tool_start_payload:
-            sent_tool_call_ids.add(tool_call_id)
+        if tool_call_id and tool_call_id not in ctx.sent_tool_call_ids and tool_start_payload:
+            ctx.sent_tool_call_ids.add(tool_call_id)
             logger.debug("发送 tool_start 事件: %s", tool_name)
             if tool_name and "tavily" in (tool_name or "").lower():
                 logger.info("联网搜索被调用: tool=%s, args=%s", tool_name, tool_args)
-            event_emitter_adapter["emit_tool_start"](writer, tool_start_payload, node=node_name)
+            emit_tool_start(ctx.writer, tool_start_payload["name"], tool_start_payload["input"], node=ctx.node_name)
 
     return True
 
@@ -1019,18 +958,16 @@ def _emit_tool_start_events_from_ai_message(
 def _should_skip_values_text_message(
     msg_content: Any,
     msg_id: Any,
-    emitted_message_ids: set,
-    collected_content: Sequence[str],
-    protocol_adapter: StreamingProtocolAdapter,
+    ctx: StreamingContext,
 ) -> bool:
     """values 模式文本补发去重判断。"""
-    if protocol_adapter["should_filter_content"](msg_content):
+    if AgentOutputParser.should_filter_content(msg_content):
         return True
 
-    if msg_id and msg_id in emitted_message_ids:
+    if msg_id and msg_id in ctx.emitted_message_ids:
         return True
 
-    full_collected = "".join(collected_content)
+    full_collected = "".join(ctx.collected_content)
     if msg_content and msg_content in full_collected:
         if len(msg_content) > 10:
             return True
@@ -1040,19 +977,17 @@ def _should_skip_values_text_message(
 
 
 def _emit_values_text_message(
-    writer,
-    node_name: str,
     ai_message: Any,
     msg_content: str,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
+    ctx: StreamingContext,
 ) -> None:
     """values 模式补发文本消息（兼容 result 结构化载荷）。"""
     result_payload = build_streaming_result_payload(ai_message, msg_content)
     if result_payload:
-        event_emitter_adapter["emit_result"](writer, result_payload, node=node_name)
+        emit_result(ctx.writer, data_type=result_payload["data_type"], data=result_payload["data"], message=result_payload["message"], node=ctx.node_name)
         return
 
-    event_emitter_adapter["emit_token"](writer, msg_content, node=node_name)
+    emit_token(ctx.writer, msg_content, node=ctx.node_name)
 
 
 def _record_emitted_message_id(message: Any, emitted_message_ids: set) -> None:
@@ -1088,11 +1023,7 @@ async def _prefill_emitted_message_ids(
 
 def _handle_messages_mode_tool_message(
     message: Any,
-    protocol_adapter: StreamingProtocolAdapter,
-    kb_images: Dict[str, str],
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> bool:
     """处理 messages 模式下的 ToolMessage（tool_end + KB_IMAGES）。"""
     if not isinstance(message, ToolMessage):
@@ -1101,45 +1032,39 @@ def _handle_messages_mode_tool_message(
     tool_name = getattr(message, "name", "unknown")
     tool_content = str(getattr(message, "content", ""))
     tool_output = tool_content[:200]
-    event_emitter_adapter["emit_tool_end"](writer, tool_name, tool_output, node=node_name)
+    emit_tool_end(ctx.writer, tool_name, tool_output, node=ctx.node_name)
 
     if tool_name and "tavily" in (tool_name or "").lower():
         logger.info("联网搜索返回: tool=%s, 结果长度=%s", tool_name, len(tool_content))
 
-    new_images = protocol_adapter["parse_kb_images"](tool_content)
+    new_images = AgentOutputParser.parse_kb_images(tool_content)
     if new_images:
-        kb_images.update(new_images)
-        logger.info("[%s] 从 ToolMessage 提取到 kb_images: %s 个", node_name, len(new_images))
+        ctx.kb_images.update(new_images)
+        logger.info("[%s] 从 ToolMessage 提取到 kb_images: %s 个", ctx.node_name, len(new_images))
 
     return True
 
 
 def _emit_messages_mode_token(
     message: Any,
-    protocol_adapter: StreamingProtocolAdapter,
-    collected_content: list[str],
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> None:
     """messages 模式发送文本 token（过滤内部协议内容）。"""
     content = getattr(message, "content", "")
     if not (content and isinstance(content, str)):
         return
 
-    if protocol_adapter["should_filter_content"](content):
-        logger.debug("[%s] 跳过内部协议内容", node_name)
+    if AgentOutputParser.should_filter_content(content):
+        logger.debug("[%s] 跳过内部协议内容", ctx.node_name)
         return
 
-    collected_content.append(content)
-    event_emitter_adapter["emit_token"](writer, content, node=node_name)
+    ctx.collected_content.append(content)
+    emit_token(ctx.writer, content, node=ctx.node_name)
 
 
 def _emit_messages_mode_thinking(
     message: Any,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> None:
     """messages 模式发送思考内容（reasoning/thinking）。"""
     additional = getattr(message, "additional_kwargs", {})
@@ -1149,7 +1074,7 @@ def _emit_messages_mode_thinking(
         additional.get("thinking")
     )
     if reasoning:
-        event_emitter_adapter["emit_thinking"](writer, reasoning, node=node_name)
+        emit_thinking(ctx.writer, reasoning, node=ctx.node_name)
 
 
 def _inject_streaming_context_messages(
@@ -1260,34 +1185,9 @@ def _build_streaming_delta_return(
     return ret
 
 
-def _handle_messages_mode_tool_call_chunks_noop(message: Any) -> None:
-    """兼容保留：messages 模式仅扫描 tool_call_chunks，不发 tool_start。"""
-    if not (hasattr(message, "tool_call_chunks") and message.tool_call_chunks):
-        return
-
-    for tool_call_chunk in message.tool_call_chunks:
-        if not tool_call_chunk:
-            continue
-
-        _tool_call_index = tool_call_chunk.get("index")
-        tool_name = tool_call_chunk.get("name")
-        _tool_args = tool_call_chunk.get("args")
-
-        if tool_name:
-            # 由于 chunk 不含稳定 ID，此处仅保留扫描语义，不发事件。
-            pass
-
-
 def _dispatch_messages_mode_chunk(
     chunk: Any,
-    protocol_adapter: StreamingProtocolAdapter,
-    emitted_message_ids: set,
-    collected_content: list[str],
-    kb_images: Dict[str, str],
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
-    state: Dict[str, Any],
+    ctx: StreamingContext,
 ) -> None:
     """分发处理 stream_mode=messages 的单个 chunk。"""
     from langchain_core.messages import AIMessage, AIMessageChunk
@@ -1296,18 +1196,14 @@ def _dispatch_messages_mode_chunk(
         return
 
     message, _metadata = chunk
-    _record_emitted_message_id(message, emitted_message_ids)
+    _record_emitted_message_id(message, ctx.emitted_message_ids)
 
-    if _should_mute_expert_text_output(state, node_name):
+    if _should_mute_expert_text_output(ctx.state, ctx.node_name):
         return
 
     handled_tool_message = _handle_messages_mode_tool_message(
         message=message,
-        protocol_adapter=protocol_adapter,
-        kb_images=kb_images,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=writer,
-        node_name=node_name,
+        ctx=ctx,
     )
     if handled_tool_message:
         return
@@ -1317,36 +1213,37 @@ def _dispatch_messages_mode_chunk(
 
     _emit_messages_mode_token(
         message=message,
-        protocol_adapter=protocol_adapter,
-        collected_content=collected_content,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=writer,
-        node_name=node_name,
+        ctx=ctx,
     )
-
-    _handle_messages_mode_tool_call_chunks_noop(message)
 
     _emit_messages_mode_thinking(
         message=message,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=writer,
-        node_name=node_name,
+        ctx=ctx,
     )
+
+
+def _dispatch_custom_mode_chunk(
+    chunk: Any,
+    ctx: StreamingContext,
+) -> None:
+    """分发处理 stream_mode=custom 的单个 chunk。
+
+    custom 模式的事件由子图节点通过 get_stream_writer() 主动发射，
+    格式已经是标准的 {"type": ..., "data": ..., "node": ...}，
+    直接透传到顶层 writer。
+    """
+    if not (isinstance(chunk, dict) and "type" in chunk and "data" in chunk):
+        logger.debug("[%s] 跳过非标准 custom chunk: %s", ctx.node_name, type(chunk))
+        return
+    logger.debug("[%s] 透传 custom 事件: type=%s", ctx.node_name, chunk.get("type"))
+    ctx.writer(chunk)
 
 
 def _dispatch_values_mode_chunk(
     final_state: Dict[str, Any],
-    protocol_adapter: StreamingProtocolAdapter,
-    state: Dict[str, Any],
     initial_input_count: int,
     input_message_count: int,
-    kb_images: Dict[str, str],
-    sent_tool_call_ids: set,
-    emitted_message_ids: set,
-    collected_content: list[str],
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> Tuple[int, Optional[Dict[str, Any]]]:
     """分发处理 stream_mode=values 的单个 chunk。"""
     from langchain_core.messages import AIMessage
@@ -1354,20 +1251,20 @@ def _dispatch_values_mode_chunk(
     messages = final_state.get("messages", [])
     delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
 
-    if node_name == "supervisor":
-        handoff_batch = protocol_adapter["extract_all_handoffs_from_messages"](delta_messages_for_scan)
+    if ctx.node_name == "supervisor":
+        handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
             normalized_batch = _normalize_handoff_batch_for_supervisor(
                 handoff_batch,
                 delta_messages=delta_messages_for_scan,
-                state=state,
+                state=ctx.state,
             )
             first_handoff = normalized_batch[0]
             remaining_handoffs = normalized_batch[1:]
             target_agent = first_handoff.get("target_agent")
             logger.info(
                 "[%s] values模式检测到 handoff_batch: total=%d, first_target=%s",
-                node_name,
+                ctx.node_name,
                 len(normalized_batch),
                 target_agent,
             )
@@ -1382,11 +1279,7 @@ def _dispatch_values_mode_chunk(
 
     _emit_kb_images_from_delta_messages(
         delta_messages=delta_messages_for_scan,
-        kb_images=kb_images,
-        protocol_adapter=protocol_adapter,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=writer,
-        node_name=node_name,
+        ctx=ctx,
     )
 
     new_messages = messages[input_message_count:] if len(messages) > input_message_count else []
@@ -1394,15 +1287,12 @@ def _dispatch_values_mode_chunk(
         if not isinstance(new_message, AIMessage):
             continue
 
-        if _should_mute_expert_text_output(state, node_name):
+        if _should_mute_expert_text_output(ctx.state, ctx.node_name):
             continue
 
         emitted_tool_calls = _emit_tool_start_events_from_ai_message(
             ai_message=new_message,
-            sent_tool_call_ids=sent_tool_call_ids,
-            event_emitter_adapter=event_emitter_adapter,
-            writer=writer,
-            node_name=node_name,
+            ctx=ctx,
         )
         if emitted_tool_calls:
             continue
@@ -1412,25 +1302,21 @@ def _dispatch_values_mode_chunk(
         should_skip_message = _should_skip_values_text_message(
             msg_content=message_content,
             msg_id=message_id,
-            emitted_message_ids=emitted_message_ids,
-            collected_content=collected_content,
-            protocol_adapter=protocol_adapter,
+            ctx=ctx,
         )
         if should_skip_message:
             continue
 
         if message_content:
-            logger.info("[%s] values 模式补发消息: %s...", node_name, message_content[:30])
+            logger.info("[%s] values 模式补发消息: %s...", ctx.node_name, message_content[:30])
             _emit_values_text_message(
-                writer=writer,
-                node_name=node_name,
                 ai_message=new_message,
                 msg_content=message_content,
-                event_emitter_adapter=event_emitter_adapter,
+                ctx=ctx,
             )
-            collected_content.append(message_content)
+            ctx.collected_content.append(message_content)
             if message_id:
-                emitted_message_ids.add(message_id)
+                ctx.emitted_message_ids.add(message_id)
 
     return len(messages), None
 
@@ -1439,39 +1325,28 @@ async def _run_streaming_dispatch_loop(
     agent: Any,
     pruned_state: Dict[str, Any],
     config: Any,
-    protocol_adapter: StreamingProtocolAdapter,
-    initial_input_count: int,
     input_message_count: int,
-    emitted_message_ids: set,
-    sent_tool_call_ids: set,
-    collected_content: list[str],
-    kb_images: Dict[str, str],
-    state: Dict[str, Any],
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
-    node_name: str,
+    ctx: StreamingContext,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """运行 streaming 双模式分发循环。"""
     final_state: Optional[Dict[str, Any]] = None
+    initial_input_count = input_message_count
     next_input_count = input_message_count
 
     async for mode, chunk in agent.astream(
         pruned_state,
         config,
-        stream_mode=["messages", "values"],
+        stream_mode=["messages", "values", "custom"],
     ):
         if mode == "messages":
             _dispatch_messages_mode_chunk(
                 chunk=chunk,
-                protocol_adapter=protocol_adapter,
-                emitted_message_ids=emitted_message_ids,
-                collected_content=collected_content,
-                kb_images=kb_images,
-                event_emitter_adapter=event_emitter_adapter,
-                writer=writer,
-                node_name=node_name,
-                state=state,
+                ctx=ctx,
             )
+            continue
+
+        if mode == "custom":
+            _dispatch_custom_mode_chunk(chunk=chunk, ctx=ctx)
             continue
 
         if mode != "values":
@@ -1480,17 +1355,9 @@ async def _run_streaming_dispatch_loop(
         final_state = chunk
         next_input_count, handoff_return = _dispatch_values_mode_chunk(
             final_state=final_state,
-            protocol_adapter=protocol_adapter,
-            state=state,
             initial_input_count=initial_input_count,
             input_message_count=next_input_count,
-            kb_images=kb_images,
-            sent_tool_call_ids=sent_tool_call_ids,
-            emitted_message_ids=emitted_message_ids,
-            collected_content=collected_content,
-            event_emitter_adapter=event_emitter_adapter,
-            writer=writer,
-            node_name=node_name,
+            ctx=ctx,
         )
         if handoff_return is not None:
             return final_state, handoff_return
@@ -1499,14 +1366,11 @@ async def _run_streaming_dispatch_loop(
 
 
 def _handle_streaming_wrapper_exception(
-    node_name: str,
-    state: Dict[str, Any],
     error_text: str,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
-    writer,
+    ctx: StreamingContext,
 ) -> Dict[str, Any]:
     """处理 streaming_wrapper 异常：优先 supervisor 兜底，其次统一友好错误。"""
-    route_decision = fallback_router(node_name=node_name, state=state, error_text=error_text)
+    route_decision = fallback_router(node_name=ctx.node_name, state=ctx.state, error_text=error_text)
     route = str(route_decision.get("route") or "friendly_error")
     runtime_recovery_state = route_decision.get("runtime_recovery_state")
 
@@ -1514,13 +1378,13 @@ def _handle_streaming_wrapper_exception(
         fallback_handoff = route_decision.get("pending_handoff") or {}
         logger.warning(
             "[%s] 命中模型权限错误，降级兜底路由到 %s",
-            node_name,
+            ctx.node_name,
             fallback_handoff.get("target_agent"),
         )
-        event_emitter_adapter["emit_status"](
-            writer,
+        emit_status(
+            ctx.writer,
             message=str(route_decision.get("status_message") or "已触发运行时兜底路由。"),
-            node=node_name,
+            node=ctx.node_name,
         )
         return {
             "messages": [],
@@ -1534,12 +1398,12 @@ def _handle_streaming_wrapper_exception(
 
     error_msg = str(route_decision.get("message") or _build_stream_error_message(error_text))
     if route == "core_tools_only":
-        event_emitter_adapter["emit_status"](
-            writer,
+        emit_status(
+            ctx.writer,
             message="插件链路异常，已回退到核心能力路径。",
-            node=node_name,
+            node=ctx.node_name,
         )
-    event_emitter_adapter["emit_token"](writer, error_msg, node=node_name)
+    emit_token(ctx.writer, error_msg, node=ctx.node_name)
     return {
         "messages": [create_ai_message(error_msg)],
         "runtime_recovery_state": runtime_recovery_state,
@@ -1551,17 +1415,12 @@ async def _execute_streaming_wrapper(
     node_name: str,
     state: Dict[str, Any],
     config: Any,
-    event_emitter_adapter: StreamingEventEmitterAdapter,
     writer,
 ) -> Dict[str, Any]:
     """执行单个专家节点的 streaming 编排与事件发射。"""
     final_state = None
     collected_content: list[str] = []
     kb_images: Dict[str, str] = {}
-
-    from app.ai.protocol import AgentOutputParser
-
-    protocol_adapter = _build_streaming_protocol_adapter(AgentOutputParser)
 
     try:
         (
@@ -1585,8 +1444,8 @@ async def _execute_streaming_wrapper(
             token_budget,
         )
 
-        sent_tool_call_ids = set()
-        emitted_message_ids = set()
+        sent_tool_call_ids: set = set()
+        emitted_message_ids: set = set()
 
         await _prefill_emitted_message_ids(
             agent=agent,
@@ -1598,21 +1457,22 @@ async def _execute_streaming_wrapper(
 
         logger.debug("[%s] 预填充 emitted_message_ids: %s 个", node_name, len(emitted_message_ids))
 
+        ctx = StreamingContext(
+            writer=writer,
+            node_name=node_name,
+            state=state,
+            collected_content=collected_content,
+            kb_images=kb_images,
+            emitted_message_ids=emitted_message_ids,
+            sent_tool_call_ids=sent_tool_call_ids,
+        )
+
         final_state, handoff_return = await _run_streaming_dispatch_loop(
             agent=agent,
             pruned_state=pruned_state,
             config=config,
-            protocol_adapter=protocol_adapter,
-            initial_input_count=initial_input_count,
             input_message_count=input_message_count,
-            emitted_message_ids=emitted_message_ids,
-            sent_tool_call_ids=sent_tool_call_ids,
-            collected_content=collected_content,
-            kb_images=kb_images,
-            state=state,
-            event_emitter_adapter=event_emitter_adapter,
-            writer=writer,
-            node_name=node_name,
+            ctx=ctx,
         )
         if handoff_return is not None:
             handoff_return["runtime_recovery_state"] = _build_runtime_recovery_state(
@@ -1641,28 +1501,23 @@ async def _execute_streaming_wrapper(
         raise
     except Exception as exc:
         logger.error("[%s]流式输出异常: %s", node_name, exc, exc_info=True)
-        return _handle_streaming_wrapper_exception(
+        ctx = StreamingContext(
+            writer=writer,
             node_name=node_name,
             state=state,
+            collected_content=collected_content,
+            kb_images=kb_images,
+            emitted_message_ids=set(),
+            sent_tool_call_ids=set(),
+        )
+        return _handle_streaming_wrapper_exception(
             error_text=str(exc),
-            event_emitter_adapter=event_emitter_adapter,
-            writer=writer,
+            ctx=ctx,
         )
 
 
 def _create_streaming_agent_wrapper(agent: Any, node_name: str):
     """创建可复用的 streaming wrapper 工厂（模块级）。"""
-    from app.ai.events import emit_token, emit_thinking, emit_tool_start, emit_tool_end, emit_result, emit_kb_images
-
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=emit_token,
-        emit_thinking=emit_thinking,
-        emit_tool_start=emit_tool_start,
-        emit_tool_end=emit_tool_end,
-        emit_status=emit_status,
-        emit_result=emit_result,
-        emit_kb_images=emit_kb_images,
-    )
 
     async def streaming_wrapper(state, config):
         writer = get_stream_writer()
@@ -1671,7 +1526,6 @@ def _create_streaming_agent_wrapper(agent: Any, node_name: str):
             node_name=node_name,
             state=state,
             config=config,
-            event_emitter_adapter=event_emitter_adapter,
             writer=writer,
         )
 

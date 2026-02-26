@@ -1,11 +1,13 @@
 """multi_agent_graph streaming helper 回归测试。"""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.ai.protocol import (
+    AgentOutputParser,
     build_operation_additional_kwargs_payload,
     build_result_additional_kwargs_payload,
     build_streaming_kb_images_payload,
@@ -19,8 +21,7 @@ from app.services.config_resolver import ConfigResolver
 from app.services.system_config_service import SystemConfigService
 
 from app.ai.workflow.multi_agent_graph import (
-    _build_streaming_event_emitter_adapter,
-    _build_streaming_protocol_adapter,
+    StreamingContext,
     _build_streaming_delta_return,
     _create_streaming_agent_wrapper,
     _dispatch_messages_mode_chunk,
@@ -39,6 +40,28 @@ from app.ai.workflow.multi_agent_graph import (
 from app.services.chat_service import degrade_on_plugin_failure
 
 
+def _make_ctx(
+    *,
+    writer=None,
+    node_name: str = "supervisor",
+    state=None,
+    collected_content=None,
+    kb_images=None,
+    emitted_message_ids=None,
+    sent_tool_call_ids=None,
+) -> StreamingContext:
+    """构造测试用 StreamingContext 实例。"""
+    return StreamingContext(
+        writer=writer or SimpleNamespace(),
+        node_name=node_name,
+        state=state if state is not None else {},
+        collected_content=collected_content if collected_content is not None else [],
+        kb_images=kb_images if kb_images is not None else {},
+        emitted_message_ids=emitted_message_ids if emitted_message_ids is not None else set(),
+        sent_tool_call_ids=sent_tool_call_ids if sent_tool_call_ids is not None else set(),
+    )
+
+
 def test_record_emitted_message_id_only_tracks_existing_id() -> None:
     """仅当消息包含 id 时应加入去重集合。"""
     emitted_ids: set[str] = set()
@@ -50,70 +73,24 @@ def test_record_emitted_message_id_only_tracks_existing_id() -> None:
     assert emitted_ids == {"msg-1"}
 
 
-def test_build_streaming_protocol_adapter_maps_parser_functions() -> None:
-    """协议适配器应暴露 parser 的三类能力函数。"""
-
-    class _FakeParser:
-        @staticmethod
-        def parse_kb_images(_text: str):
-            return {"img": "https://example.com/a.png"}
-
-        @staticmethod
-        def should_filter_content(content):
-            return content == "internal"
-
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return {"target_agent": "todo_expert"}
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return [{"target_agent": "todo_expert"}]
-
-    adapter = _build_streaming_protocol_adapter(_FakeParser)
-
-    assert adapter["parse_kb_images"]("x") == {"img": "https://example.com/a.png"}
-    assert adapter["should_filter_content"]("internal") is True
-    assert adapter["extract_latest_handoff_from_messages"]([])["target_agent"] == "todo_expert"
-    assert adapter["extract_all_handoffs_from_messages"]([])[0]["target_agent"] == "todo_expert"
-
-
-def test_build_streaming_event_emitter_adapter_maps_event_emitters() -> None:
-    """事件适配器应暴露统一事件出口。"""
-    events = []
-
-    adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda writer, content, node: writer(("token", content, node)),
-        emit_thinking=lambda writer, content, node: writer(("thinking", content, node)),
-        emit_tool_start=lambda writer, name, args, node: writer(("tool_start", name, args, node)),
-        emit_tool_end=lambda writer, name, output, node: writer(("tool_end", name, output, node)),
-        emit_status=lambda writer, message, node: writer(("status", message, node)),
-        emit_result=lambda writer, data_type, data, message, node: writer(("result", data_type, data, message, node)),
-        emit_kb_images=lambda writer, images, node: writer(("kb_images", images, node)),
+def test_streaming_context_holds_shared_state() -> None:
+    """StreamingContext 应正确封装流式会话共享状态。"""
+    ctx = _make_ctx(
+        writer=lambda x: x,
+        node_name="todo_expert",
+        state={"thread_id": "t-1"},
+        collected_content=["hello"],
+        kb_images={"img-1": "url"},
+        emitted_message_ids={"msg-1"},
+        sent_tool_call_ids={"tc-1"},
     )
 
-    writer = events.append
-    adapter["emit_token"](writer, "内容", node="supervisor")
-    adapter["emit_thinking"](writer, "思考", node="supervisor")
-    adapter["emit_tool_start"](writer, {"name": "search", "input": {"q": "x"}}, node="supervisor")
-    adapter["emit_tool_end"](writer, "search", "ok", node="supervisor")
-    adapter["emit_status"](writer, message="处理中", node="supervisor")
-    adapter["emit_result"](
-        writer,
-        {"data_type": "table", "data": {"rows": []}, "message": "结果"},
-        node="supervisor",
-    )
-    adapter["emit_kb_images"](writer, {"images": {"img-1": "https://example.com/a.png"}}, node="supervisor")
-
-    assert events == [
-        ("token", "内容", "supervisor"),
-        ("thinking", "思考", "supervisor"),
-        ("tool_start", "search", {"q": "x"}, "supervisor"),
-        ("tool_end", "search", "ok", "supervisor"),
-        ("status", "处理中", "supervisor"),
-        ("result", "table", {"rows": []}, "结果", "supervisor"),
-        ("kb_images", {"img-1": "https://example.com/a.png"}, "supervisor"),
-    ]
+    assert ctx.node_name == "todo_expert"
+    assert ctx.state == {"thread_id": "t-1"}
+    assert ctx.collected_content == ["hello"]
+    assert ctx.kb_images == {"img-1": "url"}
+    assert ctx.emitted_message_ids == {"msg-1"}
+    assert ctx.sent_tool_call_ids == {"tc-1"}
 
 
 def test_build_streaming_tool_start_payload_normalizes_invalid_args() -> None:
@@ -233,51 +210,20 @@ async def test_prefill_emitted_message_ids_reads_state_and_subgraph() -> None:
 
 def test_handle_messages_mode_tool_message_emits_tool_end_and_kb_images() -> None:
     """ToolMessage 应触发 tool_end，并更新 kb_images。"""
-
-    class _FakeParser:
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {"img-1": "https://example.com/a.png"}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
     emitted_events = []
-
-    def _fake_emit_tool_end(writer, tool_name, tool_output, node):
-        writer((tool_name, tool_output, node))
-
     kb_images: dict[str, str] = {}
     writer = emitted_events.append
     message = ToolMessage(content="tool payload", tool_call_id="tc-1", name="knowledge_search")
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda *_args, **_kwargs: None,
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=_fake_emit_tool_end,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
+    ctx = _make_ctx(writer=writer, node_name="supervisor", kb_images=kb_images)
 
-    handled = _handle_messages_mode_tool_message(
-        message=message,
-        protocol_adapter=protocol_adapter,
-        kb_images=kb_images,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=writer,
-        node_name="supervisor",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.emit_tool_end", side_effect=lambda w, name, output, node: w((name, output, node))), \
+         patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.parse_kb_images.return_value = {"img-1": "https://example.com/a.png"}
+
+        handled = _handle_messages_mode_tool_message(
+            message=message,
+            ctx=ctx,
+        )
 
     assert handled is True
     assert kb_images == {"img-1": "https://example.com/a.png"}
@@ -286,53 +232,25 @@ def test_handle_messages_mode_tool_message_emits_tool_end_and_kb_images() -> Non
 
 def test_emit_messages_mode_token_filters_internal_content() -> None:
     """内部协议文本不应向前端发送 token。"""
-
-    class _FakeParser:
-        @staticmethod
-        def should_filter_content(content):
-            return content == "[[internal]]"
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
     emitted_tokens = []
     collected_content: list[str] = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: emitted_tokens.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
+    ctx = _make_ctx(
+        node_name="todo_expert",
+        collected_content=collected_content,
     )
 
-    _emit_messages_mode_token(
-        message=SimpleNamespace(content="正常输出"),
-        protocol_adapter=protocol_adapter,
-        collected_content=collected_content,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="todo_expert",
-    )
-    _emit_messages_mode_token(
-        message=SimpleNamespace(content="[[internal]]"),
-        protocol_adapter=protocol_adapter,
-        collected_content=collected_content,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="todo_expert",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: emitted_tokens.append((content, node))):
+        mock_parser.should_filter_content.side_effect = lambda c: c == "[[internal]]"
+
+        _emit_messages_mode_token(
+            message=SimpleNamespace(content="正常输出"),
+            ctx=ctx,
+        )
+        _emit_messages_mode_token(
+            message=SimpleNamespace(content="[[internal]]"),
+            ctx=ctx,
+        )
 
     assert collected_content == ["正常输出"]
     assert emitted_tokens == [("正常输出", "todo_expert")]
@@ -341,22 +259,13 @@ def test_emit_messages_mode_token_filters_internal_content() -> None:
 def test_emit_messages_mode_thinking_prefers_reasoning_content() -> None:
     """思考内容应按 reasoning -> thinking_content -> thinking 顺序输出。"""
     emitted = []
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda *_args, **_kwargs: None,
-        emit_thinking=lambda _writer, content, node: emitted.append((content, node)),
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
+    ctx = _make_ctx(node_name="supervisor")
 
-    _emit_messages_mode_thinking(
-        message=SimpleNamespace(additional_kwargs={"reasoning_content": "step by step"}),
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="supervisor",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.emit_thinking", side_effect=lambda _w, content, node: emitted.append((content, node))):
+        _emit_messages_mode_thinking(
+            message=SimpleNamespace(additional_kwargs={"reasoning_content": "step by step"}),
+            ctx=ctx,
+        )
 
     assert emitted == [("step by step", "supervisor")]
 
@@ -399,37 +308,15 @@ def test_build_streaming_delta_return_keeps_non_message_keys() -> None:
 
 def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
     """messages dispatcher 应处理 AIMessage 并发出 token/thinking。"""
-
-    class _FakeParser:
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
     emitted_ids: set[str] = set()
     collected_content: list[str] = []
     token_events = []
     thinking_events = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda _writer, content, node: thinking_events.append((content, node)),
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={"multi_intent_mode": False},
+        collected_content=collected_content,
+        emitted_message_ids=emitted_ids,
     )
 
     message = AIMessage(
@@ -438,17 +325,15 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
         id="ai-msg-1",
     )
 
-    _dispatch_messages_mode_chunk(
-        chunk=(message, {"node": "supervisor"}),
-        protocol_adapter=protocol_adapter,
-        emitted_message_ids=emitted_ids,
-        collected_content=collected_content,
-        kb_images={},
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="supervisor",
-        state={"multi_intent_mode": False},
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))), \
+         patch("app.ai.workflow.multi_agent_graph.emit_thinking", side_effect=lambda _w, content, node: thinking_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+
+        _dispatch_messages_mode_chunk(
+            chunk=(message, {"node": "supervisor"}),
+            ctx=ctx,
+        )
 
     assert emitted_ids == {"ai-msg-1"}
     assert collected_content == ["这是回答"]
@@ -458,36 +343,14 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
 
 def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:
     """values dispatcher 应处理新增 AI 消息并补发文本。"""
-
-    class _FakeParser:
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
     emitted_ids: set[str] = set()
     collected_content: list[str] = []
     token_events = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
+    ctx = _make_ctx(
+        node_name="todo_expert",
+        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
+        collected_content=collected_content,
+        emitted_message_ids=emitted_ids,
     )
 
     final_state = {
@@ -495,20 +358,18 @@ def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:
         "thread_id": "thread-1",
     }
 
-    updated_count, handoff_return = _dispatch_values_mode_chunk(
-        final_state=final_state,
-        protocol_adapter=protocol_adapter,
-        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
-        initial_input_count=0,
-        input_message_count=0,
-        kb_images={},
-        sent_tool_call_ids=set(),
-        emitted_message_ids=emitted_ids,
-        collected_content=collected_content,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="todo_expert",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
 
     assert handoff_return is None
     assert updated_count == 1
@@ -519,37 +380,15 @@ def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:
 
 def test_dispatch_values_mode_chunk_uses_result_emitter_for_structured_payload() -> None:
     """values dispatcher 遇到结构化载荷时应通过 emit_result 发送。"""
-
-    class _FakeParser:
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
     emitted_ids: set[str] = set()
     collected_content: list[str] = []
     token_events = []
     result_events = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda _writer, data_type, data, message, node: result_events.append((data_type, data, message, node)),
-        emit_kb_images=lambda *_args, **_kwargs: None,
+    ctx = _make_ctx(
+        node_name="todo_expert",
+        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
+        collected_content=collected_content,
+        emitted_message_ids=emitted_ids,
     )
 
     final_state = {
@@ -563,20 +402,19 @@ def test_dispatch_values_mode_chunk_uses_result_emitter_for_structured_payload()
         "thread_id": "thread-1",
     }
 
-    updated_count, handoff_return = _dispatch_values_mode_chunk(
-        final_state=final_state,
-        protocol_adapter=protocol_adapter,
-        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
-        initial_input_count=0,
-        input_message_count=0,
-        kb_images={},
-        sent_tool_call_ids=set(),
-        emitted_message_ids=emitted_ids,
-        collected_content=collected_content,
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="todo_expert",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))), \
+         patch("app.ai.workflow.multi_agent_graph.emit_result", side_effect=lambda _w, data_type, data, message, node: result_events.append((data_type, data, message, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
 
     assert handoff_return is None
     assert updated_count == 1
@@ -588,35 +426,12 @@ def test_dispatch_values_mode_chunk_uses_result_emitter_for_structured_payload()
 
 def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
     """values dispatcher 应从增量 ToolMessage 提取并发送 kb_images。"""
-
-    class _FakeParser:
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {"img-1": "https://example.com/kb.png"}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
     kb_images: dict[str, str] = {}
     kb_image_events = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda *_args, **_kwargs: None,
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda _writer, images, node: kb_image_events.append((dict(images), node)),
+    ctx = _make_ctx(
+        node_name="todo_expert",
+        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
+        kb_images=kb_images,
     )
 
     final_state = {
@@ -624,20 +439,18 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
         "thread_id": "thread-1",
     }
 
-    updated_count, handoff_return = _dispatch_values_mode_chunk(
-        final_state=final_state,
-        protocol_adapter=protocol_adapter,
-        state={"messages": [HumanMessage(content="测试")], "thread_id": "thread-1"},
-        initial_input_count=0,
-        input_message_count=1,
-        kb_images=kb_images,
-        sent_tool_call_ids=set(),
-        emitted_message_ids=set(),
-        collected_content=[],
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="todo_expert",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_kb_images", side_effect=lambda _w, images, node: kb_image_events.append((dict(images), node))):
+        mock_parser.parse_kb_images.return_value = {"img-1": "https://example.com/kb.png"}
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=1,
+            ctx=ctx,
+        )
 
     assert handoff_return is None
     assert updated_count == 1
@@ -647,44 +460,9 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
 
 def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> None:
     """supervisor values 模式应保留 handoff 顺序并构造队列。"""
-
-    class _FakeParser:
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return [
-                {
-                    "action": "handoff",
-                    "target_agent": "data_expert",
-                    "task_description": "查询网银功能",
-                },
-                {
-                    "action": "handoff",
-                    "target_agent": "todo_expert",
-                    "task_description": "创建待办提醒输出网银汇总",
-                },
-            ]
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda *_args, **_kwargs: None,
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={"messages": [HumanMessage(content="复合任务")], "thread_id": "thread-1"},
     )
 
     final_state = {
@@ -692,20 +470,28 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
         "thread_id": "thread-1",
     }
 
-    updated_count, handoff_return = _dispatch_values_mode_chunk(
-        final_state=final_state,
-        protocol_adapter=protocol_adapter,
-        state={"messages": [HumanMessage(content="复合任务")], "thread_id": "thread-1"},
-        initial_input_count=0,
-        input_message_count=0,
-        kb_images={},
-        sent_tool_call_ids=set(),
-        emitted_message_ids=set(),
-        collected_content=[],
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="supervisor",
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "data_expert",
+                "task_description": "查询网银功能",
+            },
+            {
+                "action": "handoff",
+                "target_agent": "todo_expert",
+                "task_description": "创建待办提醒输出网银汇总",
+            },
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
 
     assert updated_count == 0
     assert handoff_return is not None
@@ -718,26 +504,9 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
 async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     """streaming 分发循环应按 messages/values 顺序处理并返回最终状态。"""
 
-    class _FakeParser:
-        @staticmethod
-        def extract_latest_handoff_from_messages(_messages):
-            return None
-
-        @staticmethod
-        def extract_all_handoffs_from_messages(_messages):
-            return []
-
-        @staticmethod
-        def parse_kb_images(_tool_content: str):
-            return {}
-
-        @staticmethod
-        def should_filter_content(_content):
-            return False
-
     class _FakeAgent:
         async def astream(self, _pruned_state, _config, stream_mode):
-            assert stream_mode == ["messages", "values"]
+            assert stream_mode == ["messages", "values", "custom"]
             yield (
                 "messages",
                 (
@@ -756,33 +525,28 @@ async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     collected_content: list[str] = []
     token_events = []
     thinking_events = []
-    protocol_adapter = _build_streaming_protocol_adapter(_FakeParser)
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda _writer, content, node: thinking_events.append((content, node)),
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
-
-    final_state, handoff_return = await _run_streaming_dispatch_loop(
-        agent=_FakeAgent(),
-        pruned_state={"messages": []},
-        config=SimpleNamespace(),
-        protocol_adapter=protocol_adapter,
-        initial_input_count=0,
-        input_message_count=0,
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={"messages": [HumanMessage(content="测试消息")]},
+        collected_content=collected_content,
         emitted_message_ids=emitted_ids,
         sent_tool_call_ids=sent_tool_call_ids,
-        collected_content=collected_content,
-        kb_images={},
-        state={"messages": [HumanMessage(content="测试消息")]},
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-        node_name="supervisor",
     )
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))), \
+         patch("app.ai.workflow.multi_agent_graph.emit_thinking", side_effect=lambda _w, content, node: thinking_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        final_state, handoff_return = await _run_streaming_dispatch_loop(
+            agent=_FakeAgent(),
+            pruned_state={"messages": []},
+            config=SimpleNamespace(),
+            input_message_count=0,
+            ctx=ctx,
+        )
 
     assert handoff_return is None
     assert final_state is not None
@@ -796,6 +560,46 @@ async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     assert thinking_events == [("messages-thinking", "supervisor")]
 
 
+@pytest.mark.asyncio
+async def test_run_streaming_dispatch_loop_filters_invalid_custom_chunks() -> None:
+    """custom 分发应忽略非标准 chunk，仅透传标准事件。"""
+
+    class _FakeAgent:
+        async def astream(self, _pruned_state, _config, stream_mode):
+            assert stream_mode == ["messages", "values", "custom"]
+            yield ("custom", {"not_type": "bad"})
+            yield ("custom", "invalid-string")
+            yield (
+                "custom",
+                {"type": "status", "data": {"stage": "ok"}, "node": "supervisor"},
+            )
+            yield ("values", {"messages": []})
+
+    custom_events = []
+    ctx = _make_ctx(
+        writer=custom_events.append,
+        node_name="supervisor",
+        state={"messages": [HumanMessage(content="测试 custom")], "thread_id": "thread-1"},
+    )
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        final_state, handoff_return = await _run_streaming_dispatch_loop(
+            agent=_FakeAgent(),
+            pruned_state={"messages": []},
+            config=SimpleNamespace(),
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert handoff_return is None
+    assert final_state == {"messages": []}
+    assert custom_events == [{"type": "status", "data": {"stage": "ok"}, "node": "supervisor"}]
+
+
 def test_handle_streaming_wrapper_exception_uses_supervisor_fallback(monkeypatch) -> None:
     """supervisor 命中模型权限错误时应优先返回待办兜底 handoff。"""
     monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
@@ -803,23 +607,18 @@ def test_handle_streaming_wrapper_exception_uses_supervisor_fallback(monkeypatch
 
     status_events = []
     token_events = []
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda writer, message, node: writer((message, node)),
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
-
-    result = _handle_streaming_wrapper_exception(
+    ctx = _make_ctx(
+        writer=status_events.append,
         node_name="supervisor",
         state={"messages": [HumanMessage(content="请帮我查看待办列表")]},
-        error_text="Error Code: 403, subscription_not_found",
-        event_emitter_adapter=event_emitter_adapter,
-        writer=status_events.append,
     )
+
+    with patch("app.ai.workflow.multi_agent_graph.emit_status", side_effect=lambda writer, message, node: writer((message, node))), \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        result = _handle_streaming_wrapper_exception(
+            error_text="Error Code: 403, subscription_not_found",
+            ctx=ctx,
+        )
 
     assert result["messages"] == []
     assert result["pending_handoff"]["target_agent"] == "todo_expert"
@@ -837,17 +636,8 @@ def test_handle_streaming_wrapper_exception_plugin_unhealthy_fallback(monkeypatc
 
     status_events = []
     token_events = []
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda writer, message, node: writer((message, node)),
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
-
-    result = _handle_streaming_wrapper_exception(
+    ctx = _make_ctx(
+        writer=status_events.append,
         node_name="data_expert",
         state={
             "messages": [HumanMessage(content="帮我查下贷款余额")],
@@ -857,10 +647,14 @@ def test_handle_streaming_wrapper_exception_plugin_unhealthy_fallback(monkeypatc
                 "recovery_metrics": {"recovery_attempts": 0, "fallback_count": 0},
             },
         },
-        error_text="Plugin registry load failed: timeout",
-        event_emitter_adapter=event_emitter_adapter,
-        writer=status_events.append,
     )
+
+    with patch("app.ai.workflow.multi_agent_graph.emit_status", side_effect=lambda writer, message, node: writer((message, node))), \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        result = _handle_streaming_wrapper_exception(
+            error_text="Plugin registry load failed: timeout",
+            ctx=ctx,
+        )
 
     assert len(result["messages"]) == 1
     assert result["messages"][0].content == "插件能力暂不可用，已自动降级为核心能力回答。"
@@ -918,7 +712,7 @@ async def test_execute_streaming_wrapper_returns_delta_messages() -> None:
             return None
 
         async def astream(self, pruned_state, _config, stream_mode):
-            assert stream_mode == ["messages", "values"]
+            assert stream_mode == ["messages", "values", "custom"]
             yield (
                 "values",
                 {
@@ -928,24 +722,20 @@ async def test_execute_streaming_wrapper_returns_delta_messages() -> None:
             )
 
     token_events = []
-    event_emitter_adapter = _build_streaming_event_emitter_adapter(
-        emit_token=lambda _writer, content, node: token_events.append((content, node)),
-        emit_thinking=lambda *_args, **_kwargs: None,
-        emit_tool_start=lambda *_args, **_kwargs: None,
-        emit_tool_end=lambda *_args, **_kwargs: None,
-        emit_status=lambda *_args, **_kwargs: None,
-        emit_result=lambda *_args, **_kwargs: None,
-        emit_kb_images=lambda *_args, **_kwargs: None,
-    )
 
-    result = await _execute_streaming_wrapper(
-        agent=_FakeAgent(),
-        node_name="todo_expert",
-        state={"messages": [HumanMessage(content="继续")], "thread_id": "thread-1"},
-        config=SimpleNamespace(),
-        event_emitter_adapter=event_emitter_adapter,
-        writer=SimpleNamespace(),
-    )
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser, \
+         patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        result = await _execute_streaming_wrapper(
+            agent=_FakeAgent(),
+            node_name="todo_expert",
+            state={"messages": [HumanMessage(content="继续")], "thread_id": "thread-1"},
+            config=SimpleNamespace(),
+            writer=SimpleNamespace(),
+        )
 
     assert len(result.get("messages", [])) == 1
     assert result["messages"][0].content == "execute-token"
@@ -962,7 +752,7 @@ async def test_create_streaming_agent_wrapper_uses_module_stream_writer(monkeypa
             return None
 
         async def astream(self, pruned_state, _config, stream_mode):
-            assert stream_mode == ["messages", "values"]
+            assert stream_mode == ["messages", "values", "custom"]
             yield (
                 "values",
                 {
