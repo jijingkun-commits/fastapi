@@ -1,0 +1,24 @@
+{
+  "teamName": "auth-security-review",
+  "workerCount": 3,
+  "agentTypes": [
+    "codex",
+    "codex",
+    "codex"
+  ],
+  "tasks": [
+    {
+      "subject": "认证与Token层安全审查",
+      "description": "安全审查: 认证与Token层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: JWT实现安全性、Token黑名单机制、密码哈希算法、认证绕过风险、会话管理。文件列表: app/core/security.py, app/api/v1/endpoints/auth.py, app/services/token_service.py, app/repositories/token_repo.py, app/models/token_blacklist.py, app/api/deps.py, app/core/config.py"
+    },
+    {
+      "subject": "权限与访问控制层安全审查",
+      "description": "安全审查: 权限与访问控制层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: RBAC实现完整性、数据权限边界、SQL注入防护、越权访问风险、敏感数据暴露。文件列表: app/services/permission_service.py, app/models/data_permission.py, app/ai/semantic/data_access_control.py, app/ai/utils/permission_context.py, app/api/v1/endpoints/access_admin_api.py"
+    },
+    {
+      "subject": "用户管理与SQL安全层审查",
+      "description": "安全审查: 用户管理与SQL安全层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: 用户输入验证、SQL注入防护、XSS防护、敏感信息泄露(密码/token)、AI guardrails安全性、SQL重写器的注入风险。文件列表: app/services/user_service.py, app/repositories/user_repo.py, app/models/user.py, app/schemas/user.py, app/ai/utils/sql_safety.py, app/ai/utils/sql_rewriter.py, app/ai/guardrails.py"
+    }
+  ],
+  "cwd": "/Users/jijingkun/bojxAI/fastapi"
+}

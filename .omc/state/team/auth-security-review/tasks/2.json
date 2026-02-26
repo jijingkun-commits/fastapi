@@ -1,0 +1,9 @@
+{
+  "id": "2",
+  "subject": "权限与访问控制层安全审查",
+  "description": "安全审查: 权限与访问控制层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: RBAC实现完整性、数据权限边界、SQL注入防护、越权访问风险、敏感数据暴露。文件列表: app/services/permission_service.py, app/models/data_permission.py, app/ai/semantic/data_access_control.py, app/ai/utils/permission_context.py, app/api/v1/endpoints/access_admin_api.py",
+  "status": "pending",
+  "owner": null,
+  "result": null,
+  "createdAt": "2026-02-25T02:30:32.287Z"
+}

@@ -1,0 +1,338 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1772101349538,
+  "projectRoot": "/Users/jijingkun/bojxAI/fastapi",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml",
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "fastapi",
+        "version": null,
+        "category": "backend"
+      },
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "app",
+      "docs",
+      "public",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "alembic": {
+      "path": "alembic",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1772101349529,
+      "keyFiles": [
+        "env.py",
+        "script.py.mako"
+      ]
+    },
+    "app": {
+      "path": "app",
+      "purpose": "Application code",
+      "fileCount": 2,
+      "lastAccessed": 1772101349530,
+      "keyFiles": [
+        "__init__.py",
+        "main.py"
+      ]
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 1,
+      "lastAccessed": 1772101349530,
+      "keyFiles": [
+        "active_skills.txt"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 11,
+      "lastAccessed": 1772101349531,
+      "keyFiles": [
+        "DMP_F_MID_DEP_TB_20250630.txt",
+        "DMP_F_MID_ORG_TREE_20250630.txt",
+        "README.md",
+        "dmp_show_ind_info_20260123.txt",
+        "dmp_show_ind_info_20260123.txt.ctl"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 5,
+      "lastAccessed": 1772101349531,
+      "keyFiles": [
+        "README.md",
+        "SUMMARY.md",
+        "文档梳理与重构方案_2026-02-13.md",
+        "项目上下文.md"
+      ]
+    },
+    "htmlcov": {
+      "path": "htmlcov",
+      "purpose": null,
+      "fileCount": 167,
+      "lastAccessed": 1772101349532,
+      "keyFiles": [
+        "class_index.html",
+        "coverage_html_cb_dd2e7eb5.js",
+        "favicon_32_cb_c827f16f.png",
+        "function_index.html",
+        "index.html"
+      ]
+    },
+    "install": {
+      "path": "install",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1772101349532,
+      "keyFiles": []
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1772101349533,
+      "keyFiles": [
+        "assistant.log",
+        "assistant.log.2026-02-19",
+        "assistant.log.2026-02-20",
+        "assistant.log.2026-02-21",
+        "assistant.log.2026-02-24"
+      ]
+    },
+    "output": {
+      "path": "output",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1772101349533,
+      "keyFiles": [
+        "OpenClaw对标与智能度提升综合分析报告.md",
+        "OpenClaw对标分析报告.md",
+        "OpenClaw深挖分析-四大核心问题.md",
+        "全面代码审查报告_合并版_20260225.md",
+        "多轮对话答非所问-诊断摘要.md"
+      ]
+    },
+    "public": {
+      "path": "public",
+      "purpose": "Public files",
+      "fileCount": 0,
+      "lastAccessed": 1772101349533,
+      "keyFiles": []
+    },
+    "ragflow": {
+      "path": "ragflow",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1772101349534,
+      "keyFiles": [
+        "API",
+        "README.md",
+        "docker-compose.yml"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 10,
+      "lastAccessed": 1772101349535,
+      "keyFiles": [
+        "README.md",
+        "check_doc_sync.sh",
+        "coder4_bootstrap_kernel.py",
+        "coder4_scope_guard.py",
+        "config_doctor.py"
+      ]
+    },
+    "test-results": {
+      "path": "test-results",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1772101349535,
+      "keyFiles": [
+        "playwright_full_20260216.log",
+        "playwright_full_after_fix_20260216.log",
+        "pytest_full_20260216.log"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 15,
+      "lastAccessed": 1772101349535,
+      "keyFiles": [
+        "conftest.py",
+        "debug_llm_config.py",
+        "run_master_test_suite.py",
+        "test_ask_data_flow.py",
+        "test_deepseek_fix.py"
+      ]
+    },
+    "tmp": {
+      "path": "tmp",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1772101349535,
+      "keyFiles": []
+    },
+    "venv": {
+      "path": "venv",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1772101349535,
+      "keyFiles": [
+        "pyvenv.cfg"
+      ]
+    },
+    "web": {
+      "path": "web",
+      "purpose": null,
+      "fileCount": 25,
+      "lastAccessed": 1772101349536,
+      "keyFiles": [
+        "Dockerfile",
+        "LICENSE",
+        "README.md",
+        "components.json",
+        "eslint.config.js"
+      ]
+    },
+    "app/api": {
+      "path": "app/api",
+      "purpose": "API routes",
+      "fileCount": 2,
+      "lastAccessed": 1772101349536,
+      "keyFiles": [
+        "__init__.py",
+        "deps.py"
+      ]
+    },
+    "app/data": {
+      "path": "app/data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1772101349536,
+      "keyFiles": []
+    },
+    "app/models": {
+      "path": "app/models",
+      "purpose": "Data models",
+      "fileCount": 18,
+      "lastAccessed": 1772101349536,
+      "keyFiles": [
+        "__init__.py",
+        "agent_skill.py",
+        "chat_asset.py"
+      ]
+    },
+    "install/scripts": {
+      "path": "install/scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 3,
+      "lastAccessed": 1772101349537,
+      "keyFiles": [
+        "init_llm_config.py",
+        "init_minio_buckets.py",
+        "init_system_config.py"
+      ]
+    },
+    "tests/api": {
+      "path": "tests/api",
+      "purpose": "API routes",
+      "fileCount": 9,
+      "lastAccessed": 1772101349537,
+      "keyFiles": [
+        "__init__.py",
+        "test_access_admin_api.py",
+        "test_admin_overview_api.py"
+      ]
+    },
+    "tests/fixtures": {
+      "path": "tests/fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 2,
+      "lastAccessed": 1772101349537,
+      "keyFiles": [
+        "skill_retrieval_offline_eval_baseline.json",
+        "skill_retrieval_offline_eval_cases.json"
+      ]
+    },
+    "venv/Lib": {
+      "path": "venv/Lib",
+      "purpose": "Library code",
+      "fileCount": 0,
+      "lastAccessed": 1772101349537,
+      "keyFiles": []
+    },
+    "venv/Scripts": {
+      "path": "venv/Scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 17,
+      "lastAccessed": 1772101349538,
+      "keyFiles": [
+        "Activate.ps1",
+        "activate",
+        "activate.bat"
+      ]
+    },
+    "venv/bin": {
+      "path": "venv/bin",
+      "purpose": "Executable scripts",
+      "fileCount": 53,
+      "lastAccessed": 1772101349538,
+      "keyFiles": [
+        "Activate.ps1",
+        "activate",
+        "activate.csh"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

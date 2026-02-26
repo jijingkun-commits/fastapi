@@ -1,0 +1,11 @@
+{"t":0,"agent":"a5f6de8","agent_type":"document-specialist","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a5f6de8","agent_type":"document-specialist","event":"agent_stop","success":true,"duration_ms":313030}
+{"t":0,"agent":"a6e7624","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"system","event":"keyword_detected","keyword":"team"}
+{"t":0,"agent":"system","event":"mode_change","mode_from":"none","mode_to":"team"}
+{"t":0,"agent":"aa42c50","agent_type":"document-specialist","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a2bb4ce","agent_type":"document-specialist","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"aa42c50","agent_type":"document-specialist","event":"agent_stop","success":true,"duration_ms":162385}
+{"t":0,"agent":"a2bb4ce","agent_type":"document-specialist","event":"agent_stop","success":true,"duration_ms":358889}
+{"t":0,"agent":"a2b7486","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a2c07de","agent_type":"unknown","event":"agent_stop","success":true}

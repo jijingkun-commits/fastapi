@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__postgres__query",
+  "tool_input_preview": "{\"sql\":\"\\nSELECT metric_name, query_template \\nFROM t_metric_definitions \\nWHERE LOWER(metric_name) LIKE '%贷款%余额%' \\n   OR LOWER(metric_name) LIKE '%loan%bal%'\\nLIMIT 10\\n\"}",
+  "error": "MCP error -32603: relation \"t_metric_definitions\" does not exist",
+  "timestamp": "2026-02-26T09:35:01.009Z",
+  "retry_count": 1
+}

@@ -1,0 +1,56 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@localhost:5432/chat_db", "--access-mode=unsafe"],
+      "env": {
+        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    },
+    "postgres-data-db": {
+      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@localhost:5432/data_db"],
+      "env": {
+        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    },
+    "playwright": {
+      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"]
+    },
+    "context7": {
+      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "env": {
+        "DEFAULT_MINIMUM_TOKENS": "10000",
+        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    },
+    "github-mcp-server": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+      }
+    },
+    "minio": {
+      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8090/mcp"],
+      "env": {
+        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    },
+    "vibe_kanban": {
+      "command": "/Users/jijingkun/.vibe-kanban/bin/v0.1.18-20260221114038/macos-arm64/vibe-kanban-mcp",
+      "args": [],
+      "env": {
+        "NO_PROXY": "127.0.0.1,localhost",
+        "no_proxy": "127.0.0.1,localhost",
+        "HTTP_PROXY": "",
+        "HTTPS_PROXY": "",
+        "http_proxy": "",
+        "https_proxy": ""
+      }
+    }
+  }
+}

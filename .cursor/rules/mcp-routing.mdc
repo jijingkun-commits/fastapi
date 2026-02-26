@@ -1,0 +1,25 @@
+---
+description: MCP 工具路由强制规则（涉及数据库查询、第三方库、GitHub、浏览器测试、看板、对象存储时自动加载）
+alwaysApply: true
+---
+
+# MCP 工具路由（强制）
+
+以下场景必须优先使用对应 MCP 工具，禁止用 Bash/内置工具替代：
+
+| 场景 | 必须使用的 MCP 工具 | 禁止替代方式 |
+|------|-------------------|-------------|
+| 查询 chat_db 数据/表结构 | `mcp__postgres__query` | 禁止用 psql 命令行 |
+| 查询 data_db 数据/表结构 | `mcp__postgres-data-db__query` | 禁止用 psql 命令行 |
+| LangChain/LangGraph/任何第三方库 API 用法不确定时 | `context7`（先 resolve-library-id 再 query-docs） | 禁止凭记忆猜测 API |
+| GitHub 操作（PR/Issue/代码搜索） | `github-mcp-server` 系列工具 | 禁止用 gh CLI |
+| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 禁止手写 playwright 脚本再执行 |
+| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 禁止手动操作 |
+| 对象存储操作 | `minio` 系列工具 | 禁止用 mc CLI |
+
+## 触发规则
+
+1. 涉及数据库查询时，先判断目标库（chat_db vs data_db），然后直接调用对应 MCP，不要先用 Bash 尝试
+2. 涉及第三方库 API 且不是 100% 确定用法时，必须先用 context7 查文档，再写代码
+3. 涉及 GitHub 操作时，优先用 github-mcp-server，而非 gh CLI
+4. 需要浏览器测试时，直接用 playwright MCP，不要生成脚本文件再执行

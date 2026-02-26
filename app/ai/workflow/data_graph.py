@@ -112,8 +112,13 @@ class MetricTemplatePlan:
     measure_alias: str
 
 
-_DIMENSION_FIELD_MAP = {
+_DIMENSION_FIELD_MAP: Dict[str, List[str]] = {
     "客户": ["ecif_cust_no"],
+    "机构": ["org_cd", "org_no", "legal_org_cd"],
+    "分行": ["org_cd", "org_no", "legal_org_cd"],
+    "支行": ["dept_cd"],
+    "部门": ["dept_cd"],
+    "日期": ["data_dt"],
 }
 
 
@@ -252,6 +257,55 @@ def _parse_metric_template_plan(sql: str) -> Optional[MetricTemplatePlan]:
     )
 
 
+def _resolve_dimension_fields_for_table(
+    candidates: List[str],
+    from_expr: str,
+) -> List[str]:
+    """根据模板 FROM 表的实际字段过滤维度候选列表。
+
+    从 from_expr 提取 schema.table，查 t_meta_columns 获取该表的列集合，
+    返回候选列表中第一个存在的字段。若元数据不可用则返回第一个候选。
+    """
+    if not candidates:
+        return []
+
+    # 从 from_expr 提取 schema.table（如 "fdmdata.f_mid_loan_k_tb"）
+    table_match = re.match(r"([a-zA-Z_]\w*\.[a-zA-Z_]\w*)", from_expr.strip())
+    if not table_match:
+        return [candidates[0]]
+
+    full_table = table_match.group(1).lower()
+
+    try:
+        from sqlalchemy import text
+        from app.db.session import engine
+
+        query = text(
+            """
+            SELECT LOWER(c.column_name) AS col
+            FROM t_meta_columns c
+            JOIN t_meta_tables t ON t.id = c.table_id
+            WHERE LOWER(COALESCE(t.schema_name, 'public') || '.' || t.table_name) = :full_table
+            """
+        )
+        with engine.connect() as conn:
+            rows = conn.execute(query, {"full_table": full_table}).fetchall()
+        table_columns = {row.col for row in rows}
+    except Exception as e:
+        logger.warning("查询表字段元数据失败，使用首个候选: %s", e)
+        return [candidates[0]]
+
+    if not table_columns:
+        return [candidates[0]]
+
+    for candidate in candidates:
+        if candidate.lower() in table_columns:
+            return [candidate]
+
+    logger.info("维度候选字段 %s 均不在表 %s 中", candidates, full_table)
+    return []
+
+
 def _build_metric_sql_from_plan(
     plan: MetricTemplatePlan,
     question: str,
@@ -259,9 +313,9 @@ def _build_metric_sql_from_plan(
 ) -> Optional[str]:
     """根据模板计划和查询语义组装 SQL。"""
     shape = _detect_query_shape(question, dimensions)
-    dimension_fields = _resolve_dimension_fields(dimensions)
+    dimension_candidates = _resolve_dimension_fields(dimensions)
 
-    if shape in ("dimension", "top_n") and not dimension_fields:
+    if shape in ("dimension", "top_n") and not dimension_candidates:
         logger.info("指标模板派生缺少维度字段映射，shape=%s", shape)
         return None
 
@@ -269,6 +323,13 @@ def _build_metric_sql_from_plan(
     group_by_fields: List[str] = []
 
     if shape in ("dimension", "top_n"):
+        # 根据模板表的实际字段过滤候选
+        dimension_fields = _resolve_dimension_fields_for_table(
+            dimension_candidates, plan.from_expr
+        )
+        if not dimension_fields:
+            logger.info("维度候选字段在模板表中均不存在，shape=%s", shape)
+            return None
         for dim_field in dimension_fields:
             select_parts.append(dim_field)
             group_by_fields.append(dim_field)

@@ -1,0 +1,9 @@
+{
+  "id": "3",
+  "subject": "用户管理与SQL安全层审查",
+  "description": "安全审查: 用户管理与SQL安全层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: 用户输入验证、SQL注入防护、XSS防护、敏感信息泄露(密码/token)、AI guardrails安全性、SQL重写器的注入风险。文件列表: app/services/user_service.py, app/repositories/user_repo.py, app/models/user.py, app/schemas/user.py, app/ai/utils/sql_safety.py, app/ai/utils/sql_rewriter.py, app/ai/guardrails.py",
+  "status": "pending",
+  "owner": null,
+  "result": null,
+  "createdAt": "2026-02-25T02:30:32.288Z"
+}

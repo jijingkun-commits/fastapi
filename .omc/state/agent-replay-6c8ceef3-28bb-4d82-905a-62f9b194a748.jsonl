@@ -1,0 +1,8 @@
+{"t":0,"agent":"system","event":"keyword_detected","keyword":"team"}
+{"t":0,"agent":"system","event":"mode_change","mode_from":"none","mode_to":"team"}
+{"t":0,"agent":"aecb164","agent_type":"explore","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"aecb164","agent_type":"explore","event":"agent_stop","success":true,"duration_ms":124408}
+{"t":0,"agent":"abdeb91","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a4b669f","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"ac13e2b","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a3b916e","agent_type":"unknown","event":"agent_stop","success":true}
