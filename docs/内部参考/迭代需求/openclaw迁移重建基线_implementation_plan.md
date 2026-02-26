@@ -466,3 +466,22 @@ planning_contract:
         - G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）
         - `python3 scripts/docs_guard.py --strict` 通过
 ```
+
+### 7.1 G02 复核留痕（2026-02-26）
+
+1. `hard_depends_on` 链路复核：
+   - 第 6 节固定 Gate 串行链为 `G01 -> G02 -> G03 -> G04`。
+   - 本节 `planning_contract.gate_contract.depends_on` 固定 `G02: [G01]`。
+   - `vk_cards.json` 中 `G02.hard_depends_on=[G01]` 且 `G02.depends_on=[G01]`。
+2. `single_active_card` 串行约束复核：
+   - 本节 `strict_single_active_card: true`。
+   - `vk_cards.json` 顶层 `single_active_card=true`。
+   - `docs/内部参考/任务拆解/_active_task.json` 顶层 `single_active_card=true`。
+3. G02 关键字段复核（与 WS-G02 对齐）：
+   - `task_mode=inspection-card`
+   - `merge_required=false`
+   - `acceptance_checks=["python3 scripts/docs_guard.py --strict"]`
+   - `evidence_entry=docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7`
+4. 看板链路复核状态：
+   - 2026-02-26 本地尝试连接看板 API（`http://127.0.0.1:65422`）失败，当前以 `vk_cards.json` 作为机器字段镜像完成离线复核。
+   - API 恢复后需补做一次在线看板抽检，仅用于补证，不影响当前依赖链与串行约束判定。

@@ -637,7 +637,7 @@
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7"
       ],
       "acceptance_checks": [
-        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
+        "python3 scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
@@ -647,19 +647,20 @@
       "merge_required": false,
       "file_scope": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
+        "docs/SUMMARY.md"
       ],
       "done_gate": [
         "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
-        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
+        "python3 scripts/docs_guard.py --strict 通过"
       ],
       "dod": [
         "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
-        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
+        "python3 scripts/docs_guard.py --strict 通过"
       ],
       "check_cmd": [
-        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
+        "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
     },
