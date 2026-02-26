@@ -117,34 +117,42 @@ def rewrite_sql_with_permissions(
 
 
 def _extract_tables_with_schema(sql: str) -> List[Tuple[str, str]]:
-    """提取 SQL 中的表名（含 Schema）。
-    
+    """提取 SQL 中的真实表名（含 Schema），排除 CTE 定义名称。
+
+    排除条件：仅排除无显式 schema 且命中 CTE 名的引用。
+    带 schema 前缀的同名表（如 fdmdata.params）保留。
+
     Args:
         sql: SQL 语句
-        
+
     Returns:
         [(schema, table), ...] 列表
     """
     tables = []
-    
+
     try:
         parsed = sqlglot.parse_one(sql, dialect="postgres")
-        
+
         for table in parsed.find_all(exp.Table):
-            schema = table.db or "public"
             table_name = table.name
-            if table_name:
-                tables.append((schema.lower(), table_name.lower()))
-                
+            if not table_name:
+                continue
+            has_explicit_schema = bool(table.db or table.catalog)
+            # 仅排除无显式 schema 且命中 CTE 名的引用
+            if not has_explicit_schema and table_name.lower() in _collect_visible_cte_names(table):
+                continue
+            schema = table.db or table.catalog or "public"
+            tables.append((schema.lower(), table_name.lower()))
+
     except ParseError:
         tables = _extract_tables_regex(sql)
-    
+
     return list(set(tables))
 
 
 
 def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
-    """提取 SQL 中每个表可用的限定符（别名优先）。
+    """提取 SQL 中每个表可用的限定符（别名优先），排除 CTE 定义名称。
 
     返回结构：{(schema, table): [qualifier1, qualifier2, ...]}
     - qualifier 为 SQL 中可直接用于 `qualifier.column` 的前缀
@@ -156,10 +164,16 @@ def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
         parsed = sqlglot.parse_one(sql, dialect="postgres")
 
         for table in parsed.find_all(exp.Table):
-            schema = (table.db or "public").lower()
             table_name = (table.name or "").lower()
             if not table_name:
                 continue
+
+            has_explicit_schema = bool(table.db or table.catalog)
+            # 仅排除无显式 schema 且命中 CTE 名的引用
+            if not has_explicit_schema and table_name in _collect_visible_cte_names(table):
+                continue
+
+            schema = (table.db or table.catalog or "public").lower()
 
             qualifier = table.alias_or_name or table.name
             qualifier = str(qualifier or "").strip()
@@ -177,6 +191,23 @@ def _extract_table_qualifiers(sql: str) -> Dict[Tuple[str, str], List[str]]:
         return {}
 
     return qualifiers
+
+
+def _collect_visible_cte_names(table: exp.Table) -> Set[str]:
+    """收集 table 节点当前可见作用域内的 CTE 名称。"""
+    names: Set[str] = set()
+    node: Optional[exp.Expression] = table
+
+    while node is not None:
+        with_clause = node.args.get("with_") if hasattr(node, "args") else None
+        if isinstance(with_clause, exp.With):
+            for cte in with_clause.expressions or []:
+                alias = str(cte.alias or "").strip().lower()
+                if alias:
+                    names.add(alias)
+        node = node.parent
+
+    return names
 
 
 def _load_table_columns_map(tables: List[Tuple[str, str]]) -> Dict[Tuple[str, str], Set[str]]:

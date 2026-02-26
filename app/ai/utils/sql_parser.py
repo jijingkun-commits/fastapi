@@ -52,33 +52,43 @@ def extract_tables_from_sql(sql: str, dialect: str = "postgres") -> Set[str]:
 
 
 def _extract_tables_sqlglot(sql: str, dialect: str = "postgres") -> Set[str]:
-    """使用 sqlglot 提取表名。"""
+    """使用 sqlglot 提取真实表名，排除 CTE 定义名称。
+
+    排除条件：仅排除无显式 schema 且命中 CTE 名的引用。
+    带 schema 前缀的同名表（如 fdmdata.params）保留。
+    """
     tables = set()
-    
+
     try:
         # 解析 SQL
         parsed = sqlglot.parse(sql, dialect=dialect)
-        
+
         for statement in parsed:
             if statement is None:
                 continue
-            
+
             # 遍历所有 Table 节点
             for table in statement.find_all(exp.Table):
                 table_name = table.name
-                
+                if not table_name:
+                    continue
+
+                has_explicit_schema = bool(table.db or table.catalog)
+                # 仅排除无显式 schema 且命中 CTE 名的引用
+                if not has_explicit_schema and table_name.lower() in _collect_visible_cte_names(table):
+                    continue
+
                 # 处理 schema 前缀
                 if table.db:
                     table_name = f"{table.db}.{table_name}"
                 elif table.catalog:
                     table_name = f"{table.catalog}.{table_name}"
-                
-                if table_name:
-                    tables.add(table_name.lower())
-        
+
+                tables.add(table_name.lower())
+
         logger.debug(f"sqlglot 解析提取到表: {tables}")
         return tables
-        
+
     except ParseError as e:
         logger.warning(f"sqlglot 解析失败，降级到正则: {e}")
         return _extract_tables_regex(sql)
@@ -111,6 +121,26 @@ def _extract_tables_regex(sql: str) -> Set[str]:
     
     logger.debug(f"正则解析提取到表: {tables}")
     return tables
+
+
+def _collect_visible_cte_names(table: "exp.Table") -> Set[str]:
+    """收集 table 节点当前可见作用域内的 CTE 名称。
+
+    仅向上遍历祖先链，避免将子查询内部 CTE 误应用到外层真实表。
+    """
+    names: Set[str] = set()
+    node = table
+
+    while node is not None:
+        with_clause = node.args.get("with_") if hasattr(node, "args") else None
+        if isinstance(with_clause, exp.With):
+            for cte in with_clause.expressions or []:
+                alias = str(cte.alias or "").strip().lower()
+                if alias:
+                    names.add(alias)
+        node = node.parent
+
+    return names
 
 
 def validate_sql_syntax(sql: str, dialect: str = "postgres") -> Tuple[bool, Optional[str]]:

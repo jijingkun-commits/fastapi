@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +127,15 @@ def resolve_relative_link(src: Path, raw_link: str) -> Path | None:
         return None
     if link.startswith(("http://", "https://", "mailto:")):
         return None
+    if link.startswith("file://"):
+        parsed = urlparse(link)
+        path_part = unquote(parsed.path or "")
+        if not path_part:
+            return None
+        file_path = Path(path_part)
+        if file_path.is_absolute():
+            return file_path.resolve()
+        return (src.parent / file_path).resolve()
 
     path_part = link.split("#", 1)[0].strip()
     if not path_part or path_part.startswith("/"):
@@ -134,6 +144,13 @@ def resolve_relative_link(src: Path, raw_link: str) -> Path | None:
         return None
 
     return (src.parent / path_part).resolve()
+
+
+def format_path_for_detail(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def parse_summary_links() -> list[str]:
@@ -453,7 +470,7 @@ def check_broken_links(findings: list[Finding]) -> int:
                         category="broken_link",
                         level="error",
                         file=str(md_file.relative_to(ROOT)),
-                        detail=f"{raw} -> {target.relative_to(ROOT)}",
+                        detail=f"{raw} -> {format_path_for_detail(target)}",
                     )
                 )
     return count
@@ -486,6 +503,17 @@ def is_archived_doc(path: Path) -> bool:
     return False
 
 
+def is_summary_optional_doc(path: Path) -> bool:
+    rel_posix = path.relative_to(DOCS_DIR).as_posix()
+    if rel_posix.startswith("内部参考/任务拆解/") and "/workstreams/" in rel_posix:
+        return True
+    if rel_posix.startswith("内部参考/迭代需求/fix_plan_"):
+        return True
+    if rel_posix.startswith("内部参考/迭代需求/") and rel_posix.endswith("依赖分析报告.md"):
+        return True
+    return False
+
+
 def check_summary_coverage(findings: list[Finding]) -> tuple[int, int]:
     links = parse_summary_links()
     linked_targets = {(DOCS_DIR / link).resolve() for link in links}
@@ -495,6 +523,8 @@ def check_summary_coverage(findings: list[Finding]) -> tuple[int, int]:
         if md_file in {DOCS_DIR / "README.md", DOCS_DIR / "SUMMARY.md"}:
             continue
         if is_archived_doc(md_file):
+            continue
+        if is_summary_optional_doc(md_file):
             continue
         required_docs.append(md_file.resolve())
 

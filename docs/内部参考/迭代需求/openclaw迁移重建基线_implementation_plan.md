@@ -310,7 +310,7 @@ if plugin_registry_unhealthy():
    - 不做：绕过 Gate 直接宣称“已吃透”。
 2. 触发条件与状态流转：前置卡完成 -> Gate 逐项验收 -> 发布清单冻结。
 3. 代码/文档锚点：
-   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2/11.5/11.6）
+   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2~11.5）
    - `scripts/docs_guard.py`
 4. 关键契约字段：Gate 状态、evidence 四元组、回滚演练记录。
 5. 验收命令：
@@ -324,17 +324,9 @@ assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
 ```
 
 9. 执行留痕（2026-02-25）：
-   - G-1~G-4 全部通过并完成证据链复核。
-   - docs/code/test 三线收口完成（`scripts/docs_guard.py` 严格门禁通过）。
-   - 各 Wave 回滚锚点组合演练通过并写入 `WAVE_ROLLBACK_DRILL_MATRIX`。
-10. Gate inspection 复核留痕（2026-02-25）：
-    - G01：evidence 四元组（`task_id/turn_id/process_id/status`）回填并完成绑定一致性复核。
-    - G02：`hard_depends_on` 与 `single_active_card` 的串行约束在文档/卡片口径一致。
-    - G03：`planning_contract / gate_contract / card_order` 三方口径对齐，Gate 定义无漂移。
-11. G04 复核留痕（2026-02-26）：
-    - 复核 `11.6 WAVE_ROLLBACK_DRILL_MATRIX` 记录完整性（P1~P6 全量覆盖、无占位符）。
-    - 复核 `11.5 G-4` 状态与“发布前固定回滚演练清单”闭环可执行性。
-    - 结论：发布前回滚演练可按矩阵批次直接执行。
+   - C06 收口卡已完成并提供 Gate 执行前置材料。
+   - G-1~G-4 已迁移为独立 Gate 卡（G01~G04），执行结果由 Gate 卡回填。
+   - 最终以 G01~G04 卡片证据链为准，不再仅依赖 C06 文本结论。
 
 ---
 
@@ -370,7 +362,7 @@ source_conflicts:
 2. `C01 -> C02 -> C03 -> C04`
 3. `C05` 依赖 `C02` 与 `C04`
 4. `C06` 依赖 `C01~C05`
-5. `G01 -> G02 -> G03` 为 Gate 复核链，按 inspection-card 串行执行，不改变 `C01~C06` 主链。
+5. Gate 卡串行收口：`G01 -> G02 -> G03 -> G04`，其中 `G01` 依赖 `C06`
 
 ---
 
@@ -384,6 +376,14 @@ planning_contract:
     implementation-card: hard_gate
     inspection/question-card: policy_gate
   status_source_of_truth: docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md
+  gate_contract:
+    mode: as_cards
+    gate_ids: [G01, G02, G03, G04]
+    depends_on:
+      G01: [C06]
+      G02: [G01]
+      G03: [G02]
+      G04: [G03]
   preflight:
     - card_id: C00
       feature_ids: [C00-01]
@@ -391,28 +391,7 @@ planning_contract:
         - 四风险修订口径固化完成（evidence/task_mode、scene fallback、插件后置、引用锚点）
         - 取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel
         - python3 scripts/docs_guard.py --strict 通过
-  card_order: [C01, C02, C03, C04, C05, C06]
-  gate_contract:
-    gate_card_order: [G01, G02, G03]
-    export_card_order: [C01, C02, C03, C04, C05, C06, G01, G02, G03]
-    gates:
-      - card_id: G01
-        feature_ids: [G-1]
-        hard_depends_on: [C06]
-        task_mode: inspection-card
-        merge_required: false
-      - card_id: G02
-        feature_ids: [G-2]
-        hard_depends_on: [G01]
-        task_mode: inspection-card
-        merge_required: false
-      - card_id: G03
-        feature_ids: [G-3]
-        hard_depends_on: [G02]
-        task_mode: inspection-card
-        merge_required: false
-    acceptance_checks:
-      - python3 scripts/docs_guard.py --strict
+  card_order: [C01, C02, C03, C04, C05, C06, G01, G02, G03, G04]
   cards:
     - card_id: C01
       wave: P1
@@ -458,4 +437,32 @@ planning_contract:
         - G-1~G-4 全部通过
         - docs/code/test 三线收口完成
         - 各 Wave 回滚锚点组合演练通过
+    - card_id: G01
+      wave: G1
+      feature_ids: [G-1]
+      depends_on: [C06]
+      done_gate:
+        - G-1 实测证据闭环通过（task_id/turn_id/process_id/status 四元组可核验）
+        - `python3 scripts/docs_guard.py --strict` 通过
+    - card_id: G02
+      wave: G2
+      feature_ids: [G-2]
+      depends_on: [G01]
+      done_gate:
+        - G-2 复合任务编排通过（依赖链与作用域门禁一致）
+        - `python3 scripts/docs_guard.py --strict` 通过
+    - card_id: G03
+      wave: G3
+      feature_ids: [G-3]
+      depends_on: [G02]
+      done_gate:
+        - G-3 契约一致性通过（planning_contract/vk_cards/cron 口径一致）
+        - `python3 scripts/docs_guard.py --strict` 通过
+    - card_id: G04
+      wave: G4
+      feature_ids: [G-4]
+      depends_on: [G03]
+      done_gate:
+        - G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）
+        - `python3 scripts/docs_guard.py --strict` 通过
 ```

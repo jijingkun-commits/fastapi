@@ -76,6 +76,7 @@
 * [开发工作流](开发文档/工作流/开发工作流.md)
 * [Vibe Kanban多Worktree本机开发测试](开发文档/工作流/VibeKanban多Worktree本机开发测试.md)
 * [Coder4自动执行总控手册](开发文档/工作流/Coder4自动执行总控手册.md)
+* [Worktree隔离开发模式](开发文档/工作流/开发工作流.md#worktree-隔离开发模式)
 * [OpenClaw自动执行故障字典](开发文档/工作流/OpenClaw自动执行故障字典.md)
 * [文档治理VibeKanban计划](开发文档/工作流/文档治理VibeKanban计划.md)
 * [文档治理基线清单](开发文档/工作流/文档治理基线清单.md)
@@ -172,9 +173,12 @@
 * [实施方案（运行时可取消控制）](内部参考/迭代需求/runtime_cancel_control_implementation_plan.md)
 * [实施方案（Skill 多用户版本治理）](内部参考/迭代需求/skill_multi_user_versioning_implementation_plan.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
-* [问题修复卡（总行权限映射缺失，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
+* [问题修复卡（管理员 dept_code 拒绝，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
 * [评估报告（技能检索对齐，2026-02-13）](内部参考/迭代需求/skill_retrieval_evaluation_report_20260213.md)
 * [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
+* [问题修复卡（问数查询结果展示，2026-02-25）](内部参考/迭代需求/fix_plan_data_query_display_20260225.md)
+* [需求基线（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_requirements.md)
+* [实施方案（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_implementation_plan.md)
 
 ### 任务拆解
 
@@ -266,6 +270,7 @@
 * [WS-G01 G-1 实测证据闭环](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md)
 * [WS-G02 G-2 复合任务编排](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md)
 * [WS-G03 G-3 契约一致性](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md)
+* [WS-G04 G-4 回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md)
 
 ---
 

@@ -16,6 +16,7 @@ description: 代码实现：根据计划编写代码，自动同步文档
 |------|----------|
 | 有明确计划，只需编码 | `/jjk-imp` ✅ |
 | 需要先规划再编码 | `/jjk-plan` -> `/jjk-imp` |
+| 诊断后按修复计划编码 | `/jjk-pc` -> `/jjk-imp` ✅ |
 | 已拆分为 WS 子任务 | `/jjk-imp-ws` |
 | 一站式从需求到交付 | `/jjk-feature` |
 
@@ -23,10 +24,11 @@ description: 代码实现：根据计划编写代码，自动同步文档
 
 ## 1. 编码 (Coding)
 
-**输入**:
-- `docs/内部参考/迭代需求/<topic>_requirements.md`（迭代级概览）
-- `docs/产品文档/<模块>需求.md`（模块级用户故事/验收标准）
-- `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（如有）
+**输入**（按优先级匹配）:
+1. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（来自 `/jjk-plan`，优先）
+2. `docs/内部参考/迭代需求/fix_plan_<topic>.md`（来自 `/jjk-pc`）
+3. `docs/内部参考/迭代需求/<topic>_requirements.md`（迭代级概览）
+4. `docs/产品文档/<模块>需求.md`（模块级用户故事/验收标准）
 
 **规范**:
 - 遵循 `.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc` 与场景规则
@@ -115,4 +117,4 @@ flowchart TD
 - 如涉及测试行为变更，更新 `docs/开发文档/测试管理/测试用例库.md`
 
 ---
-*使用 `/jjk-imp` 触发。按“文档先行 + 编码回填”闭环执行，无需手动追加 `/jjk-api-docs`。*
+*使用 `/jjk-imp` 触发。兼容 `/jjk-plan` 产出（implementation_plan / requirements）和 `/jjk-pc` 产出（fix_plan），按”文档先行 + 编码回填”闭环执行。*

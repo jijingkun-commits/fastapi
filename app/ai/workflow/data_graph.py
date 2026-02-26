@@ -3801,6 +3801,8 @@ def sql_execute(state: DataAgentState) -> Dict:
                 "columns": columns,
                 "column_display_names": column_display_names,
                 "display_sql": display_sql,
+                "total_rows": len(result_data),
+                "sql": sql,
                 "chart": chart_payload,
                 "permission_scope_applied": permission_rewritten,
                 "permission_scope_summary": permission_scope_summary,
@@ -3997,7 +3999,11 @@ def _interpret_result(question: str, sql: str, result: List[Dict]) -> str:
     elif row_count <= 5:
         return f"查询完成，共返回 {row_count} 条记录。"
     else:
-        return f"查询完成，共返回 {row_count} 条记录（已展示前 100 条）。"
+        display_limit = min(row_count, 100)
+        if row_count > display_limit:
+            return f"查询完成，共返回 {row_count} 条记录（已展示前 {display_limit} 条）。"
+        else:
+            return f"查询完成，共返回 {row_count} 条记录。"
 
 
 # 聚合函数列名 → 友好标签的映射

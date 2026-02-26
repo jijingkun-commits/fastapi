@@ -71,15 +71,15 @@ data_graph.py:2615  evaluate_sql_policy(sql, user_id=1)
 
 ### 修改点清单
 
-#### `app/db/init_db.py`
+#### [app/db/init_db.py](../../../app/db/init_db.py)
 
 - [x] 补全 admin 用户的 `data_role="head_president"`、`org_code="0000"`、`org_name="总行"`
 
-#### `scripts/init_tables_ci.py`
+#### [scripts/init_tables_ci.py](../../../scripts/init_tables_ci.py)
 
 - [x] 与 `init_db.py` 保持一致
 
-#### `install/scripts/init_postgres.sql/027_seed_head_president_permissions.sql`
+#### [install/scripts/init_postgres.sql/027_seed_head_president_permissions.sql](../../../install/scripts/init_postgres.sql/027_seed_head_president_permissions.sql)
 
 - [x] 表级权限：`head_president` 允许访问 `fdmdata.*` 和 `sdmdata.*`
 - [x] 行级规则：`fdmdata.*` 通配规则改用 `user.org_code`（替代 `user.dept_code`）

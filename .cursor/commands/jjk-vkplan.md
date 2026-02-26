@@ -57,10 +57,11 @@ description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主
 `/jjk-vkplan` 必须优先读取 implementation plan 末尾 `planning_contract`：
 
 1. `execution_mode`（`serial|parallel`）
-2. `card_order`（例如 `C01..C06`）
+2. `card_order`（例如 `C01..C06,G01..G04`）
 3. `cards[].feature_ids`
 4. `cards[].depends_on`
 5. `cards[].done_gate`
+6. `gate_contract.mode/gate_ids/depends_on`（若存在）
 
 规则：
 
@@ -68,6 +69,7 @@ description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主
 2. 不得在 `/jjk-vkplan` 阶段重命名 `card_id` / `feature_id`。
 3. 不得弱化 `depends_on` 的硬依赖。
 4. `feature_id` 必须一一映射到 `WS`（或 `Card WS`）文档中的功能机制段。
+5. 若 `gate_contract.mode=as_cards`，必须把 `gate_ids` 以独立卡片写入 `vk_cards.json.cards` 与 `card_order`，禁止只保留文档门禁描述。
 
 ---
 
@@ -77,10 +79,12 @@ description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主
 2. 读取 `implementation_plan` 中的“功能机制包（Feature Packet）”与 `planning_contract`。
 3. 生成拆解产物（`parallel_plan.md` + `workstreams/WS-*.md`），并在 WS 中保留机制细节与代码样例锚点。
 4. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
-5. 生成 `vk_cards.json`（默认落卡范围不含 `WS-00`）；仅在需要批量导入提示时生成 `vk_import_prompt.txt`。
-6. 执行脚本写入作用域真理源：
+5. 生成 `vk_cards.json`（默认落卡范围不含 `WS-00`）；若存在 `gate_contract.mode=as_cards`，必须包含 `G*` Gate 卡。
+6. 仅在需要批量导入提示时生成 `vk_import_prompt.txt`。
+7. 执行脚本写入作用域真理源：
    - `python3 scripts/set_active_task.py --task-split-dir <YYYY-MM-DD_主题> --project-id <project_id>`
-7. 回读并校验 `docs/内部参考/任务拆解/_active_task.json`：
+   - 必须实际执行并回显命令结果；仅在文档中声明“已设置”视为未完成。
+8. 回读并校验 `docs/内部参考/任务拆解/_active_task.json`：
    - `task_key` 与本轮 `vk_cards.json.task_key` 一致
    - `task_split_dir` 与本轮拆解目录一致
    - `project_id` 非空
@@ -109,6 +113,24 @@ description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主
 
 1. 若返回 `NO_INCREMENT(scope_no_active)`，优先排查“未落卡或作用域未命中”，不是自动执行器故障。
 2. 若返回 `RECONCILE_ONLY(scope_conflict)`，优先处理“存在非当前 task_key 的活动卡”。
+
+---
+
+## Gate 卡片化硬拦截（新增，强制）
+
+以下任一命中，`/jjk-vkplan` 必须 `FAIL_FAST`，并禁止进入 `/jjk-vktodo`：
+
+1. implementation plan 出现 `G-1~G-4`/`全局关卡`/`Gate`，但 `planning_contract.gate_contract` 缺失。
+2. `gate_contract.mode=as_cards`，但 `gate_ids` 未全部出现在 `vk_cards.card_order`。
+3. `gate_ids` 存在，但 `vk_cards.cards[*]` 缺少对应 Gate 卡定义。
+4. `set_active_task.py` 未实际执行成功，或 `_active_task.json` 与本轮 `task_split_dir/task_key/project_id` 不一致。
+4. 任一 Gate 卡缺失 `acceptance_checks` 或 `evidence_entry`。
+5. Gate 卡 `depends_on` 与 `gate_contract.depends_on` 不一致。
+
+补充：
+
+1. Gate 卡默认 `task_mode=inspection-card`、`merge_required=false`。
+2. 若 Gate 卡需要代码改动，必须显式改为 `implementation-card` 并补齐 `merge_required=true` 的 done gate。
 
 ---
 
@@ -188,7 +210,7 @@ description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主
 1. `parallel_plan.md` 写明 `single_active_card=true`。
 2. `vk_cards.json` 的 `hard_depends_on` 串成单链（如 `C01 -> C02 -> ...`）。
 3. 仅在前置卡满足 `done_gate` 后，后置卡才允许推进。
-4. Gate 类卡（如 `G1/G2`）默认串行，不可并行推进。
+4. Gate 类卡（如 `G01~G04`）默认串行，不可并行推进，且必须实体化为独立卡片，不得只写在文档正文。
 5. `inreview -> done` 策略必须读取 `planning_contract/parallel_plan` 的 `auto_done_policy`，禁止写死“人工确认”。
 
 ---

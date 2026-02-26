@@ -35,7 +35,8 @@
     "C06",
     "G01",
     "G02",
-    "G03"
+    "G03",
+    "G04"
   ],
   "preflight": {
     "card_id": "C00",
@@ -64,7 +65,8 @@
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
-      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md"
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md",
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md"
     ]
   },
   "validation": {
@@ -85,11 +87,11 @@
     "coverage": {
       "forward": {
         "status": "PASS",
-        "detail": "9/9 cards contain >=1 feature_id"
+        "detail": "10/10 cards contain >=1 feature_id"
       },
       "reverse": {
         "status": "PASS",
-        "detail": "13/13 features mapped exactly once"
+        "detail": "14/14 features mapped exactly once"
       },
       "orphan": {
         "status": "PASS",
@@ -512,7 +514,7 @@
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
@@ -537,7 +539,7 @@
         "各 Wave 回滚锚点组合演练通过"
       ],
       "check_cmd": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
     },
@@ -545,13 +547,13 @@
       "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G01",
       "card_id": "G01",
       "title": "G01 G-1 实测证据闭环 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
-      "column": "Gate",
-      "priority": "P1",
+      "column": "Backlog",
+      "priority": "P0",
       "labels": [
         "PP-20260221-OPENCLAW-REBUILD-BASELINE",
         "2026-02-21_openclaw迁移重建基线",
         "serial",
-        "lane-gate-evidence"
+        "lane-gate-release"
       ],
       "hard_depends_on": [
         "C06"
@@ -575,7 +577,7 @@
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11"
       ],
       "acceptance_checks": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
@@ -586,25 +588,18 @@
       "file_scope": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
         "docs/开发文档/工作流/Coder4自动执行总控手册.md",
-        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md",
-        "docs/SUMMARY.md",
-        "scripts/docs_guard.py"
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
       ],
       "done_gate": [
-        "evidence 四元组 task_id/turn_id/process_id/status 回填并核验通过",
-        "target_task_id == evidence_task_id 复核通过",
-        "python3 scripts/docs_guard.py --strict 通过"
+        "G-1 实测证据闭环通过（evidence 四元组可核验）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "dod": [
-        "evidence 四元组 task_id/turn_id/process_id/status 回填并核验通过",
-        "target_task_id == evidence_task_id 复核通过",
-        "python3 scripts/docs_guard.py --strict 通过"
+        "G-1 实测证据闭环通过（evidence 四元组可核验）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "check_cmd": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md"
     },
@@ -612,7 +607,7 @@
       "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G02",
       "card_id": "G02",
       "title": "G02 G-2 复合任务编排 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
-      "column": "Gate",
+      "column": "Backlog",
       "priority": "P0",
       "labels": [
         "PP-20260221-OPENCLAW-REBUILD-BASELINE",
@@ -639,10 +634,10 @@
         "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
       ],
       "example_refs": [
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7"
       ],
       "acceptance_checks": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
@@ -652,22 +647,19 @@
       "merge_required": false,
       "file_scope": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
-        "docs/SUMMARY.md"
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
       ],
       "done_gate": [
-        "G01 完成后触发 G02 复核",
-        "hard_depends_on 链路在文档、卡片、看板口径一致",
-        "single_active_card 保持 true 且未出现并发激活破坏"
+        "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "dod": [
-        "G01 完成后触发 G02 复核",
-        "hard_depends_on 链路在文档、卡片、看板口径一致",
-        "single_active_card 保持 true 且未出现并发激活破坏"
+        "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "check_cmd": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
     },
@@ -675,7 +667,7 @@
       "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G03",
       "card_id": "G03",
       "title": "G03 G-3 契约一致性 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
-      "column": "Gate",
+      "column": "Backlog",
       "priority": "P0",
       "labels": [
         "PP-20260221-OPENCLAW-REBUILD-BASELINE",
@@ -703,10 +695,10 @@
         "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
       ],
       "example_refs": [
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md"
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md#-1"
       ],
       "acceptance_checks": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
@@ -717,24 +709,80 @@
       "file_scope": [
         "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
         "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
-        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md",
-        "docs/SUMMARY.md"
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
       ],
       "done_gate": [
-        "planning_contract / gate_contract / card_order 三方口径一致",
-        "parallel_plan 与 vk_cards 的 Gate 卡定义一致",
-        "python3 scripts/docs_guard.py --strict 通过"
+        "G-3 契约一致性通过（planning_contract/vk_cards/cron 口径一致）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "dod": [
-        "planning_contract / gate_contract / card_order 三方口径一致",
-        "parallel_plan 与 vk_cards 的 Gate 卡定义一致",
-        "python3 scripts/docs_guard.py --strict 通过"
+        "G-3 契约一致性通过（planning_contract/vk_cards/cron 口径一致）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
       ],
       "check_cmd": [
-        "python3 scripts/docs_guard.py --strict"
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G04",
+      "card_id": "G04",
+      "title": "G04 G-4 回滚演练 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "G03"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G03"
+      ],
+      "feature_ids": [
+        "G-4"
+      ],
+      "mechanism_summary": [
+        "复核 WAVE_ROLLBACK_DRILL_MATRIX 记录完整性",
+        "复核 Gate 收口后的发布前回滚可执行性"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.6",
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::4.11"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md#11.6"
+      ],
+      "acceptance_checks": [
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md#11.6",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
+      ],
+      "done_gate": [
+        "G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）",
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md"
     }
   ]
 }

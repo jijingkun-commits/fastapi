@@ -204,11 +204,19 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 ```yaml
 planning_contract:
   execution_mode: serial  # serial | parallel
-  card_order: [C01, C02, C03, C04, C05, C06]
+  card_order: [C01, C02, C03, C04, C05, C06, G01, G02, G03, G04]
   strict_single_active_card: true
   auto_done_policy:
     implementation-card: hard_gate  # hard_gate | manual_gate
     inspection/question-card: policy_gate
+  gate_contract:
+    mode: as_cards  # as_cards | inline_only
+    gate_ids: [G01, G02, G03, G04]
+    depends_on:
+      G01: [C06]
+      G02: [G01]
+      G03: [G02]
+      G04: [G03]
   cards:
     - card_id: C01
       wave: P1
@@ -227,6 +235,25 @@ planning_contract:
 4. 若要启用自动 `inreview -> done`，必须在 `planning_contract` 明确 `auto_done_policy`，禁止执行期临时口头约定。
 5. `auto_done_policy=hard_gate` 时，implementation card 自动收口必须满足：`source_chain_loaded=YES`、`feature_ids_matched=YES`、`serial_gate=PASS`、`evidence_binding=YES`、`acceptance_checks` 通过、ledger 追加成功。
 6. `/jjk-plan` 只定义契约，不会生成真实看板卡片；若要让 OpenClaw 自动执行，后续仍需 `/jjk-vkplan -> /jjk-vktodo` 完成可执行落卡。
+7. 若 implementation plan 中出现 `G-1~G-4`、`全局关卡`、`Gate` 等门禁目标，必须在 `planning_contract.gate_contract` 显式声明 `gate_ids` 与依赖链。
+8. `gate_contract.mode=as_cards` 时，Gate 必须以独立卡片进入 `card_order`，禁止只写文档门禁而不出卡。
+9. Gate 卡默认 `task_mode=inspection-card`、`merge_required=false`；若某 Gate 需要代码提交，必须单独写明 `merge_required=true` 与验收命令。
+10. `gate_ids` 与 `card_order` 不一致时，计划状态必须标注 `BLOCKED`，不得进入 `/jjk-vkplan`。
+
+### 2.C Gate 卡片化契约（强制，自动执行场景）
+
+当任务目标是“自动跑完全链路”（尤其包含 `G-1~G-4`）时，`<topic>_implementation_plan.md` 必须满足：
+
+1. Gate 不得仅存在于“文字门禁说明”，必须实体化到 `planning_contract.cards`。
+2. 每张 Gate 卡至少包含：
+   - `card_id`（如 `G01`）
+   - `feature_ids`（如 `G-1`）
+   - `depends_on`
+   - `done_gate`
+   - `acceptance_checks`
+   - `evidence_entry`
+3. Gate 卡的 `acceptance_checks` 必须是可执行命令，不接受“人工判断通过”。
+4. Gate 卡默认位于串行尾部：`C*` 完成后才允许 `G*` 进入 `todo/inprogress`。
 
 ### 2.1 主从文档机制
 

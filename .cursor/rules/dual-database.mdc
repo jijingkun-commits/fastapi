@@ -15,8 +15,8 @@ alwaysApply: false
 
 ## 重要规则
 
-1. **MCP postgres 工具默认连接 `chat_db`**，查不到 `fdmdata.*` 或 `sdmdata.*` 的表
-2. 查询分析库数据时，必须通过 Python 脚本连接 `ANALYTICS_DATABASE_URL`，不能用 MCP postgres 工具
+1. `mcp__postgres__query` 连接 `chat_db`，查不到 `fdmdata.*` 或 `sdmdata.*` 的表
+2. 查询分析库数据时，使用 `mcp__postgres-data-db__query` 连接 `data_db`；代码中则通过 `ANALYTICS_DATABASE_URL` 连接
 3. 代码中 `analytics_engine` (见 `app/db/session.py`) 连接的是 `data_db`
 4. `vanna.run_sql()` 执行在 `data_db` 上
 

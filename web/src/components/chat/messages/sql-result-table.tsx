@@ -14,7 +14,7 @@ interface SqlResultTableProps {
   columns: string[];
   columnDisplayNames?: string[];
   rows: Record<string, any>[];
-  totalRows: number;
+  totalRows?: number;
   sql?: string;
   permissionScopeApplied?: boolean;
   permissionScopeText?: string;
@@ -102,8 +102,8 @@ export function SqlResultTable({
       {/* 底栏：行数 + SQL 折叠 */}
       <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-500">
         <span>
-          共 {totalRows.toLocaleString()} 条
-          {rows.length < totalRows ? `（已展示前 ${rows.length} 条）` : ""}
+          共 {(totalRows ?? 0).toLocaleString()} 条
+          {totalRows != null && rows.length < totalRows ? `（已展示前 ${rows.length} 条）` : ""}
         </span>
         {sql && (
           <button

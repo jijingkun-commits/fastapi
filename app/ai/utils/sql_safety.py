@@ -167,7 +167,12 @@ def check_sql_safety(sql: str, check_schema: bool = True) -> Tuple[bool, Optiona
     is_safe, error = check_multiple_statements(sql)
     if not is_safe:
         return (False, error)
-    
+
+    # 检查参数占位符（$1, $2 等），系统不支持参数绑定执行
+    is_safe, error = check_parameter_placeholders(sql)
+    if not is_safe:
+        return (False, error)
+
     return (True, None)
 
 
@@ -298,7 +303,29 @@ def check_multiple_statements(sql: str) -> Tuple[bool, Optional[str]]:
     if len(statements) > 1:
         logger.warning(f"SQL 安全检查: 检测到多条语句 ({len(statements)} 条)")
         return (False, "不允许执行多条 SQL 语句")
-    
+
+    return (True, None)
+
+
+def check_parameter_placeholders(sql: str) -> Tuple[bool, Optional[str]]:
+    """检查 SQL 是否包含参数占位符（$1, $2 等）。
+
+    系统通过 run_sql() 直接执行 SQL，不支持参数绑定，
+    含占位符的 SQL 会导致 UndefinedParameter 错误。
+
+    Args:
+        sql: SQL 语句
+
+    Returns:
+        (is_safe, error_message) 元组
+    """
+    # 移除字符串字面量，避免误判 '$1' 这种字符串内容
+    sql_cleaned = re.sub(r"'[^']*'", "''", sql)
+
+    if re.search(r'\$\d+', sql_cleaned):
+        logger.warning("SQL 安全检查: 检测到参数占位符")
+        return (False, "SQL 包含参数占位符（$1 等），请使用字面值替代")
+
     return (True, None)
 
 
@@ -363,6 +390,7 @@ __all__ = [
     "check_sensitive_tables",
     "check_schema_whitelist",
     "check_multiple_statements",
+    "check_parameter_placeholders",
     "add_limit_if_missing",
     "sanitize_sql",
     "get_sensitive_tables",

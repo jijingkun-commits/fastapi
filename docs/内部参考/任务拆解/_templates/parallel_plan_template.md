@@ -9,10 +9,15 @@
 - execution_mode: `serial | parallel`
 - single_active_card: `true | false`
 - card_order: `[]`（serial 模式必填）
+- gate_contract:
+  - mode: `as_cards | inline_only`
+  - gate_ids: `[]`
+  - depends_on: `{}`
 - auto_done_policy:
   - implementation-card: `manual_gate | hard_gate`
   - inspection/question-card: `policy_gate`
 - 说明：若 implementation_plan 中存在 `planning_contract`，此处必须与其一致。
+- 说明：`gate_contract.mode=as_cards` 时，Gate 必须实体化为独立卡片并进入 `card_order`，禁止仅保留文档门禁描述。
 
 ### -1.1 automation_contract（新增，供自动执行器读取）
 
@@ -80,6 +85,7 @@ automation_contract:
 | WS-G2 | 文档终稿门禁 | Gate |  | 否 | WS-G1 |
 
 > serial 模式建议：`WS-C01 ... WS-C06` 映射 card 链路；Gate 作为 C 卡内门禁或串行尾卡。
+> 若 `gate_contract.mode=as_cards`，必须把 `G01...Gn` 作为尾部独立卡片写入 `card_order`。
 
 ## 5. 冲突矩阵（互不干涉）
 
@@ -115,6 +121,7 @@ automation_contract:
 - 默认列流转：`Backlog -> Doing -> Review -> Gate -> Done`
 - 卡片 ID 规则：`<task_key>::<WS-ID>`
 - 卡片标题规则：`<WS-ID> <标题> [<task_key>]`
+- serial 建议顺序：`C01,C02,...,C06,G01,G02,G03,G04`（示例）
 
 ### 9.1 机读增强字段（必填）
 
@@ -158,3 +165,6 @@ automation_contract:
 - [ ] 每张卡都有可执行 `acceptance_checks`
 - [ ] 卡片 `DoD` 与 `implementation_plan` 的 `done_gate` 一致
 - [ ] `output/**` 仅作为证据引用，未直接复制长文
+- [ ] 若 `implementation_plan` 出现 Gate（如 `G-1~G-4`），`planning_contract.gate_contract` 已显式声明
+- [ ] 若 `gate_contract.mode=as_cards`，所有 `gate_ids` 已完整进入 `card_order` 且都存在对应卡片定义
+- [ ] 若 Gate 契约不完整，本次计划标记 `BLOCKED`（FAIL_FAST），不得进入 `/jjk-vkplan`

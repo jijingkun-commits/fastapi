@@ -383,11 +383,10 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 - `streaming_wrapper` 的 `values` 分支已按子职责抽取 helper 并接线：`handoff` 增量返回构建、`kb_images` 提取、`tool_start` 发射、文本补发去重判定、文本/结果发送，减少大段内联分支。
 - `streaming_wrapper` 的 `messages` 分支完成第一阶段拆分：消息 ID 预填充、`ToolMessage` 处理（`tool_end`/`kb_images`）、token 发送与 thinking 发送拆至独立 helper，降低单分支圈复杂度。
 - `streaming_wrapper` 的上下文准备与收尾返回完成抽取：消息裁剪+上下文注入整合为 `_prepare_streaming_inference_state`，结束态增量返回整合为 `_build_streaming_delta_return`，降低主函数流程长度。
-- `streaming_wrapper` 的双模式事件循环完成 dispatcher 抽取：`messages` 与 `values` 分支分别收敛到 `_dispatch_messages_mode_chunk` / `_dispatch_values_mode_chunk`，主循环仅保留分发与状态衔接。
+- `streaming_wrapper` 的双模式事件循环完成 dispatcher 抽取：`messages`、`values`、`custom` 三种 stream mode 分别收敛到 `_dispatch_messages_mode_chunk` / `_dispatch_values_mode_chunk` / `_dispatch_custom_mode_chunk`，主循环仅保留分发与状态衔接。`custom` 分支（2026-02-25）透传子图通过 `get_stream_writer()` 发送的结构化事件（如 `data_graph` 的 `emit_result`），使实时对话能展示 SQL 结果表格。custom 事件在子图内已完成格式化，中间层直接透传。
 - `streaming_wrapper` 的运行编排与异常兜底完成抽取：`_run_streaming_dispatch_loop` 统一承接流循环编排，`_handle_streaming_wrapper_exception` 统一承接 supervisor 降级与用户友好报错。
 - `streaming_wrapper` 工厂上提为模块级：`_create_streaming_agent_wrapper` 与 `_execute_streaming_wrapper` 从 `create_multi_agent_graph` 闭包中拆出，支持后续以可注入 orchestrator 方式复用。
-- `streaming_wrapper` 协议解析依赖收敛到适配层：通过 `StreamingProtocolAdapter` + `_build_streaming_protocol_adapter` 注入 `parse_kb_images/should_filter_content/extract_latest_handoff_from_messages`，减少对具体 `AgentOutputParser` 的硬绑定。
-- `streaming_wrapper` 事件发射与载荷契约收敛到适配层：通过 `StreamingEventEmitterAdapter` + `_build_streaming_event_emitter_adapter` 统一注入 `emit_token/emit_thinking/emit_tool_start/emit_tool_end/emit_status/emit_result/emit_kb_images`，并将 `StreamingToolStartPayload/StreamingResultPayload/StreamingKbImagesPayload` 与 builder 上提到 `app/ai/protocol.py` 作为共享协议定义，减少跨 helper 的字段拼装分支。
+- `streaming_wrapper` 协议解析与事件发射简化（2026-02-26）：移除 `StreamingProtocolAdapter` / `StreamingEventEmitterAdapter` 两层适配器及其构建函数，所有调用点改为直接调用 `AgentOutputParser` 静态方法和 `app/ai/events.py` 的 `emit_*` 函数。引入 `StreamingContext` dataclass 封装 7 个共享参数（`writer/node_name/state/collected_content/kb_images/emitted_message_ids/sent_tool_call_ids`），消除参数爆炸（最大参数数从 14 降至 6）。同时删除 `_handle_messages_mode_tool_call_chunks_noop` 死代码。`StreamingToolStartPayload/StreamingResultPayload/StreamingKbImagesPayload` 与 builder 仍保留在 `app/ai/protocol.py` 作为共享协议定义。
 - 共享载荷协议已向其他工作流扩展：`data_graph.sql_execute` 的 `emit_result` 与 `todo_graph.execute_operation` 的 `additional_kwargs` 均复用 `build_streaming_result_payload_from_fields`，减少跨图的结构化结果字段拼装差异。
 - 共享载荷协议已向工具层扩展：`chatTools.fig_inter` 的图片流式结果事件改为复用 `build_streaming_result_payload_from_fields` 构造 `image` 载荷，消除工具层手工拼装 `emit_result` 字段分支。
 - 共享载荷协议进一步收敛到问数消息回放路径：`data_graph.sql_execute` 的 `create_ai_message.additional_kwargs` 改为复用 `_build_sql_result_additional_kwargs`（内部调用 `build_streaming_result_payload_from_fields`），减少同节点“流式事件载荷 vs 历史消息载荷”的双份字段定义。
@@ -875,48 +874,35 @@ const callbacks: StreamCallbacks = {
 
 **文件**: `app/ai/workflow/multi_agent_graph.py`
 
-Agent 包装器 `_create_streaming_agent_wrapper` 使用 `astream_events(version="v2")` 统一捕获并发送事件：
+Agent 包装器 `_create_streaming_agent_wrapper` 使用 `astream(stream_mode=["messages", "values", "custom"])` 三模式分发循环统一捕获并发送事件：
 
 ```python
-from app.ai.events import AgentEvent
+async def _run_streaming_dispatch_loop(...):
+    async for mode, chunk in agent.astream(
+        pruned_state, config,
+        stream_mode=["messages", "values", "custom"],
+    ):
+        # 1. messages 模式：token / thinking / tool_end / kb_images
+        if mode == "messages":
+            _dispatch_messages_mode_chunk(chunk, ...)
+            continue
 
-async def streaming_wrapper(state, config):
-    writer = get_stream_writer()
-    
-    async for event in agent.astream_events(state, config, version="v2"):
-        event_kind = event.get("event", "")
-        event_data = event.get("data", {})
-        
-        # 1️⃣ LLM Token 流（自动捕获）
-        if event_kind == "on_chat_model_stream":
-            chunk = event_data.get("chunk")
-            if content := getattr(chunk, "content", ""):
-                writer(AgentEvent.token(content, node=name).to_stream_dict())
-            
-            # 检测思考内容
-            additional = getattr(chunk, "additional_kwargs", {})
-            if reasoning := additional.get("reasoning_content"):
-                writer(AgentEvent.thinking(reasoning, node=name).to_stream_dict())
-        
-        # 2️⃣ 工具调用开始
-        elif event_kind == "on_tool_start":
-            tool_name = event.get("name")
-            tool_input = event_data.get("input", {})
-            writer(AgentEvent.tool_start(tool_name, tool_input, node=name).to_stream_dict())
-        
-        # 3️⃣ 工具调用结束
-        elif event_kind == "on_tool_end":
-            tool_name = event.get("name")
-            tool_output = str(event_data.get("output", ""))[:500]
-            writer(AgentEvent.tool_end(tool_name, tool_output, node=name).to_stream_dict())
-        
-        # 4️⃣ 自定义事件（直接转发）
-        elif event_kind == "on_custom_event":
-            writer({"type": event.get("name"), "data": event_data, "node": name})
+        # 2. custom 模式：子图通过 get_stream_writer() 发送的结构化事件
+        #    （如 data_graph 的 emit_result、emit_status 等）
+        if mode == "custom":
+            if isinstance(chunk, dict) and "type" in chunk and "data" in chunk:
+                writer(chunk)
+            continue
+
+        # 3. values 模式：handoff 增量返回、tool_start、文本补发
+        if mode != "values":
+            continue
+        _dispatch_values_mode_chunk(chunk, ...)
 ```
 
 > [!NOTE]
-> 2026-01 重构：从 `astream(stream_mode=["messages", "values"])` 迁移到 `astream_events(version="v2")`，代码从 ~260 行简化到 ~100 行。
+> 2026-02-18 重构：从 `astream_events(version="v2")` 回迁到 `astream(stream_mode=["messages", "values"])`，按子职责拆分为 `_dispatch_messages_mode_chunk` / `_dispatch_values_mode_chunk` 两个 dispatcher。
+> 2026-02-25 修复：新增 `"custom"` 模式，使子图（如 `data_graph`）通过 `get_stream_writer()` 发送的 `emit_result` 等 custom events 能冒泡到顶层 `ChatService`，解决实时对话 SQL 结果表格不展示的问题。
 
 ### currentStatus UI 显示
 

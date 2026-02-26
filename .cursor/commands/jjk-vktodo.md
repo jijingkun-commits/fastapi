@@ -129,6 +129,24 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 2. 重新统计项目卡片状态分布。
 3. 输出“做了什么 + 结果数字 + 下一步建议”。
 
+### Step 6: 自动执行器作用域绑定（新增，强制）
+
+当本轮提供了 `task_split_dir` 与 `project_id` 时，必须在 `/jjk-vktodo` 结束后执行：
+
+1. 写入 `/Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json`：
+   - `task_split_dir`
+   - `project_id`
+   - `requested_at`
+   - `requested_by`
+   - `applied=false`
+2. 执行：
+   - `python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json`
+3. 回读 `_active_task.json`，校验：
+   - `task_split_dir` 一致
+   - `project_id` 一致
+   - `task_key` 与 `vk_cards.json.task_key` 一致
+4. 任一失败：`FAIL_FAST`，并禁止进入 coder4 自动执行。
+
 ---
 
 ## 输出模板（推荐）

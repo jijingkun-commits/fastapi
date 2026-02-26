@@ -54,6 +54,54 @@ class TestExtractTablesFromSql(unittest.TestCase):
         tables = extract_tables_from_sql(sql)
         self.assertIn("users", tables)
         self.assertIn("orders", tables)
+        # CTE 名称不应被当作真实表
+        self.assertNotIn("active_users", tables)
+
+    def test_cte_with_schema_table_same_name(self):
+        """带 schema 的同名表不应被 CTE 排除误伤。"""
+        sql = """
+        WITH params AS (SELECT 1)
+        SELECT * FROM fdmdata.params
+        """
+        tables = extract_tables_from_sql(sql)
+        self.assertIn("fdmdata.params", tables)
+        self.assertNotIn("params", tables)
+
+    def test_nested_cte_global_scope(self):
+        """全局 CTE 收集的防回归用例：嵌套引用场景。"""
+        sql = """
+        WITH a AS (SELECT 1), b AS (SELECT * FROM a)
+        SELECT * FROM b JOIN fdmdata.f_mid_dep_tb t ON 1=1
+        """
+        tables = extract_tables_from_sql(sql)
+        self.assertIn("fdmdata.f_mid_dep_tb", tables)
+        self.assertNotIn("a", tables)
+        self.assertNotIn("b", tables)
+
+    def test_nested_cte_same_name_keeps_outer_real_table(self):
+        """内层 CTE 同名不应遮蔽外层真实表提取。"""
+        sql = """
+        SELECT *
+        FROM real_orders o
+        JOIN (
+          WITH real_orders AS (SELECT 1 AS id)
+          SELECT * FROM real_orders
+        ) x ON 1=1
+        """
+        tables = extract_tables_from_sql(sql)
+        self.assertIn("real_orders", tables)
+
+    def test_multiple_cte_with_real_tables(self):
+        """多 CTE + 真实表混合场景。"""
+        sql = """
+        WITH params AS (SELECT DATE '2025-06-30' AS dt),
+             cust_bal AS (SELECT * FROM fdmdata.f_mid_loan_tb)
+        SELECT * FROM cust_bal
+        """
+        tables = extract_tables_from_sql(sql)
+        self.assertIn("fdmdata.f_mid_loan_tb", tables)
+        self.assertNotIn("params", tables)
+        self.assertNotIn("cust_bal", tables)
     
     def test_empty_sql(self):
         tables = extract_tables_from_sql("")

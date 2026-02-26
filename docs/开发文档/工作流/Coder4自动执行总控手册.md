@@ -179,53 +179,52 @@ coder4 每一轮按固定顺序执行：
 
 ---
 
-## 8. 你日常怎么用（最短路径）
+## 8. 你日常怎么用（最短路径，尽量不手工）
 
-### Step A：产出任务拆解
+### Step A：产出任务拆解（你做）
 
-1. `/jjk-plan`（或 `/jjk-plan parallel`）
-2. `/jjk-vkplan`
+1. `/jjk-plan -p -h`
+2. `/jjk-vkplan`（带 `project_id`）
 
-### Step B：落卡到 VK
+建议输入优先使用合并报告：
 
-使用 `/jjk-vktodo <task_split_dir>` 落卡，确保 C 卡进入目标 project。
+- `output/全面代码审查报告_合并版_20260225.md`
 
-### Step C：更新自动作用域
+### Step B：落卡到 VK（让 Bot 代办）
 
-```bash
-python3 scripts/set_active_task.py \
-  --task-split-dir <YYYY-MM-DD_主题> \
-  --project-id <VK_PROJECT_ID>
-```
+你不手工执行 `/jjk-vktodo`。  
+直接让 `jjk_coder4_bot` 执行落卡，并强制“单卡滚动创建”：
 
-### Step D：确认看板满足串行执行
+1. 调用 `/jjk-vktodo <task_split_dir>`
+2. 当前有 scoped 非 done 卡时，禁止再创建下一张
+3. 仅在当前卡 `done` 后，按 `card_order` 创建下一张
+4. 全程保持“每次最多 1 张 scoped 非 done 卡”
 
-- scoped 卡存在
-- `inprogress + inreview <= 1`
-- C00 preflight 已满足
+### Step C：更新自动作用域（让 Bot 代办）
 
-### Step E：开启 coder4 cron
+你不手工跑脚本。  
+让 `jjk_coder4_bot` 执行 scope guard（自动调用 `set_active_task.py`），并回报：
 
-在定时任务中启用 coder4 任务（ID `3889e1fe-ff85-4e49-adad-4c99a542743e`）。
+1. scope_guard action（`scope_switched|already_active|no_request`）
+2. `_active_task.json` 的 `task_key / task_split_dir / project_id`
+3. 与当前 `vk_cards.json` 是否一致
 
-### Step F：区分“手动单轮”与“自动持续”（关键）
+### Step D：开启自动执行（Bot 运维）
 
-1. 手动单轮推进：发送第 12.3 节提示词给 `jjk_coder4_bot`，只执行 1 轮，不会持续轮询。
-2. 自动持续推进：必须启用 cron（`enabled=true`），调度器按 `*/3 * * * *` 连续触发。
-3. 仅发送提示词但未启用 cron，不会自动循环执行。
+1. 先 `cron list`（含禁用项）获取实时 `job_id`
+2. 再对该 `job_id` 执行 `cron update enabled=true`
+3. 禁止写死历史 `job_id`
 
-### Step G：最简对话式运维（推荐）
+### Step E：区分单轮与持续
 
-你可以只和 `jjk_coder4_bot` 对话来做启停与巡检，不需要额外脚本：
+1. 只发执行提示词 = 只跑单轮
+2. `cron enabled=true` = 持续自动跑（`*/3 * * * *`）
 
-1. 查看状态：让它调用 cron `list`（含禁用项）并回报 coder4 job 的 `enabled`。
-2. 开启/关闭：让它调用 cron `update`，把指定 `job_id` 的 `enabled` 改为 `true/false`。
-3. 看运行记录：让它调用 cron `runs`，回报最近 N 次结果与失败原因。
+### Step F：日常只做三件事
 
-说明：
-
-1. 日常启停与状态查看，用对话即可。
-2. `set_active_task.py` 仍建议保留，用于刷新 `_active_task.json` 真理源，避免作用域漂移。
+1. 让 Bot 回报 cron 开关状态
+2. 让 Bot 回报最近 N 次 runs
+3. 发现阻断码后，按第 9 节语义处理
 
 ---
 
@@ -265,128 +264,100 @@ python3 scripts/set_active_task.py \
 
 ---
 
-## 12. 可复用提示词模板（plan/vkplan/coder4）
+## 12. 可复用提示词模板（精简版）
 
-以下模板用于“OpenClaw 迁移重建基线”类大任务，目标是让文档到执行链路可机读、可回放、可自动推进。
+默认场景：你只和 `jjk_coder4_bot` 对话，不手工跑脚本。
 
-### 12.1 `/jjk-plan -p -h` 模板（生成主计划）
+### 12.1 `/jjk-plan -p -h`（短模板）
 
 ```text
 /jjk-plan -p -h
-
 主题：<主题名>
-
-输入来源仅限：
-- <输入文档绝对路径1>
-- <输入文档绝对路径2>
-- <输入文档绝对路径3>
-
-强制要求：
-1) 只产出：
-   - <topic>_requirements.md
-   - <topic>_implementation_plan.md
-2) implementation_plan 必须包含完整 Feature Packet（每个 feature_id 都有机制、代码锚点、验收、回滚、证据入口）。
-3) implementation_plan 末尾必须给 planning_contract：
-   - execution_mode: serial
-   - strict_single_active_card: true
-   - auto_done_policy: implementation-card=hard_gate, inspection/question-card=policy_gate
-   - card_order + cards[].feature_ids + depends_on + done_gate 完整
-4) 必须输出 hydrate 覆盖率：
-   - source_atoms_total
-   - source_atoms_mapped
-   - source_atoms_unmapped（明细）
-   - source_conflicts（明细）
-5) 若 source_atoms_unmapped 非空，计划状态必须标注 BLOCKED，并停止进入 vkplan。
-6) 不允许重命名既有 card_id/feature_id（已有编号必须继承）。
+输入：output/全面代码审查报告_合并版_20260225.md
+要求：
+1) 产出 <topic>_requirements.md 与 <topic>_implementation_plan.md
+2) implementation_plan 必须含 planning_contract（execution_mode=serial, strict_single_active_card=true）
+3) 若 hydrate 映射不全，标注 BLOCKED 并给出 unmapped 清单
 ```
 
-### 12.2 `/jjk-vkplan` 模板（生成可执行拆解）
+### 12.2 `/jjk-vkplan`（短模板）
 
 ```text
 /jjk-vkplan
-
 主题：<主题名>
 project_id：<VK_PROJECT_ID>
-
-请只基于以下主计划拆解（禁止读取其他计划）：
-1) <topic>_requirements.md 绝对路径
-2) <topic>_implementation_plan.md 绝对路径
-
-执行约束（强制）：
-1. 严格继承 planning_contract，不得重命名 card_id/feature_id，不得弱化 depends_on。
-2. execution_mode=serial：single_active_card=true，同一时刻仅一张卡可 Doing。
-3. 写入 vk_cards.json 前必须做 FAIL_FAST 字段校验；任一缺失即停止：
-   - feature_ids
-   - mechanism_summary
-   - code_anchor_refs
-   - acceptance_checks
-   - rollback_anchors
-   - evidence_entry
-   - task_mode
-   - merge_required
-4. 必须输出双向覆盖校验：
-   - forward（每卡至少1个 feature）
-   - reverse（每个 feature 恰好映射1张实现卡）
-   - orphan（无遗漏）
-   - duplicate（无重复漂移）
-5. 若主计划包含 hydrate 映射，必须校验 FP-xx 全量落卡（缺失即 BLOCKED）。
-
-产出目录（强制）：
-- <task_split_dir>/parallel_plan.md
-- <task_split_dir>/workstreams/WS-*.md
-- <task_split_dir>/vk_cards.json
-- docs/内部参考/任务拆解/_active_task.json
-
-补充：
-- vk_import_prompt.txt 非必需，只有在需要批量导卡时再生成。
-- 若任何校验失败，请直接输出 BLOCKED 并给出缺失字段清单与修复建议。
+要求：
+1) 严格继承 planning_contract，不改 card_id/feature_id/depends_on
+2) 生成 vk_cards.json + parallel_plan.md + WS 文档
+3) gate_contract.mode=as_cards 时必须产出 G 卡并闭环依赖
+4) 任一字段缺失或映射失败，直接 BLOCKED
 ```
 
-### 12.3 启动 OpenClaw coder4 模板（串行自动执行）
+### 12.3 让 Bot 代办“落卡 + 绑定作用域”（你不手工）
 
 ```text
-你现在是 OpenClaw coder4 自动执行器。
-请按以下规则执行一轮任务推进（只推进 1 张卡，禁止并行）：
-
-1) 读取并校验：
-   - docs/内部参考/任务拆解/_active_task.json
-   - <task_split_dir>/vk_cards.json
-   - <task_split_dir>/parallel_plan.md
-   - <task_split_dir>/workstreams/WS-*.md
-2) 仅处理 task_key 作用域内卡片：
-   - title 含 [task_key] 或 labels 含 task_key 或 key 前缀为 task_key::
-3) 串行门禁：
-   - single_active_card=true
-   - inprogress + inreview <= 1
-   - hard_depends_on 未满足时禁止推进
-4) 状态迁移：
-   - todo -> inprogress -> inreview
-   - inreview -> done 仅在 auto_done_policy=hard_gate 且证据/验收/ledger 全通过
-5) 输出要求：
-   - 若成功推进：返回推进卡片、执行证据、下一张候选
-   - 若不可推进：仅返回 NO_INCREMENT / RECONCILE_ONLY / BLOCKED_* 及最小修复动作
+请在 /Users/jijingkun/bojxAI/fastapi 执行以下任务并回报结果：
+1) 执行 /jjk-vktodo <task_split_dir> 落卡到 project_id=<VK_PROJECT_ID>
+2) 按 card_order 单卡滚动创建：当前有 scoped 非 done 卡时，不创建下一张；仅在当前卡 done 后创建下一张
+3) 写入 /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json：
+   {"task_split_dir":"<task_split_dir>","project_id":"<VK_PROJECT_ID>","requested_by":"operator","requested_at":"<now>","applied":false}
+4) 执行 python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+5) 回报：
+   - 当前 scoped 卡总数与非 done 数
+   - scope_guard action
+   - _active_task.json 的 task_key/task_split_dir/project_id
+   - 与 vk_cards.json 是否一致
 ```
 
-### 12.3.1 启动模板（仅状态回报，不输出修复建议）
+### 12.4 让 Bot 代办“cron 启停与巡检”
 
 ```text
-你现在是 OpenClaw coder4 自动执行器。
-请按 active_task 作用域串行推进：每轮只推进 1 张卡，严格遵守 hard_depends_on 与 single_active_card=true。
-若不可推进，仅返回状态码（NO_INCREMENT / RECONCILE_ONLY / BLOCKED_*）、阻断原因、缺失前置条件；不要提供修复建议或下一步动作。
+请做 coder4 cron 运维（先查后改）：
+1) cron list（含 disabled）找到当前 coder4 job_id
+2) cron update enabled=true（或 false）
+3) cron runs 返回最近 5 次结果
+注意：禁止 create 新 job，只能 update 现有 job。
 ```
 
-### 12.4 一键联动命令（手工触发时）
+### 12.5 一条消息版（推荐）
 
-```bash
-# 1) 生成主计划
-/jjk-plan -p -h
+```text
+请在 /Users/jijingkun/bojxAI/fastapi 按顺序一次完成以下动作，并在最后给出结构化回报：
 
-# 2) 生成拆解与执行真理源
-/jjk-vkplan
+[输入]
+- task_split_dir=<YYYY-MM-DD_主题>
+- project_id=<VK_PROJECT_ID>
+- mode=<start|stop>  # start=开启自动持续，stop=仅停止 cron
 
-# 3) 导入真实看板卡
-/jjk-vktodo <YYYY-MM-DD_主题>
+[执行步骤]
+1) 执行 /jjk-vktodo <task_split_dir>，按 card_order 单卡滚动创建：
+   - 当前有 scoped 非 done 卡时，禁止创建下一张
+   - 仅在当前卡 done 后创建下一张
+2) 写入 coder4_scope_request.json（task_split_dir/project_id/applied=false）
+3) 执行 python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+4) 校验 _active_task.json 与 vk_cards.json 一致性（task_key/task_split_dir/project_id）
+4) 调用 cron list（含 disabled）定位 coder4 job_id
+5) 若 mode=start：cron update enabled=true；若 mode=stop：cron update enabled=false
+6) 调用 cron runs 返回最近 5 次结果
 
-# 4) 绑定自动执行作用域
-python3 scripts/set_active_task.py --task-split-dir <YYYY-MM-DD_主题> --project-id <VK_PROJECT_ID>
+[输出格式]
+- vktodo: success/fail + scoped总数 + scoped非done数
+- scope_guard: action + reason_or_none
+- active_task: task_key / task_split_dir / project_id / preflight_required
+- consistency: pass/fail + 差异项
+- cron: job_id / enabled(before->after)
+- runs: 最近5次（status + reason）
+- final_status: READY_AUTORUN | READY_MANUAL | BLOCKED
 ```
+
+### 12.6 最短开跑口令（你只说一句）
+
+```text
+开始执行 <task_split_dir> project_id=<VK_PROJECT_ID>
+```
+
+期望 Bot 内部动作：
+1) `/jjk-vktodo <task_split_dir>`（单卡滚动创建）
+2) 写入 `coder4_scope_request.json`
+3) 执行 `python3 scripts/coder4_scope_guard.py ...`
+4) `cron list` 找到 coder4 job，再 `cron update enabled=true`

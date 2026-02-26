@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 from app.ai.utils.permission_context import UserPermissionContext
 from app.ai.utils.sql_rewriter import (
     rewrite_sql_with_permissions,
+    _extract_table_qualifiers,
     _extract_tables_with_schema,
     _extract_tables_regex,
     _inject_where_clause_regex,
@@ -321,34 +322,154 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
 
 class TestEdgeCases(unittest.TestCase):
     """测试边界情况。"""
-    
+
     def test_complex_sql_with_subquery(self):
         """测试包含子查询的复杂 SQL。"""
         sql = """
-            SELECT * FROM orders 
+            SELECT * FROM orders
             WHERE customer_id IN (
                 SELECT id FROM customers WHERE region = 'EAST'
             )
         """
         tables = _extract_tables_regex(sql)
-        
+
         # 应该提取到两个表
         self.assertGreaterEqual(len(tables), 2)
-    
+
     def test_sql_with_alias(self):
         """测试带别名的 SQL。"""
         sql = "SELECT o.id FROM fdmdata.orders o"
         tables = _extract_tables_with_schema(sql)
-        
+
         self.assertEqual(len(tables), 1)
         self.assertIn(("fdmdata", "orders"), tables)
-    
+
     def test_case_insensitive_keywords(self):
         """测试关键字大小写不敏感。"""
         sql = "select * from Orders WHERE id = 1"
         tables = _extract_tables_regex(sql)
-        
+
         self.assertEqual(len(tables), 1)
+
+
+class TestCTEExclusion(unittest.TestCase):
+    """测试 CTE 名称排除逻辑。"""
+
+    def test_extract_tables_excludes_cte_names(self):
+        """CTE 名称不应被当作真实表。"""
+        sql = """
+        WITH params AS (SELECT DATE '2025-06-30' AS dt),
+             cust_bal AS (SELECT * FROM fdmdata.f_mid_loan_tb)
+        SELECT * FROM cust_bal
+        """
+        tables = _extract_tables_with_schema(sql)
+        self.assertIn(("fdmdata", "f_mid_loan_tb"), tables)
+        self.assertNotIn(("public", "params"), tables)
+        self.assertNotIn(("public", "cust_bal"), tables)
+
+    def test_extract_tables_no_cte(self):
+        """无 CTE 的普通查询应正常提取。"""
+        sql = "SELECT * FROM fdmdata.f_mid_loan_tb WHERE data_dt = '20250630'"
+        tables = _extract_tables_with_schema(sql)
+        self.assertEqual(len(tables), 1)
+        self.assertIn(("fdmdata", "f_mid_loan_tb"), tables)
+
+    def test_extract_tables_nested_cte(self):
+        """嵌套 CTE 引用不应被当作真实表。"""
+        sql = """
+        WITH a AS (SELECT 1), b AS (SELECT * FROM a)
+        SELECT * FROM fdmdata.f_mid_dep_tb, b
+        """
+        tables = _extract_tables_with_schema(sql)
+        self.assertIn(("fdmdata", "f_mid_dep_tb"), tables)
+        self.assertNotIn(("public", "a"), tables)
+        self.assertNotIn(("public", "b"), tables)
+
+    def test_cte_name_same_as_real_table_with_schema(self):
+        """带 schema 的同名表不应被 CTE 排除误伤。"""
+        sql = """
+        WITH params AS (SELECT 1 AS x)
+        SELECT * FROM fdmdata.params, params
+        """
+        tables = _extract_tables_with_schema(sql)
+        # fdmdata.params 是真实表，应保留
+        self.assertIn(("fdmdata", "params"), tables)
+        # 无 schema 的 params 是 CTE 引用，应排除
+        self.assertNotIn(("public", "params"), tables)
+
+    def test_real_world_cte_sql(self):
+        """真实场景：LLM 生成的贷款余额分布查询。"""
+        sql = """
+        WITH params AS (
+            SELECT DATE '2025-06-30' AS data_dt
+        ),
+        cust_bal AS (
+            SELECT l.org_cd, SUM(l.prin_bal) AS total_bal
+            FROM fdmdata.f_mid_loan_tb l, params p
+            WHERE l.data_dt = p.data_dt
+            GROUP BY l.org_cd
+        ),
+        ranked AS (
+            SELECT * FROM cust_bal ORDER BY total_bal DESC
+        )
+        SELECT * FROM ranked LIMIT 20
+        """
+        tables = _extract_tables_with_schema(sql)
+        self.assertIn(("fdmdata", "f_mid_loan_tb"), tables)
+        self.assertNotIn(("public", "params"), tables)
+        self.assertNotIn(("public", "cust_bal"), tables)
+        self.assertNotIn(("public", "ranked"), tables)
+
+    def test_nested_cte_same_name_keeps_outer_real_table(self):
+        """内层 CTE 同名不应遮蔽外层真实表。"""
+        sql = """
+        SELECT *
+        FROM real_orders o
+        JOIN (
+          WITH real_orders AS (SELECT 1 AS id)
+          SELECT * FROM real_orders
+        ) x ON 1=1
+        """
+        tables = _extract_tables_with_schema(sql)
+        self.assertIn(("public", "real_orders"), tables)
+        qualifiers = _extract_table_qualifiers(sql)
+        self.assertIn(("public", "real_orders"), qualifiers)
+
+
+class TestCTEScopePermission(unittest.TestCase):
+    """测试 CTE 作用域下的权限检查防回归。"""
+
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_nested_cte_same_name_still_checks_outer_table_permission(self, mock_get_service):
+        """外层真实表与内层 CTE 同名时，仍应命中外层表权限检查。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+
+        def check_access(_, schema, table):
+            if schema == "public" and table == "sensitive_table":
+                return (False, "禁止访问 sensitive_table")
+            return (True, None)
+
+        mock_service.check_table_access.side_effect = check_access
+        mock_service.get_row_filters_for_table.return_value = []
+        mock_service.get_masked_columns_for_table.return_value = {}
+        mock_get_service.return_value = mock_service
+
+        ctx = UserPermissionContext(user_id=1, data_role="staff", dept_code="D001")
+        sql = """
+        SELECT *
+        FROM sensitive_table s
+        JOIN (
+          WITH sensitive_table AS (SELECT 1 AS id)
+          SELECT * FROM sensitive_table
+        ) c ON 1=1
+        """
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rewritten.strip(), sql.strip())
+        self.assertIn("禁止访问 sensitive_table", error)
 
 
 if __name__ == "__main__":

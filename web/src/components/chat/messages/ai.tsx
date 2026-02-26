@@ -220,7 +220,7 @@ export function AssistantMessage({
                   columns={sqlResultData.columns as string[]}
                   columnDisplayNames={sqlResultData.column_display_names as string[] | undefined}
                   rows={sqlResultData.rows as Record<string, any>[]}
-                  totalRows={sqlResultData.total_rows as number}
+                  totalRows={sqlResultData.total_rows}
                   sql={(sqlResultData.display_sql as string) || (sqlResultData.sql as string)}
                   permissionScopeApplied={Boolean(sqlResultData.permission_scope_applied)}
                   permissionScopeText={
