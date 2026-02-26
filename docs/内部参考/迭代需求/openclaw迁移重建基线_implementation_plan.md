@@ -310,7 +310,7 @@ if plugin_registry_unhealthy():
    - 不做：绕过 Gate 直接宣称“已吃透”。
 2. 触发条件与状态流转：前置卡完成 -> Gate 逐项验收 -> 发布清单冻结。
 3. 代码/文档锚点：
-   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2~11.5）
+   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2/11.5/11.6）
    - `scripts/docs_guard.py`
 4. 关键契约字段：Gate 状态、evidence 四元组、回滚演练记录。
 5. 验收命令：
@@ -327,6 +327,10 @@ assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
    - G-1~G-4 全部通过并完成证据链复核。
    - docs/code/test 三线收口完成（`scripts/docs_guard.py` 严格门禁通过）。
    - 各 Wave 回滚锚点组合演练通过并写入 `WAVE_ROLLBACK_DRILL_MATRIX`。
+10. G04 复核留痕（2026-02-26）：
+   - 复核 `11.6 WAVE_ROLLBACK_DRILL_MATRIX` 记录完整性（P1~P6 全量覆盖、无占位符）。
+   - 复核 `11.5 G-4` 状态与“发布前固定回滚演练清单”闭环可执行性。
+   - 结论：发布前回滚演练可按矩阵批次直接执行。
 
 ---
 
