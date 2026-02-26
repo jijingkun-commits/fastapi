@@ -262,6 +262,7 @@
 * [WS-C04 P4 记忆检索增强](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md)
 * [WS-C05 P5 稳态增强与插件后置](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md)
 * [WS-C06 P6 收口与回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md)
+* [WS-G02 G2 复合任务编排](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md)
 
 ---
 

@@ -58,7 +58,8 @@
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md",
-      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md",
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
     ]
   },
   "validation": {
@@ -79,11 +80,11 @@
     "coverage": {
       "forward": {
         "status": "PASS",
-        "detail": "6/6 cards contain >=1 feature_id"
+        "detail": "7/7 cards contain >=1 feature_id"
       },
       "reverse": {
         "status": "PASS",
-        "detail": "10/10 features mapped exactly once"
+        "detail": "11/11 features mapped exactly once"
       },
       "orphan": {
         "status": "PASS",
@@ -534,6 +535,69 @@
         "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G02",
+      "card_id": "G02",
+      "title": "G02 G-2 复合任务编排 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Gate",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "G01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G01"
+      ],
+      "feature_ids": [
+        "G-2"
+      ],
+      "mechanism_summary": [
+        "复核 hard_depends_on 链路在文档、卡片与看板的一致性",
+        "复核 single_active_card 串行约束未被破坏"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::6",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json"
+      ],
+      "example_refs": [
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
+      ],
+      "acceptance_checks": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
+        "docs/SUMMARY.md"
+      ],
+      "done_gate": [
+        "G01 完成后触发 G02 复核",
+        "hard_depends_on 链路在文档、卡片、看板口径一致",
+        "single_active_card 保持 true 且未出现并发激活破坏"
+      ],
+      "dod": [
+        "G01 完成后触发 G02 复核",
+        "hard_depends_on 链路在文档、卡片、看板口径一致",
+        "single_active_card 保持 true 且未出现并发激活破坏"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
     }
   ]
 }
