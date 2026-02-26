@@ -9,10 +9,18 @@
 - execution_mode: `serial`
 - single_active_card: `true`
 - card_order: `[C01, C02, C03, C04, C05, C06, G01, G02, G03, G04]`
+- gate_contract:
+  - mode: `as_cards`
+  - gate_ids: `[G01, G02, G03, G04]`
+  - depends_on:
+    - `G01: [C06]`
+    - `G02: [G01]`
+    - `G03: [G02]`
+    - `G04: [G03]`
 - auto_done_policy:
   - implementation-card: `hard_gate`
   - inspection/question-card: `policy_gate`
-- 与 planning_contract 一致性: `PASS`
+- 与 planning_contract 一致性: `PASS`（execution_mode/single_active_card/card_order/gate_contract/auto_done_policy）
 
 ### -1.1 automation_contract
 
@@ -32,6 +40,18 @@ automation_contract:
     - labels_contains_task_key
     - card_key_prefix_task_key
 ```
+
+### -1.2 G03 契约一致性留痕（2026-02-26）
+
+1. `planning_contract / gate_contract / card_order` 三方复核：
+   - `openclaw迁移重建基线_implementation_plan.md::7` 固定 `gate_contract.mode=as_cards`、`gate_ids=[G01,G02,G03,G04]`、`depends_on={G01:[C06],G02:[G01],G03:[G02],G04:[G03]}`。
+   - 本节 `card_order` 与 `vk_cards.json.card_order` 一致，均为 `C01~C06 + G01~G04`。
+2. Gate 卡定义复核（`parallel_plan` × `vk_cards`）：
+   - `G01~G04` 依赖链均保持 `C06 -> G01 -> G02 -> G03 -> G04`。
+   - `vk_cards.json` 中 `G01~G04.task_mode=inspection-card`、`merge_required=false`、`rollback_anchors=[WAVE_ROLLBACK_DRILL_MATRIX]`。
+3. cron 消费口径复核：
+   - `docs/开发文档/工作流/Coder4自动执行总控手册.md` 要求按 `card_order` 单卡滚动创建。
+   - 当前 Gate 尾链和 `single_active_card=true` 未发生漂移，可被 cron 调度侧稳定消费。
 
 ## 0. G0 协议冻结
 
@@ -69,7 +89,7 @@ automation_contract:
 | C06 | P6 | P6-01 | G-1~G-4 门禁收口与证据链复核；docs/code/test 三线收口 | docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.2 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 | G01 | G1 | G-1 | 实测证据闭环 Gate（evidence 四元组可核验） | docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::4.11 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 | G02 | G2 | G-2 | 复合任务编排 Gate（依赖链/作用域门禁一致） | docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::7 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
-| G03 | G3 | G-3 | 契约一致性 Gate（planning_contract/vk_cards/cron 对齐） | docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G03 | G3 | G-3 | 契约一致性 Gate（planning_contract/vk_cards/cron 对齐） | docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json | python3 /Users/jijingkun/bojxAI/fastapi/scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 | G04 | G4 | G-4 | 回滚演练 Gate（矩阵记录闭环） | docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.6 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 
 ## 2. 目标与边界
