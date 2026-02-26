@@ -310,7 +310,7 @@ if plugin_registry_unhealthy():
    - 不做：绕过 Gate 直接宣称“已吃透”。
 2. 触发条件与状态流转：前置卡完成 -> Gate 逐项验收 -> 发布清单冻结。
 3. 代码/文档锚点：
-   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2~11.5）
+   - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`（11.2/11.5/11.6）
    - `scripts/docs_guard.py`
 4. 关键契约字段：Gate 状态、evidence 四元组、回滚演练记录。
 5. 验收命令：
@@ -331,6 +331,10 @@ assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
     - G01：evidence 四元组（`task_id/turn_id/process_id/status`）回填并完成绑定一致性复核。
     - G02：`hard_depends_on` 与 `single_active_card` 的串行约束在文档/卡片口径一致。
     - G03：`planning_contract / gate_contract / card_order` 三方口径对齐，Gate 定义无漂移。
+11. G04 复核留痕（2026-02-26）：
+    - 复核 `11.6 WAVE_ROLLBACK_DRILL_MATRIX` 记录完整性（P1~P6 全量覆盖、无占位符）。
+    - 复核 `11.5 G-4` 状态与“发布前固定回滚演练清单”闭环可执行性。
+    - 结论：发布前回滚演练可按矩阵批次直接执行。
 
 ---
 

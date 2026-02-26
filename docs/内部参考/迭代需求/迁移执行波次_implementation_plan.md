@@ -324,3 +324,10 @@
 | P4 | `ENABLE_MEMORY_RECALL` + `ENABLE_PRE_COMPACTION_FLUSH` | 2026-02-25-DRILL-04 | 通过（记忆注入恢复） | `user_preference_memory_implementation_plan.md` 第 7 节 |
 | P5 | `ENABLE_RUNTIME_RECOVERY` + `ENABLE_PLUGIN_REGISTRY` | 2026-02-25-DRILL-05 | 通过（恢复/插件链路恢复） | `openclaw迁移重建基线_implementation_plan.md` 第 4.10 节 |
 | P6 | `WAVE_ROLLBACK_DRILL_MATRIX` + `python3 scripts/docs_guard.py --strict` | 2026-02-25-DRILL-06 | 通过（docs/code/test 收口） | `8.3 C06 收口执行记录` |
+
+#### 11.6.1 G04（G-4）复核记录（2026-02-26）
+
+1. 复核范围：`11.6 WAVE_ROLLBACK_DRILL_MATRIX` 与 `openclaw迁移重建基线_implementation_plan.md` 第 4.11 节。
+2. 完整性判定：矩阵包含 `P1~P6` 全量 6 行，且每行均包含“组合回滚锚点 / 演练批次 / 恢复结果 / 证据链接”四要素，无占位符。
+3. 可执行性判定：`11.5` 中 `G-4` 状态已通过且“下一步”固定为发布前回滚清单；`4.11` 已以 `WAVE_ROLLBACK_DRILL_MATRIX` 作为回滚锚点并绑定 `python3 scripts/docs_guard.py --strict` 校验。
+4. 结论：`G04` 检查通过，发布前回滚演练可按矩阵批次直接执行。
