@@ -159,10 +159,18 @@ coder4 每一轮按固定顺序执行：
 - `task_id`
 - `turn_id`
 - `process_id`
+- `status`
+- `target_task_id`
+- `evidence_task_id`
 - `merge_commit`
 - `check_results`
 - `docs_guard_result`
 - `timestamp`
+
+约束：
+
+1. evidence 四元组 `task_id/turn_id/process_id/status` 必须完整。
+2. 证据绑定必须满足 `target_task_id == evidence_task_id`，否则视为 `BLOCKED_EVIDENCE_GAP`。
 
 ### 7.3 短上下文清理
 

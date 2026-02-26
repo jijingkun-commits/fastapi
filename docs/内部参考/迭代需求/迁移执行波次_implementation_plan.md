@@ -234,6 +234,12 @@
 2. code 收口：`scripts/docs_guard.py` 新增 Gate 与回滚矩阵强校验。
 3. test 收口：`python3 scripts/docs_guard.py --strict` 通过（errors=0，warnings=0）。
 
+### 8.4 G01 证据闭环执行记录（2026-02-25）
+
+1. evidence 四元组（`task_id/turn_id/process_id/status`）已固化到 `WS-G01` 并完成非空核验。
+2. 证据绑定关系复核通过：`target_task_id == evidence_task_id`。
+3. 执行留痕入口：`docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md`。
+
 ---
 
 ## 9. 文档优先执行清单（仅计划/文档）
@@ -303,7 +309,7 @@
 
 | Gate | 责任人 | 目标日期 | 当前状态 | 证据链接 | 下一步 |
 |---|---|---|---|---|---|
-| G-1 实测证据闭环 | 纪景锟 | 2026-02-25 | 已通过 | `output/openclaw源码解析/OpenClaw吃透度补强-*.md`、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 进入周检，若指标回退按 11.4 回查 |
+| G-1 实测证据闭环 | 纪景锟 | 2026-02-25 | 已通过 | `output/openclaw源码解析/OpenClaw吃透度补强-*.md`、`11.6 WAVE_ROLLBACK_DRILL_MATRIX`、`WS-G01_G1_实测证据闭环.md` | 进入周检，若指标回退按 11.4 回查 |
 | G-2 复合任务编排实证 | 纪景锟 | 2026-02-25 | 已通过 | `output/openclaw源码解析/OpenClaw源码解析-长期主档.md`、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 维持复合用例滚动统计与失败复盘 |
 | G-3 契约一致性证据 | 纪景锟 | 2026-02-25 | 已通过 | `docs/API文档/接口文档.md`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/开发文档/架构设计/数据库设计.md`、`8.3 C06 收口执行记录` | 保持契约周检，发现漂移即回填 |
 | G-4 P1 回滚演练证据 | 纪景锟 | 2026-02-25 | 已通过 | `runtime_cancel_control_implementation_plan.md`（第 7 节回滚记录）、`11.6 WAVE_ROLLBACK_DRILL_MATRIX` | 纳入发布前固定回滚演练清单 |

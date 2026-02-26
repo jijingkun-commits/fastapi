@@ -32,7 +32,8 @@
     "C03",
     "C04",
     "C05",
-    "C06"
+    "C06",
+    "G01"
   ],
   "preflight": {
     "card_id": "C00",
@@ -58,7 +59,8 @@
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md",
       "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md",
-      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md",
+      "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md"
     ]
   },
   "validation": {
@@ -79,11 +81,11 @@
     "coverage": {
       "forward": {
         "status": "PASS",
-        "detail": "6/6 cards contain >=1 feature_id"
+        "detail": "7/7 cards contain >=1 feature_id"
       },
       "reverse": {
         "status": "PASS",
-        "detail": "10/10 features mapped exactly once"
+        "detail": "11/11 features mapped exactly once"
       },
       "orphan": {
         "status": "PASS",
@@ -534,6 +536,73 @@
         "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G01",
+      "card_id": "G01",
+      "title": "G01 G-1 实测证据闭环 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Gate",
+      "priority": "P1",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-evidence"
+      ],
+      "hard_depends_on": [
+        "C06"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C06"
+      ],
+      "feature_ids": [
+        "G-1"
+      ],
+      "mechanism_summary": [
+        "固化并核验 evidence 四元组（task_id/turn_id/process_id/status）",
+        "复核证据绑定 target_task_id == evidence_task_id"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::4.11",
+        "docs/开发文档/工作流/Coder4自动执行总控手册.md::7"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11"
+      ],
+      "acceptance_checks": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "docs/开发文档/工作流/Coder4自动执行总控手册.md",
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json",
+        "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md",
+        "docs/SUMMARY.md",
+        "scripts/docs_guard.py"
+      ],
+      "done_gate": [
+        "evidence 四元组 task_id/turn_id/process_id/status 回填并核验通过",
+        "target_task_id == evidence_task_id 复核通过",
+        "python3 scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "evidence 四元组 task_id/turn_id/process_id/status 回填并核验通过",
+        "target_task_id == evidence_task_id 复核通过",
+        "python3 scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md"
     }
   ]
 }
