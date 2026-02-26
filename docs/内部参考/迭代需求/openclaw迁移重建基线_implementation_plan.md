@@ -366,6 +366,7 @@ source_conflicts:
 2. `C01 -> C02 -> C03 -> C04`
 3. `C05` 依赖 `C02` 与 `C04`
 4. `C06` 依赖 `C01~C05`
+5. `G01 -> G02` 为 Gate 复核链，仅用于核验 `hard_depends_on` 与 `single_active_card` 约束，不改变 `C01~C06` 的串行主链。
 
 ---
 
@@ -387,6 +388,16 @@ planning_contract:
         - 取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel
         - python3 scripts/docs_guard.py --strict 通过
   card_order: [C01, C02, C03, C04, C05, C06]
+  inspection_chain:
+    - card_id: G02
+      feature_ids: [G-2]
+      hard_depends_on: [G01]
+      excluded_from_card_order: true
+      task_mode: inspection-card
+      merge_required: false
+      acceptance_checks:
+        - python3 scripts/docs_guard.py --strict
+      evidence_entry: docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7
   cards:
     - card_id: C01
       wave: P1
