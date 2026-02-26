@@ -8,11 +8,12 @@
 
 - execution_mode: `serial`
 - single_active_card: `true`
-- card_order: `[C01, C02, C03, C04, C05, C06, G01]`
+- card_order: `[C01, C02, C03, C04, C05, C06, G01, G02, G03]`
 - auto_done_policy:
   - implementation-card: `hard_gate`
   - inspection/question-card: `policy_gate`
 - 与 planning_contract 一致性: `PASS`
+- 与 gate_contract 一致性: `PASS`
 
 ### -1.1 automation_contract
 
@@ -68,6 +69,8 @@ automation_contract:
 | C05 | P5 | P5-01 | 恢复/隔离/观测增强与异常降级；插件能力后置接线，不阻塞主链 | app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff | PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback | ENABLE_RUNTIME_RECOVERY,ENABLE_PLUGIN_REGISTRY |
 | C06 | P6 | P6-01 | G-1~G-4 门禁收口与证据链复核；docs/code/test 三线收口 | docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.2 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 | G01 | P6/G-1 | G-1 | 固化并核验 evidence 四元组（task_id/turn_id/process_id/status）；复核 target_task_id == evidence_task_id | docs/开发文档/工作流/Coder4自动执行总控手册.md::7 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G02 | P6/G-2 | G-2 | 复核 hard_depends_on 链路在文档、卡片与看板一致；复核 single_active_card 串行约束不漂移 | docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::6 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G03 | P6/G-3 | G-3 | 对齐 planning_contract / gate_contract / card_order；对齐 parallel_plan 与 vk_cards Gate 卡定义 | docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::7 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 
 ## 2. 目标与边界
 
@@ -91,7 +94,7 @@ automation_contract:
   - `t_chat_run` 表结构草案冻结（字段、索引、状态枚举）
   - `stopped/done/interrupt` 终态互斥与顺序语义冻结
   - `code_anchor_refs` 可解析校验通过（已存在文件必须可定位符号）
-- 路由闭环: C00 -> C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> G01。
+- 路由闭环: C00 -> C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> G01 -> G02 -> G03。
 - 前后端链路时序: cancel API -> run_control -> workflow checkpoint -> SSE stopped -> 前端状态收口。
 
 ## 4. 工作包总览
@@ -106,10 +109,12 @@ automation_contract:
 | WS-C05 | P5 稳态增强与插件后置接线 | parallel | 否 | WS-C02, WS-C04 |
 | WS-C06 | P6 收口与回滚演练 | gate | 否 | WS-C01~WS-C05 |
 | WS-G01 | G-1 实测证据闭环 | inspection | 否 | WS-C06 |
+| WS-G02 | G-2 复合任务编排 | inspection | 否 | WS-G01 |
+| WS-G03 | G-3 契约一致性 | inspection | 否 | WS-G02 |
 
 ## 5. 合并策略
 
-- 合并顺序: `C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> G01`
+- 合并顺序: `C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> G01 -> G02 -> G03`
 - 回归门禁: 每卡执行 `acceptance_checks`，并在 `evidence_entry` 回填证据。
 - 回滚策略: 按 `rollback_anchors` 单卡回退，不跨卡混合回退。
 
@@ -121,8 +126,8 @@ automation_contract:
 
 ## 7. 双向覆盖校验结果
 
-- forward: `PASS`（7/7 cards contain >=1 feature）
-- reverse: `PASS`（11/11 features mapped exactly once）
+- forward: `PASS`（9/9 cards contain >=1 feature）
+- reverse: `PASS`（13/13 features mapped exactly once）
 - orphan: `PASS`（无遗漏 feature）
 - duplicate: `PASS`（无重复漂移）
 
@@ -130,7 +135,7 @@ automation_contract:
 
 - task_key: `PP-20260221-OPENCLAW-REBUILD-BASELINE`
 - 拆解目录 ID: `2026-02-21_openclaw迁移重建基线`
-- cards: `C01~C06 + G01`（C00 作为 preflight，不进入默认落卡）
+- cards: `C01~C06 + G01~G03`（C00 作为 preflight，不进入默认落卡）
 - 默认列流转: `Backlog -> Doing -> Review -> Gate -> Done`
 - single_active_card: `true`
 

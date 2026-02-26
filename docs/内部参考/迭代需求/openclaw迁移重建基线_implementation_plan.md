@@ -327,10 +327,10 @@ assert gates["G-1"] and gates["G-2"] and gates["G-3"] and gates["G-4"]
    - G-1~G-4 全部通过并完成证据链复核。
    - docs/code/test 三线收口完成（`scripts/docs_guard.py` 严格门禁通过）。
    - 各 Wave 回滚锚点组合演练通过并写入 `WAVE_ROLLBACK_DRILL_MATRIX`。
-10. G01（inspection-card）证据闭环补充（2026-02-25）：
-    - evidence 四元组已固化并核验：`task_id/turn_id/process_id/status`。
-    - 证据绑定规则复核通过：`target_task_id == evidence_task_id`。
-    - 留痕入口：`docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md`。
+10. Gate inspection 复核留痕（2026-02-25）：
+    - G01：evidence 四元组（`task_id/turn_id/process_id/status`）回填并完成绑定一致性复核。
+    - G02：`hard_depends_on` 与 `single_active_card` 的串行约束在文档/卡片口径一致。
+    - G03：`planning_contract / gate_contract / card_order` 三方口径对齐，Gate 定义无漂移。
 
 ---
 
@@ -366,7 +366,7 @@ source_conflicts:
 2. `C01 -> C02 -> C03 -> C04`
 3. `C05` 依赖 `C02` 与 `C04`
 4. `C06` 依赖 `C01~C05`
-5. `G01 -> G02` 为 Gate 复核链，仅用于核验 `hard_depends_on` 与 `single_active_card` 约束，不改变 `C01~C06` 的串行主链。
+5. `G01 -> G02 -> G03` 为 Gate 复核链，按 inspection-card 串行执行，不改变 `C01~C06` 主链。
 
 ---
 
@@ -388,16 +388,27 @@ planning_contract:
         - 取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel
         - python3 scripts/docs_guard.py --strict 通过
   card_order: [C01, C02, C03, C04, C05, C06]
-  inspection_chain:
-    - card_id: G02
-      feature_ids: [G-2]
-      hard_depends_on: [G01]
-      excluded_from_card_order: true
-      task_mode: inspection-card
-      merge_required: false
-      acceptance_checks:
-        - python3 scripts/docs_guard.py --strict
-      evidence_entry: docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7
+  gate_contract:
+    gate_card_order: [G01, G02, G03]
+    export_card_order: [C01, C02, C03, C04, C05, C06, G01, G02, G03]
+    gates:
+      - card_id: G01
+        feature_ids: [G-1]
+        hard_depends_on: [C06]
+        task_mode: inspection-card
+        merge_required: false
+      - card_id: G02
+        feature_ids: [G-2]
+        hard_depends_on: [G01]
+        task_mode: inspection-card
+        merge_required: false
+      - card_id: G03
+        feature_ids: [G-3]
+        hard_depends_on: [G02]
+        task_mode: inspection-card
+        merge_required: false
+    acceptance_checks:
+      - python3 scripts/docs_guard.py --strict
   cards:
     - card_id: C01
       wave: P1

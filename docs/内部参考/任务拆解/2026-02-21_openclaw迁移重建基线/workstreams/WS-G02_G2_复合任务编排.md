@@ -51,7 +51,7 @@
 - 前置卡：G01
 - 解锁条件：G01 已完成并完成 `hard_depends_on` 口径回填。
 - 本 WS 不得推进条件：G01 处于 `TODO/IN_PROGRESS/IN_REVIEW/BLOCKED`。
-- 串行保护要求：`card_order` 维持 `C01~C06` 不变，避免破坏 `single_active_card=true` 的主链执行。
+- 串行保护要求：`card_order` 维持 `C01~C06 + G01~G03` 约束，不破坏 `single_active_card=true` 的主链执行。
 
 ## 4. 测试与验收
 
