@@ -9,6 +9,7 @@
 5. 双库变量名黑名单（DATA_DATABASE_URL）
 6. OpenClaw Gate 看板（11.2/11.5）状态收口
 7. 波次回滚演练矩阵（WAVE_ROLLBACK_DRILL_MATRIX）完整性
+8. G01 证据四元组与绑定关系校验
 """
 
 from __future__ import annotations
@@ -27,6 +28,15 @@ DOCS_DIR = ROOT / "docs"
 SUMMARY_FILE = DOCS_DIR / "SUMMARY.md"
 REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
 WAVE_PLAN_FILE = DOCS_DIR / "内部参考" / "迭代需求" / "迁移执行波次_implementation_plan.md"
+G01_WORKSTREAM_FILE = (
+    DOCS_DIR
+    / "内部参考"
+    / "任务拆解"
+    / "2026-02-21_openclaw迁移重建基线"
+    / "workstreams"
+    / "WS-G01_G1_实测证据闭环.md"
+)
+G01_CARD_KEY = "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G01"
 
 REQUIRED_GATES = ("G-1", "G-2", "G-3", "G-4")
 REQUIRED_WAVES = ("P1", "P2", "P3", "P4", "P5", "P6")
@@ -43,6 +53,7 @@ PENDING_STATUS_TOKENS = (
     "blocked",
     "pending",
 )
+PENDING_EVIDENCE_TOKENS = ("待回填", "tbd", "todo", "pending", "待补", "待定")
 
 
 FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
@@ -214,6 +225,186 @@ def has_pending_status(status_text: str) -> bool:
 def has_pass_status(status_text: str) -> bool:
     normalized = status_text.lower()
     return any(token in normalized for token in PASS_STATUS_TOKENS)
+
+
+def normalize_table_cell(value: str) -> str:
+    return value.strip().strip("`").strip()
+
+
+def is_pending_evidence_value(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized:
+        return True
+    return any(token in normalized for token in PENDING_EVIDENCE_TOKENS)
+
+
+def check_g01_evidence_binding(findings: list[Finding]) -> int:
+    count = 0
+    file_label = str(G01_WORKSTREAM_FILE.relative_to(ROOT))
+
+    if not G01_WORKSTREAM_FILE.exists():
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail="G01 工作包文档不存在",
+            )
+        )
+        return 1
+
+    text = read_text(G01_WORKSTREAM_FILE)
+    section_61 = extract_level3_section(text, "### 6.1")
+    if not section_61:
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail="缺少 6.1 证据四元组实测记录章节",
+            )
+        )
+        return 1
+
+    rows = parse_markdown_table_rows(section_61)
+    if len(rows) < 2:
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail="6.1 证据表缺少表头或数据行",
+            )
+        )
+        return 1
+
+    header = [normalize_table_cell(cell).lower() for cell in rows[0]]
+    header_index = {name: idx for idx, name in enumerate(header)}
+    required_columns = (
+        "target_task_id",
+        "evidence_task_id",
+        "task_id",
+        "turn_id",
+        "process_id",
+        "status",
+    )
+    missing_columns = [column for column in required_columns if column not in header_index]
+    if missing_columns:
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=f"6.1 证据表缺少列：{', '.join(missing_columns)}",
+            )
+        )
+        return 1
+
+    normalized_rows: list[dict[str, str]] = []
+    for row in rows[1:]:
+        padded_row = row + [""] * (len(header) - len(row))
+        mapped = {
+            column: normalize_table_cell(padded_row[index])
+            for column, index in header_index.items()
+            if index < len(padded_row)
+        }
+        if any(mapped.get(column, "") for column in required_columns):
+            normalized_rows.append(mapped)
+
+    if not normalized_rows:
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail="6.1 证据表未提供有效数据行",
+            )
+        )
+        return 1
+
+    latest = normalized_rows[-1]
+
+    for column in required_columns:
+        value = latest.get(column, "")
+        if is_pending_evidence_value(value):
+            count += 1
+            findings.append(
+                Finding(
+                    category="g01_evidence_binding",
+                    level="error",
+                    file=file_label,
+                    detail=f"最新证据行字段 `{column}` 缺失或仍为占位：{value or '空值'}",
+                )
+            )
+
+    target_task_id = latest.get("target_task_id", "")
+    evidence_task_id = latest.get("evidence_task_id", "")
+    task_id = latest.get("task_id", "")
+    status = latest.get("status", "")
+    bind_result = latest.get("bind_result", "")
+
+    if target_task_id and target_task_id != evidence_task_id:
+        count += 1
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=(
+                    "证据绑定不一致："
+                    f"target_task_id={target_task_id}, evidence_task_id={evidence_task_id}"
+                ),
+            )
+        )
+
+    if target_task_id and target_task_id != G01_CARD_KEY:
+        count += 1
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=(
+                    "target_task_id 与 G01 card_key 不一致："
+                    f"{target_task_id} != {G01_CARD_KEY}"
+                ),
+            )
+        )
+
+    if task_id and evidence_task_id and task_id != evidence_task_id:
+        count += 1
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=f"task_id 与 evidence_task_id 不一致：{task_id} != {evidence_task_id}",
+            )
+        )
+
+    if status and (has_pending_status(status) or not has_pass_status(status)):
+        count += 1
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=f"最新证据行状态未收口：{status}",
+            )
+        )
+
+    if bind_result and (has_pending_status(bind_result) or not ("一致" in bind_result or has_pass_status(bind_result))):
+        count += 1
+        findings.append(
+            Finding(
+                category="g01_evidence_binding",
+                level="error",
+                file=file_label,
+                detail=f"最新证据行 bind_result 未收口：{bind_result}",
+            )
+        )
+
+    return count
 
 
 def check_openclaw_gate_status(findings: list[Finding]) -> int:
@@ -719,6 +910,7 @@ def print_human_report(report: dict) -> None:
     print(f"report_naming_errors: {stats['report_naming_errors']}")
     print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
     print(f"openclaw_gate_status_errors: {stats['openclaw_gate_status_errors']}")
+    print(f"g01_evidence_binding_errors: {stats['g01_evidence_binding_errors']}")
     print(f"wave_rollback_matrix_errors: {stats['wave_rollback_matrix_errors']}")
     print(f"path_reference_missing: {stats['path_reference_missing']}")
     print(f"errors: {stats['errors']} | warnings: {stats['warnings']}")
@@ -751,6 +943,7 @@ def main() -> int:
         "report_naming_errors": check_report_naming(findings),
         "blacklist_var_hits": check_blacklist_vars(findings),
         "openclaw_gate_status_errors": check_openclaw_gate_status(findings),
+        "g01_evidence_binding_errors": check_g01_evidence_binding(findings),
         "wave_rollback_matrix_errors": check_wave_rollback_matrix(findings),
         "path_reference_missing": check_inline_path_refs(findings) if args.check_paths else 0,
     }
