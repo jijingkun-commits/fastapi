@@ -6,6 +6,9 @@
 #   wt-flow.sh cleanup
 #   wt-flow.sh status
 #   wt-flow.sh guard   # 检查是否在 master 上，返回 0=安全 1=在 master
+#   wt-flow.sh next    [--state-dir=<dir>]
+#   wt-flow.sh verify  <card-id> [--state-dir=<dir>]
+#   wt-flow.sh list    [--state-dir=<dir>]
 #
 # merge 默认 fail-fast：主仓 dirty 时直接退出。
 # 如需兼容旧行为，可显式设置 WT_FLOW_ALLOW_AUTOCOMMIT=1 启用 auto-commit + 重建。
@@ -15,12 +18,211 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 WT_BASE="${REPO_ROOT}/.worktrees"
 STATE_FILE="${REPO_ROOT}/.omc/state/wt-flow-state.json"
+ACTIVE_TASK_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/_active_task.json"
+DEFAULT_STATE_DIR="${REPO_ROOT}/.omc/state"
+ALLOWED_PREFIXES=("bash" "python" "python3" "pytest" "ruff" "grep" "cat" "jq" "wc" "test" "diff")
+
+WT_FLOW_PARSE_STATE_DIR=""
+WT_FLOW_PARSE_REMAINING=()
 
 # --- 工具函数 ---
 
 _log()  { echo "[wt-flow] $*"; }
 _err()  { echo "[wt-flow] ERROR: $*" >&2; }
 _die()  { _err "$@"; exit 1; }
+
+_require_cmd() {
+  local cmd_name="$1"
+  command -v "$cmd_name" >/dev/null 2>&1 || _die "缺少依赖命令: ${cmd_name}"
+}
+
+_to_upper() {
+  printf "%s" "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+_normalize_status() {
+  local status="$1"
+  status="$(printf "%s" "$status" | tr '[:upper:]' '[:lower:]')"
+  status="${status//-/_}"
+  if [[ "$status" == "inprogress" || "$status" == "in_progress" ]]; then
+    echo "in_progress"
+    return
+  fi
+  if [[ "$status" == "inreview" || "$status" == "in_review" ]]; then
+    echo "in_review"
+    return
+  fi
+  if [[ "$status" == "to_do" || "$status" == "backlog" ]]; then
+    echo "todo"
+    return
+  fi
+  echo "$status"
+}
+
+_default_state_dir() {
+  echo "${WT_FLOW_STATE_DIR:-$DEFAULT_STATE_DIR}"
+}
+
+_parse_state_dir_flag() {
+  local state_dir="$1"
+  shift || true
+
+  WT_FLOW_PARSE_REMAINING=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --state-dir=*)
+        state_dir="${1#*=}"
+        shift
+        ;;
+      --state-dir)
+        shift
+        [[ $# -gt 0 ]] || _die "--state-dir 缺少参数"
+        state_dir="$1"
+        shift
+        ;;
+      *)
+        WT_FLOW_PARSE_REMAINING+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  WT_FLOW_PARSE_STATE_DIR="$state_dir"
+}
+
+_task_state_file() {
+  local state_dir="$1"
+  echo "${state_dir}/task-runner-state.json"
+}
+
+_state_status_value() {
+  local state_file="$1" card_id="$2"
+  jq -r --arg card "$card_id" '((.card_status // {})[$card] // (.card_status_map // {})[$card] // "todo")' "$state_file"
+}
+
+_resolve_cards_file() {
+  local active_file="${WT_FLOW_ACTIVE_TASK_FILE:-$ACTIVE_TASK_FILE}"
+  [[ -f "$active_file" ]] || _die "active task 文件不存在: ${active_file}"
+
+  local task_split_dir task_key cards_file
+  task_split_dir="$(jq -r '.task_split_dir // empty' "$active_file")"
+  task_key="$(jq -r '.task_key // empty' "$active_file")"
+
+  cards_file=""
+  if [[ -n "$task_split_dir" ]]; then
+    cards_file="${REPO_ROOT}/docs/内部参考/任务拆解/${task_split_dir}/vk_cards.json"
+  fi
+
+  if [[ -z "$cards_file" || ! -f "$cards_file" ]]; then
+    if [[ -n "$task_key" ]]; then
+      cards_file="${REPO_ROOT}/docs/内部参考/任务拆解/${task_key}/vk_cards.json"
+    fi
+  fi
+
+  [[ -f "$cards_file" ]] || _die "无法定位 vk_cards.json，请检查 ${active_file} 的 task_split_dir/task_key"
+  echo "$cards_file"
+}
+
+_card_exists_in_cards_file() {
+  local card_id="$1" cards_file="$2"
+  jq -e --arg card "$card_id" 'any((.cards // [])[]; ((.card_id // "") | ascii_upcase) == ($card | ascii_upcase))' "$cards_file" >/dev/null 2>&1
+}
+
+_card_depends_ready() {
+  local card_id="$1" state_file="$2" cards_file="$3"
+  local dep dep_status
+
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    dep="$(_to_upper "$dep")"
+    dep_status="$(_normalize_status "$(_state_status_value "$state_file" "$dep")")"
+    if [[ "$dep_status" != "done" ]]; then
+      return 1
+    fi
+  done < <(jq -r --arg card "$card_id" '
+      (.cards // [])
+      | map(select(((.card_id // "") | ascii_upcase) == ($card | ascii_upcase)))
+      | .[0]
+      | ((.hard_depends_on // .depends_on // [])[]?)
+    ' "$cards_file")
+
+  return 0
+}
+
+_card_depends_label() {
+  local card_id="$1" cards_file="$2"
+  local depends
+
+  depends="$(jq -r --arg card "$card_id" '
+      (.cards // [])
+      | map(select(((.card_id // "") | ascii_upcase) == ($card | ascii_upcase)))
+      | .[0]
+      | ((.hard_depends_on // .depends_on // []) | join(","))
+    ' "$cards_file")"
+
+  if [[ -z "$depends" || "$depends" == "null" ]]; then
+    echo "-"
+    return
+  fi
+  echo "$depends"
+}
+
+_update_json_file() {
+  local target_file="$1"
+  shift
+  local tmp_file="${target_file}.tmp"
+
+  if ! jq "$@" "$target_file" > "$tmp_file"; then
+    rm -f "$tmp_file"
+    _die "更新 ${target_file} 失败"
+  fi
+
+  if [[ ! -s "$tmp_file" ]]; then
+    rm -f "$tmp_file"
+    _die "更新 ${target_file} 失败: jq 输出为空"
+  fi
+
+  mv "$tmp_file" "$target_file"
+}
+
+_extract_prefix() {
+  local check="$1"
+  check="${check#"${check%%[![:space:]]*}"}"
+  check="${check%%[[:space:]]*}"
+  echo "$check"
+}
+
+_is_allowed_prefix() {
+  local prefix="$1" allowed
+  for allowed in "${ALLOWED_PREFIXES[@]}"; do
+    if [[ "$prefix" == "$allowed" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_resolve_worktree_path_for_card() {
+  local card_id="$1"
+  local by_card="${WT_BASE}/${card_id}"
+  if [[ -d "$by_card" ]]; then
+    echo "$by_card"
+    return 0
+  fi
+
+  if [[ -f "$STATE_FILE" ]]; then
+    local state branch wt_path
+    state="$(cat "$STATE_FILE")"
+    branch="$(echo "$state" | sed -n 's/.*"branch": *"\([^"]*\)".*/\1/p' | head -n1)"
+    wt_path="$(echo "$state" | sed -n 's/.*"worktree": *"\([^"]*\)".*/\1/p' | head -n1)"
+    if [[ "$branch" == "feature/${card_id}" && -d "$wt_path" ]]; then
+      echo "$wt_path"
+      return 0
+    fi
+  fi
+
+  return 1
+}
 
 _ensure_clean() {
   if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -84,6 +286,108 @@ cmd_create() {
   _log "  路径:    ${wt_path}"
   _log "  基准:    ${base}"
   echo "${wt_path}"
+}
+
+# --- 命令: next ---
+
+cmd_next() {
+  _require_cmd jq
+  _parse_state_dir_flag "$(_default_state_dir)" "$@"
+  if [[ "${#WT_FLOW_PARSE_REMAINING[@]}" -gt 0 ]]; then
+    _die "用法: wt-flow.sh next [--state-dir=<dir>]"
+  fi
+
+  local state_dir="$WT_FLOW_PARSE_STATE_DIR"
+  local state_file
+  state_file="$(_task_state_file "$state_dir")"
+  [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
+
+  local cards_file execution_mode card status
+  cards_file="$(_resolve_cards_file)"
+  execution_mode="$(jq -r '.execution_mode // "serial"' "$state_file")"
+
+  local active_cards=""
+  while IFS= read -r card; do
+    [[ -z "$card" ]] && continue
+    status="$(_normalize_status "$(_state_status_value "$state_file" "$card")")"
+    if [[ "$status" == "in_progress" || "$status" == "in_review" ]]; then
+      if [[ -n "$active_cards" ]]; then
+        active_cards="${active_cards},${card}"
+      else
+        active_cards="$card"
+      fi
+    fi
+  done < <(jq -r '.card_order[]?' "$state_file")
+
+  if [[ "$execution_mode" == "serial" && -n "$active_cards" ]]; then
+    _log "BLOCKED: 串行模式存在进行中卡片: ${active_cards}"
+    return 2
+  fi
+
+  local next_card="" blocked_cards=""
+  while IFS= read -r card; do
+    [[ -z "$card" ]] && continue
+    card="$(_to_upper "$card")"
+    if ! _card_exists_in_cards_file "$card" "$cards_file"; then
+      _die "卡片 ${card} 不在 vk_cards.json 中"
+    fi
+
+    status="$(_normalize_status "$(_state_status_value "$state_file" "$card")")"
+    if [[ "$status" != "todo" ]]; then
+      continue
+    fi
+
+    if _card_depends_ready "$card" "$state_file" "$cards_file"; then
+      next_card="$card"
+      break
+    fi
+
+    if [[ -n "$blocked_cards" ]]; then
+      blocked_cards="${blocked_cards},${card}"
+    else
+      blocked_cards="$card"
+    fi
+  done < <(jq -r '.card_order[]?' "$state_file")
+
+  if [[ -z "$next_card" ]]; then
+    local unfinished=0
+    while IFS= read -r card; do
+      [[ -z "$card" ]] && continue
+      status="$(_normalize_status "$(_state_status_value "$state_file" "$card")")"
+      if [[ "$status" != "done" && "$status" != "skipped" ]]; then
+        unfinished=$((unfinished + 1))
+      fi
+    done < <(jq -r '.card_order[]?' "$state_file")
+
+    if [[ "$unfinished" -eq 0 ]]; then
+      echo "ALL_DONE"
+      return 0
+    fi
+
+    if [[ -n "$blocked_cards" ]]; then
+      _log "BLOCKED: 无可推进卡片，依赖未满足: ${blocked_cards}"
+    else
+      _log "BLOCKED: 无可推进卡片"
+    fi
+    return 2
+  fi
+
+  _log "NEXT: ${next_card}"
+  cmd_create "$next_card"
+
+  local now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  _update_json_file "$state_file" \
+    --arg card "$next_card" \
+    --arg now "$now" \
+    '
+    .current_card = $card
+    | .card_status = ((.card_status // {}) + {($card): "in_progress"})
+    | .card_status_map = ((.card_status_map // {}) + {($card): "inprogress"})
+    | .last_action = "next"
+    | .last_action_result = "activated_by_wt_flow"
+    | .last_updated = $now
+    '
 }
 
 # --- 命令: merge ---
@@ -209,6 +513,217 @@ cmd_guard() {
   return 0
 }
 
+# --- 命令: verify ---
+
+cmd_verify() {
+  _require_cmd jq
+  _parse_state_dir_flag "$(_default_state_dir)" "$@"
+  if [[ "${#WT_FLOW_PARSE_REMAINING[@]}" -ne 1 ]]; then
+    _die "用法: wt-flow.sh verify <card-id> [--state-dir=<dir>]"
+  fi
+
+  local card_id
+  card_id="$(_to_upper "${WT_FLOW_PARSE_REMAINING[0]}")"
+
+  local state_dir="$WT_FLOW_PARSE_STATE_DIR"
+  local state_file
+  state_file="$(_task_state_file "$state_dir")"
+  [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
+
+  local cards_file
+  cards_file="$(_resolve_cards_file)"
+  if ! _card_exists_in_cards_file "$card_id" "$cards_file"; then
+    _die "卡片 ${card_id} 不在 vk_cards.json 中"
+  fi
+
+  local worktree_path
+  if ! worktree_path="$(_resolve_worktree_path_for_card "$card_id")"; then
+    _die "未找到卡片 ${card_id} 的 worktree，预期路径: ${WT_BASE}/${card_id}"
+  fi
+
+  local all_passed=true
+  local checks_count=0
+  local evidence_json=""
+  local check prefix output rc item
+
+  while IFS= read -r check; do
+    [[ -z "$check" ]] && continue
+    checks_count=$((checks_count + 1))
+
+    prefix="$(_extract_prefix "$check")"
+    if [[ -z "$prefix" ]] || ! _is_allowed_prefix "$prefix"; then
+      _err "BLOCKED: 命令前缀不在白名单中: ${check}"
+      item="$(jq -n \
+        --arg check "$check" \
+        --arg prefix "$prefix" \
+        '{check: $check, prefix: $prefix, result: "blocked_not_allowed"}')"
+      if [[ -n "$evidence_json" ]]; then
+        evidence_json="${evidence_json},${item}"
+      else
+        evidence_json="$item"
+      fi
+      all_passed=false
+      continue
+    fi
+
+    _log "执行检查: ${check}"
+    set +e
+    output="$(cd "$worktree_path" && bash -lc "set -euo pipefail; $check" 2>&1)"
+    rc=$?
+    set -e
+
+    if [[ "$rc" -eq 0 ]]; then
+      item="$(jq -n \
+        --arg check "$check" \
+        --arg prefix "$prefix" \
+        --arg output "$output" \
+        '{check: $check, prefix: $prefix, result: "pass", output: $output}')"
+    else
+      _err "检查失败(${rc}): ${check}"
+      _err "$output"
+      item="$(jq -n \
+        --arg check "$check" \
+        --arg prefix "$prefix" \
+        --arg output "$output" \
+        --argjson exit_code "$rc" \
+        '{check: $check, prefix: $prefix, result: "fail", exit_code: $exit_code, output: $output}')"
+      all_passed=false
+    fi
+
+    if [[ -n "$evidence_json" ]]; then
+      evidence_json="${evidence_json},${item}"
+    else
+      evidence_json="$item"
+    fi
+  done < <(jq -r --arg card "$card_id" '
+      (.cards // [])
+      | map(select(((.card_id // "") | ascii_upcase) == ($card | ascii_upcase)))
+      | .[0]
+      | (.acceptance_checks // [])[]
+    ' "$cards_file")
+
+  if [[ "$checks_count" -eq 0 ]]; then
+    _log "WARN: ${card_id} 无 acceptance_checks，默认通过"
+    evidence_json='{"result":"no_checks_defined"}'
+  fi
+
+  local passed_json="true"
+  if [[ "$all_passed" != true ]]; then
+    passed_json="false"
+  fi
+
+  local result_file="${state_dir}/attempts/${card_id}/gate_result.json"
+  mkdir -p "$(dirname "$result_file")"
+
+  local checked_at evidence_payload result_tmp
+  checked_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  result_tmp="${result_file}.tmp"
+  if [[ -n "$evidence_json" ]]; then
+    evidence_payload="[${evidence_json}]"
+  else
+    evidence_payload="[]"
+  fi
+
+  if ! jq -n \
+    --arg card_id "$card_id" \
+    --arg checked_at "$checked_at" \
+    --arg worktree_path "$worktree_path" \
+    --argjson passed "$passed_json" \
+    --argjson evidence "$evidence_payload" \
+    '{
+      card_id: $card_id,
+      passed: $passed,
+      checked_at: $checked_at,
+      worktree_path: $worktree_path,
+      evidence: $evidence
+    }' > "$result_tmp"; then
+    rm -f "$result_tmp"
+    _die "写入 done_gate 结果失败: ${result_file}"
+  fi
+
+  if [[ ! -s "$result_tmp" ]]; then
+    rm -f "$result_tmp"
+    _die "写入 done_gate 结果失败: jq 输出为空"
+  fi
+  mv "$result_tmp" "$result_file"
+
+  if [[ "$all_passed" == true ]]; then
+    _update_json_file "$state_file" \
+      --arg card "$card_id" \
+      --arg now "$checked_at" \
+      '
+      .current_card = $card
+      | .card_status = ((.card_status // {}) + {($card): "done"})
+      | .card_status_map = ((.card_status_map // {}) + {($card): "done"})
+      | .last_action = "verify"
+      | .last_action_result = "done_gate_passed"
+      | .no_increment_count = 0
+      | .last_updated = $now
+      '
+    _log "GATE_PASSED: ${card_id}"
+    return 0
+  fi
+
+  _update_json_file "$state_file" \
+    --arg card "$card_id" \
+    --arg now "$checked_at" \
+    '
+    .current_card = $card
+    | .card_status = ((.card_status // {}) + {($card): "in_progress"})
+    | .card_status_map = ((.card_status_map // {}) + {($card): "inprogress"})
+    | .last_action = "verify"
+    | .last_action_result = "done_gate_failed"
+    | .no_increment_count = ((.no_increment_count // 0) + 1)
+    | .last_updated = $now
+    '
+  _log "GATE_FAILED: ${card_id}"
+  return 1
+}
+
+# --- 命令: list ---
+
+cmd_list() {
+  _require_cmd jq
+  _parse_state_dir_flag "$(_default_state_dir)" "$@"
+  if [[ "${#WT_FLOW_PARSE_REMAINING[@]}" -gt 0 ]]; then
+    _die "用法: wt-flow.sh list [--state-dir=<dir>]"
+  fi
+
+  local state_dir="$WT_FLOW_PARSE_STATE_DIR"
+  local state_file
+  state_file="$(_task_state_file "$state_dir")"
+  [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
+
+  local cards_file
+  cards_file="$(_resolve_cards_file)"
+
+  local task_key execution_mode current_card
+  task_key="$(jq -r '.task_key // "unknown"' "$state_file")"
+  execution_mode="$(jq -r '.execution_mode // "serial"' "$state_file")"
+  current_card="$(jq -r '.current_card // ""' "$state_file")"
+
+  echo "=== 任务队列 ==="
+  echo "task_key: ${task_key}"
+  echo "mode: ${execution_mode}"
+  echo "current: ${current_card:-N/A}"
+  echo ""
+  printf "%-8s %-12s %-18s %s\n" "CARD" "STATUS" "DEPENDS" "MARK"
+  printf "%-8s %-12s %-18s %s\n" "--------" "------------" "------------------" "----"
+
+  local card status depends marker
+  while IFS= read -r card; do
+    [[ -z "$card" ]] && continue
+    card="$(_to_upper "$card")"
+    status="$(_normalize_status "$(_state_status_value "$state_file" "$card")")"
+    depends="$(_card_depends_label "$card" "$cards_file")"
+    marker=""
+    if [[ "$card" == "$current_card" ]]; then
+      marker="<--"
+    fi
+    printf "%-8s %-12s %-18s %s\n" "$card" "$status" "$depends" "$marker"
+  done < <(jq -r '.card_order[]?' "$state_file")
+}
+
 # --- 入口 ---
 
 main() {
@@ -217,14 +732,20 @@ main() {
 
   case "$cmd" in
     create)  cmd_create "$@" ;;
+    next)    cmd_next "$@" ;;
+    verify)  cmd_verify "$@" ;;
+    list)    cmd_list "$@" ;;
     merge)   cmd_merge "$@" ;;
     cleanup) cmd_cleanup "$@" ;;
     status)  cmd_status "$@" ;;
     guard)   cmd_guard "$@" ;;
     *)
-      echo "用法: wt-flow.sh {create|merge|cleanup|status|guard}"
+      echo "用法: wt-flow.sh {create|next|verify|list|merge|cleanup|status|guard}"
       echo ""
       echo "  create <slug> [base]  从 base 创建 worktree"
+      echo "  next [--state-dir]    选择下一张可执行卡并创建 worktree"
+      echo "  verify <card-id>      执行 done_gate 验收（白名单命令前缀）"
+      echo "  list [--state-dir]    查看卡片队列与状态"
       echo "  merge [--no-cleanup]  合并回基准分支"
       echo "  cleanup               清理 worktree 和分支"
       echo "  status                查看当前会话"
@@ -232,6 +753,8 @@ main() {
       echo ""
       echo "环境变量:"
       echo "  WT_FLOW_ALLOW_AUTOCOMMIT=1  主仓 dirty 时允许 auto-commit（默认关闭）"
+      echo "  WT_FLOW_STATE_DIR         覆盖 task-runner-state 目录（默认 .omc/state）"
+      echo "  WT_FLOW_ACTIVE_TASK_FILE  覆盖 active task 文件路径"
       exit 1
       ;;
   esac
