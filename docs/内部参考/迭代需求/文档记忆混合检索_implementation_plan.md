@@ -276,7 +276,7 @@ implementation_tasks:
       - app/services/document_memory_embedding_service.py
       - app/repositories/document_memory_repo.py
       - app/models/document_memory.py
-      - alembic/versions/20260301_0018_document_memory_embedding_status.py
+      - alembic/versions/20260228_0018_document_memory_hybrid_search.py
     symbols:
       - process_pending_chunks
       - mark_chunk_embedding_ready
