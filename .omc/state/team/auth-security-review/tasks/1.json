@@ -1,9 +1,0 @@
-{
-  "id": "1",
-  "subject": "认证与Token层安全审查",
-  "description": "安全审查: 认证与Token层。审查以下文件的安全漏洞(OWASP Top 10)，不要修改任何代码，只输出审查报告。重点关注: JWT实现安全性、Token黑名单机制、密码哈希算法、认证绕过风险、会话管理。文件列表: app/core/security.py, app/api/v1/endpoints/auth.py, app/services/token_service.py, app/repositories/token_repo.py, app/models/token_blacklist.py, app/api/deps.py, app/core/config.py",
-  "status": "pending",
-  "owner": null,
-  "result": null,
-  "createdAt": "2026-02-25T02:30:32.286Z"
-}

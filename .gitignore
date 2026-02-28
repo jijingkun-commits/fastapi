@@ -13,6 +13,10 @@ Thumbs.db
 .agent/
 .claude/
 .cursor/
+.codex_plugins/
+.omc/
+.omx/
+.playwright-cli/
 .trae/
 .cline/
 .clinerules/
