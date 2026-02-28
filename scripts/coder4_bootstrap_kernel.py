@@ -48,9 +48,18 @@ STATE_BACKUP_SUFFIX = ".bak"
 
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"
 IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
+AUTO_WAKE_DISABLE_ENV = "DISABLE_AUTO_WAKE"
+OPENCLAW_GATEWAY_ENV = "OPENCLAW_GATEWAY"
+OPENCLAW_HOOKS_TOKEN_ENV = "OPENCLAW_HOOKS_TOKEN"
+
+DEFAULT_OPENCLAW_GATEWAY = "http://localhost:18789"
+DEFAULT_OPENCLAW_CONFIG = Path("~/.openclaw-dev/openclaw.json").expanduser()
+DEFAULT_AUTO_WAKE_TIMEOUT_SECONDS = 5
 
 EVENT_RUN_LOCK_ACQUIRED = "RUN_LOCK_ACQUIRED"
 EVENT_SKIP_DUPLICATE = "SKIP_DUPLICATE_EVENT"
+EVENT_AUTO_WAKE_TRIGGERED = "AUTO_WAKE_TRIGGERED"
+EVENT_AUTO_WAKE_FAILED = "AUTO_WAKE_FAILED"
 
 STATUS_ORDER = {
     "inprogress": 0,
@@ -391,18 +400,21 @@ def load_local_state(
             state = {}
     if not isinstance(state, dict):
         state = {}
-    raw_map = state.get("card_status_map")
+
+    normalized_state = dict(state)
+    raw_map = normalized_state.get("card_status_map")
     if not isinstance(raw_map, dict):
-        raw_map = state.get("card_status") if isinstance(state.get("card_status"), dict) else {}
+        raw_map = normalized_state.get("card_status") if isinstance(normalized_state.get("card_status"), dict) else {}
     card_status_map = _normalize_card_status_map(raw_map if isinstance(raw_map, dict) else {})
-    return {
-        "schema_version": str(state.get("schema_version") or "1.0.0"),
-        "task_key": str(state.get("task_key") or task_key),
-        "card_order": [str(x).strip().upper() for x in (state.get("card_order") or card_order)],
-        "card_status_map": card_status_map,
-        "last_updated": str(state.get("last_updated") or ""),
-        "created_at": str(state.get("created_at") or ""),
-    }
+
+    normalized_state["schema_version"] = str(normalized_state.get("schema_version") or "1.0.0")
+    normalized_state["task_key"] = str(normalized_state.get("task_key") or task_key)
+    normalized_state["card_order"] = [str(x).strip().upper() for x in (normalized_state.get("card_order") or card_order)]
+    normalized_state["card_status_map"] = card_status_map
+    normalized_state["card_status"] = dict(card_status_map)
+    normalized_state["last_updated"] = str(normalized_state.get("last_updated") or "")
+    normalized_state["created_at"] = str(normalized_state.get("created_at") or "")
+    return normalized_state
 
 
 def update_local_card_status(
@@ -412,9 +424,16 @@ def update_local_card_status(
     card_order: list[str],
     card_id: str,
     status: str,
+    action: str | None = None,
+    action_result: str | None = None,
+    current_card: str | None = None,
 ) -> dict[str, Any]:
     lock_path = _state_lock_path(state_path)
     backup_path = _state_backup_path(state_path)
+    normalized_card_id = str(card_id or "").strip().upper()
+    if not normalized_card_id:
+        raise ValueError("card_id is required")
+    normalized_status = normalize_status(status)
 
     with with_file_lock(lock_path):
         state = load_local_state(state_path, task_key, card_order, lock_held=True)
@@ -422,14 +441,163 @@ def update_local_card_status(
         state["task_key"] = task_key
         state["card_order"] = card_order
         status_map = dict(state.get("card_status_map") or {})
-        status_map[card_id] = status
+        status_map[normalized_card_id] = normalized_status
         state["card_status_map"] = status_map
+        state["card_status"] = dict(status_map)
+        state["current_card"] = str(current_card or normalized_card_id).strip().upper()
+        if action:
+            state["last_action"] = str(action).strip().lower()
+        if action_result:
+            state["last_action_result"] = str(action_result).strip()
         now = datetime.now(timezone.utc).isoformat()
         if not state.get("created_at"):
             state["created_at"] = now
         state["last_updated"] = now
         atomic_write_json(state_path, state, backup_path=backup_path)
         return state
+
+
+def pick_pending_auto_wake_card(local_state: dict[str, Any], card_order: list[str]) -> str | None:
+    status_map = dict(local_state.get("card_status_map") or {})
+    done_cards = [
+        str(cid).strip().upper()
+        for cid in card_order
+        if normalize_status(status_map.get(cid)) == "done"
+    ]
+    if not done_cards:
+        return None
+
+    latest_done_card = done_cards[-1]
+    last_auto_wake_card = str(local_state.get("last_auto_wake_card") or "").strip().upper()
+    if last_auto_wake_card == latest_done_card:
+        return None
+    return latest_done_card
+
+
+def mark_local_auto_wake(
+    state_path: Path,
+    *,
+    task_key: str,
+    card_order: list[str],
+    card_id: str,
+) -> dict[str, Any]:
+    lock_path = _state_lock_path(state_path)
+    backup_path = _state_backup_path(state_path)
+
+    with with_file_lock(lock_path):
+        state = load_local_state(state_path, task_key, card_order, lock_held=True)
+        now = datetime.now(timezone.utc).isoformat()
+        state["last_auto_wake_card"] = str(card_id).strip().upper()
+        state["last_auto_wake_at"] = now
+        if not state.get("created_at"):
+            state["created_at"] = now
+        state["last_updated"] = now
+        atomic_write_json(state_path, state, backup_path=backup_path)
+        return state
+
+
+def resolve_openclaw_gateway() -> str:
+    env_gateway = str(os.getenv(OPENCLAW_GATEWAY_ENV) or "").strip()
+    if env_gateway:
+        return env_gateway.rstrip("/")
+
+    if DEFAULT_OPENCLAW_CONFIG.exists():
+        try:
+            payload = load_json(DEFAULT_OPENCLAW_CONFIG)
+            port_raw = payload.get("gateway", {}).get("port")
+            port = int(port_raw)
+            if port > 0:
+                return f"http://localhost:{port}"
+        except Exception:  # noqa: BLE001
+            pass
+
+    return DEFAULT_OPENCLAW_GATEWAY
+
+
+def _build_hooks_headers() -> dict[str, str]:
+    token = str(os.getenv(OPENCLAW_HOOKS_TOKEN_ENV) or "").strip()
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
+def trigger_next_round(
+    reason: str,
+    *,
+    timeout_seconds: int = DEFAULT_AUTO_WAKE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    gateway = resolve_openclaw_gateway()
+    normalized_reason = str(reason or "").strip() or "card_done"
+    if is_disabled_by_env(AUTO_WAKE_DISABLE_ENV):
+        return {
+            "attempted": False,
+            "ok": False,
+            "disabled": True,
+            "reason": "disabled_by_env",
+            "gateway": gateway,
+        }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    headers.update(_build_hooks_headers())
+    body = json.dumps({"text": normalized_reason, "mode": "now"}, ensure_ascii=False).encode("utf-8")
+    req = request.Request(
+        f"{gateway}/hooks/wake",
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=timeout_seconds) as resp:
+            status_code = int(getattr(resp, "status", 200))
+            resp.read()
+        wake_result = {
+            "attempted": True,
+            "ok": 200 <= status_code < 300,
+            "disabled": False,
+            "status_code": status_code,
+            "reason": normalized_reason,
+            "gateway": gateway,
+        }
+        event_name = EVENT_AUTO_WAKE_TRIGGERED if wake_result["ok"] else EVENT_AUTO_WAKE_FAILED
+        emit_event(event_name, reason=normalized_reason, status_code=status_code, gateway=gateway)
+        return wake_result
+    except error.HTTPError as exc:
+        body_text = exc.read().decode("utf-8", errors="ignore")
+        emit_event(
+            EVENT_AUTO_WAKE_FAILED,
+            reason=normalized_reason,
+            status_code=exc.code,
+            gateway=gateway,
+            error=body_text[:300],
+        )
+        return {
+            "attempted": True,
+            "ok": False,
+            "disabled": False,
+            "status_code": exc.code,
+            "reason": normalized_reason,
+            "gateway": gateway,
+            "error": body_text[:300],
+        }
+    except Exception as exc:  # noqa: BLE001
+        emit_event(
+            EVENT_AUTO_WAKE_FAILED,
+            reason=normalized_reason,
+            gateway=gateway,
+            error=str(exc),
+        )
+        return {
+            "attempted": True,
+            "ok": False,
+            "disabled": False,
+            "reason": normalized_reason,
+            "gateway": gateway,
+            "error": str(exc),
+        }
 
 
 def normalize_status(raw: Any) -> str:
@@ -663,7 +831,7 @@ def build_kernel_context(
     if preflight_required in card_status_map and card_status_map[preflight_required] == "done":
         preflight_ok = True
         preflight_reason = "preflight_card_done"
-    else:
+    elif not local_mode:
         source = str(active.get("status_source_of_truth") or "").strip()
         if source:
             source_path = Path(source)
@@ -791,6 +959,9 @@ def apply_action(
                 card_order=ctx.card_order,
                 card_id=target_card_id,
                 status="todo",
+                action="seed",
+                action_result=f"CARD_SEEDED:{target_card_id}",
+                current_card=target_card_id,
             )
             return {
                 "performed": True,
@@ -827,6 +998,9 @@ def apply_action(
                 card_order=ctx.card_order,
                 card_id=target_card_id,
                 status="inprogress",
+                action="activate",
+                action_result=f"CARD_ACTIVATED:{target_card_id}",
+                current_card=target_card_id,
             )
             return {
                 "performed": True,
@@ -979,6 +1153,25 @@ def main() -> int:
                     state_path=state_path,
                 )
 
+            auto_wake = {
+                "attempted": False,
+                "ok": False,
+                "disabled": is_disabled_by_env(AUTO_WAKE_DISABLE_ENV),
+            }
+            if args.local_mode and args.apply_bootstrap:
+                local_state = load_local_state(state_path, ctx.task_key, ctx.card_order)
+                done_card = pick_pending_auto_wake_card(local_state, ctx.card_order)
+                if done_card:
+                    wake_reason = f"CARD_DONE:{done_card}"
+                    auto_wake = trigger_next_round(wake_reason)
+                    if auto_wake.get("ok"):
+                        mark_local_auto_wake(
+                            state_path,
+                            task_key=ctx.task_key,
+                            card_order=ctx.card_order,
+                            card_id=done_card,
+                        )
+
             scoped_counts = count_statuses(ctx.scoped_tasks)
             unscoped_counts = count_statuses(ctx.unscoped_tasks)
             result = {
@@ -1004,6 +1197,7 @@ def main() -> int:
                 "card_status_map": ctx.card_status_map,
                 "blocked_details": blocked_details,
                 "applied": applied,
+                "auto_wake": auto_wake,
                 "run_lock": {
                     "enabled": not run_lock_disabled,
                     "file": str(run_lock_file),
