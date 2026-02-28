@@ -17,15 +17,19 @@ Optional bootstrap apply mode can create/activate one card:
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import re
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib import error, parse, request
 
 
@@ -34,6 +38,16 @@ DEFAULT_ACTIVE_TASK = (
 )
 DEFAULT_API_BASE = "http://127.0.0.1:3001"
 DEFAULT_STATE_FILE = ".omc/state/task-runner-state.json"
+DEFAULT_RUN_LOCK_FILE = ".omc/state/coder4-run.lock"
+DEFAULT_IDEMPOTENCY_FILE = ".omc/state/coder4-idempotency.json"
+DEFAULT_IDEMPOTENCY_WINDOW_SECONDS = 120
+IDEMPOTENCY_RETENTION_MULTIPLIER = 3
+
+RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"
+IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
+
+EVENT_RUN_LOCK_ACQUIRED = "RUN_LOCK_ACQUIRED"
+EVENT_SKIP_DUPLICATE = "SKIP_DUPLICATE_EVENT"
 
 STATUS_ORDER = {
     "inprogress": 0,
@@ -66,7 +80,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vk-api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--local-mode", action="store_true", default=False)
     parser.add_argument("--state-file", default=DEFAULT_STATE_FILE)
+    parser.add_argument("--run-lock-file", default=DEFAULT_RUN_LOCK_FILE)
+    parser.add_argument("--idempotency-file", default=DEFAULT_IDEMPOTENCY_FILE)
     parser.add_argument("--apply-bootstrap", action="store_true")
+    parser.add_argument("--trigger-source", default=os.getenv("CODER4_TRIGGER_SOURCE", "wake"))
+    parser.add_argument("--idempotency-key", default="")
+    parser.add_argument("--idempotency-window-seconds", type=int, default=DEFAULT_IDEMPOTENCY_WINDOW_SECONDS)
     parser.add_argument("--output", default="")
     return parser.parse_args()
 
@@ -101,6 +120,167 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         if tmp_path.exists():
             tmp_path.unlink()
         raise
+
+
+def is_disabled_by_env(name: str) -> bool:
+    raw = str(os.getenv(name) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def normalize_trigger_source(value: str) -> str:
+    source = str(value or "").strip().lower()
+    if not source:
+        return "manual"
+    if source in {"wake", "agent", "cron", "watchdog"}:
+        return "hooks"
+    return source
+
+
+def _normalize_window_seconds(value: int) -> int:
+    if value <= 0:
+        return DEFAULT_IDEMPOTENCY_WINDOW_SECONDS
+    return value
+
+
+def build_idempotency_key(
+    *,
+    trigger_source: str,
+    task_key: str,
+    card_id: str | None,
+    action: str,
+    status: str | None,
+    explicit_key: str = "",
+) -> str:
+    explicit = str(explicit_key or "").strip()
+    if explicit:
+        return hashlib.sha256(explicit.encode("utf-8")).hexdigest()
+
+    normalized_trigger = normalize_trigger_source(trigger_source)
+    raw = "|".join(
+        [
+            normalized_trigger,
+            str(task_key or "").strip() or "-",
+            str(card_id or "").strip().upper() or "-",
+            str(action or "").strip() or "-",
+            str(status or "").strip() or "-",
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _load_idempotency_state(path: Path) -> dict[str, float]:
+    if not path.exists():
+        return {}
+    try:
+        data = load_json(path)
+    except Exception:  # noqa: BLE001
+        return {}
+
+    parsed: dict[str, float] = {}
+    for key, value in data.items():
+        idempotency_key = str(key or "").strip()
+        if not idempotency_key:
+            continue
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            continue
+        if ts > 0:
+            parsed[idempotency_key] = ts
+    return parsed
+
+
+def should_skip_duplicate(
+    *,
+    key: str,
+    now_ts: float,
+    idempotency_file: Path,
+    window_seconds: int,
+) -> tuple[bool, float | None]:
+    idempotency_file.parent.mkdir(parents=True, exist_ok=True)
+    state = _load_idempotency_state(idempotency_file)
+
+    retention_seconds = max(
+        window_seconds * IDEMPOTENCY_RETENTION_MULTIPLIER,
+        window_seconds + 1,
+    )
+    threshold = now_ts - retention_seconds
+
+    compacted = {
+        existing_key: ts for existing_key, ts in state.items() if ts >= threshold
+    }
+
+    last_ts = compacted.get(key)
+    if last_ts is not None and now_ts <= (last_ts + window_seconds):
+        return True, last_ts
+
+    compacted[key] = now_ts
+    atomic_write_json(idempotency_file, compacted)
+    return False, last_ts
+
+
+@contextmanager
+def with_run_lock(lock_file: Path) -> Iterator[bool]:
+    if is_disabled_by_env(RUN_LOCK_DISABLE_ENV):
+        yield True
+        return
+
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("w", encoding="utf-8") as lock_fd:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def emit_event(event: str, **fields: Any) -> None:
+    payload = {
+        "event": event,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    payload.update(fields)
+    print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+
+
+def write_output_file(output_path: str, payload: dict[str, Any]) -> None:
+    if not output_path:
+        return
+    write_json(Path(output_path).resolve(), payload)
+
+
+def build_skip_duplicate_result(
+    *,
+    reason: str,
+    trigger_source: str,
+    run_lock_file: Path,
+    idempotency_file: Path,
+    idempotency_window_seconds: int,
+    state_file: Path,
+    task_key: str,
+    idempotency_key: str,
+    local_mode: bool,
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "skip_duplicate_event",
+        "event": EVENT_SKIP_DUPLICATE,
+        "reason": reason,
+        "task_key": task_key,
+        "trigger_source": trigger_source,
+        "run_lock_file": str(run_lock_file),
+        "idempotency_file": str(idempotency_file),
+        "idempotency_window_seconds": idempotency_window_seconds,
+        "idempotency_key": idempotency_key,
+        "applied": {"performed": False},
+        "local_mode": local_mode,
+        "state_file": str(state_file),
+    }
 
 
 def _normalize_card_status_map(raw_map: dict[str, Any]) -> dict[str, str]:
@@ -254,14 +434,18 @@ def resolve_vk_cards_path(active_task_path: Path, active_payload: dict[str, Any]
     raise FileNotFoundError(f"vk_cards.json not found in candidates: {joined}")
 
 
-def resolve_state_file_path(active_task_path: Path, raw_state_file: str) -> Path:
-    state_path = Path(raw_state_file).expanduser()
-    if state_path.is_absolute():
-        return state_path.resolve()
+def resolve_runtime_file_path(active_task_path: Path, raw_path: str) -> Path:
+    target_path = Path(raw_path).expanduser()
+    if target_path.is_absolute():
+        return target_path.resolve()
     for ancestor in active_task_path.parents:
         if (ancestor / ".git").exists():
-            return (ancestor / state_path).resolve()
-    return (Path.cwd() / state_path).resolve()
+            return (ancestor / target_path).resolve()
+    return (Path.cwd() / target_path).resolve()
+
+
+def resolve_state_file_path(active_task_path: Path, raw_state_file: str) -> Path:
+    return resolve_runtime_file_path(active_task_path, raw_state_file)
 
 
 def pick_task_for_card(tasks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -575,68 +759,178 @@ def apply_action(
 def main() -> int:
     args = parse_args()
     active_task_path = Path(args.active_task).resolve()
-    state_path = resolve_state_file_path(active_task_path, args.state_file)
     if not active_task_path.exists():
-        print(json.dumps({"ok": False, "action": "kernel_error", "error": f"active task not found: {active_task_path}"}, ensure_ascii=False))
+        payload = {
+            "ok": False,
+            "action": "kernel_error",
+            "error": f"active task not found: {active_task_path}",
+        }
+        write_output_file(args.output, payload)
+        print(json.dumps(payload, ensure_ascii=False))
         return 1
 
+    state_path = resolve_state_file_path(active_task_path, args.state_file)
+    run_lock_file = resolve_runtime_file_path(active_task_path, args.run_lock_file)
+    idempotency_file = resolve_runtime_file_path(active_task_path, args.idempotency_file)
+    trigger_source = normalize_trigger_source(args.trigger_source)
+    explicit_idempotency_key = str(args.idempotency_key or "").strip()
+    idempotency_window_seconds = _normalize_window_seconds(args.idempotency_window_seconds)
+    run_lock_disabled = is_disabled_by_env(RUN_LOCK_DISABLE_ENV)
+    idempotency_disabled = is_disabled_by_env(IDEMPOTENCY_DISABLE_ENV)
+
     try:
-        ctx = build_kernel_context(
-            active_task_path,
-            args.vk_api_base,
-            local_mode=args.local_mode,
-            state_path=state_path,
-        )
-        action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
-        applied = {"performed": False}
-        if args.apply_bootstrap and action in {"seed", "activate"}:
-            applied = apply_action(
+        with with_run_lock(run_lock_file) as lock_acquired:
+            if not lock_acquired:
+                emit_event(
+                    EVENT_SKIP_DUPLICATE,
+                    reason="run_lock_busy",
+                    trigger_source=trigger_source,
+                    run_lock_file=str(run_lock_file),
+                )
+                result = build_skip_duplicate_result(
+                    reason="run_lock_busy",
+                    trigger_source=trigger_source,
+                    run_lock_file=run_lock_file,
+                    idempotency_file=idempotency_file,
+                    idempotency_window_seconds=idempotency_window_seconds,
+                    state_file=state_path,
+                    task_key="",
+                    idempotency_key="",
+                    local_mode=args.local_mode,
+                )
+                write_output_file(args.output, result)
+                print(json.dumps(result, ensure_ascii=False))
+                return 0
+
+            emit_event(
+                EVENT_RUN_LOCK_ACQUIRED,
+                trigger_source=trigger_source,
+                run_lock_file=str(run_lock_file),
+                lock_mode="disabled" if run_lock_disabled else "exclusive_nonblocking",
+            )
+
+            ctx = build_kernel_context(
+                active_task_path,
                 args.vk_api_base,
-                ctx,
-                action,
-                first_not_done,
-                target_task_id,
                 local_mode=args.local_mode,
                 state_path=state_path,
             )
+            action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
 
-        scoped_counts = count_statuses(ctx.scoped_tasks)
-        unscoped_counts = count_statuses(ctx.unscoped_tasks)
-        result = {
-            "ok": True,
-            "project_id": ctx.project_id,
-            "task_key": ctx.task_key,
-            "preflight_required": ctx.preflight_required,
-            "preflight_ok": ctx.preflight_ok,
-            "preflight_reason": ctx.preflight_reason,
-            "counts": {
-                "scoped": scoped_counts,
-                "unscoped": unscoped_counts,
-                "scoped_total": len(ctx.scoped_tasks),
-                "unscoped_total": len(ctx.unscoped_tasks),
-                "board_total": len(ctx.scoped_tasks) + len(ctx.unscoped_tasks),
-            },
-            "card_order": ctx.card_order,
-            "action": action,
-            "first_not_done": first_not_done,
-            "target_card_id": first_not_done,
-            "target_task_id": target_task_id,
-            "target_status": target_status,
-            "card_status_map": ctx.card_status_map,
-            "blocked_details": blocked_details,
-            "applied": applied,
-            "local_mode": args.local_mode,
-            "state_file": str(state_path),
-        }
+            idempotency_key = build_idempotency_key(
+                trigger_source=trigger_source,
+                task_key=ctx.task_key,
+                card_id=first_not_done,
+                action=action,
+                status=target_status,
+                explicit_key=explicit_idempotency_key,
+            )
+            should_check_idempotency = not idempotency_disabled and (
+                bool(explicit_idempotency_key) or trigger_source != "manual"
+            )
 
-        if args.output:
-            write_json(Path(args.output).resolve(), result)
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
+            if should_check_idempotency:
+                now_ts = time.time()
+                should_skip, previous_ts = should_skip_duplicate(
+                    key=idempotency_key,
+                    now_ts=now_ts,
+                    idempotency_file=idempotency_file,
+                    window_seconds=idempotency_window_seconds,
+                )
+                if should_skip:
+                    emit_event(
+                        EVENT_SKIP_DUPLICATE,
+                        reason="idempotency_window",
+                        trigger_source=trigger_source,
+                        idempotency_key=idempotency_key,
+                        previous_ts=previous_ts,
+                        idempotency_window_seconds=idempotency_window_seconds,
+                    )
+                    result = build_skip_duplicate_result(
+                        reason="idempotency_window",
+                        trigger_source=trigger_source,
+                        run_lock_file=run_lock_file,
+                        idempotency_file=idempotency_file,
+                        idempotency_window_seconds=idempotency_window_seconds,
+                        state_file=state_path,
+                        task_key=ctx.task_key,
+                        idempotency_key=idempotency_key,
+                        local_mode=args.local_mode,
+                    )
+                    result.update(
+                        {
+                            "project_id": ctx.project_id,
+                            "preflight_required": ctx.preflight_required,
+                            "preflight_ok": ctx.preflight_ok,
+                            "preflight_reason": ctx.preflight_reason,
+                            "target_card_id": first_not_done,
+                            "target_task_id": target_task_id,
+                            "target_status": target_status,
+                        }
+                    )
+                    write_output_file(args.output, result)
+                    print(json.dumps(result, ensure_ascii=False))
+                    return 0
+
+            applied = {"performed": False}
+            if args.apply_bootstrap and action in {"seed", "activate"}:
+                applied = apply_action(
+                    args.vk_api_base,
+                    ctx,
+                    action,
+                    first_not_done,
+                    target_task_id,
+                    local_mode=args.local_mode,
+                    state_path=state_path,
+                )
+
+            scoped_counts = count_statuses(ctx.scoped_tasks)
+            unscoped_counts = count_statuses(ctx.unscoped_tasks)
+            result = {
+                "ok": True,
+                "project_id": ctx.project_id,
+                "task_key": ctx.task_key,
+                "preflight_required": ctx.preflight_required,
+                "preflight_ok": ctx.preflight_ok,
+                "preflight_reason": ctx.preflight_reason,
+                "counts": {
+                    "scoped": scoped_counts,
+                    "unscoped": unscoped_counts,
+                    "scoped_total": len(ctx.scoped_tasks),
+                    "unscoped_total": len(ctx.unscoped_tasks),
+                    "board_total": len(ctx.scoped_tasks) + len(ctx.unscoped_tasks),
+                },
+                "card_order": ctx.card_order,
+                "action": action,
+                "first_not_done": first_not_done,
+                "target_card_id": first_not_done,
+                "target_task_id": target_task_id,
+                "target_status": target_status,
+                "card_status_map": ctx.card_status_map,
+                "blocked_details": blocked_details,
+                "applied": applied,
+                "run_lock": {
+                    "enabled": not run_lock_disabled,
+                    "file": str(run_lock_file),
+                },
+                "idempotency": {
+                    "enabled": not idempotency_disabled,
+                    "checked": should_check_idempotency,
+                    "file": str(idempotency_file),
+                    "window_seconds": idempotency_window_seconds,
+                    "key": idempotency_key,
+                },
+                "local_mode": args.local_mode,
+                "trigger_source": trigger_source,
+                "state_file": str(state_path),
+            }
+
+            write_output_file(args.output, result)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
     except Exception as exc:  # noqa: BLE001
         payload = {"ok": False, "action": "kernel_error", "error": str(exc)}
-        if args.output:
-            write_json(Path(args.output).resolve(), payload)
+        write_output_file(args.output, payload)
         print(json.dumps(payload, ensure_ascii=False))
         return 1
 
