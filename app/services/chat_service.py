@@ -7,7 +7,6 @@
 """
 import json
 import logging
-import os
 from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -16,6 +15,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_human_message
 
 from app.ai.events import stopped_event
+from app.ai.runtime.recovery_policy import (
+    is_feature_flag_enabled,
+    should_degrade_on_plugin_failure,
+)
 from app.ai.workflow import get_multi_agent_graph
 from app.core.config import (
     DOCUMENT_MEMORY_HYBRID_MIN_SCORE,
@@ -47,24 +50,12 @@ from app.services.user_preference_memory_service import (
 
 
 logger = logging.getLogger(__name__)
-_TRUE_VALUES = {"1", "true", "yes", "on"}
-PLUGIN_REGISTRY_ERROR_HINTS = (
-    "plugin registry",
-    "plugin_registry",
-    "plugin init",
-    "plugin load",
-    "插件注册",
-    "插件加载",
-)
 
 
 def _is_feature_enabled(env_name: str, fallback: bool) -> bool:
     """读取布尔开关，支持环境变量覆盖。"""
 
-    raw_value = os.getenv(env_name)
-    if raw_value is None:
-        return fallback
-    return raw_value.strip().lower() in _TRUE_VALUES
+    return is_feature_flag_enabled(env_name, fallback)
 
 
 def _is_user_preference_memory_enabled(fallback: bool) -> bool:
@@ -194,31 +185,10 @@ def _get_document_memory_hybrid_min_score(fallback: float) -> float:
         return max(0.0, float(fallback))
 
 
-def _is_runtime_recovery_enabled() -> bool:
-    """运行时恢复开关（默认开启）。"""
-
-    return _is_feature_enabled("ENABLE_RUNTIME_RECOVERY", True)
-
-
-def _is_plugin_registry_enabled() -> bool:
-    """插件注册表开关（默认关闭，后置接线）。"""
-
-    return _is_feature_enabled("ENABLE_PLUGIN_REGISTRY", False)
-
-
 def degrade_on_plugin_failure(error_text: str) -> Optional[str]:
     """识别插件链路故障并返回降级文案。"""
 
-    if not _is_runtime_recovery_enabled():
-        return None
-    if not _is_plugin_registry_enabled():
-        return None
-
-    lowered = str(error_text or "").strip().lower()
-    if not lowered:
-        return None
-
-    if any(hint in lowered for hint in PLUGIN_REGISTRY_ERROR_HINTS):
+    if should_degrade_on_plugin_failure(error_text):
         return "插件能力暂时不可用，已自动切换到核心能力继续处理。"
 
     return None
@@ -315,6 +285,116 @@ def _normalize_result_event_payload(event_data: dict[str, Any], *, node: str = "
     return payload
 
 
+def _is_sse_intent_goal_status_v2_enabled() -> bool:
+    """SSE 目标口径双字段开关（默认开启）。"""
+    return _is_feature_enabled("ENABLE_SSE_INTENT_GOAL_STATUS_V2", True)
+
+
+def _parse_non_negative_int(value: Any, default: int = 0) -> int:
+    """解析非负整数。"""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _normalize_plan_ready_event_payload(event_data: dict[str, Any], *, node: str = "") -> dict[str, Any]:
+    """标准化 plan_ready 事件，补齐初判目标计数字段。"""
+    payload = dict(event_data or {})
+    if not _is_sse_intent_goal_status_v2_enabled():
+        return payload
+
+    plan = payload.get("plan")
+    if not isinstance(plan, dict):
+        plan = {}
+        payload["plan"] = plan
+
+    goals = list(plan.get("goals") or [])
+    meta = payload.get("meta")
+    normalized_meta = dict(meta) if isinstance(meta, dict) else {}
+    goal_count_initial = _parse_non_negative_int(
+        normalized_meta.get("goal_count_initial"),
+        default=len(goals),
+    )
+
+    normalized_meta["goal_count_initial"] = goal_count_initial
+    if node and "node" not in normalized_meta:
+        normalized_meta["node"] = node
+
+    payload["meta"] = normalized_meta
+    payload["goal_count_initial"] = goal_count_initial
+    return payload
+
+
+def _normalize_coverage_check_event_payload(event_data: dict[str, Any], *, node: str = "") -> dict[str, Any]:
+    """标准化 coverage_check 事件，补齐确认目标计数字段。"""
+    payload = dict(event_data or {})
+    if not _is_sse_intent_goal_status_v2_enabled():
+        return payload
+
+    report = payload.get("report")
+    if not isinstance(report, dict):
+        report = {}
+        payload["report"] = report
+
+    missing_goals = list(report.get("missing_goals") or [])
+    meta = payload.get("meta")
+    normalized_meta = dict(meta) if isinstance(meta, dict) else {}
+
+    goal_count_initial = _parse_non_negative_int(
+        normalized_meta.get("goal_count_initial"),
+        default=_parse_non_negative_int(report.get("total_goals"), default=0),
+    )
+    goal_count_confirmed = _parse_non_negative_int(
+        normalized_meta.get("goal_count_confirmed"),
+        default=_parse_non_negative_int(report.get("answered_goals"), default=0),
+    )
+    missing_goal_count = _parse_non_negative_int(
+        normalized_meta.get("missing_goal_count"),
+        default=len(missing_goals),
+    )
+
+    normalized_meta["goal_count_initial"] = goal_count_initial
+    normalized_meta["goal_count_confirmed"] = goal_count_confirmed
+    normalized_meta["missing_goal_count"] = missing_goal_count
+    if node and "node" not in normalized_meta:
+        normalized_meta["node"] = node
+
+    payload["meta"] = normalized_meta
+    payload["goal_count_initial"] = goal_count_initial
+    payload["goal_count_confirmed"] = goal_count_confirmed
+    payload["missing_goal_count"] = missing_goal_count
+    return payload
+
+
+def _normalize_final_answer_meta(meta: Any) -> dict[str, Any]:
+    """标准化 final_answer 元信息，补齐目标计数字段。"""
+    normalized_meta = dict(meta) if isinstance(meta, dict) else {}
+    if not _is_sse_intent_goal_status_v2_enabled():
+        return normalized_meta
+
+    missing_goal_count = _parse_non_negative_int(
+        normalized_meta.get("missing_goal_count"),
+        default=_parse_non_negative_int(normalized_meta.get("missing_goals"), default=0),
+    )
+    goal_count_initial = _parse_non_negative_int(
+        normalized_meta.get("goal_count_initial"),
+        default=_parse_non_negative_int(normalized_meta.get("goal_count"), default=0),
+    )
+    goal_count_confirmed = _parse_non_negative_int(
+        normalized_meta.get("goal_count_confirmed"),
+        default=max(goal_count_initial - missing_goal_count, 0),
+    )
+
+    normalized_meta["missing_goal_count"] = missing_goal_count
+    if goal_count_initial > 0:
+        normalized_meta["goal_count_initial"] = goal_count_initial
+    if goal_count_confirmed > 0 or goal_count_initial > 0:
+        normalized_meta["goal_count_confirmed"] = goal_count_confirmed
+    return normalized_meta
+
+
 def _normalize_interrupt_event_payload(
     interrupt_value: Any,
     *,
@@ -400,6 +480,34 @@ def _build_done_payload(
         payload["meta"] = meta
 
     return payload
+
+
+def _build_control_flags(
+    *,
+    run_control_enabled: bool,
+    attachments: Optional[list],
+    current_todo_id: Optional[int],
+) -> dict[str, Any]:
+    """构建控制面标记，供下游节点识别控制上下文。"""
+    return {
+        "run_control_enabled": bool(run_control_enabled),
+        "has_attachments": bool(attachments),
+        "has_current_todo_anchor": current_todo_id is not None,
+    }
+
+
+def _build_semantic_payload(
+    *,
+    user_query: str,
+    composed_query: str,
+    human_message_id: Optional[str],
+) -> dict[str, Any]:
+    """构建语义面载荷，避免控制层直接改写语义目标。"""
+    return {
+        "user_query": str(user_query or "").strip(),
+        "composed_query": str(composed_query or "").strip(),
+        "human_message_id": human_message_id,
+    }
 
 
 def _build_stopped_payload(*, thread_id: str, run_id: str, reason: str) -> dict[str, Any]:
@@ -602,6 +710,16 @@ class ChatService:
         human_message = create_human_message(final_prompt)
         input_messages.append(human_message)
         current_human_message_id = getattr(human_message, "id", None)
+        control_flags = _build_control_flags(
+            run_control_enabled=run_control_enabled,
+            attachments=attachments,
+            current_todo_id=current_todo_id,
+        )
+        semantic_payload = _build_semantic_payload(
+            user_query=prompt,
+            composed_query=final_prompt,
+            human_message_id=current_human_message_id,
+        )
 
         if memory_context:
             logger.info(
@@ -623,6 +741,8 @@ class ChatService:
             "model_id": model_id,
             "current_todo_id": current_todo_id,
             "run_id": resolved_run_id,
+            "control_flags": control_flags,
+            "semantic_payload": semantic_payload,
         }
         
         # 用于收集完整回复
@@ -793,11 +913,12 @@ class ChatService:
                             final_answer_content = content
                             full_answer.clear()
                             full_answer.append(content)
+                        final_meta = _normalize_final_answer_meta(event_data.get("meta", {}))
                         yield self._format_sse(
                             "final_answer",
                             {
                                 "content": content,
-                                "meta": event_data.get("meta", {}),
+                                "meta": final_meta,
                                 "node": chunk.get("node", ""),
                             },
                         )
@@ -812,6 +933,20 @@ class ChatService:
                             node=chunk.get("node", ""),
                         )
                         yield self._format_sse("result", result_payload)
+
+                    elif event_type == "plan_ready":
+                        plan_payload = _normalize_plan_ready_event_payload(
+                            event_data,
+                            node=chunk.get("node", ""),
+                        )
+                        yield self._format_sse("plan_ready", plan_payload)
+
+                    elif event_type == "coverage_check":
+                        coverage_payload = _normalize_coverage_check_event_payload(
+                            event_data,
+                            node=chunk.get("node", ""),
+                        )
+                        yield self._format_sse("coverage_check", coverage_payload)
 
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
                         yield self._format_sse(event_type, event_data)
@@ -1296,11 +1431,12 @@ async def sse_resume_stream(
                         final_answer_content = content
                         full_answer.clear()
                         full_answer.append(content)
+                    final_meta = _normalize_final_answer_meta(event_data.get("meta", {}))
                     yield format_sse(
                         "final_answer",
                         {
                             "content": content,
-                            "meta": event_data.get("meta", {}),
+                            "meta": final_meta,
                             "node": chunk.get("node", ""),
                         },
                     )
@@ -1313,6 +1449,20 @@ async def sse_resume_stream(
                         node=chunk.get("node", ""),
                     )
                     yield format_sse("result", result_payload)
+
+                elif event_type == "plan_ready":
+                    plan_payload = _normalize_plan_ready_event_payload(
+                        event_data,
+                        node=chunk.get("node", ""),
+                    )
+                    yield format_sse("plan_ready", plan_payload)
+
+                elif event_type == "coverage_check":
+                    coverage_payload = _normalize_coverage_check_event_payload(
+                        event_data,
+                        node=chunk.get("node", ""),
+                    )
+                    yield format_sse("coverage_check", coverage_payload)
 
                 elif event_type in ("status", "clarification", "confirmation"):
                     yield format_sse(event_type, event_data)

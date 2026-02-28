@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-feature（自动同步源�
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-feature.md -->
-<!-- source_sha1: 8082dd3b3fd2a97f5c5926fee8b23d9410ee6cdd -->
+<!-- source_sha1: de6aee806917bbe103371ae17fd7f842eb95e81f -->
 
 # Team 命令封装（`/jjk-team-feature`）
 
@@ -37,7 +37,7 @@ description: Team 封装命令：执行 /prompts:jjk-feature（自动同步源�
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-feature.md` |
-| source_sha8 | `8082dd3b` |
+| source_sha8 | `de6aee80` |
 | actual_prompt | `/prompts:jjk-feature` |
 | recommended_role | `executor` |
 | description | 全流程开发入口（澄清->规划->实现->审查->验证）：单命令编排，禁止跳阶段 |

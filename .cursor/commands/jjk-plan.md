@@ -66,6 +66,17 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. 若未找到审批记录，`FAIL_FAST` 并输出标记 `DESIGN_APPROVAL_REQUIRED`，回退到 `/jjk-clarify`。
 4. 若上游来自 `BRAINSTORM_UNAVAILABLE_FALLBACK`，需在本轮明确人工确认后再继续，并标记 `DESIGN_APPROVAL_FALLBACK_ACK`。
 
+### 0.2) 执行意图门禁（新增，强制）
+
+目标：防止“规划指令”被误扩展为“自动实施”。
+
+规则：
+
+1. `/jjk-plan` 默认模式为 `plan-only`：只产出 WHAT + HOW 文档与机读契约，不自动触发 `/jjk-vkplan`、`/jjk-vktodo`、`/jjk-imp`。
+2. 用户若在当前轮未明确“执行/落地/开始实现”，必须停在规划输出，不进入实施链路。
+3. 若用户仅回复“好的/继续”等弱确认词，输出标记 `PLAN_EXECUTION_INTENT_REQUIRED`，并给出下一步可选命令。
+4. 仅当用户显式要求进入执行链时，才允许把 `next_step` 指向 `/jjk-vkplan` 或 `/jjk-imp`。
+
 ### 0.5) 大任务自动启用 Team（强制判定）
 
 `/jjk-team-plan` 不再作为主入口。`/jjk-plan` 在任务规模较大时自动升级 Team 规划模式。
@@ -108,6 +119,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
    - `change_type`（新增/修改/删除）
    - `acceptance_cmds`（可执行命令）
    - `rollback_point`（失败回退点）
+   - `pr_id`（归属 PR 编号）
 3. 若仅有“架构思路/阶段标题”而无上述字段，必须标记 `HOW_NOT_ACTIONABLE`，并继续细化，不得宣称“可直接实施”。
 4. 文档末尾必须给出机读结论块：
    - `implementation_ready: true|false`
@@ -333,6 +345,27 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`implementation_tasks` 段）。  
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
 
+### 2.A2 PR 映射契约（新增，必填）
+
+`<topic>_implementation_plan.md` 必须提供 `task_to_pr_mapping`（表格或 YAML），确保“任务拆分”与“PR 粒度”一致。
+
+每条映射至少包含：
+
+1. `task_id`
+2. `pr_id`（如 `PR-01`）
+3. `pr_branch`（如 `codex/<topic>-<pr_id>`）
+4. `pr_subject`（PR 标题摘要）
+5. `pr_depends_on`（前置 PR，可空数组）
+6. `acceptance_cmds`
+7. `rollback_point`
+
+硬约束：
+
+1. 每个 `task_id` 必须且仅能映射 1 个 `pr_id`。
+2. `acceptance_cmds` 不允许只写“人工验证”。
+3. 缺失映射时必须标记 `PR_MAPPING_MISSING`，并阻断 `/jjk-imp` 与 `/jjk-create-pr`。
+4. `pr_depends_on` 必须与 `cards[].depends_on` 语义一致，禁止双轨依赖口径。
+
 ### 2.B 与 `/jjk-vkplan` 的机读契约（必填）
 
 `<topic>_implementation_plan.md` 必须在末尾给出 `planning_contract` YAML，供 `/jjk-vkplan` 直接消费。
@@ -349,6 +382,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 8. `cards[].task_mode`
 9. `cards[].merge_required`
 10. `cards[].evidence_entry`
+11. `task_to_pr_mapping[]`
 
 完整样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`planning_contract` 段）。  
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
@@ -365,6 +399,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 8. `gate_contract.mode=as_cards` 时，Gate 必须以独立卡片进入 `card_order`，禁止只写文档门禁而不出卡。
 9. Gate 卡默认 `task_mode=inspection-card`、`merge_required=false`；若某 Gate 需要代码提交，必须单独写明 `merge_required=true` 与验收命令。
 10. `gate_ids` 与 `card_order` 不一致时，计划状态必须标注 `BLOCKED`，不得进入 `/jjk-vkplan`。
+11. `task_to_pr_mapping` 缺失或不完整时，计划状态必须标注 `BLOCKED`，不得进入 `/jjk-vkplan` 与 `/jjk-create-pr`。
 
 ### 2.C Gate 卡片化契约（强制，自动执行场景）
 

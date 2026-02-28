@@ -58,9 +58,13 @@
 | `jjk-plan` | 与 `brainstorming`/`writing-plans` 为互补衔接；已增加 design 审批门禁与产物桥接 | 大任务自动启用 Team；`jjk-team-plan` 已退出主入口 | 融合完成（V1） | 上游 skill 升级时，审批记录格式可能漂移 | 固化审批记录字段与模板版本号，定期体检 |
 | `jjk-pc` | 对 `systematic-debugging` 为强依赖（可用时必须遵循） | 对 `team` 为条件依赖（大范围问题自动升级） | 融合完成（V1） | 诊断产物若不含可执行修复路径，实施阶段会返工 | 固化 `fix_plan_<topic>.md` 模板与 2-3 方案强制对比 |
 | `jjk-debug` | 与 `systematic-debugging`/`test-driven-development`/`verification-before-completion` 分段互补 | 对 `team` 为条件依赖（复杂故障自动升级） | 融合完成（V1） | 修复与计划偏离时可能引入结构性返工 | 固化根因证据链 + 最小修复 + 验证证据三件套 |
-| `jjk-vkplan` | 基本不依赖 Superpowers，主要消费 `jjk-plan` 契约 | 与 OMX 自动执行链路强相关（落卡/状态真理源） | 半融合（执行侧强） | 若上游契约缺失，容易“可拆解但不可执行” | 继续强化契约硬拦截与双向覆盖校验 |
+| `jjk-vkplan` | 与 `writing-plans` 结果层互补（不复写方法，只消费契约） | 与 OMX 自动执行链路强相关（落卡/状态真理源） | 融合完成（V1） | 若映射校验不足，仍可能“能落卡但不可执行” | 固化 Gate 实体化 + 双向覆盖校验 + active_task 对齐 |
+| `jjk-vktodo` | 与 Superpowers 为弱依赖（方法层不主导，主消费 `jjk-vkplan` 契约） | 与 `team`/`vibe_kanban` 为强执行依赖（批量落卡 + 状态推进） | 融合完成（V1） | 易出现“可落卡但状态/作用域漂移”与重复建卡 | 固化 `vksync` 前置 + 幂等去重 + scope 绑定回读校验 |
+| `jjk-vksync` | 与 Superpowers 为弱依赖（方法层不主导，主负责闸门） | 与 `team` 为条件依赖（大规模 worktree 并行校验），与 git worktree 强执行耦合 | 融合完成（V1） | 易出现“闸门结果不可追溯”或“apply 冲突后继续推进” | 固化结构化回执 + 冲突即停 + vktodo 消费单一结论 |
 | `jjk-feature` | 与 `brainstorming`/`writing-plans`/`test-driven-development`/`verification-before-completion` 分段互补 | 对 `team` 为条件依赖（大任务自动升级） | 融合完成（V1） | 若阶段产物失配，可能出现链路中断 | 固化“按阶段编排 + readiness 前置 + 交付摘要” |
-| `jjk-imp` / `jjk-imp-ws` | 与 `test-driven-development`、`verification-before-completion` 互补衔接 | 对 `team` 为条件依赖（大任务自动升级） | 融合完成（V1） | 输入计划粗粒度时仍可能返工 | 强制 `task_id` 粒度执行与 `implementation_ready` 前置校验 |
+| `jjk-imp` | 与 `test-driven-development`、`verification-before-completion` 互补衔接 | 对 `team` 为条件依赖（大任务自动升级） | 融合完成（V1） | 输入计划粗粒度时仍可能返工 | 强制 `task_id` 粒度执行与 `implementation_ready` 前置校验 |
+| `jjk-imp-ws` | 与 `test-driven-development`、`verification-before-completion` 分段互补（单 WS 粒度） | 对 `team` 为条件依赖（大 WS 自动升级） | 融合完成（V1） | 易出现“跨 WS 越权”与“卡片状态/依赖未满足即开工” | 固化单 WS 契约 + 依赖硬拦截 + Gate 串行执行 |
+| `jjk-create-pr` | 与 `verification-before-completion`、`requesting-code-review` 互补（交付前校验） | 对 `team` 为条件依赖（批量 PR 自动升级） | 融合完成（V1） | 易出现“无映射 PR”或“证据不足就提 PR” | 固化 manifest 映射硬校验 + GitHub MCP 优先 + 禁止重复开放 PR |
 | `jjk-test` / `jjk-verify` / `jjk-review` | 方法可与 Superpowers 校验类技能互补，但非强依赖 | 可接 OMX 状态回填但非入口依赖 | 稳定 | 报告结构统一但与上游 feature 粒度可能脱节 | 统一引用 `feature_id` 作为验证追溯锚点 |
 
 ---
@@ -353,9 +357,13 @@ flowchart TD
 | `jjk-clarify` | `brainstorming`（可用时强依赖） | 大任务自动 Team | `BRAINSTORM_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | `docs/plans/YYYY-MM-DD-<topic>-design.md` | 已落地 |
 | `jjk-plan` | `writing-plans`（拆解方法层） | 大任务自动 Team | `DESIGN_APPROVAL_REQUIRED`、`DESIGN_APPROVAL_FALLBACK_ACK`、`TEAM_UNAVAILABLE_FALLBACK` | `<topic>_requirements.md` + `<topic>_implementation_plan.md` | 已落地 |
 | `jjk-imp` | `test-driven-development`、`verification-before-completion` | 大任务自动 Team | `TDD_UNAVAILABLE_FALLBACK`、`VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | 实施证据 + 验收命令结果 | 已落地 |
+| `jjk-imp-ws` | `test-driven-development`、`verification-before-completion`（单 WS 粒度） | 大 WS 自动 Team | `IMP_WS_PR_MAPPING_MISSING`、`IMP_WS_DEPENDENCY_NOT_READY`、`IMP_WS_ACTIVE_TASK_MISMATCH`、`IMP_WS_CARD_NOT_EXECUTABLE`、`IMP_WS_GATE_BLOCKED`、`IMP_WS_SCOPE_BROKEN`、`IMP_WS_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | WS 自检卡 + `pr_ready_manifest_ws` + Gate 回填证据 | 已落地 |
+| `jjk-create-pr` | `verification-before-completion`、`requesting-code-review`（交付前校验） | 批量 PR 自动 Team | `CREATE_PR_INPUT_INCOMPLETE`、`CREATE_PR_MAPPING_MISMATCH`、`CREATE_PR_VERIFY_MISSING`、`CREATE_PR_BRANCH_MISMATCH`、`CREATE_PR_BRANCH_NOT_PUBLISHED`、`CREATE_PR_BASELINE_NOT_READY`、`CREATE_PR_DUPLICATE_OPEN`、`GITHUB_MCP_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | PR 描述草案 + 映射校验结果 + 证据摘要 + PR 链接回填 | 已落地 |
 | `jjk-debug` | `systematic-debugging`、`test-driven-development`、`verification-before-completion` | 大任务自动 Team | `SYSTEMATIC_DEBUGGING_UNAVAILABLE_FALLBACK`、`TDD_UNAVAILABLE_FALLBACK`、`VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | `debug_report_<topic>.md` + 验证命令证据 | 已落地 |
 | `jjk-pc` | `systematic-debugging`（诊断方法层） | 大任务自动 Team | `SYSTEMATIC_DEBUGGING_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | `docs/内部参考/迭代需求/fix_plan_<topic>.md` | 已落地 |
-| `jjk-vkplan` | 无强依赖（消费主计划契约） | 与 OMX 落卡链路强耦合 | `FAIL_FAST`（缺字段/缺 gate 契约即阻断） | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 已落地 |
+| `jjk-vkplan` | `writing-plans`（上游方法输出） | 大任务自动 Team + OMX 落卡链路强耦合 | `VKPLAN_INPUT_NOT_READY`、`VKPLAN_MISSING_PROJECT_ID`、`VKPLAN_GATE_CONTRACT_BROKEN`、`VKPLAN_FEATURE_MAPPING_BROKEN`、`VKPLAN_ACTIVE_TASK_MISMATCH` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` + `_active_task.json` | 已落地 |
+| `jjk-vktodo` | 弱依赖（主消费 `jjk-vkplan` 契约，方法层不重写） | 大批量操作自动 Team + `vibe_kanban` 强依赖 | `VKTODO_BASELINE_NOT_READY`、`VKTODO_MISSING_PROJECT_ID`、`VKTODO_INPUT_INVALID`、`VKTODO_ACTIVE_TASK_MISMATCH`、`VKTODO_MCP_502_FALLBACK`、`VKTODO_SCOPE_BIND_MISMATCH`、`TEAM_UNAVAILABLE_FALLBACK` | 落卡执行回执 + 状态统计 + scope 对齐结果 | 已落地 |
+| `jjk-vksync` | 弱依赖（闸门命令，不承载方法论正文） | 大规模 worktree 自动 Team + git worktree 执行强相关 | `VKSYNC_G0_ARTIFACT_MISSING`、`VKSYNC_BASELINE_COMMIT_MISSING`、`VKSYNC_BASELINE_COMMIT_FALLBACK`、`VKSYNC_NOT_READY`、`VKSYNC_REBASE_CONFLICT`、`VKSYNC_BYPASS_ACK`、`TEAM_UNAVAILABLE_FALLBACK` | READY/NOT_READY 结构化回执 + 可选 `vksync_status.json` | 已落地 |
 
 ---
 
@@ -410,3 +418,226 @@ flowchart TD
 1. `jjk-pc`：诊断计划；
 2. `jjk-debug`：问题修复；
 3. `jjk-imp`：按计划实施。
+
+---
+
+## 19. `jjk-vkplan` 融合补全（2026-03-01）
+
+本轮把 `jjk-vkplan` 从“拆解说明文档”升级为“执行契约编译器”，确保从 `jjk-plan` 到 `jjk-vktodo` 的链路可执行且可追溯。
+
+### 19.1 已完成改造
+
+1. 分工边界明确：
+   - `writing-plans` 负责上游方法；
+   - `jjk-vkplan` 只消费主计划契约，不重写需求语义；
+   - OMX 负责并行执行与落卡协作。
+2. 输入前置硬约束：
+   - 必须存在同主题 `requirements + implementation_plan`；
+   - `implementation_ready=false` 时输出 `VKPLAN_INPUT_NOT_READY`；
+   - 自动执行器场景缺失 `project_id` 时输出 `VKPLAN_MISSING_PROJECT_ID` 并阻断。
+3. 拆解执行硬约束：
+   - 强制继承 `planning_contract` 核心字段；
+   - 禁止重命名 `card_id/feature_id` 与弱化硬依赖。
+4. 闭环校验强化：
+   - Gate 实体化失败输出 `VKPLAN_GATE_CONTRACT_BROKEN`；
+   - Feature/Card 双向覆盖失败输出 `VKPLAN_FEATURE_MAPPING_BROKEN`；
+   - `_active_task.json` 回读不一致输出 `VKPLAN_ACTIVE_TASK_MISMATCH`。
+5. 大任务自动 Team 升级：
+   - 命中阈值时自动 team 并行拆解；
+   - 不可用时输出 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 模板体系补齐：
+   - 全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_vkplan_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_vkplan_templates.md`
+
+### 19.2 结果
+
+`jjk-vkplan` 现在可稳定承担中间编译层角色：
+
+1. 上游：严格消费 `jjk-plan` 的 WHAT+HOW 契约；
+2. 中游：产出可执行 `parallel_plan/WS/vk_cards/_active_task`；
+3. 下游：为 `jjk-vktodo -> jjk-imp-ws` 提供可校验输入。
+
+---
+
+## 20. `jjk-vktodo` 融合补全（2026-03-01）
+
+本轮把 `jjk-vktodo` 从“批量建卡脚本说明”升级为“契约化落卡入口”，核心目标是：**不重写上游拆解语义，只做可观测执行与作用域对齐**。
+
+### 20.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | `jjk-vktodo` 内重复实现 `vksync` 基线判定 | 责任边界冲突 | 强制改为“调用 `/jjk-vksync` 并消费结果”，不在本命令重复实现 |
+| 冲突 | `jjk-vktodo` 可能重写 `vkplan` 卡片语义 | 语义漂移风险 | 强制只消费 `vk_cards.json`，禁止重命名/重编排上游 `card_id/feature_id` 语义 |
+| 重叠 | `vibe_kanban` 与本地后端都能建卡/改状态 | 通道重叠 | 固化“优先 MCP，502/不可用才 fallback”，并输出显式标记 |
+| 重叠 | 多 worktree 场景下 Team 与单代理都可执行 | 执行路径重叠 | 固化规模阈值，命中即自动 Team，否则单代理 |
+| 互补 | Superpowers/OMX 执行能力 + `jjk-vktodo` 业务契约 | 能力互补 | `jjk-vktodo` 保留业务门禁与机读回执，插件负责并行与执行效率 |
+
+### 20.2 已完成改造
+
+1. 新增分工段：明确 `vkplan`（契约源）/`vksync`（基线）/`team`（规模执行）/`vktodo`（落卡执行）边界。
+2. 新增跨 IDE 调用段：统一 `Cursor/CC` 与 `Codex` 调用口径，减少命令触发歧义。
+3. 新增输入前置硬约束：
+   - 缺 `project_id` -> `VKTODO_MISSING_PROJECT_ID`
+   - `vk_cards.json` 缺失或结构异常 -> `VKTODO_INPUT_INVALID`
+4. 强化基线门禁：
+   - `NOT_READY` -> `VKTODO_BASELINE_NOT_READY`
+   - 应急放行 -> `VKTODO_BASELINE_BYPASS_ACK`
+5. 增加大任务自动 Team：
+   - 命中阈值自动升级；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 强化执行与校验闭环：
+   - 幂等去重后再建卡；
+   - 结果不一致标记 `VKTODO_RESULT_MISMATCH`；
+   - scope 回读不一致标记 `VKTODO_SCOPE_BIND_MISMATCH`。
+7. 模板升级：
+   - 全局模板 `jjk_vktodo_templates.md` 扩展为“执行摘要 + 校验 + 明细表 + 失败模板”。
+
+### 20.3 结果
+
+`jjk-vktodo` 现已与 `jjk-vkplan`、`jjk-vksync` 形成稳定链路：
+
+1. 上游契约不漂移（只消费，不重写）；
+2. 执行故障可观测（marker 完整）；
+3. 大批量落卡可按规模自动升级 Team；
+4. 可直接衔接 `jjk-imp-ws`，避免“看板状态正确但执行作用域错误”。
+
+---
+
+## 21. `jjk-vksync` 融合补全（2026-03-01）
+
+本轮把 `jjk-vksync` 从“基础检查说明”升级为“基线闸门命令”，目标是确保 `jjk-vktodo` 只消费单一、可追溯的 READY/NOT_READY 结论。
+
+### 21.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | `jjk-vksync` 与 `jjk-vktodo` 都做基线判定 | 责任重叠导致口径漂移 | 明确“基线判定只在 `vksync`”，`vktodo` 仅消费结果 |
+| 冲突 | `mode=apply` 冲突后仍继续推进 | 风险扩散 | 固化 `VKSYNC_REBASE_CONFLICT` 即停策略 |
+| 重叠 | Team 与单代理都能跑 worktree 校验 | 执行路径重叠 | 以 worktree 数量/NOT_READY 数量设阈值自动 Team |
+| 重叠 | 基线提交来源多处可解析 | 真理源不一致风险 | 固化优先级：`parallel_plan` -> `main/master HEAD(fallback)` |
+| 互补 | `vkplan` 产物 + `vksync` 闸门 + `vktodo` 落卡 | 执行链路互补 | 强化三段式链路，减少“边同步边落卡”的状态漂移 |
+
+### 21.2 已完成改造
+
+1. 新增分工段：明确 `vkplan` 产物层、`vksync` 闸门层、`vktodo` 执行层边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 新增模板优先级段并补齐模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_vksync_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_vksync_templates.md`
+4. 新增输入硬约束与标记：
+   - `VKSYNC_G0_ARTIFACT_MISSING`
+   - `VKSYNC_BASELINE_COMMIT_MISSING`
+   - `VKSYNC_BASELINE_COMMIT_FALLBACK`
+5. 新增大规模自动 Team 判定：
+   - 命中阈值时自动 Team；
+   - 不可用时标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 新增闸门输出标记：
+   - `VKSYNC_READY`
+   - `VKSYNC_NOT_READY`
+   - `VKSYNC_BYPASS_ACK`
+   - `VKSYNC_REBASE_CONFLICT`
+7. 强化结构化回执契约（`g0_baseline_commit`、READY/NOT_READY 清单、`final_gate`），并建议可选落盘 `vksync_status.json`。
+
+### 21.3 结果
+
+`jjk-vksync` 已成为 vk 链路中的稳定闸门层：
+
+1. 上游消费 `jjk-vkplan` 产物，不重写语义；
+2. 中游形成可观测同步结论（可机读）；
+3. 下游为 `jjk-vktodo` 提供单一放行依据；
+4. 在多 worktree 并行场景下，降低“状态已落卡但基线未对齐”的执行风险。
+
+---
+
+## 22. `jjk-imp-ws` 融合补全（2026-03-01）
+
+本轮把 `jjk-imp-ws` 从“子任务实现说明”升级为“单 WS 契约执行入口”，目标是避免越权开发与卡片状态漂移。
+
+### 22.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | `jjk-imp-ws` 可能绕过 `vk_cards` 依赖与状态直接开工 | 会造成“代码已改但卡片前置未满足” | 强制 `hard_depends_on` + 卡片可执行状态校验，不满足即阻断 |
+| 冲突 | `jjk-imp-ws` 可能与 `jjk-imp` 职责重叠 | 容易“全量实现”和“单 WS 实现”混用 | 固化边界：`jjk-imp` 任务级，`jjk-imp-ws` 单 WS 契约级 |
+| 重叠 | Team 与单代理都可执行 WS | 执行路径重叠 | 按 WS 规模阈值自动 Team，否则单代理 |
+| 重叠 | Gate 回填可手工或脚本 | 手工易漂移 | 强制 Gate 走脚本回填，禁止手改统计 |
+| 互补 | `vkplan/vktodo` 上游契约 + `imp-ws` 落地执行 | 链路互补 | 形成“拆解 -> 落卡 -> 单 WS 实现 -> PR”闭环 |
+
+### 22.2 已完成改造
+
+1. 新增分工段：明确 `vkplan`（契约源）/`vktodo`（状态）/`imp-ws`（执行）边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 新增模板优先级与模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_imp_ws_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_imp_ws_templates.md`
+4. 新增输入硬约束与标记：
+   - `IMP_WS_PR_MAPPING_MISSING`
+   - `IMP_WS_DEPENDENCY_NOT_READY`
+   - `IMP_WS_ACTIVE_TASK_MISMATCH`
+   - `IMP_WS_CARD_NOT_EXECUTABLE`
+5. 新增大 WS 自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 强化执行闭环：
+   - TDD 优先 + 完成前验证优先；
+   - 无证据不得宣称完成（`IMP_WS_EVIDENCE_MISSING`）。
+7. Gate 规则收紧：
+   - `WS-G1 -> WS-G2` 串行硬约束；
+   - Gate 结果必须由 `scripts/backfill_gate_status.py` 回填，禁止手工改数。
+
+### 22.3 结果
+
+`jjk-imp-ws` 现已与 vk 链路形成稳定执行层：
+
+1. 上游契约可追溯（`WS -> card_id/task_id/pr_id`）；
+2. 执行边界可控（单 WS 白名单）；
+3. Gate 结果可审计（脚本化回填 + 证据命令）；
+4. 可直接衔接 `/jjk-create-pr`，减少 PR 映射不一致风险。
+
+---
+
+## 23. `jjk-create-pr` 融合补全（2026-03-01）
+
+本轮把 `jjk-create-pr` 从“PR 文案助手”升级为“交付闸门入口”，目标是避免无映射、无证据、无回滚的 PR 进入评审流。
+
+### 23.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | 仅凭当前分支直接建 PR，未消费 `pr_ready_manifest` | 任务追溯断链风险 | 强制消费 manifest，缺字段 `FAIL_FAST` |
+| 冲突 | `gh` CLI 与项目工具路由要求冲突 | 工具路径不一致 | 固化 GitHub MCP 优先，MCP 不可用则显式 fallback 并停止默认建 PR |
+| 重叠 | `verification-before-completion` 与 `jjk-create-pr` 都关注“完成证据” | 证据检查重叠 | 定位为“方法层 + 交付层”分工：前者给方法，后者给交付门禁 |
+| 重叠 | Team 与单代理都可做 PR 草稿与映射校验 | 执行路径重叠 | 按批量阈值自动 Team，单 PR 保持轻路径 |
+| 互补 | `imp/imp-ws` 产物 + `create-pr` 交付编排 | 链路互补 | 形成“实现证据 -> PR 描述 -> 评审入口”闭环 |
+
+### 23.2 已完成改造
+
+1. 新增分工段：明确 `imp/imp-ws`、校验类 skill、`create-pr` 的交付职责边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 触发口径。
+3. 新增模板优先级与模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_create_pr_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_create_pr_templates.md`
+4. 新增输入硬约束与标记：
+   - `CREATE_PR_INPUT_INCOMPLETE`
+   - `CREATE_PR_MAPPING_MISMATCH`
+   - `CREATE_PR_VERIFY_MISSING`
+   - `CREATE_PR_BRANCH_MISMATCH`
+5. 新增批量自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 强化交付门禁：
+   - 基线未对齐 -> `CREATE_PR_BASELINE_NOT_READY`
+   - 分支未发布 -> `CREATE_PR_BRANCH_NOT_PUBLISHED`
+   - 重复开放 PR -> `CREATE_PR_DUPLICATE_OPEN`
+7. 工具路由对齐：
+   - GitHub MCP 不可用时标记 `GITHUB_MCP_UNAVAILABLE_FALLBACK`，不默认使用 `gh` CLI。
+
+### 23.3 结果
+
+`jjk-create-pr` 现在可稳定承担“交付闸门”角色：
+
+1. PR 与 `task_id/card_id/pr_id` 映射可追溯；
+2. PR 描述含验收证据与回滚锚点；
+3. 批量交付可自动 Team 提效；
+4. 与 `jjk-review`、`jjk-verify` 可无缝衔接。

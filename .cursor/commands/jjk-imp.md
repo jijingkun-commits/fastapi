@@ -133,6 +133,18 @@ description: 代码实现入口（结合 TDD + 完成前校验）：按计划执
 2. 未完成/阻塞项（含原因与下一步）
 3. 风险与回滚建议
 4. 建议下一命令（`/jjk-verify` 或 `/jjk-review`）
+5. `pr_ready_manifest`（建议写入实现文档末尾）：
+   - `task_id`
+   - `pr_id`
+   - `card_id`（可空）
+   - `changed_files`
+   - `acceptance_cmds`
+   - `rollback_point`
+
+约束：
+
+1. 若 `pr_ready_manifest` 缺失，禁止直接进入 `/jjk-create-pr`。
+2. `pr_id` 必须能回查到 `implementation_plan.task_to_pr_mapping`。
 
 ---
 

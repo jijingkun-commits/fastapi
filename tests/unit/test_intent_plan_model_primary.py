@@ -82,3 +82,22 @@ def test_build_planner_intent_plan_supports_heuristic_only_mode(monkeypatch) -> 
     assert plan["source"] == "heuristic_only"
     assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))
     assert all("allowed_agents" in goal for goal in list(plan.get("goals") or []))
+
+
+def test_infer_model_intent_plan_accepts_string_goal_list() -> None:
+    """模型仅返回 goals 字符串数组时，仍应完成归一化而非报错。"""
+
+    class _FakeStructuredLLM:
+        def invoke(self, _prompt: str):
+            return {"goals": ["todo.query", "external.lookup"]}
+
+    class _FakeLLM:
+        def with_structured_output(self, _schema):
+            return _FakeStructuredLLM()
+
+    state = {"messages": [HumanMessage(content="先查待办 + 再看天气")]}
+    plan = graph._infer_model_intent_plan(state, _FakeLLM())
+
+    kinds = [str(goal.get("kind") or "") for goal in list(plan.get("goals") or [])]
+    assert kinds == ["todo.query", "external.lookup"]
+    assert plan["goals"][0]["allowed_agents"] == ["todo_expert"]

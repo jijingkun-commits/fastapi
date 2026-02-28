@@ -1,0 +1,11 @@
+{
+  "card_id": "C00",
+  "task_key": "PP-20260228-INTENT-DECOMPOSITION-DB",
+  "status": "ready",
+  "checked_at": "2026-02-28",
+  "required_done_gate": [
+    "planning_contract 与 vk_cards card_order/gate_contract 一致",
+    "Gate 卡片化完整且字段齐全",
+    "active_task 作用域三元组已绑定"
+  ]
+}

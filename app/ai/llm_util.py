@@ -5,6 +5,7 @@
 import os
 import json
 import logging
+from typing import Any
 from langchain.chat_models import init_chat_model
 
 from app.ai import config as ai_config
@@ -138,6 +139,42 @@ def get_scene_llm(
 
     resolved_model_id = _resolve_scene_model_id(scene_key=scene_key, model_id=model_id)
     return get_llm(model_id=resolved_model_id, **kwargs)
+
+
+def _resolve_llm_capabilities(
+    llm: Any,
+    *,
+    supports_tool_call_hint: Any = None,
+) -> dict[str, Any]:
+    """解析 LLM 能力标签，供 planner 策略路由使用。"""
+    supports_tool_call = False
+    hint_value = _parse_bool_flag(supports_tool_call_hint)
+    if hint_value is not None:
+        supports_tool_call = hint_value
+    else:
+        supports_tool_call = callable(getattr(llm, "bind_tools", None))
+
+    return {
+        "supports_tool_call": bool(supports_tool_call),
+        "supports_structured_output": callable(getattr(llm, "with_structured_output", None)),
+    }
+
+
+def get_llm_capabilities(llm: Any) -> dict[str, Any]:
+    """读取 LLM 能力标签（优先实例缓存，失败时运行时推断）。"""
+    if llm is None:
+        return {"supports_tool_call": False, "supports_structured_output": False}
+
+    cached = getattr(llm, "_bojx_llm_capabilities", None)
+    if isinstance(cached, dict):
+        return dict(cached)
+
+    base_llm = getattr(llm, "_llm", llm)
+    cached = getattr(base_llm, "_bojx_llm_capabilities", None)
+    if isinstance(cached, dict):
+        return dict(cached)
+
+    return _resolve_llm_capabilities(base_llm)
 
 
 def _normalize_text_content(content) -> str:
@@ -544,7 +581,19 @@ def get_llm(
             **model_kwargs,
         )
 
-    if internal:
-        return InternalLLMWrapper(llm)
+    supports_tool_call_hint = None
+    if config and isinstance(config.extra_config, dict):
+        supports_tool_call_hint = config.extra_config.get("supports_tool_call")
+    capabilities = _resolve_llm_capabilities(
+        llm,
+        supports_tool_call_hint=supports_tool_call_hint,
+    )
+    try:
+        setattr(llm, "_bojx_llm_capabilities", capabilities)
+    except Exception:
+        logger.debug("无法写入 LLM 能力标签: model=%s", model_name)
 
+    if internal:
+        wrapped = InternalLLMWrapper(llm)
+        return wrapped
     return llm

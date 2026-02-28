@@ -92,6 +92,34 @@ function normalizeStatusData(statusData: StatusEventData): StreamStatus | null {
     };
 }
 
+function normalizeClarificationQuestions(questions: string[]): string[] {
+    const normalized: string[] = [];
+    for (const question of questions) {
+        const trimmed = question.trim();
+        if (!trimmed || normalized.includes(trimmed)) {
+            continue;
+        }
+        normalized.push(trimmed);
+    }
+    return normalized;
+}
+
+function buildClarificationDisplayText(data: ClarificationEventData): string {
+    const message = typeof data.message === "string" ? data.message.trim() : "";
+    const questions = normalizeClarificationQuestions(data.questions);
+    const formattedQuestions = questions
+        .map((question, index) => `${index + 1}. ${question}`)
+        .join("\n");
+
+    if (message && formattedQuestions) {
+        return `${message}\n\n${formattedQuestions}`;
+    }
+    if (formattedQuestions) {
+        return formattedQuestions;
+    }
+    return message;
+}
+
 /**
  * SSE 流消息处理 Hook
  */
@@ -223,6 +251,44 @@ export function useSSEStream(): StreamContextValue {
                     ...existingKwargs,
                     final_source: "final_answer",
                     ...(meta ? { final_answer_meta: meta } : {}),
+                },
+            } as Message;
+            return updated;
+        });
+    }, []);
+
+    const applyClarificationToMessage = useCallback((
+        aiId: string,
+        data: ClarificationEventData,
+    ) => {
+        const questions = normalizeClarificationQuestions(data.questions);
+        const message = typeof data.message === "string" && data.message.trim().length > 0
+            ? data.message.trim()
+            : undefined;
+        const displayContent = buildClarificationDisplayText({ questions, message });
+        if (!displayContent) {
+            return;
+        }
+
+        setMessages((prev) => {
+            const updated = [...prev];
+            const idx = updated.findIndex((m) => m.id === aiId);
+            if (idx === -1) {
+                return updated;
+            }
+
+            const messageItem = updated[idx] as MessageWithAdditionalKwargs;
+            const existingKwargs = messageItem.additional_kwargs ?? {};
+            updated[idx] = {
+                ...updated[idx],
+                content: displayContent,
+                additional_kwargs: {
+                    ...existingKwargs,
+                    final_source: "clarification",
+                    clarification: {
+                        questions,
+                        ...(message ? { message } : {}),
+                    },
                 },
             } as Message;
             return updated;
@@ -425,7 +491,8 @@ export function useSSEStream(): StreamContextValue {
                     // 处理澄清问题事件
                     onClarification: (data: ClarificationEventData) => {
                         console.log(`❓ 澄清问题:`, data.questions);
-                        // 澄清问题通常由 AI 消息内容展示，这里只是日志
+                        applyClarificationToMessage(aiId, data);
+                        setCurrentStatus(null);
                     },
                     onInterrupt: (data: InterruptData) => {
                         setInterrupt(data);
@@ -476,6 +543,7 @@ export function useSSEStream(): StreamContextValue {
         appendToAiMessage,
         handleStructuredResultEvent,
         applyFinalAnswerToMessage,
+        applyClarificationToMessage,
         completeStreamLifecycle,
     ]);
 
@@ -531,6 +599,8 @@ export function useSSEStream(): StreamContextValue {
                 },
                 onClarification: (data: ClarificationEventData) => {
                     console.log(`❓ 恢复流澄清问题:`, data.questions);
+                    applyClarificationToMessage(aiId, data);
+                    setCurrentStatus(null);
                 },
                 onKbImages: (images: Record<string, string>) => {
                     console.log(`🖼️ 恢复流收到 kb_images 映射: ${Object.keys(images).length} 张图片`);
@@ -559,7 +629,7 @@ export function useSSEStream(): StreamContextValue {
             stopRef.current = null;
             currentAiIdRef.current = null;
         });
-    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, applyFinalAnswerToMessage, completeStreamLifecycle]);
+    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, applyFinalAnswerToMessage, applyClarificationToMessage, completeStreamLifecycle]);
 
     const values: StateType = { messages, ui: [] };
 

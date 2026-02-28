@@ -14,6 +14,13 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 4. 标准模式产物统一写入：`docs/plans/YYYY-MM-DD-<topic>-design.md`（轻量模式可不落盘）。
 5. 禁止在本文件复制完整 brainstorming 正文，避免双份维护漂移。
 
+## 执行意图门禁（新增，强制）
+
+1. `/jjk-clarify` 默认只做澄清与设计，不自动进入 `/jjk-plan`、`/jjk-imp`、`/jjk-feature` 的执行链。
+2. 用户若只回复“好的/继续/确认”但未明确“执行/落地/开始改”，本命令必须停留在澄清态。
+3. 仅当用户在当前轮显式表达执行动词时，才允许输出“建议下一步执行命令”。
+4. 若执行意图不明确，输出标记 `CLARIFY_EXECUTION_INTENT_REQUIRED`，并给出可选下一步（继续澄清或进入规划）。
+
 ## 跨 IDE 调用方式
 
 1. Cursor / Claude Code：`/jjk-clarify`

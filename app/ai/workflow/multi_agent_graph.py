@@ -15,7 +15,7 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
@@ -28,7 +28,7 @@ from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
 
-from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.llm_util import get_scene_llm, get_llm_capabilities, _normalize_text_content
 from app.ai.scene_registry import (
     SCENE_KEY_INTENT_CLASSIFIER,
     SCENE_KEY_MULTI_AGENT_SUPERVISOR,
@@ -50,6 +50,7 @@ from app.ai.events import (
     emit_task_finished,
     emit_coverage_check,
     emit_final_answer,
+    emit_clarification,
 )
 from app.ai.protocol import (
     AgentOutputParser,
@@ -61,7 +62,16 @@ from app.ai.protocol import (
     build_streaming_result_payload,
     build_streaming_kb_images_payload,
 )
-from app.ai.prompts.agent_prompts import SUPERVISOR_PROMPT
+from app.ai.prompts.agent_prompts import (
+    PLANNER_INTENT_PLAN_PROMPT_TEMPLATE,
+    SUPERVISOR_PROMPT,
+)
+from app.ai.runtime.recovery_policy import (
+    is_feature_flag_enabled,
+    is_plugin_registry_enabled as runtime_plugin_registry_enabled,
+    is_plugin_registry_error as runtime_plugin_registry_error,
+    is_runtime_recovery_enabled as runtime_recovery_enabled,
+)
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
@@ -221,7 +231,6 @@ SUPERVISOR_CONTEXT_MIN_TOKENS = 1024
 SUPERVISOR_TOOL_MESSAGE_CHAR_LIMIT = 2400
 SUPERVISOR_TOOL_MESSAGE_HEAD_CHARS = 1500
 SUPERVISOR_TOOL_MESSAGE_TAIL_CHARS = 600
-_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 class _IntentGoalModel(BaseModel):
@@ -239,32 +248,40 @@ class _IntentPlanModel(BaseModel):
 
     goals: list[_IntentGoalModel] = Field(default_factory=list)
 
-PLUGIN_REGISTRY_ERROR_HINTS = (
-    "plugin registry",
-    "plugin_registry",
-    "plugin init",
-    "plugin load",
-    "插件注册",
-    "插件加载",
-)
 
+class _IntentPlanToolCallModel(BaseModel):
+    """Tool Calling 输出参数结构。"""
+
+    goals: list[_IntentGoalModel] = Field(default_factory=list)
+
+
+class _PlannerModelInvokeError(RuntimeError):
+    """模型调用失败（含能力不兼容）。"""
+
+
+class _PlannerModelTimeoutError(_PlannerModelInvokeError):
+    """模型调用超时。"""
+
+
+class _PlannerModelOutputError(ValueError):
+    """模型输出不满足 intent_plan 结构约束。"""
 
 def _is_feature_flag_enabled(env_name: str, fallback: bool = False) -> bool:
     """读取布尔开关，支持环境变量覆盖。"""
-    raw_value = os.getenv(env_name)
-    if raw_value is None:
-        return fallback
-    return raw_value.strip().lower() in _TRUE_VALUES
+
+    return is_feature_flag_enabled(env_name, fallback)
 
 
 def _is_runtime_recovery_enabled() -> bool:
     """运行时恢复开关（默认开启）。"""
-    return _is_feature_flag_enabled("ENABLE_RUNTIME_RECOVERY", True)
+
+    return runtime_recovery_enabled()
 
 
 def _is_plugin_registry_enabled() -> bool:
     """插件注册表开关（默认关闭，后置接线）。"""
-    return _is_feature_flag_enabled("ENABLE_PLUGIN_REGISTRY", False)
+
+    return runtime_plugin_registry_enabled()
 
 
 def _is_delivery_orchestrator_v2_enabled() -> bool:
@@ -287,6 +304,11 @@ def _is_coverage_gate_enforced() -> bool:
     return _is_feature_flag_enabled("ENABLE_COVERAGE_GATE_ENFORCED", True)
 
 
+def _is_coverage_reconcile_enabled() -> bool:
+    """运行时证据对账开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_COVERAGE_RECONCILE", True)
+
+
 def _resolve_coverage_gate_max_retries() -> int:
     """读取 Coverage Gate 最大补齐轮次（默认 2，允许 0 表示不重试）。"""
     raw = os.getenv("COVERAGE_GATE_MAX_RETRIES")
@@ -295,10 +317,8 @@ def _resolve_coverage_gate_max_retries() -> int:
 
 def _is_plugin_registry_error(error_text: str) -> bool:
     """判断异常是否命中插件注册表故障。"""
-    lowered = str(error_text or "").strip().lower()
-    if not lowered:
-        return False
-    return any(hint in lowered for hint in PLUGIN_REGISTRY_ERROR_HINTS)
+
+    return runtime_plugin_registry_error(error_text)
 
 
 def _parse_non_negative_int(value: Any, default: int = 0) -> int:
@@ -394,6 +414,21 @@ def _slice_messages_from_latest_human(messages: Sequence[BaseMessage]) -> list[B
     if latest_human_index is None:
         return list(messages)
     return list(messages[latest_human_index:])
+
+
+def _resolve_semantic_user_query(state: MultiAgentState) -> str:
+    """优先读取语义层载荷，缺失时回退到消息切片。"""
+    semantic_payload = state.get("semantic_payload")
+    if isinstance(semantic_payload, dict):
+        candidate_keys = ("user_query", "composed_query")
+        for key in candidate_keys:
+            value = semantic_payload.get(key)
+            text = _normalize_text_content(value)
+            if text and text.strip():
+                return text.strip()
+
+    messages = _slice_messages_from_latest_human(state.get("messages", []))
+    return _extract_latest_human_content(messages)
 
 
 def _first_hint_position(text: str, hints: Sequence[str]) -> int:
@@ -509,59 +544,43 @@ def _normalize_intent_plan_allowed_agents(intent_plan: Dict[str, Any]) -> Dict[s
 
 def _build_model_intent_plan_prompt(user_text: str) -> str:
     """构建模型意图规划提示词。"""
+    return PLANNER_INTENT_PLAN_PROMPT_TEMPLATE.format(user_text=str(user_text or "").strip())
+
+
+def _build_model_intent_plan_tool_prompt(user_text: str) -> str:
+    """构建 Tool Calling 主路径提示词。"""
     return (
-        "你是对话编排器中的目标分解节点。\n"
-        "请只根据用户语义拆分本轮必须回答的目标，不要因为动作词（如“查询/看看/列出”）盲目扩增目标。\n"
-        "规则：\n"
-        "1) 仅当用户明确提到数据域（如 SQL、报表、数据库、指标）时，才输出 data.query。\n"
-        "2) 待办相关问题输出 todo.query 或 todo.create。\n"
-        "3) 天气/股价/汇率等外部信息输出 external.lookup。\n"
-        "4) 无法拆分时仅输出 general.reply。\n"
-        "5) goals 保持去重，同类目标最多 1 个。\n"
-        f"用户问题：{str(user_text or '').strip()}"
+        f"{_build_model_intent_plan_prompt(user_text)}\n"
+        "请通过工具调用返回 goals，不要输出额外文本。"
     )
 
 
-def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
-    """使用模型生成结构化 intent_plan。"""
-    messages = _slice_messages_from_latest_human(state.get("messages", []))
-    user_text = _extract_latest_human_content(messages)
-    if not user_text:
-        return {
-            "version": 1,
-            "source": "model_primary",
-            "user_query": "",
-            "goals": [
-                {
-                    "goal_id": "GOAL-01",
-                    "order": 1,
-                    "kind": "general.reply",
-                    "title": "问题回复",
-                    "must_answer": True,
-                    "confidence": 0.5,
-                    "allowed_agents": [],
-                }
-            ],
-        }
+def _coerce_model_intent_plan_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    """兼容模型返回的弱结构 goals，避免字符串数组直接触发校验失败。"""
+    normalized = dict(raw_data or {})
+    goals = normalized.get("goals")
+    if not isinstance(goals, (list, tuple)):
+        return normalized
 
-    if not hasattr(llm, "with_structured_output"):
-        raise RuntimeError("planner_llm_structured_output_unsupported")
+    coerced_goals: list[Any] = []
+    for goal in goals:
+        if isinstance(goal, dict):
+            coerced_goals.append(goal)
+            continue
+        if isinstance(goal, str):
+            normalized_kind = goal.strip()
+            if normalized_kind:
+                coerced_goals.append({"kind": normalized_kind})
+    normalized["goals"] = coerced_goals
+    return normalized
 
-    structured_llm = llm.with_structured_output(_IntentPlanModel)
-    prompt = _build_model_intent_plan_prompt(user_text)
-    raw_output = structured_llm.invoke(prompt)
-    if isinstance(raw_output, _IntentPlanModel):
-        parsed = raw_output
-    elif isinstance(raw_output, dict):
-        parsed = _IntentPlanModel(**raw_output)
-    else:
-        raw_data: Dict[str, Any] = {}
-        if hasattr(raw_output, "model_dump"):
-            raw_data = raw_output.model_dump()  # type: ignore[assignment]
-        elif hasattr(raw_output, "dict"):
-            raw_data = raw_output.dict()  # type: ignore[assignment]
-        parsed = _IntentPlanModel(**raw_data)
 
+def _build_model_primary_plan_from_parsed(
+    parsed: _IntentPlanModel,
+    *,
+    user_text: str,
+) -> Dict[str, Any]:
+    """将结构化输出归一为标准 intent_plan。"""
     normalized_goals: list[Dict[str, Any]] = []
     seen_buckets: set[str] = set()
     for item in list(parsed.goals or []):
@@ -605,18 +624,244 @@ def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]
 
     return _normalize_intent_plan_allowed_agents(
         {
-        "version": 1,
-        "source": "model_primary",
-        "user_query": user_text,
-        "goals": normalized_goals,
+            "version": 1,
+            "source": "model_primary",
+            "user_query": user_text,
+            "goals": normalized_goals,
         }
     )
 
 
+def _normalize_planner_structured_strategy(value: Any) -> str:
+    """标准化 planner 结构化策略名。"""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"legacy", "legacy_json", "legacy_json_object", "json", "json_object"}:
+        return "legacy_json_object"
+    if normalized in {"tool_call", "tool_call_primary"}:
+        return "tool_call_primary"
+    return "auto"
+
+
+def _resolve_planner_structured_strategy(llm: Any) -> Dict[str, Any]:
+    """解析 planner 结构化策略路由。"""
+    forced_strategy = _normalize_planner_structured_strategy(os.getenv("PLANNER_STRUCTURED_STRATEGY"))
+    capabilities = get_llm_capabilities(llm)
+    supports_tool_call = bool(capabilities.get("supports_tool_call", False))
+    supports_structured_output = bool(capabilities.get("supports_structured_output", False))
+    tool_call_disabled = _is_feature_flag_enabled("PLANNER_DISABLE_TOOL_CALL", False)
+
+    if tool_call_disabled:
+        selected_strategy = "legacy_json_object"
+    elif forced_strategy in {"tool_call_primary", "legacy_json_object"}:
+        selected_strategy = forced_strategy
+    elif supports_tool_call:
+        selected_strategy = "tool_call_primary"
+    else:
+        selected_strategy = "legacy_json_object"
+
+    return {
+        "strategy": selected_strategy,
+        "forced_strategy": forced_strategy,
+        "tool_call_disabled": tool_call_disabled,
+        "supports_tool_call": supports_tool_call,
+        "supports_structured_output": supports_structured_output,
+    }
+
+
+def _coerce_tool_call_args(raw_args: Any) -> Dict[str, Any]:
+    """解析 tool_call args，兼容 dict/json-string。"""
+    if isinstance(raw_args, dict):
+        return dict(raw_args)
+    if isinstance(raw_args, str):
+        normalized = raw_args.strip()
+        if not normalized:
+            return {}
+        try:
+            parsed = json.loads(normalized)
+        except json.JSONDecodeError as exc:
+            raise _PlannerModelOutputError(f"planner_tool_call_args_invalid_json:{exc}") from exc
+        if isinstance(parsed, dict):
+            return parsed
+    raise _PlannerModelOutputError("planner_tool_call_args_invalid")
+
+
+def _infer_model_intent_plan_via_tool_call(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """使用 Tool Calling 主路径生成结构化 intent_plan。"""
+    user_text = _resolve_semantic_user_query(state)
+    if not user_text:
+        return _build_model_primary_plan_from_parsed(_IntentPlanModel(goals=[]), user_text="")
+
+    if not hasattr(llm, "bind_tools"):
+        raise _PlannerModelInvokeError("planner_llm_tool_call_unsupported")
+
+    tool_bound_llm = None
+    try:
+        tool_bound_llm = llm.bind_tools([_IntentPlanToolCallModel], tool_choice="required")
+    except TypeError:
+        try:
+            tool_bound_llm = llm.bind_tools([_IntentPlanToolCallModel])
+        except Exception as exc:
+            raise _PlannerModelInvokeError(f"planner_tool_call_bind_failed:{exc}") from exc
+    except Exception as exc:
+        raise _PlannerModelInvokeError(f"planner_tool_call_bind_failed:{exc}") from exc
+
+    prompt = _build_model_intent_plan_tool_prompt(user_text)
+    try:
+        raw_output = tool_bound_llm.invoke(prompt)
+    except TimeoutError as exc:
+        raise _PlannerModelTimeoutError(f"planner_tool_call_timeout:{exc}") from exc
+    except Exception as exc:
+        raise _PlannerModelInvokeError(str(exc)) from exc
+
+    tool_calls = []
+    if isinstance(raw_output, dict):
+        tool_calls = list(raw_output.get("tool_calls") or [])
+    else:
+        tool_calls = list(getattr(raw_output, "tool_calls", []) or [])
+
+    if not tool_calls:
+        raise _PlannerModelOutputError("planner_tool_call_missing")
+
+    try:
+        raw_args = tool_calls[0].get("args")
+        parsed = _IntentPlanModel(**_coerce_model_intent_plan_data(_coerce_tool_call_args(raw_args)))
+    except (_PlannerModelOutputError, ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, _PlannerModelOutputError):
+            raise
+        raise _PlannerModelOutputError(str(exc)) from exc
+
+    return _build_model_primary_plan_from_parsed(parsed, user_text=user_text)
+
+
+def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """使用模型生成结构化 intent_plan。"""
+    user_text = _resolve_semantic_user_query(state)
+    if not user_text:
+        return _build_model_primary_plan_from_parsed(_IntentPlanModel(goals=[]), user_text="")
+
+    if not hasattr(llm, "with_structured_output"):
+        raise _PlannerModelInvokeError("planner_llm_structured_output_unsupported")
+
+    try:
+        structured_llm = llm.with_structured_output(_IntentPlanModel)
+    except Exception as exc:
+        raise _PlannerModelInvokeError(f"planner_llm_bind_failed:{exc}") from exc
+
+    prompt = _build_model_intent_plan_prompt(user_text)
+    try:
+        raw_output = structured_llm.invoke(prompt)
+    except TimeoutError as exc:
+        raise _PlannerModelTimeoutError(f"planner_llm_timeout:{exc}") from exc
+    except Exception as exc:
+        raise _PlannerModelInvokeError(str(exc)) from exc
+
+    try:
+        if isinstance(raw_output, _IntentPlanModel):
+            parsed = raw_output
+        elif isinstance(raw_output, dict):
+            parsed = _IntentPlanModel(**_coerce_model_intent_plan_data(raw_output))
+        else:
+            raw_data: Dict[str, Any] = {}
+            if hasattr(raw_output, "model_dump"):
+                raw_data = raw_output.model_dump()  # type: ignore[assignment]
+            elif hasattr(raw_output, "dict"):
+                raw_data = raw_output.dict()  # type: ignore[assignment]
+            else:
+                raise _PlannerModelOutputError("planner_output_not_serializable")
+            parsed = _IntentPlanModel(**_coerce_model_intent_plan_data(raw_data))
+    except (_PlannerModelOutputError, ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, _PlannerModelOutputError):
+            raise
+        raise _PlannerModelOutputError(str(exc)) from exc
+
+    return _build_model_primary_plan_from_parsed(parsed, user_text=user_text)
+
+
+def _infer_model_intent_plan_by_strategy(
+    state: MultiAgentState,
+    llm: Any,
+) -> Dict[str, Any]:
+    """按能力路由执行 planner 结构化主链路。"""
+    strategy_meta = _resolve_planner_structured_strategy(llm)
+    strategy = str(strategy_meta.get("strategy") or "legacy_json_object")
+
+    if strategy == "tool_call_primary":
+        try:
+            plan = _infer_model_intent_plan_via_tool_call(state, llm)
+            plan["planner_strategy"] = strategy
+            return plan
+        except Exception as tool_exc:
+            logger.warning("planner_tool_call_failed_fallback_to_json_object: %s", tool_exc)
+            plan = _infer_model_intent_plan(state, llm)
+            plan["planner_strategy"] = "legacy_json_object"
+            plan["planner_strategy_fallback"] = "tool_call_failed"
+            plan["planner_strategy_fallback_reason"] = str(tool_exc)[:160]
+            return plan
+
+    plan = _infer_model_intent_plan(state, llm)
+    plan["planner_strategy"] = "legacy_json_object"
+    return plan
+
+
+def _classify_planner_fallback(exc: Exception) -> Optional[Tuple[str, str]]:
+    """分类 planner 兜底触发原因。"""
+    if isinstance(exc, (_PlannerModelTimeoutError, TimeoutError, asyncio.TimeoutError)):
+        return ("planner_fallback.timeout", "timeout")
+    if isinstance(exc, (_PlannerModelOutputError, ValidationError, TypeError, ValueError, json.JSONDecodeError)):
+        return ("planner_fallback.invalid_output", "invalid_output")
+    if isinstance(exc, (_PlannerModelInvokeError, RuntimeError, ConnectionError, OSError)):
+        return ("planner_fallback.model_failure", "model_failure")
+    return None
+
+
+def _resolve_planner_fallback_strategy(exc: Exception) -> Tuple[bool, str, str]:
+    """决定是否进入 heuristic_fallback 及其规则标识。"""
+    gate_enabled = _is_feature_flag_enabled("ENABLE_INTENT_FALLBACK_GATE", True)
+    if not gate_enabled:
+        return True, "planner_fallback.legacy_catch_all", "legacy"
+
+    classified = _classify_planner_fallback(exc)
+    if classified is None:
+        return False, "", ""
+    return True, classified[0], classified[1]
+
+
+def _extract_planner_fallback_meta(*intent_plans: Any) -> Dict[str, Any]:
+    """从候选 intent_plan 中提取 fallback_meta（按传入顺序优先）。"""
+    for plan in intent_plans:
+        if not isinstance(plan, dict):
+            continue
+        fallback_meta = plan.get("fallback_meta")
+        if isinstance(fallback_meta, dict):
+            return dict(fallback_meta)
+    return {}
+
+
+def _build_planner_status_message(
+    intent_plan: Dict[str, Any],
+    *,
+    raw_intent_plan: Optional[Dict[str, Any]] = None,
+) -> str:
+    """构造 planner 阶段状态文案。"""
+    goal_count = len(list((intent_plan or {}).get("goals") or []))
+    status_message = f"已识别 {goal_count} 个待答目标，准备进入执行阶段。"
+
+    source = str((intent_plan or {}).get("source") or "")
+    if not source and isinstance(raw_intent_plan, dict):
+        source = str(raw_intent_plan.get("source") or "")
+
+    if source == "heuristic_fallback":
+        suffix = "（已自动切换规则兜底）"
+        return f"已识别 {goal_count} 个待答目标，准备进入执行阶段{suffix}。"
+    if source == "heuristic_only":
+        return f"已识别 {goal_count} 个待答目标，当前运行于 heuristic_only 回滚模式。"
+
+    return status_message
+
+
 def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
     """从用户输入推断初始问题合同（intent_plan）。"""
-    messages = _slice_messages_from_latest_human(state.get("messages", []))
-    user_text = _extract_latest_human_content(messages)
+    user_text = _resolve_semantic_user_query(state)
     normalized = user_text.lower()
 
     has_todo = any(hint in normalized for hint in TODO_DOMAIN_HINTS)
@@ -688,6 +933,22 @@ def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
     )
 
 
+def _normalize_intent_mode(mode: Any, default: str = "model_primary") -> str:
+    """归一化意图模式，兼容 shadow_compare 别名。"""
+    normalized = str(mode or "").strip().lower()
+    if normalized == "shadow_compare":
+        return "model_primary"
+    if normalized in {"model_primary", "heuristic_only"}:
+        return normalized
+
+    fallback = str(default or "model_primary").strip().lower()
+    if fallback == "shadow_compare":
+        return "model_primary"
+    if fallback in {"model_primary", "heuristic_only"}:
+        return fallback
+    return "model_primary"
+
+
 def _build_planner_intent_plan(
     state: MultiAgentState,
     *,
@@ -695,9 +956,7 @@ def _build_planner_intent_plan(
     mode: str = "model_primary",
 ) -> Dict[str, Any]:
     """构建 planner 节点使用的 intent_plan（模型主判定 + 规则兜底）。"""
-    normalized_mode = str(mode or "").strip().lower()
-    if normalized_mode not in {"model_primary", "heuristic_only"}:
-        normalized_mode = "model_primary"
+    normalized_mode = _normalize_intent_mode(mode, default="model_primary")
 
     heuristic_plan = _infer_initial_intent_plan(state)
     if normalized_mode == "heuristic_only":
@@ -707,12 +966,22 @@ def _build_planner_intent_plan(
                 "source": "heuristic_only",
                 "user_query": heuristic_plan.get("user_query", ""),
                 "goals": list(heuristic_plan.get("goals") or []),
+                "planner_strategy": "heuristic_only",
             }
         )
 
+    strategy_meta = _resolve_planner_structured_strategy(llm)
+    planner_strategy = str(strategy_meta.get("strategy") or "legacy_json_object")
     try:
-        return _normalize_intent_plan_allowed_agents(_infer_model_intent_plan(state, llm))
+        structured_plan = _infer_model_intent_plan_by_strategy(state, llm)
+        structured_plan.setdefault("planner_strategy", planner_strategy)
+        return _normalize_intent_plan_allowed_agents(structured_plan)
     except Exception as exc:
+        should_fallback, fallback_rule_id, fallback_trigger = _resolve_planner_fallback_strategy(exc)
+        if not should_fallback:
+            logger.exception("planner_model_error_without_fallback: %s", exc)
+            raise
+
         logger.warning("planner_model_fallback_to_heuristic: %s", exc)
         return _normalize_intent_plan_allowed_agents(
             {
@@ -723,9 +992,93 @@ def _build_planner_intent_plan(
                 "fallback_meta": {
                     "reason": f"planner_model_error:{type(exc).__name__}",
                     "detail": str(exc)[:200],
+                    "fallback_rule_id": fallback_rule_id,
+                    "trigger": fallback_trigger,
                 },
+                "planner_strategy": planner_strategy,
             }
         )
+
+
+def _extract_goal_kind_signature(intent_plan: Optional[Dict[str, Any]]) -> list[str]:
+    """提取目标类型签名（按目标顺序）。"""
+    goals = list((intent_plan or {}).get("goals") or [])
+    signatures: list[str] = []
+    for goal in goals:
+        if not isinstance(goal, dict):
+            continue
+        signatures.append(_normalize_model_goal_kind(str(goal.get("kind") or "general.reply")))
+    return signatures
+
+
+def _compute_intent_diff_rate(primary_plan: Optional[Dict[str, Any]], shadow_plan: Optional[Dict[str, Any]]) -> float:
+    """计算主判定与 shadow 对账的差异率。"""
+    primary_signatures = _extract_goal_kind_signature(primary_plan)
+    shadow_signatures = _extract_goal_kind_signature(shadow_plan)
+    total = max(len(primary_signatures), len(shadow_signatures), 1)
+
+    diff_count = 0
+    for idx in range(total):
+        primary_kind = primary_signatures[idx] if idx < len(primary_signatures) else ""
+        shadow_kind = shadow_signatures[idx] if idx < len(shadow_signatures) else ""
+        if primary_kind != shadow_kind:
+            diff_count += 1
+
+    return round(diff_count / total, 4)
+
+
+def _build_intent_shadow_metrics(
+    *,
+    state: MultiAgentState,
+    intent_plan: Dict[str, Any],
+    planner_mode: str,
+    intent_shadow_enabled: bool,
+) -> Dict[str, Any]:
+    """构建意图灰度观测指标。"""
+    normalized_mode = _normalize_intent_mode(planner_mode)
+    source = str(intent_plan.get("source") or "").strip().lower()
+
+    fallback_hit_rate = 1.0 if source == "heuristic_fallback" else 0.0
+    effective_shadow_enabled = bool(intent_shadow_enabled) and normalized_mode == "model_primary"
+
+    metrics: Dict[str, Any] = {
+        "intent_mode": normalized_mode,
+        "intent_shadow_enabled": effective_shadow_enabled,
+        "intent_diff_rate": 0.0,
+        "fallback_hit_rate": fallback_hit_rate,
+    }
+    if not effective_shadow_enabled:
+        return metrics
+
+    shadow_plan = _infer_initial_intent_plan(state)
+    metrics["intent_diff_rate"] = _compute_intent_diff_rate(intent_plan, shadow_plan)
+    metrics["intent_shadow_goal_count"] = len(shadow_plan.get("goals") or [])
+    return metrics
+
+
+def _resolve_intent_planner_settings(state: MultiAgentState) -> Dict[str, Any]:
+    """读取 planner 运行配置，支持快速回滚与 shadow 灰度。"""
+    default_mode = _normalize_intent_mode(state.get("intent_mode"), default="model_primary")
+    settings: Dict[str, Any] = {
+        "intent_mode": default_mode,
+        "intent_shadow_enabled": False,
+    }
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_intent_shadow_settings(default_mode=default_mode)
+    except Exception as exc:
+        logger.warning("intent_planner_settings_resolve_failed: %s", exc)
+        return settings
+
+    settings["intent_mode"] = _normalize_intent_mode(
+        resolved.get("intent_mode"),
+        default=default_mode,
+    )
+    settings["intent_shadow_enabled"] = bool(resolved.get("intent_shadow_enabled", False))
+    if settings["intent_mode"] == "heuristic_only":
+        settings["intent_shadow_enabled"] = False
+    return settings
 
 
 def _goal_kind_bucket(kind: str) -> str:
@@ -934,12 +1287,20 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
         if target_agent == AgentType.TODO:
             payload = dict((todo_structured or {}).get("data") or {})
-            summary = result_excerpt or (todo_structured or {}).get("message") or "待办处理完成"
+            summary = result_excerpt or (todo_structured or {}).get("message") or ""
+            if _is_coverage_reconcile_enabled():
+                status = "success" if (summary or payload) else "pending"
+                if not summary:
+                    summary = "待办结果待补齐"
+            else:
+                status = "success"
+                if not summary:
+                    summary = "待办处理完成"
             deliverables.append(
                 {
                     "kind": "todo.query",
                     "goal_id": goal_id,
-                    "status": "success",
+                    "status": status,
                     "summary": summary,
                     "task_description": task_description,
                     "payload": payload,
@@ -949,12 +1310,20 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
         if target_agent == AgentType.DATA:
             payload = dict((data_structured or {}).get("data") or {})
-            summary = result_excerpt or (data_structured or {}).get("message") or "数据处理完成"
+            summary = result_excerpt or (data_structured or {}).get("message") or ""
+            if _is_coverage_reconcile_enabled():
+                status = "success" if (summary or payload) else "pending"
+                if not summary:
+                    summary = "数据结果待补齐"
+            else:
+                status = "success"
+                if not summary:
+                    summary = "数据处理完成"
             deliverables.append(
                 {
                     "kind": "data.query",
                     "goal_id": goal_id,
-                    "status": "success",
+                    "status": status,
                     "summary": summary,
                     "task_description": task_description,
                     "payload": payload,
@@ -977,6 +1346,35 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
     return deliverables
 
 
+def _deliverable_has_runtime_evidence(deliverable: Dict[str, Any]) -> bool:
+    """判定交付物是否具备可验证的运行时证据。"""
+    summary = _normalize_tool_summary_text(deliverable.get("summary"), limit=280)
+    if summary:
+        return True
+
+    payload = deliverable.get("payload")
+    if isinstance(payload, dict):
+        return bool(payload)
+    if isinstance(payload, list):
+        return bool(payload)
+    if payload is None:
+        return False
+    return bool(str(payload).strip())
+
+
+def _can_match_deliverable_for_coverage(deliverable: Dict[str, Any]) -> bool:
+    """判定交付物是否可参与 coverage 对账。"""
+    if not _is_coverage_reconcile_enabled():
+        return True
+
+    status = str(deliverable.get("status") or "").strip().lower()
+    if status and status != "success":
+        return False
+    if status == "success":
+        return True
+    return _deliverable_has_runtime_evidence(deliverable)
+
+
 def _match_goals_with_deliverables(
     goals: Sequence[Dict[str, Any]],
     deliverables: Sequence[Dict[str, Any]],
@@ -993,6 +1391,8 @@ def _match_goals_with_deliverables(
         for idx, deliverable in enumerate(deliverables):
             if idx in used_indexes:
                 continue
+            if not _can_match_deliverable_for_coverage(deliverable):
+                continue
             deliverable_goal_id = str(deliverable.get("goal_id") or "")
             if goal_id and deliverable_goal_id and deliverable_goal_id == goal_id:
                 matched_idx = idx
@@ -1001,6 +1401,8 @@ def _match_goals_with_deliverables(
         if matched_idx is None:
             for idx, deliverable in enumerate(deliverables):
                 if idx in used_indexes:
+                    continue
+                if not _can_match_deliverable_for_coverage(deliverable):
                     continue
                 deliverable_bucket = _goal_kind_bucket(str(deliverable.get("kind") or ""))
                 if goal_bucket == deliverable_bucket:
@@ -1011,6 +1413,8 @@ def _match_goals_with_deliverables(
             for idx, deliverable in enumerate(deliverables):
                 if idx in used_indexes:
                     continue
+                if not _can_match_deliverable_for_coverage(deliverable):
+                    continue
                 if _goal_kind_bucket(str(deliverable.get("kind") or "")) != "external":
                     matched_idx = idx
                     break
@@ -1019,7 +1423,10 @@ def _match_goals_with_deliverables(
             continue
 
         used_indexes.add(matched_idx)
-        result[goal_id] = dict(deliverables[matched_idx])
+        matched_deliverable = dict(deliverables[matched_idx])
+        if goal_id and not str(matched_deliverable.get("goal_id") or "").strip():
+            matched_deliverable["goal_id"] = goal_id
+        result[goal_id] = matched_deliverable
 
     return result
 
@@ -1153,12 +1560,25 @@ def _render_coverage_blocked_message(
         ]
 
     if pending_titles:
-        return (
-            "当前还有问题未补齐："
-            f"{'、'.join(pending_titles)}。"
-            "为避免给出不完整结论，我先不结束本轮答复，请继续授权我补齐这些部分。"
-        )
-    return "当前答复仍不完整。为避免误导，我先不输出结论，请允许我继续补齐后再返回。"
+        lines = ["为了保证回答完整，我还需要补齐以下目标："]
+        lines.extend([f"- {title}" for title in pending_titles])
+        lines.append("")
+        lines.append("请确认是否继续补齐？你回复“继续”即可。")
+        return "\n".join(lines)
+
+    return "当前答复仍不完整。请确认是否继续补齐？你回复“继续”即可。"
+
+
+def _build_coverage_clarification_questions(coverage_report: Dict[str, Any]) -> list[str]:
+    """根据 coverage 缺口构造澄清问题列表。"""
+    missing_goals = list(coverage_report.get("missing_goals") or [])
+    missing_titles = [
+        str(item.get("title") or item.get("goal_id") or "未命名目标")
+        for item in missing_goals
+    ]
+    if missing_titles:
+        return [f"是否继续补齐：{'、'.join(missing_titles)}？"]
+    return ["是否继续补齐当前未完成目标？"]
 
 
 def _augment_data_handoff_payload(
@@ -3304,17 +3724,25 @@ async def create_multi_agent_graph(
         if not _is_delivery_orchestrator_v2_enabled():
             return {}
 
-        planner_mode = str(state.get("intent_mode") or "model_primary")
+        planner_settings = _resolve_intent_planner_settings(state)
+        planner_mode = _normalize_intent_mode(
+            planner_settings.get("intent_mode"),
+            default=str(state.get("intent_mode") or "model_primary"),
+        )
         raw_intent_plan = _build_planner_intent_plan(state, llm=planner_llm, mode=planner_mode)
+        planner_strategy = str(raw_intent_plan.get("planner_strategy") or "").strip() or "unknown"
+        planner_strategy_fallback = str(raw_intent_plan.get("planner_strategy_fallback") or "").strip()
+        planner_strategy_fallback_reason = str(raw_intent_plan.get("planner_strategy_fallback_reason") or "").strip()
         intent_plan, plan_valid, plan_error = validate_intent_plan_contract(raw_intent_plan)
-        source = str(intent_plan.get("source") or "unknown")
-        fallback_meta = intent_plan.get("fallback_meta") if isinstance(intent_plan.get("fallback_meta"), dict) else {}
-        fallback_reason = str(fallback_meta.get("reason") or "").strip()
-
-        status_message = f"已识别 {len(intent_plan.get('goals', []))} 个待答目标，准备进入执行阶段。"
-        if source == "heuristic_fallback":
-            suffix = f"（模型主判定失败，已切换规则兜底：{fallback_reason or 'unknown'}）"
-            status_message = f"已识别 {len(intent_plan.get('goals', []))} 个待答目标，准备进入执行阶段{suffix}。"
+        shadow_metrics = _build_intent_shadow_metrics(
+            state=state,
+            intent_plan=intent_plan,
+            planner_mode=planner_mode,
+            intent_shadow_enabled=bool(planner_settings.get("intent_shadow_enabled", False)),
+        )
+        source = str(intent_plan.get("source") or raw_intent_plan.get("source") or "unknown")
+        fallback_meta = _extract_planner_fallback_meta(raw_intent_plan, intent_plan)
+        status_message = _build_planner_status_message(intent_plan, raw_intent_plan=raw_intent_plan)
 
         writer = get_stream_writer()
         emit_status(
@@ -3325,16 +3753,30 @@ async def create_multi_agent_graph(
         if _is_sse_delivery_events_v2_enabled():
             emit_plan_ready(writer, intent_plan, node="planner")
 
-        return {
-            "intent_plan": intent_plan,
-            "coverage_retry_count": 0,
-            "coverage_gate_route": "final_composer",
-            "route_decisions": [],
-            "delivery_meta": build_contract_validation_meta(
+        delivery_meta = {
+            **build_contract_validation_meta(
                 existing_meta=state.get("delivery_meta") if isinstance(state.get("delivery_meta"), dict) else {},
                 intent_plan_valid=plan_valid,
                 intent_plan_error=plan_error,
             ),
+            "goal_count_initial": len(intent_plan.get("goals") or []),
+            "planner_structured_strategy": planner_strategy,
+            "planner_strategy_fallback": planner_strategy_fallback,
+            "planner_strategy_fallback_reason": planner_strategy_fallback_reason,
+            **shadow_metrics,
+        }
+        if source == "heuristic_fallback" and fallback_meta:
+            delivery_meta["planner_fallback_reason"] = str(fallback_meta.get("reason") or "")
+            delivery_meta["planner_fallback_rule_id"] = str(fallback_meta.get("fallback_rule_id") or "")
+            delivery_meta["planner_fallback_trigger"] = str(fallback_meta.get("trigger") or "")
+
+        return {
+            "intent_plan": intent_plan,
+            "intent_mode": planner_mode,
+            "coverage_retry_count": 0,
+            "coverage_gate_route": "final_composer",
+            "route_decisions": [],
+            "delivery_meta": delivery_meta,
         }
 
     # 9. 定义评估节点（判断专家工作是否完成）
@@ -3467,7 +3909,12 @@ async def create_multi_agent_graph(
 
         if route == "postprocess":
             blocked_answer = _render_coverage_blocked_message(intent_plan, coverage_report)
-            emit_token(writer, blocked_answer, node="coverage_gate")
+            emit_clarification(
+                writer,
+                questions=_build_coverage_clarification_questions(coverage_report),
+                message=blocked_answer,
+                node="coverage_gate",
+            )
             return {
                 "messages": [create_ai_message(blocked_answer)],
                 "intent_plan": intent_plan,
@@ -3502,7 +3949,12 @@ async def create_multi_agent_graph(
             blocked_answer = _render_coverage_blocked_message(intent_plan, coverage_report)
             writer = get_stream_writer()
             emit_status(writer, message="覆盖门禁未通过，已阻止最终结论输出。", node="final_composer")
-            emit_token(writer, blocked_answer, node="final_composer")
+            emit_clarification(
+                writer,
+                questions=_build_coverage_clarification_questions(coverage_report),
+                message=blocked_answer,
+                node="final_composer",
+            )
             return {
                 "messages": [create_ai_message(blocked_answer)],
                 "intent_plan": intent_plan,
@@ -3524,13 +3976,22 @@ async def create_multi_agent_graph(
         writer = get_stream_writer()
         emit_status(writer, message="结论已生成，正在返回最终答复。", node="final_composer")
         if _is_sse_delivery_events_v2_enabled():
+            goal_count_initial = len(intent_plan.get("goals") or [])
+            missing_goal_count = len(coverage_report.get("missing_goals") or [])
+            goal_count_confirmed = _parse_non_negative_int(
+                coverage_report.get("answered_goals"),
+                default=max(goal_count_initial - missing_goal_count, 0),
+            )
             emit_final_answer(
                 writer,
                 final_answer,
                 meta={
                     "coverage_pass": bool(coverage_report.get("pass")),
                     "missing_goals": len(coverage_report.get("missing_goals") or []),
-                    "goal_count": len(intent_plan.get("goals") or []),
+                    "goal_count": goal_count_initial,
+                    "goal_count_initial": goal_count_initial,
+                    "goal_count_confirmed": goal_count_confirmed,
+                    "missing_goal_count": missing_goal_count,
                 },
                 node="final_composer",
             )

@@ -96,8 +96,9 @@
 ## 规则维护
 - 规则唯一源：`.cursor/rules/*.mdc`
 - 命令唯一源：`.cursor/commands/*.md`
+- 指南唯一源：`AGENTS.md`（`CLAUDE.md` 由同步脚本自动镜像生成，禁止手改）
 - 生成产物（禁止手改）：`.claude/rules/*.md`、`.claude/commands/*.md`（手改会在下次同步被覆盖）
-- 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（rules 去 frontmatter 生成 `.claude/rules/*.md`，commands 直接复制到 `.claude/commands/*.md`）
+- 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（同步 `AGENTS.md -> CLAUDE.md`，rules 去 frontmatter 生成 `.claude/rules/*.md`，commands 直接复制到 `.claude/commands/*.md`）
 - 自动同步：CC 侧 PostToolUse hook 在编辑 `.cursor/rules/*.mdc` 或 `.cursor/commands/*.md` 时自动触发 sync
 - 新增规则：在 `.cursor/rules/` 创建 `.mdc` 文件，编辑保存后自动同步
 - 新增命令：在 `.cursor/commands/` 创建 `.md` 文件，编辑保存后自动同步

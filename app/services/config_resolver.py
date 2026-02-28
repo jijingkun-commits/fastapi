@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 _TRUTHY = {"1", "true", "yes", "on", "enabled"}
 _FALSY = {"0", "false", "no", "off", "disabled"}
 _POLICY_FAIL_MODES = {"compat", "allow", "deny", "minimal"}
+_INTENT_MODES = {"model_primary", "heuristic_only"}
 _EXECUTION_TASK_MODES = {
     "execute",
     "execution",
@@ -157,6 +158,34 @@ class ConfigResolver:
         }
 
     @classmethod
+    def get_intent_shadow_settings(
+        cls,
+        *,
+        default_mode: str = "model_primary",
+    ) -> dict[str, Any]:
+        """读取意图灰度配置（模式切换 + shadow 对账开关）。"""
+
+        resolved_default_mode = cls._normalize_intent_mode(default_mode)
+        mode_raw = cls._read_dynamic("INTENT_MODE", "intent_mode")
+        normalized_mode = cls._normalize_intent_mode(mode_raw, default=resolved_default_mode)
+
+        shadow_raw = cls._read_dynamic(
+            "ENABLE_INTENT_SHADOW_COMPARE",
+            "enable_intent_shadow_compare",
+        )
+        shadow_enabled = cls._to_bool(shadow_raw, False)
+        if str(mode_raw or "").strip().lower() == "shadow_compare":
+            shadow_enabled = True
+
+        if normalized_mode == "heuristic_only":
+            shadow_enabled = False
+
+        return {
+            "intent_mode": normalized_mode,
+            "intent_shadow_enabled": shadow_enabled,
+        }
+
+    @classmethod
     def _read_raw(cls, spec: ConfigSpec) -> Any:
         """按来源读取原始配置值。"""
 
@@ -279,3 +308,37 @@ class ConfigResolver:
             merged[key] = value
 
         return merged
+
+    @classmethod
+    def _read_dynamic(cls, *keys: str) -> Any:
+        """按 DB 优先、环境变量兜底读取动态配置。"""
+
+        normalized_keys = [str(key or "").strip() for key in keys if str(key or "").strip()]
+        for key in normalized_keys:
+            value = SystemConfigService.get(key, None)
+            if value not in (None, ""):
+                return value
+
+        for key in normalized_keys:
+            value = os.getenv(key)
+            if value not in (None, ""):
+                return value
+
+        return None
+
+    @classmethod
+    def _normalize_intent_mode(cls, value: Any, *, default: str = "model_primary") -> str:
+        """归一 intent_mode，兼容 shadow_compare 别名。"""
+
+        normalized = str(value or "").strip().lower()
+        if normalized == "shadow_compare":
+            return "model_primary"
+        if normalized in _INTENT_MODES:
+            return normalized
+
+        fallback = str(default or "model_primary").strip().lower()
+        if fallback == "shadow_compare":
+            return "model_primary"
+        if fallback in _INTENT_MODES:
+            return fallback
+        return "model_primary"

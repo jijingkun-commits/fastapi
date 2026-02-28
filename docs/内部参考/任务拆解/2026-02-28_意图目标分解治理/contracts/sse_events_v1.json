@@ -1,0 +1,27 @@
+{
+  "version": "v1",
+  "frozen_events": [
+    "done",
+    "result",
+    "interrupt",
+    "stopped"
+  ],
+  "required_fields": {
+    "done": [
+      "thread_id",
+      "message_id"
+    ],
+    "result": [
+      "thread_id",
+      "message_id"
+    ],
+    "interrupt": [
+      "thread_id"
+    ],
+    "stopped": [
+      "thread_id",
+      "message_id"
+    ]
+  },
+  "compatibility": "additive_only"
+}

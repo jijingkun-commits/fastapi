@@ -894,6 +894,7 @@ if full_answer:
 2. 插件故障关键词匹配（`plugin registry` / `plugin init` / `插件注册` 等）只维护一份。
 3. `ChatService` 与 `multi_agent_graph` 只消费策略函数，不再各自维护关键词集合与判定分支。
 4. 业务文案允许在调用方差异化（例如 supervisor 降级文案与 service 侧文案不同），但触发条件必须一致。
+5. 落地接线：`app/services/chat_service.py` 与 `app/ai/workflow/multi_agent_graph.py` 已统一改为调用 `recovery_policy`。
 
 > 目标：减少“改一处漏一处”的分叉，确保 normal/resume/fallback 三条链路行为可预测、可回归。
  

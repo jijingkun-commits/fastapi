@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-create-pr（自动同步源
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-create-pr.md -->
-<!-- source_sha1: c37947236ee049c147e705ca60f83a68367406f8 -->
+<!-- source_sha1: fb1d1042884fc4dda995d186202ffa621465a95a -->
 
 # Team 命令封装（`/jjk-team-create-pr`）
 
@@ -37,10 +37,10 @@ description: Team 封装命令：执行 /prompts:jjk-create-pr（自动同步源
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-create-pr.md` |
-| source_sha8 | `c3794723` |
+| source_sha8 | `fb1d1042` |
 | actual_prompt | `/prompts:jjk-create-pr` |
 | recommended_role | `git-master` |
-| description | 🚀 创建 Pull Request：自动生成 PR 描述、检查清单和标签 |
+| description | PR 交付入口（消费 pr_ready_manifest）：校验任务映射与验收证据后创建/更新 Pull Request |
 
 ## 同步机制
 

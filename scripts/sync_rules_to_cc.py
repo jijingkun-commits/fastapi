@@ -1,6 +1,7 @@
 """Cursor 配置同步脚本：同步到 Claude Code 与 Codex。
 
-同步三类文件：
+同步四类文件：
+0. Guide: AGENTS.md -> CLAUDE.md（自动镜像，禁止手改 CLAUDE.md）
 1. Rules: .cursor/rules/*.mdc -> .claude/rules/*.md（去 frontmatter，下划线转连字符）
 2. Commands: .cursor/commands/*.md -> .claude/commands/*.md（直接复制，替代 symlink）
 3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（由 ENABLE_PROMPT_REGISTRY_V2 控制 symlink/copy）
@@ -34,6 +35,9 @@ CURSOR_RULES_DIR = ROOT / ".cursor" / "rules"
 CLAUDE_RULES_DIR = ROOT / ".claude" / "rules"
 CURSOR_COMMANDS_DIR = ROOT / ".cursor" / "commands"
 CLAUDE_COMMANDS_DIR = ROOT / ".claude" / "commands"
+AGENTS_GUIDE_FILE = ROOT / "AGENTS.md"
+CLAUDE_GUIDE_FILE = ROOT / "CLAUDE.md"
+CLAUDE_GUIDE_MARKER = "<!-- AUTO-GENERATED FROM AGENTS.md via scripts/sync_rules_to_cc.py. DO NOT EDIT. -->"
 DEFAULT_CODEX_PROMPTS_DIR = Path.home() / ".codex" / "prompts"
 CODEX_MANIFEST_FILENAME = ".cursor_commands_manifest.json"
 TEAM_BRIDGE_PREFIX = "jjk-team-"
@@ -60,6 +64,42 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _render_claude_guide_from_agents(agents_content: str) -> str:
+    """将 AGENTS 内容渲染为 CLAUDE 镜像内容。"""
+
+    lines = agents_content.splitlines()
+    if lines:
+        lines[0] = lines[0].replace("（Codex 版）", "（Claude 镜像）")
+
+    for idx, line in enumerate(lines):
+        if line.startswith("本文件是 Codex 在 "):
+            lines[idx] = "本文件由 `AGENTS.md` 自动镜像生成，供 Claude Code 使用。"
+            break
+
+    body = "\n".join(lines).rstrip() + "\n"
+    return f"{CLAUDE_GUIDE_MARKER}\n\n{body}"
+
+
+def sync_claude_guide() -> bool:
+    """同步 AGENTS 到 CLAUDE，返回是否发生更新。"""
+
+    if not AGENTS_GUIDE_FILE.exists():
+        print(f"警告: 未找到 AGENTS 源文件（{AGENTS_GUIDE_FILE}），跳过 CLAUDE 镜像同步")
+        return False
+
+    agents_content = AGENTS_GUIDE_FILE.read_text(encoding="utf-8")
+    rendered = _render_claude_guide_from_agents(agents_content)
+    current = ""
+    if CLAUDE_GUIDE_FILE.exists():
+        current = CLAUDE_GUIDE_FILE.read_text(encoding="utf-8")
+
+    if current == rendered:
+        return False
+
+    CLAUDE_GUIDE_FILE.write_text(rendered, encoding="utf-8")
+    return True
 
 
 def mdc_to_md_name(mdc_name: str) -> str:
@@ -440,6 +480,12 @@ def main() -> None:
     args = parser.parse_args()
 
     exclude = {s.strip() for s in args.exclude.split(",") if s.strip()}
+
+    guide_changed = sync_claude_guide()
+    if guide_changed:
+        print(f"已同步 CLAUDE 指南镜像: {CLAUDE_GUIDE_FILE}")
+    else:
+        print(f"CLAUDE 指南镜像已是最新: {CLAUDE_GUIDE_FILE}")
 
     if args.only != "commands":
         rules = sync_rules(exclude=exclude)

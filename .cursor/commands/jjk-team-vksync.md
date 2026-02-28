@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-vksync（自动同步源命
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-vksync.md -->
-<!-- source_sha1: 85ca33d14caabc2f59ff585079b3c2d583247aa9 -->
+<!-- source_sha1: f2224afa27bf9d8b0c7f84675e959ab11144b802 -->
 
 # Team 命令封装（`/jjk-team-vksync`）
 
@@ -37,10 +37,10 @@ description: Team 封装命令：执行 /prompts:jjk-vksync（自动同步源命
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-vksync.md` |
-| source_sha8 | `85ca33d1` |
+| source_sha8 | `f2224afa` |
 | actual_prompt | `/prompts:jjk-vksync` |
 | recommended_role | `planner` |
-| description | VK 基线同步：在 /jjk-vktodo 前校验并同步 G0（WS-00）到多 worktree |
+| description | VK 基线闸门入口（消费 /jjk-vkplan 产物）：多 worktree READY 校验与可控同步（check/apply） |
 
 ## 同步机制
 

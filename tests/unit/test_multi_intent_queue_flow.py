@@ -2,10 +2,14 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from app.ai.contracts.delivery_contract_validators import validate_coverage_report_contract
 from app.ai.state import AgentType
 from app.ai.workflow.multi_agent_graph import (
+    _build_coverage_clarification_questions,
     _build_multi_intent_summary_content,
+    _compute_coverage_report,
     _evaluate_handoff_progress,
+    _render_coverage_blocked_message,
     _resolve_coverage_gate_route,
 )
 
@@ -263,3 +267,60 @@ def test_resolve_coverage_gate_route_goes_final_when_passed() -> None:
 
     assert route["route"] == "final_composer"
     assert route["coverage_retry_count"] == 0
+
+
+def test_compute_coverage_report_should_fill_goal_id_for_direct_deliverable() -> None:
+    """direct tool 交付物未显式携带 goal_id 时，coverage 输出仍应满足合同。"""
+    intent_plan = {
+        "goals": [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+        ]
+    }
+    deliverables = [
+        {
+            "kind": "external.lookup",
+            "status": "success",
+            "summary": "嘉兴今天多云，18-24℃",
+            "payload": {"findings": [{"label": "天气", "summary": "多云"}]},
+        },
+        {
+            "goal_id": "GOAL-01",
+            "kind": "todo.query",
+            "status": "success",
+            "summary": "查到 1 条待办",
+            "payload": {"todos": [{"title": "提交周报"}]},
+        },
+    ]
+
+    report = _compute_coverage_report(intent_plan, deliverables)
+    normalized, valid, error = validate_coverage_report_contract(report)
+
+    assert report["pass"] is True
+    assert valid is True
+    assert error == ""
+    assert normalized["goal_results"]["GOAL-02"]["goal_id"] == "GOAL-02"
+
+
+def test_render_coverage_blocked_message_should_use_single_question_style() -> None:
+    """coverage 门禁阻断文案应输出明确补齐目标与确认提问。"""
+    intent_plan = {
+        "goals": [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+        ]
+    }
+    coverage_report = {
+        "pass": False,
+        "missing_goals": [
+            {"goal_id": "GOAL-02", "title": "外部信息", "reason": "missing_deliverable"},
+        ],
+    }
+
+    message = _render_coverage_blocked_message(intent_plan, coverage_report)
+    questions = _build_coverage_clarification_questions(coverage_report)
+
+    assert "为了保证回答完整" in message
+    assert "- 外部信息" in message
+    assert "请确认是否继续补齐" in message
+    assert questions == ["是否继续补齐：外部信息？"]

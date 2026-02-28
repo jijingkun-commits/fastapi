@@ -8,6 +8,12 @@
 
 ---
 
+## 方案草案
+
+* [站内通知中心设计（2026-03-01）](plans/2026-03-01-in-app-notification-center-design.md)
+
+---
+
 ## 产品文档
 
 > 功能需求与产品说明（单一真理来源）
@@ -153,13 +159,17 @@
 * [模板索引（迭代需求）](内部参考/迭代需求/_templates/README.md)
 * [模板集（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.md)
 * [模板集覆盖（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.override.md)
+* [模板集（jjk-create-pr）](内部参考/迭代需求/_templates/jjk_create_pr_templates.md)
 * [模板集（jjk-debug）](内部参考/迭代需求/_templates/jjk_debug_templates.md)
 * [模板集（jjk-feature）](内部参考/迭代需求/_templates/jjk_feature_templates.md)
 * [模板集（jjk-imp）](内部参考/迭代需求/_templates/jjk_imp_templates.md)
+* [模板集（jjk-imp-ws）](内部参考/迭代需求/_templates/jjk_imp_ws_templates.md)
 * [模板集（jjk-pc）](内部参考/迭代需求/_templates/jjk_pc_templates.md)
 * [模板集（jjk-plan）](内部参考/迭代需求/_templates/jjk_plan_templates.md)
 * [模板集（jjk-verify）](内部参考/迭代需求/_templates/jjk_verify_templates.md)
+* [模板集（jjk-vkplan）](内部参考/迭代需求/_templates/jjk_vkplan_templates.md)
 * [模板集（jjk-vktodo）](内部参考/迭代需求/_templates/jjk_vktodo_templates.md)
+* [模板集（jjk-vksync）](内部参考/迭代需求/_templates/jjk_vksync_templates.md)
 * [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
 * [需求基线（文档化永久记忆）](内部参考/迭代需求/文档化永久记忆_requirements.md)
 * [实施方案（文档化永久记忆，两表）](内部参考/迭代需求/文档化永久记忆_implementation_plan.md)
@@ -184,8 +194,10 @@
 * [依赖分析报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban依赖分析报告.md)
 * [方案评审报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban方案评审报告.md)
 * [融合参考报告（用户资产 + Superpowers + OMX，2026-02-28）](内部参考/迭代需求/用户资产_superpowers_omx融合参考报告_20260228.md)
+* [PR拆单执行稿（P0屎山治理：SSE分发/recovery_policy/SkillService一期，2026-02-28）](内部参考/迭代需求/P0屎山治理_SSE分发_recovery_policy_SkillService一期_PR拆单_20260228.md)
 * [需求基线（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_requirements.md)
 * [实施方案（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md)
+* [完成报告（自动化大型任务开发，主机方案，2026-03-01）](内部参考/迭代需求/自动化大型任务开发_主机方案_completion_report_20260301.md)
 * [设计方案（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发设计方案.md)
 * [全量打钩板清单（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
@@ -223,6 +235,10 @@
 #### 当前并行拆解（2026-02-28 自动化大型任务开发_主机方案）
 
 * [并行总计划](内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md)
+
+#### 当前并行拆解（2026-02-28 意图目标分解治理）
+
+* [并行总计划](内部参考/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md)
 
 ---
 

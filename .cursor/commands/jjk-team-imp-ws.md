@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-imp-ws（自动同步源命
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-imp-ws.md -->
-<!-- source_sha1: 879d49c4eb0fc21593a5dfe8fd7bce9e67541a47 -->
+<!-- source_sha1: 3aa8828de7a72671eb8fbc3bfed2ce31d1be6093 -->
 
 # Team 命令封装（`/jjk-team-imp-ws`）
 
@@ -37,10 +37,10 @@ description: Team 封装命令：执行 /prompts:jjk-imp-ws（自动同步源命
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-imp-ws.md` |
-| source_sha8 | `879d49c4` |
+| source_sha8 | `3aa8828d` |
 | actual_prompt | `/prompts:jjk-imp-ws` |
 | recommended_role | `executor` |
-| description | 子任务实现：按单个 WS 文档执行实现与自检 |
+| description | WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包实现、验证与回填，支持大 WS 自动 Team |
 
 ## 同步机制
 

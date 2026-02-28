@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-vkplan（自动同步源命
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-vkplan.md -->
-<!-- source_sha1: 28707a759908979d8ed33e09b6f161476b351e6e -->
+<!-- source_sha1: c113eeb360a7c2355a052f6e2dbdf0d022877a07 -->
 
 # Team 命令封装（`/jjk-team-vkplan`）
 
@@ -37,10 +37,10 @@ description: Team 封装命令：执行 /prompts:jjk-vkplan（自动同步源命
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-vkplan.md` |
-| source_sha8 | `28707a75` |
+| source_sha8 | `c113eeb3` |
 | actual_prompt | `/prompts:jjk-vkplan` |
 | recommended_role | `planner` |
-| description | 并行拆解入口（前提：已完成 /jjk-plan，并继承同主题命名） |
+| description | 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解与 vk_cards 执行契约 |
 
 ## 同步机制
 

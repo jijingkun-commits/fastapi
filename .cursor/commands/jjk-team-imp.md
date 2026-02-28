@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-imp（自动同步源命令
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-imp.md -->
-<!-- source_sha1: 64625208a88babdae0adeaa31822cef2b4a23629 -->
+<!-- source_sha1: 2b88fdc624957ead48299e89927285b70c4059a4 -->
 
 # Team 命令封装（`/jjk-team-imp`）
 
@@ -37,7 +37,7 @@ description: Team 封装命令：执行 /prompts:jjk-imp（自动同步源命令
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-imp.md` |
-| source_sha8 | `64625208` |
+| source_sha8 | `2b88fdc6` |
 | actual_prompt | `/prompts:jjk-imp` |
 | recommended_role | `executor` |
 | description | 代码实现入口（结合 TDD + 完成前校验）：按计划执行代码改动与文档回填 |

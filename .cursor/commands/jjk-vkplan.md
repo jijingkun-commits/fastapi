@@ -1,253 +1,181 @@
 ---
-description: 并行拆解入口（前提：已完成 /jjk-plan，并继承同主题命名）
+description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解与 vk_cards 执行契约
 ---
 
 > 参考规则: @dual-database
 
 # VKPlan 工作流 (Split to Executable Cards)
 
-用于在 `/jjk-plan` 完成后执行任务拆解，产出可直接供 `/jjk-vktodo` 落卡与自动执行器消费的结果。
+`/jjk-vkplan` 是 `jjk-*` 体系里的拆解入口，负责把 `jjk-plan` 的主计划转成“可落卡、可执行、可追溯”的并行产物。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
-## 定位
+## 与 Superpowers / OMX 的分工（强制）
 
-- 前置要求：必须先完成 `/jjk-plan`
-- 核心目标：完成“可执行拆解 + G0 冻结”，生成 `vk_cards.json` 供 `/jjk-vktodo` 直接使用
-- 关键要求：机读信息不能丢失（机制、代码锚点、验证门禁、回滚锚点都必须落到卡片字段）
+1. `writing-plans`：负责计划方法论（上游）。
+2. `team`（OMX）：负责大规模拆解并行执行与证据汇总。
+3. `/jjk-vkplan`：负责契约继承、卡片映射、Gate 实体化、真理源写入。
 
----
+约束：
+
+1. 禁止在 `/jjk-vkplan` 复制 `writing-plans` 正文。
+2. `jjk-vkplan` 只消费 `jjk-plan` 主产物，不自行重写需求语义。
+3. 插件可用时优先调用；不可用时必须显式 fallback。
+
+## 跨 IDE 调用方式
+
+1. Cursor / Claude Code：`/jjk-vkplan`
+2. Codex：`/prompts:jjk-vkplan`
+
+> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
+
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-vkplan` 模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_vkplan_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_vkplan_templates.md`
+
+若全局模板缺失，输出 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 
 ## 何时使用
 
 | 场景 | 推荐命令 |
-|------|----------|
-| 已完成 `/jjk-plan`，准备并行拆解 | `/jjk-vkplan` ✅ |
-| 已完成 `/jjk-plan hydrate`，需要把历史沉淀转成可执行卡 | `/jjk-vkplan` ✅ |
-| 尚未完成需求与技术方案 | 先 `/jjk-plan` |
-| 已有完整拆解产物，仅需重落卡 | `/jjk-vktodo` |
+|---|---|
+| 已完成 `/jjk-plan`，准备拆解为可执行卡 | `/jjk-vkplan` ✅ |
+| 仅需诊断规划，不拆卡 | `/jjk-plan` |
+| 已有 `vk_cards.json` 仅需落卡 | `/jjk-vktodo` |
 
 ---
 
-## 命名衔接（与 `/jjk-plan` 强一致）
+## 输入前置（强制）
 
-1. `/jjk-vkplan` 必须读取同一主题的 `/jjk-plan` 产物：
-   - `docs/内部参考/迭代需求/<主题>_requirements.md`
-   - `docs/内部参考/迭代需求/<主题>_implementation_plan.md`
-2. 并行拆解目录必须与同一 `<主题>` 对齐：
-   - `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/`
-3. 拆解产物中的来源引用必须保持一致：
-   - `parallel_plan.md` 的“输入来源”
-   - `workstreams/WS-*.md` 的“来源主计划”
-   - `vk_cards.json` 中涉及主计划的 `file_scope`
-4. 若 `/jjk-plan` 命名规则更新，`/jjk-vkplan` 需同步继承，不得回退到旧通用名。
+1. 同主题主产物必须存在：
+   - `docs/内部参考/迭代需求/<topic>_requirements.md`
+   - `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+2. `implementation_plan` 必须含 `planning_contract`。
+3. 若存在 `implementation_readiness` 且 `implementation_ready=false`，必须输出 `VKPLAN_INPUT_NOT_READY` 并回退 `/jjk-plan`。
+4. 自动执行器场景必须拿到 `project_id`：
+   - 显式参数优先；
+   - 否则尝试读取 `docs/内部参考/任务拆解/_active_task.json`；
+   - 仍缺失则 `FAIL_FAST` 输出 `VKPLAN_MISSING_PROJECT_ID`。
+5. `implementation_plan` 必须含 `task_to_pr_mapping`；缺失时 `FAIL_FAST` 输出 `VKPLAN_PR_MAPPING_MISSING`。
 
-### project_id 输入（自动执行器必填）
+## 执行流程（强制顺序）
 
-`/jjk-vkplan` 若用于后续自动执行器，必须拿到 `project_id`（显式参数或从现有 `_active_task.json` 继承）。
+### 0) 先探索项目上下文（强制）
 
-1. 若用户已传 `project_id`，直接使用。
-2. 若未传，尝试读取 `docs/内部参考/任务拆解/_active_task.json` 的 `project_id` 作为默认值。
-3. 若仍拿不到，`FAIL_FAST` 并提示补充 `project_id`；禁止跳过。
+至少检查：
 
----
+1. 同主题主计划与历史拆解目录。
+2. `planning_contract` 的 `execution_mode/card_order/cards/gate_contract`。
+3. 现有 `_active_task.json` 是否与本轮主题冲突。
 
-## 机读契约继承（强制）
+### 0.5) 大任务自动启用 Team（强制判定）
 
-`/jjk-vkplan` 必须优先读取 implementation plan 末尾 `planning_contract`：
+命中任一条件时自动启用 Team：
 
-1. `execution_mode`（`serial|parallel`）
-2. `card_order`（例如 `C01..C06,G01..G04`）
-3. `cards[].feature_ids`
-4. `cards[].depends_on`
-5. `cards[].done_gate`
-6. `gate_contract.mode/gate_ids/depends_on`（若存在）
+1. `cards` 数量 `>= 8`；
+2. 涉及 `feature_id` `>= 12`；
+3. 同时包含 Foundation + 并行层 + Gate 层拆解；
+4. 预计需多 worktree 并行推进。
 
-规则：
+执行策略：
 
-1. 若 `execution_mode=serial`，必须产出“单活串行”卡片编排（同一时刻仅 1 张卡可进入 Doing）。
-2. 不得在 `/jjk-vkplan` 阶段重命名 `card_id` / `feature_id`。
-3. 不得弱化 `depends_on` 的硬依赖。
-4. `feature_id` 必须一一映射到 `WS`（或 `Card WS`）文档中的功能机制段。
-5. 若 `gate_contract.mode=as_cards`，必须把 `gate_ids` 以独立卡片写入 `vk_cards.json.cards` 与 `card_order`，禁止只保留文档门禁描述。
+1. **有 Team 能力时**：并行生成 WS 草案与卡片映射，Leader 汇总唯一产物。
+2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
----
+### 1) 契约继承与校验（强制）
 
-## 执行阶段
+从 `planning_contract` 继承：
 
-1. 读取 `/jjk-plan` 产物（`<主题>_requirements.md`、`<主题>_implementation_plan.md`）。
-2. 读取 `implementation_plan` 中的“功能机制包（Feature Packet）”与 `planning_contract`。
-3. 生成拆解产物（`parallel_plan.md` + `workstreams/WS-*.md`），并在 WS 中保留机制细节与代码样例锚点。
-4. 在拆解阶段完成 G0（`WS-00`）冻结与机读契约。
-5. 生成 `vk_cards.json`（默认落卡范围不含 `WS-00`）；若存在 `gate_contract.mode=as_cards`，必须包含 `G*` Gate 卡。
-6. 仅在需要批量导入提示时生成 `vk_import_prompt.txt`。
-7. 执行脚本写入作用域真理源：
-   - `python3 scripts/set_active_task.py --task-split-dir <YYYY-MM-DD_主题> --project-id <project_id>`
-   - 必须实际执行并回显命令结果；仅在文档中声明“已设置”视为未完成。
-8. 回读并校验 `docs/内部参考/任务拆解/_active_task.json`：
-   - `task_key` 与本轮 `vk_cards.json.task_key` 一致
-   - `task_split_dir` 与本轮拆解目录一致
-   - `project_id` 非空
+1. `execution_mode`
+2. `card_order`
+3. `cards[].card_id`
+4. `cards[].feature_ids`
+5. `cards[].depends_on`
+6. `cards[].done_gate`
+7. `cards[].acceptance_checks`
+8. `gate_contract`（如存在）
+9. `task_to_pr_mapping`
 
-若任一阶段失败，立即停止并给出系统性修复建议（含架构归因与维护性影响）。
+硬约束：
 
----
+1. 禁止重命名 `card_id/feature_id`。
+2. 禁止弱化硬依赖 `depends_on`。
+3. `execution_mode=serial` 时必须保持“单活卡推进”语义。
+4. 每个实现卡必须能映射到唯一 `pr_id`，禁止“卡片存在但无 PR 归属”。
 
-## 自动执行前置检查（新增，强制）
+### 2) 产物生成（强制）
 
-`/jjk-vkplan` 只负责产出执行契约，不会自动在 VK 看板创建真实卡片。若目标是 OpenClaw coder4 自动执行，必须额外完成以下检查：
-
-1. 已执行 `/jjk-vktodo <任务拆解目录>`（或等效 API）完成落卡；仅有本地 `vk_cards.json` 不等于“可执行”。
-2. 看板中存在至少 1 张 `scoped task`（匹配 `task_key`）：
-   - `title` 含 `[task_key]`
-   - 或 `labels` 含 `task_key`
-   - 或卡片 key 前缀为 `<task_key>::`
-3. 当 `single_active_card=true` 时，`inprogress + inreview` 的 scoped 卡必须 `<= 1`。
-4. `preflight_required`（默认 `C00`）状态可判定：未通过时应阻断实现卡推进。
-5. `_active_task.json` 与 `vk_cards.json` 对齐：
-   - `task_key` 一致
-   - `task_split_dir` 一致
-   - `execution_mode/single_active_card/auto_done_policy` 一致
-
-补充：
-
-1. 若返回 `NO_INCREMENT(scope_no_active)`，优先排查“未落卡或作用域未命中”，不是自动执行器故障。
-2. 若返回 `RECONCILE_ONLY(scope_conflict)`，优先处理“存在非当前 task_key 的活动卡”。
-
----
-
-## Gate 卡片化硬拦截（新增，强制）
-
-以下任一命中，`/jjk-vkplan` 必须 `FAIL_FAST`，并禁止进入 `/jjk-vktodo`：
-
-1. implementation plan 出现 `G-1~G-4`/`全局关卡`/`Gate`，但 `planning_contract.gate_contract` 缺失。
-2. `gate_contract.mode=as_cards`，但 `gate_ids` 未全部出现在 `vk_cards.card_order`。
-3. `gate_ids` 存在，但 `vk_cards.cards[*]` 缺少对应 Gate 卡定义。
-4. `set_active_task.py` 未实际执行成功，或 `_active_task.json` 与本轮 `task_split_dir/task_key/project_id` 不一致。
-4. 任一 Gate 卡缺失 `acceptance_checks` 或 `evidence_entry`。
-5. Gate 卡 `depends_on` 与 `gate_contract.depends_on` 不一致。
-
-补充：
-
-1. Gate 卡默认 `task_mode=inspection-card`、`merge_required=false`。
-2. 若 Gate 卡需要代码改动，必须显式改为 `implementation-card` 并补齐 `merge_required=true` 的 done gate。
-
----
-
-## 信息不丢失映射（新增）
-
-`vk_cards.json.cards[*]` 至少包含以下字段（可扩展，不可省略）：
-
-1. `feature_ids`
-2. `mechanism_summary`
-3. `code_anchor_refs`
-4. `example_refs`
-5. `acceptance_checks`
-6. `rollback_anchors`
-7. `evidence_entry`
-8. `task_mode`（`implementation-card|inspection-card|question-card`）
-9. `merge_required`
-
-约束：
-
-1. `mechanism_summary` 必须来自 implementation plan 的功能机制包，不允许自由改写语义。
-2. `example_refs` 只放“最小样例路径/片段锚点”，不塞大段正文。
-3. `acceptance_checks` 必须可直接执行（命令级）。
-4. `evidence_entry` 必须指向权威回填位置（例如 `迁移执行波次_implementation_plan.md` 具体节）。
-
----
-
-## 字段完整性硬拦截（新增）
-
-`/jjk-vkplan` 在写入 `vk_cards.json` 前必须做完整性校验。以下任一字段缺失时，直接 `FAIL_FAST` 并停止产出：
-
-1. `feature_ids`
-2. `mechanism_summary`
-3. `code_anchor_refs`
-4. `acceptance_checks`
-5. `rollback_anchors`
-6. `evidence_entry`
-7. `task_mode`
-8. `merge_required`
-
-补充：
-
-1. 不允许“留空后执行期补齐”。
-2. 不允许把缺失字段降级到自然语言备注。
-3. 校验失败时必须输出“缺失字段清单 + 影响 card_id + 修复建议”。
-
----
-
-## Feature/Card 双向覆盖校验（新增）
-
-为防止 feature 漏卡或重复漂移，`/jjk-vkplan` 必须输出双向校验结果：
-
-1. **forward check**：每个 `card_id` 至少绑定 1 个 `feature_id`。
-2. **reverse check**：implementation plan 的每个 `feature_id` 必须且仅能映射到 1 张实现卡。
-3. **orphan check**：不允许存在未被任何卡片承载的 `feature_id`。
-4. **duplicate check**：除明确声明“共享检查卡”外，同一 `feature_id` 不得重复落在多张实现卡。
-5. **hydration reverse check**（当来源包含 `hydrate` 归一化草案时）：草案 `D. Feature Packet Draft` 的每个 `FP-xx` 必须映射到至少 1 个实现 `feature_id`，并最终落到卡片。
-6. **hydration orphan fp check**：不允许存在未被任何实现卡承载的 `FP-xx`。
-
-任一校验失败时：
-
-1. `vk_cards.json` 标记为不可执行；
-2. 不得进入 `/jjk-vktodo`；
-3. 必须先回填 `implementation_plan` 或重排卡片映射。
-
-补充约束（无新增参数）：
-
-1. `hydrate` 闭环校验随原有 `/jjk-vkplan` 默认执行，不新增命令参数。
-2. 允许沿用原有 `execution_mode/card_order/cards`，但不得跳过 `FP-xx` 到实现卡的显式映射。
-3. 若 implementation plan 未提供可机读 `FP-xx` 映射，`/jjk-vkplan` 必须 `FAIL_FAST` 并提示先补齐主计划映射。
-
----
-
-## 串行执行编排（新增）
-
-当 `execution_mode=serial` 时，`/jjk-vkplan` 必须满足：
-
-1. `parallel_plan.md` 写明 `single_active_card=true`。
-2. `vk_cards.json` 的 `hard_depends_on` 串成单链（如 `C01 -> C02 -> ...`）。
-3. 仅在前置卡满足 `done_gate` 后，后置卡才允许推进。
-4. Gate 类卡（如 `G01~G04`）默认串行，不可并行推进，且必须实体化为独立卡片，不得只写在文档正文。
-5. `inreview -> done` 策略必须读取 `planning_contract/parallel_plan` 的 `auto_done_policy`，禁止写死“人工确认”。
-
----
-
-## 与 output 分析的融合规则（新增）
-
-1. `output/**` 只作为“证据来源”，必须先落入 implementation plan 的功能机制包。
-2. `/jjk-vkplan` 禁止直接把 `output` 长文塞入卡片描述。
-3. 每个 WS 仅引用与本功能点直接相关的 1~3 条分析证据。
-4. 若分析证据与实现计划冲突，以 implementation plan 为准并记录冲突裁决。
-
----
-
-## 必做产出
+必须生成：
 
 1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
 3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
-4. `docs/内部参考/任务拆解/_active_task.json`（自动执行器真理源）
-5. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_import_prompt.txt`（可选）
+
+规则：
+
+1. 每个 `card_id` 必须绑定 `feature_id` 与 `acceptance_checks`。
+2. 每个 WS 必须引用来源主计划与对应 `feature_id`。
+3. `output/**` 只能作为证据引用，不允许长文直贴到卡描述。
+4. `vk_cards.json.cards[*]` 必须新增：
+   - `pr_id`
+   - `pr_branch`
+   - `pr_depends_on`
+   - `pr_subject`
+
+### 3) Gate 卡片化与映射闭环（强制）
+
+1. 若 `gate_contract.mode=as_cards`，所有 `gate_ids` 必须实体化为卡片。
+2. Gate 卡必须包含：
+   - `task_mode`
+   - `merge_required`
+   - `acceptance_checks`
+   - `evidence_entry`
+3. 双向覆盖校验必须通过：
+   - forward：每张卡至少 1 个 `feature_id`
+   - reverse：每个 `feature_id` 必须映射到实现卡
+   - orphan：无未承载 `feature_id`
+   - duplicate：无异常重复映射
+
+失败标记：
+
+1. `VKPLAN_GATE_CONTRACT_BROKEN`
+2. `VKPLAN_FEATURE_MAPPING_BROKEN`
+3. `VKPLAN_PR_MAPPING_BROKEN`
+
+### 4) 真理源写入（强制）
+
+必须执行：
+
+`python3 scripts/set_active_task.py --task-split-dir <YYYY-MM-DD_主题> --project-id <project_id>`
+
+并回读校验 `docs/内部参考/任务拆解/_active_task.json`：
+
+1. `task_key` 一致
+2. `task_split_dir` 一致
+3. `project_id` 非空
+
+不一致时输出 `VKPLAN_ACTIVE_TASK_MISMATCH` 并阻断下游。
+
+### 5) 下游衔接（强制）
+
+1. 推荐链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`
+2. 未通过本命令硬校验时，禁止进入 `/jjk-vktodo`。
 
 ---
 
-## 下游链路
+## 禁止项（强制）
 
-推荐极简链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`
-
-自动执行器链路（OpenClaw coder4）：
-
-`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> set_active_task -> coder4 cron`
-
-- `/jjk-vktodo`：直接落卡/推进（多 worktree 场景默认执行 `/jjk-vksync` 硬拦截）
-- `/jjk-imp-ws`：从并行层 WS 开始执行（`WS-00` 已由前置阶段完成）
-- 自动执行器场景：必须以 `vk_cards.json` 为唯一执行输入，不允许自由重写卡标题与 DoD
-
-手工分步链路（调试用）：`/jjk-plan -> /jjk-vkplan -> /jjk-vksync -> /jjk-vktodo`
+1. 禁止在无 `planning_contract` 时生成 `vk_cards.json`。
+2. 禁止跳过 `_active_task.json` 写入与回读校验。
+3. 禁止缺字段卡片“先落卡后补齐”。
+4. 禁止把 Gate 仅保留为文档描述而不实体化。
+5. 禁止在 `task_to_pr_mapping` 缺失时继续生成可执行卡片。
 
 ---
-*使用 `/jjk-vkplan` 触发。用于“完成拆解后直接进入 `/jjk-vktodo`”。*
----
+
+*使用 `/jjk-vkplan` 触发。目标是“契约可执行拆解”，不是自由写卡。*

@@ -124,5 +124,5 @@ bash scripts/vk_cleanup.sh     # 清理进程
 |------|------|
 | 新增个人工作流脚本 | 文件放 `.cursor/scripts/xxx`，然后 `ln -s ../.cursor/scripts/xxx scripts/xxx` |
 | 新增项目脚本 | 直接放 `scripts/` 根目录或对应子目录（`db/`、`data/`） |
-| 新增 Cursor 规则/命令 | 在 `.cursor/rules/` 或 `.cursor/commands/` 新增文件，然后 `python3 scripts/sync_rules_to_cc.py`（同步到 `.claude/*`，并将命令同步到 `~/.codex/prompts/`） |
+| 新增 Cursor 规则/命令 | 在 `.cursor/rules/` 或 `.cursor/commands/` 新增文件，然后 `python3 scripts/sync_rules_to_cc.py`（同时镜像 `AGENTS.md -> CLAUDE.md`，同步到 `.claude/*`，并将命令同步到 `~/.codex/prompts/`） |
 | 新增 CC 手工规则 | 创建 `.claude/rules/xxx.md`，在 sync 脚本 `MANUAL_FILES` 中注册文件名 |
