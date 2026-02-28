@@ -183,7 +183,21 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
     def _unexpected_http(*args, **kwargs):
         raise AssertionError("local-mode 不应发起 HTTP 调用")
 
+    sync_calls: list[tuple[str, str]] = []
+
+    def _fake_try_sync_vk(**kwargs):
+        sync_calls.append((kwargs["card_id"], kwargs["status"]))
+        return {
+            "attempted": True,
+            "ok": True,
+            "disabled": False,
+            "reason": "spawned",
+            "card_id": kwargs["card_id"],
+            "status": kwargs["status"],
+        }
+
     monkeypatch.setattr(module, "http_json", _unexpected_http)
+    monkeypatch.setattr(module, "_try_sync_vk", _fake_try_sync_vk)
 
     ctx = module.KernelContext(
         project_id="",
@@ -206,10 +220,12 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         "seed",
         "C02",
         None,
+        active_task_path=tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json",
         local_mode=True,
         state_path=state_path,
     )
     assert seed_result["performed"] is True
+    assert seed_result["vk_sync"]["ok"] is True
 
     state_after_seed = json.loads(state_path.read_text(encoding="utf-8"))
     assert state_after_seed["card_status_map"]["C02"] == "todo"
@@ -224,10 +240,12 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         "activate",
         "C02",
         None,
+        active_task_path=tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json",
         local_mode=True,
         state_path=state_path,
     )
     assert activate_result["performed"] is True
+    assert activate_result["vk_sync"]["ok"] is True
 
     state_after_activate = json.loads(state_path.read_text(encoding="utf-8"))
     assert state_after_activate["card_status_map"]["C02"] == "inprogress"
@@ -235,6 +253,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
     assert state_after_activate["current_card"] == "C02"
     assert state_after_activate["last_action"] == "activate"
     assert state_after_activate["last_action_result"] == "CARD_ACTIVATED:C02"
+    assert sync_calls == [("C02", "todo"), ("C02", "inprogress")]
 
 
 def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_path, capsys):

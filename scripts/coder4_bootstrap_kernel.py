@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -52,6 +53,7 @@ STATE_BACKUP_SUFFIX = ".bak"
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"
 IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
 AUTO_WAKE_DISABLE_ENV = "DISABLE_AUTO_WAKE"
+VK_SYNC_DISABLE_ENV = "DISABLE_VK_SYNC"
 OPENCLAW_GATEWAY_ENV = "OPENCLAW_GATEWAY"
 OPENCLAW_HOOKS_TOKEN_ENV = "OPENCLAW_HOOKS_TOKEN"
 
@@ -63,6 +65,8 @@ EVENT_RUN_LOCK_ACQUIRED = "RUN_LOCK_ACQUIRED"
 EVENT_SKIP_DUPLICATE = "SKIP_DUPLICATE_EVENT"
 EVENT_AUTO_WAKE_TRIGGERED = "AUTO_WAKE_TRIGGERED"
 EVENT_AUTO_WAKE_FAILED = "AUTO_WAKE_FAILED"
+EVENT_VK_SYNC_TRIGGERED = "VK_SYNC_TRIGGERED"
+EVENT_VK_SYNC_FAILED = "VK_SYNC_FAILED"
 
 STATUS_ORDER = {
     "inprogress": 0,
@@ -763,6 +767,126 @@ def trigger_next_round(
         }
 
 
+def _try_sync_vk(
+    *,
+    active_task_path: Path,
+    state_path: Path | None,
+    vk_api_base: str,
+    project_id: str,
+    task_key: str,
+    card_id: str,
+    status: str,
+) -> dict[str, Any]:
+    normalized_card_id = str(card_id or "").strip().upper()
+    normalized_status = normalize_status(status)
+    api_base = str(vk_api_base or "").strip().rstrip("/")
+
+    if is_disabled_by_env(VK_SYNC_DISABLE_ENV):
+        return {
+            "attempted": False,
+            "ok": False,
+            "disabled": True,
+            "reason": "disabled_by_env",
+            "card_id": normalized_card_id,
+            "status": normalized_status,
+        }
+
+    if not api_base:
+        return {
+            "attempted": False,
+            "ok": False,
+            "disabled": False,
+            "reason": "missing_vk_api_base",
+            "card_id": normalized_card_id,
+            "status": normalized_status,
+        }
+
+    sync_script = resolve_runtime_file_path(active_task_path, "scripts/coder4_vk_sync.py")
+    if not sync_script.exists():
+        emit_event(
+            EVENT_VK_SYNC_FAILED,
+            reason="sync_script_missing",
+            sync_script=str(sync_script),
+            card_id=normalized_card_id,
+            status=normalized_status,
+        )
+        return {
+            "attempted": False,
+            "ok": False,
+            "disabled": False,
+            "reason": "sync_script_missing",
+            "sync_script": str(sync_script),
+            "card_id": normalized_card_id,
+            "status": normalized_status,
+        }
+
+    cmd = [
+        sys.executable,
+        str(sync_script),
+        "--active-task",
+        str(active_task_path),
+        "--vk-api-base",
+        api_base,
+        "--card-id",
+        normalized_card_id,
+        "--status",
+        normalized_status,
+    ]
+
+    if state_path is not None:
+        cmd.extend(["--state-file", str(state_path)])
+    if project_id:
+        cmd.extend(["--project-id", str(project_id)])
+    if task_key:
+        cmd.extend(["--task-key", str(task_key)])
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        emit_event(
+            EVENT_VK_SYNC_FAILED,
+            reason="spawn_failed",
+            sync_script=str(sync_script),
+            card_id=normalized_card_id,
+            status=normalized_status,
+            error=str(exc),
+        )
+        return {
+            "attempted": True,
+            "ok": False,
+            "disabled": False,
+            "reason": "spawn_failed",
+            "sync_script": str(sync_script),
+            "card_id": normalized_card_id,
+            "status": normalized_status,
+            "error": str(exc),
+        }
+
+    emit_event(
+        EVENT_VK_SYNC_TRIGGERED,
+        sync_script=str(sync_script),
+        card_id=normalized_card_id,
+        status=normalized_status,
+        pid=process.pid,
+        api_base=api_base,
+    )
+    return {
+        "attempted": True,
+        "ok": True,
+        "disabled": False,
+        "reason": "spawned",
+        "sync_script": str(sync_script),
+        "card_id": normalized_card_id,
+        "status": normalized_status,
+        "pid": process.pid,
+    }
+
+
 def normalize_status(raw: Any) -> str:
     s = str(raw or "").strip().lower().replace("-", "_")
     if s == "in_progress":
@@ -1128,6 +1252,7 @@ def apply_action(
     target_card_id: str | None,
     target_task_id: str | None,
     *,
+    active_task_path: Path,
     local_mode: bool = False,
     state_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -1149,12 +1274,22 @@ def apply_action(
                 action="seed",
                 action_result=f"CARD_SEEDED:{target_card_id}",
             )
+            vk_sync = _try_sync_vk(
+                active_task_path=active_task_path,
+                state_path=state_path,
+                vk_api_base=api_base,
+                project_id=ctx.project_id,
+                task_key=ctx.task_key,
+                card_id=target_card_id,
+                status="todo",
+            )
             return {
                 "performed": True,
                 "action": "seed",
                 "card_id": target_card_id,
                 "task_id": target_card_id,
                 "status": "todo",
+                "vk_sync": vk_sync,
             }
         payload = {
             "project_id": ctx.project_id,
@@ -1164,12 +1299,22 @@ def apply_action(
         }
         resp = http_json("POST", f"{api_base}/api/tasks", payload)
         data = resp.get("data") or {}
+        vk_sync = _try_sync_vk(
+            active_task_path=active_task_path,
+            state_path=state_path,
+            vk_api_base=api_base,
+            project_id=ctx.project_id,
+            task_key=ctx.task_key,
+            card_id=target_card_id,
+            status=data.get("status") or "todo",
+        )
         return {
             "performed": True,
             "action": "seed",
             "card_id": target_card_id,
             "task_id": data.get("id"),
             "status": data.get("status") or "todo",
+            "vk_sync": vk_sync,
         }
 
     if action == "activate":
@@ -1187,24 +1332,44 @@ def apply_action(
                 action="activate",
                 action_result=f"CARD_ACTIVATED:{target_card_id}",
             )
+            vk_sync = _try_sync_vk(
+                active_task_path=active_task_path,
+                state_path=state_path,
+                vk_api_base=api_base,
+                project_id=ctx.project_id,
+                task_key=ctx.task_key,
+                card_id=target_card_id,
+                status="inprogress",
+            )
             return {
                 "performed": True,
                 "action": "activate",
                 "card_id": target_card_id,
                 "task_id": target_card_id,
                 "status": "inprogress",
+                "vk_sync": vk_sync,
             }
         if not target_task_id:
             raise RuntimeError("activate action missing target identifiers")
         payload = {"status": "inprogress"}
         resp = http_json("PUT", f"{api_base}/api/tasks/{target_task_id}", payload)
         data = resp.get("data") or {}
+        vk_sync = _try_sync_vk(
+            active_task_path=active_task_path,
+            state_path=state_path,
+            vk_api_base=api_base,
+            project_id=ctx.project_id,
+            task_key=ctx.task_key,
+            card_id=target_card_id,
+            status=data.get("status") or "inprogress",
+        )
         return {
             "performed": True,
             "action": "activate",
             "card_id": target_card_id,
             "task_id": target_task_id,
             "status": data.get("status") or "inprogress",
+            "vk_sync": vk_sync,
         }
 
     return {"performed": False}
@@ -1370,6 +1535,7 @@ def main() -> int:
                     action,
                     first_not_done,
                     target_task_id,
+                    active_task_path=active_task_path,
                     local_mode=args.local_mode,
                     state_path=state_path,
                 )
