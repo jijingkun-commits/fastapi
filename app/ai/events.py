@@ -26,6 +26,11 @@ EventType = Literal[
     "tool_end",        # 工具调用结束
     "status",          # 状态更新（如"正在查询..."）
     "result",          # 结构化结果（卡片数据：todo_list, image, chart 等）
+    "plan_ready",      # 规划完成（问题合同）
+    "task_started",    # 任务开始
+    "task_finished",   # 任务完成
+    "coverage_check",  # 覆盖率检查
+    "final_answer",    # 最终答复（唯一对外正文）
     "kb_images",       # 知识库图片映射（RAG 占位符 [IMG-N] -> URL）
     "confirmation",    # 确认请求（需要用户确认的操作）
     "clarification",   # 澄清问题（需要用户补充信息）
@@ -53,6 +58,11 @@ class AgentEventType(str, Enum):
     TOOL_END = "tool_end"
     STATUS = "status"
     RESULT = "result"
+    PLAN_READY = "plan_ready"
+    TASK_STARTED = "task_started"
+    TASK_FINISHED = "task_finished"
+    COVERAGE_CHECK = "coverage_check"
+    FINAL_ANSWER = "final_answer"
     CONFIRMATION = "confirmation"
     CLARIFICATION = "clarification"
     HANDOFF = "handoff"
@@ -345,6 +355,77 @@ def emit_result(
             "message": message
         },
         "node": node
+    })
+
+
+def emit_plan_ready(
+    writer: StreamWriter,
+    plan: dict,
+    node: str = "",
+) -> None:
+    """发送 plan_ready 事件。"""
+    writer({
+        "type": "plan_ready",
+        "data": {"plan": plan},
+        "node": node,
+    })
+
+
+def emit_task_started(
+    writer: StreamWriter,
+    task: dict,
+    node: str = "",
+) -> None:
+    """发送 task_started 事件。"""
+    writer({
+        "type": "task_started",
+        "data": {"task": task},
+        "node": node,
+    })
+
+
+def emit_task_finished(
+    writer: StreamWriter,
+    task: dict,
+    node: str = "",
+) -> None:
+    """发送 task_finished 事件。"""
+    writer({
+        "type": "task_finished",
+        "data": {"task": task},
+        "node": node,
+    })
+
+
+def emit_coverage_check(
+    writer: StreamWriter,
+    report: dict,
+    node: str = "",
+) -> None:
+    """发送 coverage_check 事件。"""
+    writer({
+        "type": "coverage_check",
+        "data": {"report": report},
+        "node": node,
+    })
+
+
+def emit_final_answer(
+    writer: StreamWriter,
+    content: str,
+    *,
+    meta: Optional[dict] = None,
+    node: str = "",
+) -> None:
+    """发送 final_answer 事件。"""
+    payload = {"content": content}
+    if isinstance(meta, dict) and meta:
+        payload["meta"] = meta
+
+    writer({
+        "type": "final_answer",
+        "data": payload,
+        "node": node,
     })
 
 

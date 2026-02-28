@@ -24,6 +24,7 @@ scripts/                        # 项目脚本（根目录保留高频/CI 脚本
 │   └── verify_data_db.py
 ├── docs_guard.py               # 文档同步守卫（pre-commit）
 ├── check_doc_sync.sh           # 文档同步检查
+├── check_special_doc_sync.py   # 防屎山手册强制同步检查
 ├── config_doctor.py            # 配置契约健康检查
 ├── init_llm_config.py          # 初始化 LLM 模型配置
 ├── test_llm_config.py          # LLM 配置测试
@@ -71,6 +72,7 @@ python scripts/db/schema_sync.py                 # 新增表后同步元数据
 python scripts/data/import_skills.py             # 修改 SKILL.md 后更新技能
 python scripts/data/skill_offline_evaluation.py  # Skill 检索离线评测
 python scripts/config_doctor.py --strict         # 配置健康检查
+python scripts/check_special_doc_sync.py --cached --strict  # 命中特殊处理文件时强制校验手册同步
 ```
 
 ### Vibe Kanban 多 worktree
@@ -96,5 +98,5 @@ bash scripts/vk_cleanup.sh     # 清理进程
 |------|------|
 | 新增个人工作流脚本 | 文件放 `.cursor/scripts/xxx`，然后 `ln -s ../.cursor/scripts/xxx scripts/xxx` |
 | 新增项目脚本 | 直接放 `scripts/` 根目录或对应子目录（`db/`、`data/`） |
-| 新增 Cursor 规则 | 在 `.cursor/rules/` 创建 `.mdc` 文件，然后 `python3 scripts/sync_rules_to_cc.py` |
+| 新增 Cursor 规则/命令 | 在 `.cursor/rules/` 或 `.cursor/commands/` 新增文件，然后 `python3 scripts/sync_rules_to_cc.py`（同步到 `.claude/*`，并将命令同步到 `~/.codex/prompts/`） |
 | 新增 CC 手工规则 | 创建 `.claude/rules/xxx.md`，在 sync 脚本 `MANUAL_FILES` 中注册文件名 |

@@ -15,6 +15,7 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple
+from pydantic import BaseModel, Field
 
 from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
@@ -33,7 +34,20 @@ from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
 from langgraph.config import get_stream_writer
-from app.ai.events import emit_status, emit_token, emit_thinking, emit_tool_start, emit_tool_end, emit_result, emit_kb_images
+from app.ai.events import (
+    emit_status,
+    emit_token,
+    emit_thinking,
+    emit_tool_start,
+    emit_tool_end,
+    emit_result,
+    emit_kb_images,
+    emit_plan_ready,
+    emit_task_started,
+    emit_task_finished,
+    emit_coverage_check,
+    emit_final_answer,
+)
 from app.ai.protocol import (
     AgentOutputParser,
     HandoffResult,
@@ -166,6 +180,27 @@ EXTERNAL_INFO_HINTS = (
     "基金",
 )
 
+DATA_DOMAIN_HINTS = (
+    "数据",
+    "指标",
+    "报表",
+    "统计",
+    "数据库",
+    "sql",
+    "分析",
+)
+
+DATA_STRONG_HINTS = (
+    "sql",
+    "报表",
+    "数据库",
+    "指标",
+    "字段",
+    "表",
+)
+
+DELIVERY_RECOVERY_MARKER = "【交付补齐提示】"
+
 TURN_ACT_HINTS = {
     "NEW_QUERY",
     "SUPPLEMENT",
@@ -179,6 +214,21 @@ SUPERVISOR_TOOL_MESSAGE_CHAR_LIMIT = 2400
 SUPERVISOR_TOOL_MESSAGE_HEAD_CHARS = 1500
 SUPERVISOR_TOOL_MESSAGE_TAIL_CHARS = 600
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+class _IntentGoalModel(BaseModel):
+    """Planner 输出的单目标结构。"""
+
+    kind: str = Field(default="general.reply")
+    title: str = Field(default="")
+    must_answer: bool = Field(default=True)
+    confidence: float = Field(default=0.7)
+
+
+class _IntentPlanModel(BaseModel):
+    """Planner 输出的目标合集。"""
+
+    goals: list[_IntentGoalModel] = Field(default_factory=list)
 
 PLUGIN_REGISTRY_ERROR_HINTS = (
     "plugin registry",
@@ -206,6 +256,16 @@ def _is_runtime_recovery_enabled() -> bool:
 def _is_plugin_registry_enabled() -> bool:
     """插件注册表开关（默认关闭，后置接线）。"""
     return _is_feature_flag_enabled("ENABLE_PLUGIN_REGISTRY", False)
+
+
+def _is_delivery_orchestrator_v2_enabled() -> bool:
+    """交付导向编排开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_DELIVERY_ORCHESTRATOR_V2", True)
+
+
+def _is_sse_delivery_events_v2_enabled() -> bool:
+    """SSE 交付事件开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_SSE_DELIVERY_EVENTS_V2", True)
 
 
 def _is_plugin_registry_error(error_text: str) -> bool:
@@ -293,6 +353,669 @@ def _extract_latest_human_content(messages: Sequence[BaseMessage]) -> str:
         if content and content.strip():
             return content.strip()
     return ""
+
+
+def _slice_messages_from_latest_human(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """按当前轮次切片消息（从最近一条 human 开始）。"""
+    if not messages:
+        return []
+
+    latest_human_index: Optional[int] = None
+    for idx in range(len(messages) - 1, -1, -1):
+        if str(getattr(messages[idx], "type", "")).lower().strip() == "human":
+            latest_human_index = idx
+            break
+
+    if latest_human_index is None:
+        return list(messages)
+    return list(messages[latest_human_index:])
+
+
+def _first_hint_position(text: str, hints: Sequence[str]) -> int:
+    """返回首个关键词命中的位置，未命中返回大值。"""
+    normalized = str(text or "").lower()
+    min_idx = 10**9
+    for hint in hints:
+        idx = normalized.find(str(hint).lower())
+        if idx >= 0:
+            min_idx = min(min_idx, idx)
+    return min_idx
+
+
+def _normalize_model_goal_kind(raw_kind: str) -> str:
+    """将模型输出的目标类型归一到当前系统支持的 kind。"""
+    normalized = str(raw_kind or "").strip().lower().replace("_", ".")
+    compact = normalized.replace(" ", "")
+
+    if compact.startswith("todo"):
+        if "create" in compact or "add" in compact or "new" in compact:
+            return "todo.create"
+        return "todo.query"
+
+    if (
+        compact.startswith("external")
+        or "weather" in compact
+        or "lookup" in compact
+        or "search" in compact
+        or "web" in compact
+    ):
+        return "external.lookup"
+
+    if (
+        compact.startswith("data")
+        or "sql" in compact
+        or "report" in compact
+        or "metric" in compact
+        or "table" in compact
+    ):
+        return "data.query"
+
+    return "general.reply"
+
+
+def _default_goal_title(kind: str) -> str:
+    """根据标准 kind 提供默认标题。"""
+    bucket = _goal_kind_bucket(kind)
+    if bucket == "todo":
+        return "待办事项"
+    if bucket == "external":
+        return "外部信息"
+    if bucket == "data":
+        return "数据查询"
+    return "问题回复"
+
+
+def _build_model_intent_plan_prompt(user_text: str) -> str:
+    """构建模型意图规划提示词。"""
+    return (
+        "你是对话编排器中的目标分解节点。\n"
+        "请只根据用户语义拆分本轮必须回答的目标，不要因为动作词（如“查询/看看/列出”）盲目扩增目标。\n"
+        "规则：\n"
+        "1) 仅当用户明确提到数据域（如 SQL、报表、数据库、指标）时，才输出 data.query。\n"
+        "2) 待办相关问题输出 todo.query 或 todo.create。\n"
+        "3) 天气/股价/汇率等外部信息输出 external.lookup。\n"
+        "4) 无法拆分时仅输出 general.reply。\n"
+        "5) goals 保持去重，同类目标最多 1 个。\n"
+        f"用户问题：{str(user_text or '').strip()}"
+    )
+
+
+def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """使用模型生成结构化 intent_plan。"""
+    messages = _slice_messages_from_latest_human(state.get("messages", []))
+    user_text = _extract_latest_human_content(messages)
+    if not user_text:
+        return {
+            "version": 1,
+            "source": "model_primary",
+            "user_query": "",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                    "confidence": 0.5,
+                }
+            ],
+        }
+
+    if not hasattr(llm, "with_structured_output"):
+        raise RuntimeError("planner_llm_structured_output_unsupported")
+
+    structured_llm = llm.with_structured_output(_IntentPlanModel)
+    prompt = _build_model_intent_plan_prompt(user_text)
+    raw_output = structured_llm.invoke(prompt)
+    if isinstance(raw_output, _IntentPlanModel):
+        parsed = raw_output
+    elif isinstance(raw_output, dict):
+        parsed = _IntentPlanModel(**raw_output)
+    else:
+        raw_data: Dict[str, Any] = {}
+        if hasattr(raw_output, "model_dump"):
+            raw_data = raw_output.model_dump()  # type: ignore[assignment]
+        elif hasattr(raw_output, "dict"):
+            raw_data = raw_output.dict()  # type: ignore[assignment]
+        parsed = _IntentPlanModel(**raw_data)
+
+    normalized_goals: list[Dict[str, Any]] = []
+    seen_buckets: set[str] = set()
+    for item in list(parsed.goals or []):
+        kind = _normalize_model_goal_kind(item.kind)
+        bucket = _goal_kind_bucket(kind)
+        if bucket in seen_buckets and bucket != "general":
+            continue
+        seen_buckets.add(bucket)
+
+        title = str(item.title or "").strip() or _default_goal_title(kind)
+        try:
+            confidence = float(item.confidence)
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+
+        normalized_goals.append(
+            {
+                "goal_id": f"GOAL-{len(normalized_goals) + 1:02d}",
+                "order": len(normalized_goals) + 1,
+                "kind": kind,
+                "title": title,
+                "must_answer": bool(item.must_answer),
+                "confidence": confidence,
+            }
+        )
+
+    if not normalized_goals:
+        normalized_goals = [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "general.reply",
+                "title": "问题回复",
+                "must_answer": True,
+                "confidence": 0.5,
+            }
+        ]
+
+    return {
+        "version": 1,
+        "source": "model_primary",
+        "user_query": user_text,
+        "goals": normalized_goals,
+    }
+
+
+def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
+    """从用户输入推断初始问题合同（intent_plan）。"""
+    messages = _slice_messages_from_latest_human(state.get("messages", []))
+    user_text = _extract_latest_human_content(messages)
+    normalized = user_text.lower()
+
+    has_todo = any(hint in normalized for hint in TODO_DOMAIN_HINTS)
+    has_external = any(hint in normalized for hint in EXTERNAL_INFO_HINTS)
+    has_data = any(hint in normalized for hint in DATA_DOMAIN_HINTS)
+    has_data_strong = any(hint in normalized for hint in DATA_STRONG_HINTS)
+
+    goals: list[Dict[str, Any]] = []
+    if has_todo:
+        goals.append(
+            {
+                "kind": "todo.query",
+                "title": "待办事项",
+                "must_answer": True,
+                "order_hint": _first_hint_position(user_text, TODO_DOMAIN_HINTS),
+            }
+        )
+    if has_external:
+        goals.append(
+            {
+                "kind": "external.lookup",
+                "title": "外部信息",
+                "must_answer": True,
+                "order_hint": _first_hint_position(user_text, EXTERNAL_INFO_HINTS),
+            }
+        )
+    if has_data and not has_external and (not has_todo or has_data_strong):
+        goals.append(
+            {
+                "kind": "data.query",
+                "title": "数据查询",
+                "must_answer": True,
+                "order_hint": _first_hint_position(user_text, DATA_DOMAIN_HINTS),
+            }
+        )
+
+    if not goals:
+        goals.append(
+            {
+                "kind": "general.reply",
+                "title": "问题回复",
+                "must_answer": True,
+                "order_hint": 0,
+            }
+        )
+
+    goals = sorted(goals, key=lambda item: int(item.get("order_hint", 10**9)))
+    normalized_goals: list[Dict[str, Any]] = []
+    for index, goal in enumerate(goals, start=1):
+        normalized_goals.append(
+            {
+                "goal_id": f"GOAL-{index:02d}",
+                "order": index,
+                "kind": goal["kind"],
+                "title": goal["title"],
+                "must_answer": bool(goal.get("must_answer", True)),
+            }
+        )
+
+    return {
+        "version": 1,
+        "source": "heuristic",
+        "user_query": user_text,
+        "goals": normalized_goals,
+    }
+
+
+def _build_planner_intent_plan(
+    state: MultiAgentState,
+    *,
+    llm: Any,
+    mode: str = "model_primary",
+) -> Dict[str, Any]:
+    """构建 planner 节点使用的 intent_plan（模型主判定 + 规则兜底）。"""
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode not in {"model_primary", "heuristic_only"}:
+        normalized_mode = "model_primary"
+
+    heuristic_plan = _infer_initial_intent_plan(state)
+    if normalized_mode == "heuristic_only":
+        return {
+            "version": heuristic_plan.get("version", 1),
+            "source": "heuristic_only",
+            "user_query": heuristic_plan.get("user_query", ""),
+            "goals": list(heuristic_plan.get("goals") or []),
+        }
+
+    try:
+        return _infer_model_intent_plan(state, llm)
+    except Exception as exc:
+        logger.warning("planner_model_fallback_to_heuristic: %s", exc)
+        return {
+            "version": heuristic_plan.get("version", 1),
+            "source": "heuristic_fallback",
+            "user_query": heuristic_plan.get("user_query", ""),
+            "goals": list(heuristic_plan.get("goals") or []),
+            "fallback_meta": {
+                "reason": f"planner_model_error:{type(exc).__name__}",
+                "detail": str(exc)[:200],
+            },
+        }
+
+
+def _goal_kind_bucket(kind: str) -> str:
+    """将细粒度 kind 归一到匹配桶。"""
+    normalized = str(kind or "").strip().lower()
+    if normalized.startswith("todo"):
+        return "todo"
+    if normalized.startswith("external"):
+        return "external"
+    if normalized.startswith("data"):
+        return "data"
+    return "general"
+
+
+def _count_must_answer_goals(intent_plan: Optional[Dict[str, Any]]) -> int:
+    """统计问题合同中 must_answer 目标数量。"""
+    goals = list((intent_plan or {}).get("goals") or [])
+    return sum(1 for goal in goals if bool(goal.get("must_answer", True)))
+
+
+def _should_enable_multi_intent_mode(
+    *,
+    handoff_batch_size: int,
+    has_direct_lookup: bool,
+    state: MultiAgentState,
+) -> bool:
+    """判定是否启用复合任务模式（优先使用问题合同，避免单 handoff 丢目标）。"""
+    if handoff_batch_size > 1 or has_direct_lookup:
+        return True
+    return _count_must_answer_goals(state.get("intent_plan")) >= 2
+
+
+def _build_multi_intent_recovery_system_context(
+    base_context: str,
+    intent_plan: Dict[str, Any],
+    missing_goals: Sequence[Dict[str, Any]],
+) -> str:
+    """构造补齐未完成目标的 system_context 提示。"""
+    normalized_base = str(base_context or "").strip()
+    marker_idx = normalized_base.find(DELIVERY_RECOVERY_MARKER)
+    if marker_idx >= 0:
+        normalized_base = normalized_base[:marker_idx].rstrip()
+
+    goal_index: Dict[str, Dict[str, Any]] = {
+        str(goal.get("goal_id") or ""): goal
+        for goal in list(intent_plan.get("goals") or [])
+        if str(goal.get("goal_id") or "")
+    }
+
+    pending_titles: list[str] = []
+    pending_actions: list[str] = []
+    seen_buckets: set[str] = set()
+    for item in missing_goals:
+        if not isinstance(item, dict):
+            continue
+        goal_id = str(item.get("goal_id") or "")
+        title = str(item.get("title") or goal_id or "未命名目标").strip()
+        if title:
+            pending_titles.append(title)
+
+        goal_kind = str((goal_index.get(goal_id) or {}).get("kind") or "")
+        bucket = _goal_kind_bucket(goal_kind)
+        if bucket in seen_buckets:
+            continue
+        seen_buckets.add(bucket)
+        if bucket == "external":
+            pending_actions.append("外部信息未完成：优先调用 tavily_search（必要时 knowledge_search）补齐结果。")
+        elif bucket == "todo":
+            pending_actions.append("待办事项未完成：调用 assign_to_todo_expert 获取或更新待办结果。")
+        elif bucket == "data":
+            pending_actions.append("数据查询未完成：调用 assign_to_data_expert 补齐数据答案。")
+        else:
+            pending_actions.append("通用问题未完成：请继续补齐该目标后再结束。")
+
+    if not pending_titles:
+        return normalized_base
+
+    lines = [
+        DELIVERY_RECOVERY_MARKER,
+        f"当前轮仍缺少目标：{'、'.join(pending_titles)}。",
+        "请继续完成上述目标后再结束本轮回复，禁止只覆盖部分问题直接结束。",
+    ]
+    if pending_actions:
+        lines.append("补齐动作：")
+        lines.extend(f"- {action}" for action in pending_actions)
+
+    recovery_hint = "\n".join(lines)
+    if normalized_base:
+        return f"{normalized_base}\n{recovery_hint}"
+    return recovery_hint
+
+
+def _extract_latest_structured_result(
+    messages: Sequence[BaseMessage],
+    *,
+    data_type: str,
+) -> Optional[Dict[str, Any]]:
+    """提取当前轮最近的结构化结果。"""
+    target_data_type = str(data_type or "").strip()
+    if not target_data_type:
+        return None
+
+    for message in reversed(messages or []):
+        if str(getattr(message, "type", "")).lower().strip() != "ai":
+            continue
+        additional = getattr(message, "additional_kwargs", {}) or {}
+        if not isinstance(additional, dict):
+            continue
+        if str(additional.get("data_type") or "").strip() != target_data_type:
+            continue
+        payload = additional.get("data")
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "data_type": target_data_type,
+            "data": payload,
+            "message": _normalize_text_content(getattr(message, "content", "")),
+        }
+    return None
+
+
+def _ensure_intent_plan_covers_runtime(
+    state: MultiAgentState,
+    base_plan: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """根据运行时产物补齐 intent_plan，避免遗漏必答项。"""
+    plan = dict(base_plan or state.get("intent_plan") or {})
+    goals = list(plan.get("goals") or [])
+    seen_buckets = {_goal_kind_bucket(str(goal.get("kind") or "")) for goal in goals}
+
+    turn_messages = _slice_messages_from_latest_human(state.get("messages", []))
+    direct_findings = _build_direct_lookup_findings(turn_messages)
+    trace = list(state.get("handoff_execution_trace") or [])
+
+    def _append_goal(kind: str, title: str) -> None:
+        goals.append(
+            {
+                "goal_id": f"GOAL-{len(goals) + 1:02d}",
+                "order": len(goals) + 1,
+                "kind": kind,
+                "title": title,
+                "must_answer": True,
+            }
+        )
+
+    if direct_findings and "external" not in seen_buckets:
+        _append_goal("external.lookup", "外部信息")
+        seen_buckets.add("external")
+
+    for item in trace:
+        target_agent = str(item.get("target_agent") or "")
+        if target_agent == AgentType.TODO and "todo" not in seen_buckets:
+            _append_goal("todo.query", "待办事项")
+            seen_buckets.add("todo")
+        if target_agent == AgentType.DATA and "data" not in seen_buckets:
+            _append_goal("data.query", "数据查询")
+            seen_buckets.add("data")
+
+    if not goals:
+        goals = [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "general.reply",
+                "title": "问题回复",
+                "must_answer": True,
+            }
+        ]
+
+    plan["goals"] = goals
+    if "version" not in plan:
+        plan["version"] = 1
+    if "source" not in plan:
+        plan["source"] = "runtime"
+    return plan
+
+
+def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
+    """构建结构化交付物列表。"""
+    turn_messages = _slice_messages_from_latest_human(state.get("messages", []))
+    trace = list(state.get("handoff_execution_trace") or [])
+    deliverables: list[Dict[str, Any]] = []
+
+    direct_findings = _build_direct_lookup_findings(turn_messages)
+    if direct_findings:
+        summary = "；".join(f"{item['label']}：{item['summary']}" for item in direct_findings)
+        deliverables.append(
+            {
+                "kind": "external.lookup",
+                "status": "success",
+                "summary": summary,
+                "payload": {"findings": direct_findings},
+            }
+        )
+
+    todo_structured = _extract_latest_structured_result(turn_messages, data_type="todo_list")
+    data_structured = _extract_latest_structured_result(turn_messages, data_type="sql_result")
+
+    for item in trace:
+        target_agent = str(item.get("target_agent") or "")
+        result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=220)
+        task_description = _normalize_tool_summary_text(item.get("task_description"), limit=120)
+
+        if target_agent == AgentType.TODO:
+            payload = dict((todo_structured or {}).get("data") or {})
+            summary = result_excerpt or (todo_structured or {}).get("message") or "待办处理完成"
+            deliverables.append(
+                {
+                    "kind": "todo.query",
+                    "status": "success",
+                    "summary": summary,
+                    "task_description": task_description,
+                    "payload": payload,
+                }
+            )
+            continue
+
+        if target_agent == AgentType.DATA:
+            payload = dict((data_structured or {}).get("data") or {})
+            summary = result_excerpt or (data_structured or {}).get("message") or "数据处理完成"
+            deliverables.append(
+                {
+                    "kind": "data.query",
+                    "status": "success",
+                    "summary": summary,
+                    "task_description": task_description,
+                    "payload": payload,
+                }
+            )
+            continue
+
+        if result_excerpt:
+            deliverables.append(
+                {
+                    "kind": "general.reply",
+                    "status": "success",
+                    "summary": result_excerpt,
+                    "task_description": task_description,
+                    "payload": {},
+                }
+            )
+
+    return deliverables
+
+
+def _match_goals_with_deliverables(
+    goals: Sequence[Dict[str, Any]],
+    deliverables: Sequence[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """按顺序匹配 goal 与 deliverable。"""
+    result: Dict[str, Dict[str, Any]] = {}
+    used_indexes: set[int] = set()
+
+    for goal in goals:
+        goal_id = str(goal.get("goal_id") or "")
+        goal_bucket = _goal_kind_bucket(str(goal.get("kind") or ""))
+        matched_idx: Optional[int] = None
+
+        for idx, deliverable in enumerate(deliverables):
+            if idx in used_indexes:
+                continue
+            deliverable_bucket = _goal_kind_bucket(str(deliverable.get("kind") or ""))
+            if goal_bucket == deliverable_bucket:
+                matched_idx = idx
+                break
+
+        if matched_idx is None and goal_bucket == "general":
+            for idx, deliverable in enumerate(deliverables):
+                if idx in used_indexes:
+                    continue
+                if _goal_kind_bucket(str(deliverable.get("kind") or "")) != "external":
+                    matched_idx = idx
+                    break
+
+        if matched_idx is None:
+            continue
+
+        used_indexes.add(matched_idx)
+        result[goal_id] = dict(deliverables[matched_idx])
+
+    return result
+
+
+def _compute_coverage_report(
+    intent_plan: Dict[str, Any],
+    deliverables: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """计算问题覆盖率报告。"""
+    goals = list(intent_plan.get("goals") or [])
+    matched = _match_goals_with_deliverables(goals, deliverables)
+    missing: list[Dict[str, str]] = []
+
+    for goal in goals:
+        goal_id = str(goal.get("goal_id") or "")
+        if not bool(goal.get("must_answer", True)):
+            continue
+        if goal_id not in matched:
+            missing.append(
+                {
+                    "goal_id": goal_id,
+                    "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
+                    "reason": "missing_deliverable",
+                }
+            )
+
+    pass_flag = len(missing) == 0
+    return {
+        "pass": pass_flag,
+        "total_goals": len(goals),
+        "answered_goals": len(matched),
+        "missing_goals": missing,
+        "matched_goal_ids": list(matched.keys()),
+        "goal_results": matched,
+    }
+
+
+def _render_todo_deliverable_text(deliverable: Dict[str, Any]) -> str:
+    """渲染待办交付内容。"""
+    payload = deliverable.get("payload") or {}
+    todos = payload.get("todos") if isinstance(payload, dict) else None
+    if not isinstance(todos, list):
+        return str(deliverable.get("summary") or "待办处理完成")
+
+    if not todos:
+        return "当前没有符合条件的待办事项。"
+
+    head = f"共 {len(todos)} 项待办。"
+    item_texts: list[str] = []
+    for todo in todos[:5]:
+        if not isinstance(todo, dict):
+            continue
+        title = str(todo.get("title") or "未命名待办").strip()
+        status = str(todo.get("status") or "").strip()
+        due = str(todo.get("due_date") or "").strip()
+        meta_parts = [part for part in (status, due) if part]
+        if meta_parts:
+            item_texts.append(f"{title}（{' / '.join(meta_parts)}）")
+        else:
+            item_texts.append(title)
+
+    if not item_texts:
+        return head
+    return f"{head} 重点：{'；'.join(item_texts)}。"
+
+
+def _render_goal_answer(goal: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> str:
+    """渲染单个 goal 的用户答复文本。"""
+    title = str(goal.get("title") or goal.get("kind") or "问题").strip()
+    if not deliverable:
+        return f"{title}：暂未完成，缺少可用结果。"
+
+    bucket = _goal_kind_bucket(str(goal.get("kind") or ""))
+    if bucket == "todo":
+        return f"{title}：{_render_todo_deliverable_text(deliverable)}"
+
+    summary = _normalize_tool_summary_text(deliverable.get("summary"), limit=280)
+    if not summary:
+        summary = "已处理完成。"
+    return f"{title}：{summary}"
+
+
+def _render_final_answer(
+    intent_plan: Dict[str, Any],
+    coverage_report: Dict[str, Any],
+) -> str:
+    """根据问题合同与覆盖报告生成唯一最终答复。"""
+    goals = sorted(
+        list(intent_plan.get("goals") or []),
+        key=lambda item: int(item.get("order") or 0),
+    )
+    goal_results = dict(coverage_report.get("goal_results") or {})
+
+    lines: list[str] = ["按你的问题顺序，逐项回复如下："]
+    for idx, goal in enumerate(goals, start=1):
+        goal_id = str(goal.get("goal_id") or "")
+        lines.append(f"{idx}. {_render_goal_answer(goal, goal_results.get(goal_id))}")
+
+    missing_goals = list(coverage_report.get("missing_goals") or [])
+    if missing_goals:
+        missing_titles = "、".join(str(item.get("title") or item.get("goal_id") or "未命名目标") for item in missing_goals)
+        lines.append(f"当前仍缺少：{missing_titles}。如果你愿意，我可以继续补齐。")
+    else:
+        lines.append("以上问题已全部覆盖。")
+
+    return "\n".join(lines)
 
 
 def _augment_data_handoff_payload(
@@ -787,38 +1510,17 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
 
 
 def _build_multi_intent_summary_content(state: MultiAgentState) -> str:
-    """构造复合任务统一汇总文本。"""
-    trace = list(state.get("handoff_execution_trace") or [])
-    direct_findings = _build_direct_lookup_findings(state.get("messages", []))
-
-    lines: list[str] = ["我已按顺序完成这条复合请求，汇总如下："]
-    index = 1
-
-    for finding in direct_findings:
-        lines.append(f"{index}. {finding['label']}：{finding['summary']}")
-        index += 1
-
-    for item in trace:
-        target_agent = str(item.get("target_agent") or "")
-        if target_agent == AgentType.DATA:
-            agent_name = "数据专家"
-        elif target_agent == AgentType.TODO:
-            agent_name = "待办专家"
-        else:
-            agent_name = target_agent or "专家"
-
-        task_description = _normalize_tool_summary_text(item.get("task_description"), limit=80) or "按当前上下文执行"
-        result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=200) or "已执行完成"
-        lines.append(f"{index}. {agent_name}（{task_description}）：{result_excerpt}")
-        index += 1
-
-    lines.append("如果你希望，我可以基于以上结果继续下一步（例如补充细节或改写待办）。")
-    return "\n".join(lines)
+    """构造复合任务统一交付文本（用户可读、无内部术语）。"""
+    intent_plan = _ensure_intent_plan_covers_runtime(state)
+    deliverables = _build_delivery_artifacts(state)
+    coverage_report = _compute_coverage_report(intent_plan, deliverables)
+    return _render_final_answer(intent_plan, coverage_report)
 
 
 def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
     """评估复合任务进度，返回带 evaluation_route 的状态更新。"""
     messages = state.get("messages", [])
+    turn_messages = _slice_messages_from_latest_human(messages)
     iteration_count = state.get("iteration_count") or 0
     pending_handoff = state.get("pending_handoff")
     handoff_queue = list(state.get("handoff_queue") or [])
@@ -845,7 +1547,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 {
                     "target_agent": pending_handoff.get("target_agent"),
                     "task_description": pending_handoff.get("task_description"),
-                    "result_excerpt": _extract_latest_visible_ai_excerpt(messages),
+                    "result_excerpt": _extract_latest_visible_ai_excerpt(turn_messages),
                 }
             )
 
@@ -864,11 +1566,30 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
         }
 
     if bool(state.get("multi_intent_mode")):
-        direct_findings = _build_direct_lookup_findings(messages)
-        should_summarize = len(execution_trace) >= 2 or (
-            len(execution_trace) >= 1 and bool(direct_findings)
-        )
-        if should_summarize:
+        runtime_state = dict(state)
+        runtime_state["pending_handoff"] = pending_handoff
+        runtime_state["handoff_queue"] = handoff_queue
+        runtime_state["completed_handoffs"] = completed_handoffs
+        runtime_state["handoff_execution_trace"] = execution_trace
+
+        intent_plan = _ensure_intent_plan_covers_runtime(runtime_state)
+        deliverables = _build_delivery_artifacts(runtime_state)
+        coverage_preview = _compute_coverage_report(intent_plan, deliverables)
+        missing_goals = list(coverage_preview.get("missing_goals") or [])
+
+        if not missing_goals:
+            if _is_delivery_orchestrator_v2_enabled():
+                return {
+                    "evaluation": "coverage",
+                    "evaluation_route": "coverage_gate",
+                    "pending_handoff": None,
+                    "handoff_queue": [],
+                    "completed_handoffs": completed_handoffs,
+                    "handoff_execution_trace": execution_trace,
+                    "intent_plan": intent_plan,
+                    "deliverables": deliverables,
+                    "coverage_report": coverage_preview,
+                }
             return {
                 "evaluation": "summarize",
                 "evaluation_route": "summarize",
@@ -876,7 +1597,65 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "handoff_queue": [],
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
+                "intent_plan": intent_plan,
+                "deliverables": deliverables,
+                "coverage_report": coverage_preview,
             }
+
+        missing_goal_ids = [str(item.get("goal_id") or "") for item in missing_goals]
+        missing_goal_titles = [str(item.get("title") or item.get("goal_id") or "未命名目标") for item in missing_goals]
+        logger.info(
+            "评估节点: 复合任务仍有未完成目标，missing=%s，iteration=%d",
+            missing_goal_ids,
+            iteration_count,
+        )
+
+        if iteration_count + 1 >= max_iterations:
+            logger.warning(
+                "评估节点: 复合任务到达迭代上限，带缺口输出（missing=%s）",
+                missing_goal_ids,
+            )
+            final_route = "coverage_gate" if _is_delivery_orchestrator_v2_enabled() else "summarize"
+            final_evaluation = "coverage" if final_route == "coverage_gate" else "summarize"
+            return {
+                "evaluation": final_evaluation,
+                "evaluation_route": final_route,
+                "pending_handoff": None,
+                "handoff_queue": [],
+                "completed_handoffs": completed_handoffs,
+                "handoff_execution_trace": execution_trace,
+                "intent_plan": intent_plan,
+                "deliverables": deliverables,
+                "coverage_report": coverage_preview,
+                "delivery_meta": {
+                    **dict(state.get("delivery_meta") or {}),
+                    "pending_goal_ids": missing_goal_ids,
+                    "pending_goal_titles": missing_goal_titles,
+                },
+            }
+
+        return {
+            "evaluation": "continue",
+            "evaluation_route": "supervisor",
+            "iteration_count": iteration_count + 1,
+            "pending_handoff": None,
+            "handoff_queue": [],
+            "completed_handoffs": completed_handoffs,
+            "handoff_execution_trace": execution_trace,
+            "intent_plan": intent_plan,
+            "deliverables": deliverables,
+            "coverage_report": coverage_preview,
+            "delivery_meta": {
+                **dict(state.get("delivery_meta") or {}),
+                "pending_goal_ids": missing_goal_ids,
+                "pending_goal_titles": missing_goal_titles,
+            },
+            "system_context": _build_multi_intent_recovery_system_context(
+                str(state.get("system_context") or ""),
+                intent_plan,
+                missing_goals,
+            ),
+        }
 
     if not messages:
         return {
@@ -1262,18 +2041,29 @@ def _dispatch_values_mode_chunk(
             first_handoff = normalized_batch[0]
             remaining_handoffs = normalized_batch[1:]
             target_agent = first_handoff.get("target_agent")
+            direct_findings = _build_direct_lookup_findings(delta_messages_for_scan)
+            has_direct_lookup = bool(direct_findings)
+            planned_goal_count = _count_must_answer_goals(ctx.state.get("intent_plan"))
+            enable_multi_intent_mode = _should_enable_multi_intent_mode(
+                handoff_batch_size=len(normalized_batch),
+                has_direct_lookup=has_direct_lookup,
+                state=ctx.state,
+            )
             logger.info(
-                "[%s] values模式检测到 handoff_batch: total=%d, first_target=%s",
+                "[%s] values模式检测到 handoff_batch: total=%d, first_target=%s, direct_findings=%d, planned_goals=%d, multi_intent=%s",
                 ctx.node_name,
                 len(normalized_batch),
                 target_agent,
+                len(direct_findings),
+                planned_goal_count,
+                enable_multi_intent_mode,
             )
             handoff_return = _build_streaming_handoff_return(
                 final_state=final_state,
                 delta_messages=delta_messages_for_scan,
                 handoff_data=first_handoff,
                 handoff_queue=remaining_handoffs,
-                multi_intent_mode=len(normalized_batch) > 1,
+                multi_intent_mode=enable_multi_intent_mode,
             )
             return input_message_count, handoff_return
 
@@ -1532,30 +2322,150 @@ def _create_streaming_agent_wrapper(agent: Any, node_name: str):
     return streaming_wrapper
 
 
-def _get_common_tools():
-    """获取所有专家共享的工具（图片分析、文件读取）。"""
-    tools = []
-    
+def _resolve_tool_name(tool_obj: Any) -> str:
+    """解析工具名称，兼容 LangChain Tool / 函数对象。"""
+    name = getattr(tool_obj, "name", None)
+    if callable(name):
+        try:
+            name = name()
+        except Exception:
+            name = None
+    if not name:
+        name = getattr(tool_obj, "__name__", "")
+    return str(name or "").strip().lower()
+
+
+def _build_tool_entry(tool_obj: Any, groups: Optional[set[str]] = None) -> Dict[str, Any]:
+    """构造工具候选条目。"""
+    return {
+        "tool": tool_obj,
+        "name": _resolve_tool_name(tool_obj),
+        "groups": {str(item).strip().lower() for item in (groups or set()) if str(item).strip()},
+    }
+
+
+def _normalize_policy_tokens(raw_value: Any) -> set[str]:
+    """标准化策略 token 列表。"""
+    if raw_value is None:
+        return set()
+    if isinstance(raw_value, str):
+        candidates = [raw_value]
+    elif isinstance(raw_value, list):
+        candidates = raw_value
+    else:
+        return set()
+
+    normalized = set()
+    for item in candidates:
+        token = str(item or "").strip().lower()
+        if token:
+            normalized.add(token)
+    return normalized
+
+
+def _match_policy_tokens(entry: Dict[str, Any], tokens: set[str]) -> bool:
+    """判断工具条目是否命中策略 token。"""
+    if not tokens:
+        return False
+
+    name = str(entry.get("name", "")).strip().lower()
+    groups = {
+        str(item).strip().lower()
+        for item in (entry.get("groups") or set())
+        if str(item).strip()
+    }
+    entry_tokens = {name, f"tool:{name}", *groups}
+    return bool(entry_tokens & tokens)
+
+
+def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name: str) -> list[Any]:
+    """按工具治理策略过滤工具候选集。"""
+    raw_tools = [entry["tool"] for entry in tool_entries]
+    fail_mode = "compat"
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        settings = ConfigResolver.get_tool_governance_settings()
+        fail_mode = str(settings.get("fail_mode") or "compat").strip().lower() or "compat"
+        if not settings.get("enabled", False):
+            return raw_tools
+
+        policy_layers = ConfigResolver.get_tool_policy_layers(agent_name)
+        merged_policy = policy_layers.get("merged_policy")
+        if not isinstance(merged_policy, dict):
+            merged_policy = {}
+
+        allow_tokens = _normalize_policy_tokens(merged_policy.get("allow"))
+        deny_tokens = _normalize_policy_tokens(merged_policy.get("deny"))
+
+        default_allow = fail_mode in {"compat", "allow"}
+        if allow_tokens:
+            default_allow = False
+
+        selected: list[Any] = []
+        denied_names: list[str] = []
+
+        for entry in tool_entries:
+            allowed = default_allow or _match_policy_tokens(entry, allow_tokens)
+            if _match_policy_tokens(entry, deny_tokens):
+                allowed = False
+
+            if allowed:
+                selected.append(entry["tool"])
+            else:
+                denied_names.append(entry.get("name", "unknown"))
+
+        logger.info(
+            "工具治理生效: agent=%s, allow=%s, deny=%s, selected=%s, denied=%s",
+            agent_name,
+            sorted(allow_tokens),
+            sorted(deny_tokens),
+            [entry.get("name", "unknown") for entry in tool_entries if entry["tool"] in selected],
+            denied_names,
+        )
+        return selected
+    except Exception as exc:
+        logger.warning(
+            "工具治理过滤失败，降级继续: agent=%s, fail_mode=%s, error=%s",
+            agent_name,
+            fail_mode,
+            exc,
+        )
+        if fail_mode in {"deny", "minimal"}:
+            return []
+        return raw_tools
+
+
+def _get_common_tool_entries() -> list[Dict[str, Any]]:
+    """构建共享工具候选条目（未应用治理策略）。"""
+    entries: list[Dict[str, Any]] = []
+
     # 图片分析工具
     try:
         from app.ai.tools.vision_tool import analyze_image, is_vision_configured
         if is_vision_configured():
-            tools.append(analyze_image)
+            entries.append(_build_tool_entry(analyze_image, {"group:vision"}))
             logger.debug("共享工具: 已加载 analyze_image")
     except Exception as e:
         logger.warning("Vision 工具加载失败: %s", e)
-    
+
     # 文件读取工具
     try:
         from app.ai.tools.file_tools import read_uploaded_file, read
 
-        tools.append(read_uploaded_file)
-        tools.append(read)
+        entries.append(_build_tool_entry(read_uploaded_file, {"group:file"}))
+        entries.append(_build_tool_entry(read, {"group:file"}))
         logger.debug("共享工具: 已加载 read_uploaded_file/read")
     except Exception as e:
         logger.warning("文件读取工具加载失败: %s", e)
-    
-    return tools
+
+    return entries
+
+
+def _get_common_tools():
+    """获取所有专家共享的工具（图片分析、文件读取）。"""
+    return _apply_tool_governance_policy(_get_common_tool_entries(), agent_name="common")
 
 
 def _get_supervisor_tools():
@@ -1570,12 +2480,12 @@ def _get_supervisor_tools():
     注意：sql_inter 已移除，数据查询统一由 data_expert 处理，
     避免 Supervisor 直接执行 SQL 导致权限失败和无效重试。
     """
-    tools = _get_common_tools()
+    entries = _get_common_tool_entries()
     
     # 绘图工具（sql_inter 已移至 data_expert 专用）
     try:
         from app.ai.tools.chatTools import fig_inter
-        tools.append(fig_inter)
+        entries.append(_build_tool_entry(fig_inter, {"group:chart"}))
         logger.debug("Supervisor 工具: 已加载 fig_inter")
     except Exception as e:
         logger.warning("Supervisor 绘图工具加载失败: %s", e)
@@ -1584,7 +2494,7 @@ def _get_supervisor_tools():
     try:
         from app.ai.tools.ragflow_tool import knowledge_search, is_ragflow_configured
         if is_ragflow_configured():
-            tools.append(knowledge_search)
+            entries.append(_build_tool_entry(knowledge_search, {"group:knowledge"}))
             logger.debug("Supervisor 工具: 已加载 knowledge_search")
     except Exception as e:
         logger.warning("Supervisor 知识库工具加载失败: %s", e)
@@ -1593,7 +2503,7 @@ def _get_supervisor_tools():
     try:
         from app.ai.tools.chatTools import search_tool
         if search_tool is not None:
-            tools.append(search_tool)
+            entries.append(_build_tool_entry(search_tool, {"group:web"}))
             logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索")
         else:
             logger.info(
@@ -1601,8 +2511,8 @@ def _get_supervisor_tools():
             )
     except Exception as e:
         logger.warning("Supervisor 联网搜索工具加载失败: %s", e)
-    
-    return tools
+
+    return _apply_tool_governance_policy(entries, agent_name="supervisor")
 
 
 def _create_task_handoff_tool(agent_name: str, description: str):
@@ -1662,6 +2572,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             fallback_triggered=False,
             plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state),
         ),
+        "turn_id": f"{state.get('thread_id') or 'thread'}:{datetime.now(timezone.utc).isoformat(timespec='seconds')}",
     }
     
     # 注意：临时状态（pending_handoff 等）在 postprocess 节点统一清理
@@ -1718,7 +2629,6 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     
     # ========== 3. 系统上下文注入 ==========
     # 为所有 Agent 提供当前时间与待办锚点等系统级信息
-    from datetime import datetime
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
     context_parts = [f"当前时间: {current_time}"]
 
@@ -1747,6 +2657,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                 content,
                 top_k=2,
                 auto_only=True,
+                user_id=state.get("user_id"),
             )
             skill_candidates = debug_payload.get("skill_candidates", [])
             selected_skill_ids = debug_payload.get("selected_skill_ids", [])
@@ -1967,6 +2878,7 @@ async def create_multi_agent_graph(
             # === 意图识别 ===
             "detected_intent": None,
             "intent_route": None,
+            "intent_mode": "model_primary",
             
             # === 预处理结果（下一轮会重新生成）===
             "attachment_analysis": None,
@@ -1974,6 +2886,16 @@ async def create_multi_agent_graph(
             "selected_skill_ids": [],
             "skill_context": None,
             "skill_injection_meta": None,
+            "turn_id": None,
+
+            # === 交付导向状态 ===
+            "intent_plan": None,
+            "task_graph": None,
+            "task_runs": [],
+            "deliverables": [],
+            "coverage_report": None,
+            "final_answer": None,
+            "delivery_meta": {},
 
             # === 稳态恢复观测 ===
             "runtime_recovery_state": _build_runtime_recovery_state(
@@ -1984,7 +2906,35 @@ async def create_multi_agent_graph(
             ),
         }
 
-    # 8. 定义评估节点（判断专家工作是否完成）
+    # 8. 定义规划节点（问题合同）
+    def _planner_node(state: MultiAgentState) -> dict:
+        """生成当前轮 intent_plan，并向前端发送 plan_ready 事件。"""
+        if not _is_delivery_orchestrator_v2_enabled():
+            return {}
+
+        planner_mode = str(state.get("intent_mode") or "model_primary")
+        intent_plan = _build_planner_intent_plan(state, llm=llm, mode=planner_mode)
+        source = str(intent_plan.get("source") or "unknown")
+        fallback_meta = intent_plan.get("fallback_meta") if isinstance(intent_plan.get("fallback_meta"), dict) else {}
+        fallback_reason = str(fallback_meta.get("reason") or "").strip()
+
+        status_message = f"已识别 {len(intent_plan.get('goals', []))} 个待答目标，准备进入执行阶段。"
+        if source == "heuristic_fallback":
+            suffix = f"（模型主判定失败，已切换规则兜底：{fallback_reason or 'unknown'}）"
+            status_message = f"已识别 {len(intent_plan.get('goals', []))} 个待答目标，准备进入执行阶段{suffix}。"
+
+        writer = get_stream_writer()
+        emit_status(
+            writer,
+            message=status_message,
+            node="planner",
+        )
+        if _is_sse_delivery_events_v2_enabled():
+            emit_plan_ready(writer, intent_plan, node="planner")
+
+        return {"intent_plan": intent_plan}
+
+    # 9. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
         """评估专家工作节点：支持 handoff 队列串行消费与复合任务汇总收口。"""
         decision = _evaluate_handoff_progress(state)
@@ -2000,19 +2950,113 @@ async def create_multi_agent_graph(
                 message=f"复合任务继续执行：即将委派 {target_agent}，剩余队列 {queue_left} 项。",
                 node="evaluate",
             )
+            if _is_sse_delivery_events_v2_enabled():
+                emit_task_started(
+                    writer,
+                    {
+                        "target_agent": target_agent,
+                        "task_description": pending_handoff.get("task_description"),
+                        "queue_left": queue_left,
+                    },
+                    node="evaluate",
+                )
         elif route == "summarize":
             emit_status(
                 writer,
                 message="复合任务子步骤已完成，正在统一汇总输出...",
                 node="evaluate",
             )
+        elif route == "coverage_gate":
+            emit_status(
+                writer,
+                message="复合任务子步骤已完成，正在执行完整性检查...",
+                node="evaluate",
+            )
+            if _is_sse_delivery_events_v2_enabled():
+                latest_completed = (decision.get("completed_handoffs") or [])[-1:] or []
+                if latest_completed:
+                    emit_task_finished(
+                        writer,
+                        {
+                            "target_agent": latest_completed[0].get("target_agent"),
+                            "task_description": latest_completed[0].get("task_description"),
+                        },
+                        node="evaluate",
+                    )
         elif route == "supervisor":
             emit_status(writer, message="专家工作需要继续，正在协调其他专家...", node="evaluate")
 
         return decision
 
+    def _coverage_gate_node(state: MultiAgentState) -> dict:
+        """覆盖率门禁：保证 must_answer 目标有对应交付物。"""
+        if not _is_delivery_orchestrator_v2_enabled():
+            return {}
+
+        intent_plan = _ensure_intent_plan_covers_runtime(state)
+        deliverables = _build_delivery_artifacts(state)
+        coverage_report = _compute_coverage_report(intent_plan, deliverables)
+
+        writer = get_stream_writer()
+        emit_status(
+            writer,
+            message="已完成问题覆盖检查，正在整理最终答复。",
+            node="coverage_gate",
+        )
+        if _is_sse_delivery_events_v2_enabled():
+            emit_coverage_check(writer, coverage_report, node="coverage_gate")
+
+        return {
+            "intent_plan": intent_plan,
+            "deliverables": deliverables,
+            "coverage_report": coverage_report,
+        }
+
+    def _final_composer_node(state: MultiAgentState) -> dict:
+        """唯一对外出口：生成最终答复并触发 final_answer 事件。"""
+        if not _is_delivery_orchestrator_v2_enabled():
+            return {}
+
+        intent_plan = _ensure_intent_plan_covers_runtime(state)
+        deliverables = list(state.get("deliverables") or _build_delivery_artifacts(state))
+        coverage_report = dict(state.get("coverage_report") or _compute_coverage_report(intent_plan, deliverables))
+        final_answer = _render_final_answer(intent_plan, coverage_report)
+
+        writer = get_stream_writer()
+        emit_status(writer, message="结论已生成，正在返回最终答复。", node="final_composer")
+        if _is_sse_delivery_events_v2_enabled():
+            emit_final_answer(
+                writer,
+                final_answer,
+                meta={
+                    "coverage_pass": bool(coverage_report.get("pass")),
+                    "missing_goals": len(coverage_report.get("missing_goals") or []),
+                    "goal_count": len(intent_plan.get("goals") or []),
+                },
+                node="final_composer",
+            )
+        else:
+            emit_token(writer, final_answer, node="final_composer")
+
+        return {
+            "messages": [create_ai_message(final_answer)],
+            "intent_plan": intent_plan,
+            "deliverables": deliverables,
+            "coverage_report": coverage_report,
+            "final_answer": final_answer,
+            "delivery_meta": {
+                "coverage_pass": bool(coverage_report.get("pass")),
+                "missing_goal_count": len(coverage_report.get("missing_goals") or []),
+            },
+            "evaluation": "complete",
+            "evaluation_route": "postprocess",
+        }
+
     def _summarize_multi_intent(state: MultiAgentState) -> dict:
         """复合任务汇总节点：将 direct tool + 专家执行结果合并为单条总结。"""
+        if _is_delivery_orchestrator_v2_enabled():
+            return {}
+
         trace = list(state.get("handoff_execution_trace") or [])
         direct_findings = _build_direct_lookup_findings(state.get("messages", []))
         has_enough_inputs = len(trace) >= 2 or (len(trace) >= 1 and bool(direct_findings))
@@ -2030,13 +3074,20 @@ async def create_multi_agent_graph(
             "evaluation_route": "postprocess",
         }
 
-    # 9. 条件路由函数
+    # 10. 条件路由函数
     def should_continue_routing(
         state: MultiAgentState,
-    ) -> Literal["postprocess", "supervisor", "data_expert", "todo_expert", "summarize"]:
+    ) -> Literal[
+        "postprocess",
+        "supervisor",
+        "data_expert",
+        "todo_expert",
+        "summarize",
+        "coverage_gate",
+    ]:
         """根据评估结果决定下一步。"""
         evaluation_route = str(state.get("evaluation_route") or "").strip()
-        if evaluation_route in {"postprocess", "supervisor", "data_expert", "todo_expert", "summarize"}:
+        if evaluation_route in {"postprocess", "supervisor", "data_expert", "todo_expert", "summarize", "coverage_gate"}:
             return evaluation_route  # type: ignore[return-value]
 
         evaluation = state.get("evaluation", "complete")
@@ -2044,16 +3095,19 @@ async def create_multi_agent_graph(
             return "supervisor"
         return "postprocess"
 
-    # 10. 构建 StateGraph（简化架构：移除 knowledge_expert）
+    # 11. 构建 StateGraph（简化架构：移除 knowledge_expert）
     workflow = StateGraph(MultiAgentState)
 
     # 添加节点
     workflow.add_node("preprocess", _preprocess_multimodal)
+    workflow.add_node("planner", _planner_node)
     # 修复: Supervisor 也需要流式包装器,确保 LLM 输出是流式的
     workflow.add_node("supervisor", _create_streaming_agent_wrapper(supervisor_agent, "supervisor"))
     workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_graph_app, "data_expert"))
     workflow.add_node("todo_expert", _create_streaming_agent_wrapper(todo_graph_app, "todo_expert"))
     workflow.add_node("evaluate", _evaluate_expert_work)
+    workflow.add_node("coverage_gate", _coverage_gate_node)
+    workflow.add_node("final_composer", _final_composer_node)
     workflow.add_node("summarize", _summarize_multi_intent)
     workflow.add_node("postprocess", _postprocess)
 
@@ -2061,7 +3115,8 @@ async def create_multi_agent_graph(
     
     # 添加边
     workflow.add_edge(START, "preprocess")
-    workflow.add_edge("preprocess", "supervisor")
+    workflow.add_edge("preprocess", "planner")
+    workflow.add_edge("planner", "supervisor")
     
     # 专家执行完 -> 评估节点
     workflow.add_edge("data_expert", "evaluate")
@@ -2129,9 +3184,13 @@ async def create_multi_agent_graph(
         if has_tool_calls:
             logger.debug("Supervisor 有工具调用，路由到 evaluate")
             return "evaluate"
-        else:
-            logger.debug("Supervisor 直接回复，路由到 postprocess")
-            return "postprocess"
+
+        if bool(state.get("multi_intent_mode")):
+            logger.debug("Supervisor 处于复合任务模式，路由到 evaluate 进行覆盖检查")
+            return "evaluate"
+
+        logger.debug("Supervisor 直接回复，路由到 postprocess")
+        return "postprocess"
     
     workflow.add_conditional_edges(
         "supervisor",
@@ -2153,10 +3212,13 @@ async def create_multi_agent_graph(
             "supervisor": "supervisor",    # 返回 Supervisor 重新评估
             "data_expert": "data_expert",  # 队列中下一位专家
             "todo_expert": "todo_expert",  # 队列中下一位专家
+            "coverage_gate": "coverage_gate",  # 完整性门禁
             "summarize": "summarize",      # 复合任务统一汇总
         }
     )
 
+    workflow.add_edge("coverage_gate", "final_composer")
+    workflow.add_edge("final_composer", "postprocess")
     workflow.add_edge("summarize", "postprocess")
     
     # Postprocess -> END

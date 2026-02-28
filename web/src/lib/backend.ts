@@ -1,6 +1,7 @@
 import type {
   ClarificationEventData,
   DoneEventData,
+  FinalAnswerEventData,
   InitEventData,
   KbImagesEventData,
   ResultEventData,
@@ -194,6 +195,8 @@ export interface StreamCallbacks {
   onClarification?: (data: ClarificationEventData) => void;
   /** 知识库图片映射（用于替换占位符） */
   onKbImages?: (images: Record<string, string>) => void;
+  /** 最终答复（唯一对外正文） */
+  onFinalAnswer?: (data: FinalAnswerEventData) => void;
 }
 
 /**
@@ -263,6 +266,16 @@ function normalizeResultEventData(data: unknown): ResultEventData | null {
     // 约定：`data_type=sql_result` 时，data 可选携带 `chart` 字段
     data: data.data as SqlResultData,
     message: toOptionalString(data.message),
+  };
+}
+
+function normalizeFinalAnswerEventData(data: unknown): FinalAnswerEventData | null {
+  if (!isObjectRecord(data)) return null;
+  const content = toOptionalString(data.content);
+  if (!content) return null;
+  return {
+    content,
+    meta: isObjectRecord(data.meta) ? data.meta : undefined,
   };
 }
 
@@ -368,6 +381,7 @@ function dispatchSSEEvent(
     onStatus,
     onClarification,
     onKbImages,
+    onFinalAnswer,
     onDone,
     onError,
   } = callbacks;
@@ -426,6 +440,13 @@ function dispatchSSEEvent(
       const resultData = normalizeResultEventData(event.data);
       if (resultData) {
         onResult?.(resultData);
+      }
+      return;
+    }
+    case "final_answer": {
+      const finalAnswerData = normalizeFinalAnswerEventData(event.data);
+      if (finalAnswerData) {
+        onFinalAnswer?.(finalAnswerData);
       }
       return;
     }

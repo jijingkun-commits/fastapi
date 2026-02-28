@@ -135,8 +135,8 @@ else:
 
 ### 单元测试
 
-- [ ] `test_interpret_result_display_limit`: 验证 `_interpret_result` 在不同行数下的文案
-- [ ] `test_streaming_wrapper_forwards_custom_events`: 验证 custom events 能通过 streaming_wrapper 转发
+- [x] `test_interpret_result_display_limit`: 验证 `_interpret_result` 在不同行数下的文案
+- [x] `test_run_streaming_dispatch_loop_filters_invalid_custom_chunks`: 验证 custom events 能通过 streaming_wrapper 转发
 
 ---
 
@@ -154,6 +154,6 @@ else:
 
 ## 7. 文档关联
 
-- [ ] 需求文档: `docs/产品文档/问数助手需求.md`
-- [ ] 测试案例: `docs/开发文档/测试管理/问数引擎测试案例.md`
-- [ ] 架构文档: `docs/开发文档/架构设计/AI模块设计.md`（streaming 架构）
+- [x] 需求文档: `docs/产品文档/问数助手需求.md`
+- [x] 测试案例: `docs/开发文档/测试管理/问数引擎测试案例.md`
+- [x] 架构文档: `docs/开发文档/架构设计/AI模块设计.md`（streaming 架构）

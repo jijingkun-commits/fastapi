@@ -256,9 +256,14 @@ class PermissionService:
             )
             return (True, None)
 
+        logger.warning(
+            "查询上下文校验拒绝: user_id=%s, data_role=%s, reason=missing_dept_code_default_scope",
+            ctx.user_id,
+            ctx.data_role,
+        )
         return (
             False,
-            f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询",
+            f"用户 {ctx.user_id} 缺少 dept_code，命中默认部门隔离策略，拒绝查询（data_role={ctx.data_role}）",
         )
 
     @staticmethod

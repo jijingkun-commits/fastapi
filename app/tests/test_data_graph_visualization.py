@@ -353,3 +353,16 @@ def test_pick_chart_axes_prefers_multi_point_date_dimension_for_trend():
     x_key, y_key = module._pick_chart_axes(columns, rows)
     assert x_key == "业务日期"
     assert y_key == "贷款余额"
+
+
+def test_interpret_result_display_limit():
+    """_interpret_result 在不同行数下应返回正确文案。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    ten_rows = [{"id": idx} for idx in range(10)]
+    text_ten = module._interpret_result("测试问题", "SELECT id FROM t", ten_rows)
+    assert text_ten == "查询完成，共返回 10 条记录。"
+
+    many_rows = [{"id": idx} for idx in range(150)]
+    text_many = module._interpret_result("测试问题", "SELECT id FROM t", many_rows)
+    assert text_many == "查询完成，共返回 150 条记录（已展示前 100 条）。"

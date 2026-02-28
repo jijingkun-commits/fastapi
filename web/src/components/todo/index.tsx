@@ -42,6 +42,8 @@ interface TodoListCardProps {
 
 // ==================== Component ====================
 
+const DEFAULT_STATUS_FILTER: 'all' | 'todo' | 'done' = 'todo'
+
 export default function TodoListCard({
     todos,
     onAction,
@@ -73,7 +75,7 @@ export default function TodoListCard({
 
     // 筛选状态
     const [searchQuery, setSearchQuery] = useState('')
-    const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'done'>('all')
+    const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'done'>(DEFAULT_STATUS_FILTER)
     const [priorityFilter, setPriorityFilter] = useState<'all' | '1' | '2' | '3'>('all')
 
     // 筛选后的待办列表（使用本地状态）
@@ -100,11 +102,11 @@ export default function TodoListCard({
         })
     }, [localTodos, searchQuery, statusFilter, priorityFilter])
 
-    const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all'
+    const hasActiveFilters = searchQuery || statusFilter !== DEFAULT_STATUS_FILTER || priorityFilter !== 'all'
 
     const clearFilters = () => {
         setSearchQuery('')
-        setStatusFilter('all')
+        setStatusFilter(DEFAULT_STATUS_FILTER)
         setPriorityFilter('all')
     }
 

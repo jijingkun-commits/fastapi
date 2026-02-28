@@ -4,7 +4,9 @@
 
 本文定位：开发人员一页速查卡。若需命令/技能/规则细节，请配合阅读 `vibe-coding开发技巧.md` 与 `.cursor/commands/*.md`。
 
-> 命令权威源：`.cursor/commands/*.md`（Cursor / Codex）、`.claude/commands/*.md`（Claude Code）。当速查表、工作流文档与命令文档冲突时，一律以命令文档为准。
+> 命令权威源：`.cursor/commands/*.md`。同步镜像：`.claude/commands/*.md`（Claude Code）与 `~/.codex/prompts/*.md`（Codex）。当速查表、工作流文档与命令文档冲突时，一律以命令文档为准。
+
+> 命令触发差异：Claude Code / Cursor 可直接用 `/jjk-xxx`；Codex 需使用 `/prompts:jjk-xxx`。
 
 ---
 
@@ -13,7 +15,8 @@
 ### 1.1 常规开发（单任务）
 
 ```text
-想法 -> /jjk-clarify -> /jjk-plan -> /jjk-imp -> /jjk-review -> /jjk-test -> 验收
+想法 -> /jjk-clarify -> /jjk-plan -> /jjk-imp -> /jjk-verify -> 验收
+                                                  （或 /jjk-review -> /jjk-test -> 验收）
 ```
 
 ### 1.2 并行开发（多 AI / 多 worktree）
@@ -24,7 +27,8 @@
      -> /jjk-imp-ws @workstreams/WS-01...WS-N（并行层）
      -> /jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md
      -> /jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md
-     -> /jjk-review -> /jjk-test -> 验收
+     -> /jjk-verify -> 验收
+                       （或 /jjk-review -> /jjk-test -> 验收）
 ```
 
 并行执行顺序固定：
@@ -52,7 +56,7 @@
 
 | 场景 | 推荐命令 | 说明 |
 |---|---|---|
-| 快速澄清需求 | `/jjk-clarify` | 只问答，不落文档 |
+| 快速澄清需求 | `/jjk-clarify`（支持 deep 模式） | 只问答，不落文档；deep 模式做领域灰区分析 |
 | 规划（不拆卡） | `/jjk-plan` 或 `/jjk-plan core` | 只产出需求与技术方案 |
 | 规划 + 并行拆解（推荐） | `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`） | 含 G0 冻结与落卡前产物 |
 | 基线同步（调试） | `/jjk-vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
@@ -60,6 +64,8 @@
 | 看板推进（简化） | `/jjk-vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
 | 执行单个 WS | `/jjk-imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/jjk-imp` | 不走并行流程时使用 |
+| 小改动（<= 3 文件） | `/jjk-quick` | 跳过完整流程，直接改码 + 最小验证 |
+| 一站式验证 | `/jjk-verify` | 审查 + 测试 + 交互式 UAT，一次完成 |
 | 代码审查 | `/jjk-review` | 质量与风险检查 |
 | 测试验证 | `/jjk-test` | 回归验证与报告沉淀 |
 

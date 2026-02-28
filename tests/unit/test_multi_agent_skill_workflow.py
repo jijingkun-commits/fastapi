@@ -12,6 +12,7 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
     """预处理节点应写入技能候选、入选与注入元信息。"""
 
     events = []
+    captured = {}
     monkeypatch.setattr(multi_agent_graph, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr("app.ai.message_utils.validate_messages", lambda messages, fix_reasoning=False: messages)
 
@@ -30,7 +31,9 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
         auto_only: bool = False,
         thread_id=None,
         trace_id=None,
+        user_id=None,
     ):
+        captured["user_id"] = user_id
         return {
             "query": query,
             "mode": "hybrid",
@@ -66,6 +69,7 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
             {
                 "messages": [HumanMessage(content="按分行统计贷款余额")],
                 "enable_thinking": False,
+                "user_id": 42,
             }
         )
     )
@@ -74,4 +78,5 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
     assert updates["skill_context"]
     assert updates["skill_injection_meta"]["selected_count"] == 1
     assert updates["skill_candidates"][0]["skill_id"] == "data-loan"
+    assert captured["user_id"] == 42
     assert any(event.get("type") == "status" for event in events)

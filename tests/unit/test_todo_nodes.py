@@ -777,6 +777,30 @@ class TestTodoWorkflowStateSemantics:
 class TestTodoRejectSupplementRecovery:
     """拒绝后补充应恢复创建草稿（需求 §3.4）。"""
 
+    def test_merge_create_draft_with_supplement_should_override_time_location_and_append_desc(self):
+        """单元：补充信息应覆盖时间/地点并保留同一草稿上下文。"""
+        from app.ai.workflow.todo_graph import _merge_create_draft_with_supplement
+
+        draft = {
+            "title": "和张三开会",
+            "time": "明天上午9点",
+            "location": "陆家嘴",
+            "description": "与张三开会",
+        }
+        supplement = {
+            "time": "明天下午3点",
+            "location": "会议室A",
+            "description": "需要带投影线",
+        }
+
+        merged = _merge_create_draft_with_supplement(draft, supplement)
+
+        assert merged["title"] == "和张三开会"
+        assert merged["time"] == "明天下午3点"
+        assert merged["location"] == "会议室A"
+        assert "与张三开会" in str(merged.get("description") or "")
+        assert "需要带投影线" in str(merged.get("description") or "")
+
     def test_global_todo_state_should_include_response_message(self):
         """全局 Todo 状态契约必须包含 response_message，避免 clarify 节点丢字段。"""
         from app.ai import state as ai_state
@@ -889,6 +913,79 @@ class TestTodoRejectSupplementRecovery:
         merged_desc = str((pending.get("data") or {}).get("description") or "")
         assert "与张三开会" in merged_desc
         assert "需要带纸和笔" in merged_desc
+        assert "确认创建" in str(result.get("response_message") or "")
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_reject_then_supplement_time_location_should_keep_same_create_draft(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """场景：拒绝后补充时间/地点，应恢复同一创建草稿并进入再确认。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"update","action_state":"need_clarify",'
+            '"response_message":"我可以帮你更新补充信息，你想更新哪一个待办？",'
+            '"extracted_info":{"time":"明天下午3点","location":"会议室A","description":"改到明天下午3点，在会议室A开会"},'
+            '"missing_info":["todo_target"]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [
+                HumanMessage(content="明天上午9点和张三在陆家嘴开会"),
+                AIMessage(
+                    content="好的，我帮你记录这个待办",
+                    additional_kwargs={
+                        "operation": {
+                            "action": "create",
+                            "data": {
+                                "title": "和张三开会",
+                                "time": "明天上午9点",
+                                "location": "陆家嘴",
+                                "description": "与张三开会",
+                            },
+                        }
+                    },
+                ),
+                HumanMessage(content="拒绝"),
+                AIMessage(content="好的，已取消操作。有其他需要帮助的吗？"),
+                HumanMessage(content="改到明天下午3点，在会议室A开会"),
+            ],
+            "user_id": 1,
+            "pending_operation": None,
+            "pending_clarifications": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "response_message": None,
+            "clarify_fsm_state": "idle",
+            "clarify_round": 0,
+        }
+
+        result = analyze_intent(state)
+
+        pending = result.get("pending_operation", {})
+        pending_data = pending.get("data") or {}
+        assert pending.get("action") == "create"
+        assert pending.get("needs_clarification") is False
+        assert pending_data.get("title") == "和张三开会"
+        assert pending_data.get("time") == "明天下午3点"
+        assert pending_data.get("location") == "会议室A"
         assert "确认创建" in str(result.get("response_message") or "")
 
 

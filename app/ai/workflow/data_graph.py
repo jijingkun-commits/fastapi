@@ -112,6 +112,17 @@ class MetricTemplatePlan:
     measure_alias: str
 
 
+@dataclass
+class MetricDimensionProjection:
+    """维度投影计划。"""
+
+    select_parts: List[str]
+    group_by_fields: List[str]
+    from_expr_override: Optional[str] = None
+    where_expr_override: Optional[str] = None
+    measure_expr_override: Optional[str] = None
+
+
 _DIMENSION_FIELD_MAP: Dict[str, List[str]] = {
     "客户": ["ecif_cust_no"],
     "机构": ["org_cd", "org_no", "legal_org_cd"],
@@ -120,6 +131,11 @@ _DIMENSION_FIELD_MAP: Dict[str, List[str]] = {
     "部门": ["dept_cd"],
     "日期": ["data_dt"],
 }
+
+_ORG_DIMENSION_KEYS: Tuple[str, ...] = ("机构", "分行")
+_LOAN_METRIC_FACT_TABLE = "fdmdata.f_mid_loan_k_tb"
+_ORG_TREE_DIM_TABLE = "fdmdata.f_mid_org_tree_k"
+_DEFAULT_BRANCH_ORG_LEVEL = "04"
 
 
 _FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES: Tuple[ResultLookupEnrichmentRule, ...] = (
@@ -185,6 +201,86 @@ def _resolve_dimension_fields(dimensions: Optional[List[str]]) -> List[str]:
                         resolved.append(field)
 
     return resolved
+
+
+def _extract_primary_table_name(from_expr: str) -> Optional[str]:
+    """从 FROM 表达式提取主表名（schema.table）。"""
+    match = re.match(r"([a-zA-Z_]\w*\.[a-zA-Z_]\w*)", str(from_expr or "").strip())
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def _is_org_dimension_requested(dimensions: Optional[List[str]]) -> bool:
+    """判断维度中是否包含机构/分行。"""
+    dims = dimensions if isinstance(dimensions, list) else []
+    normalized_org_keys = {_normalize_dimension_name(key) for key in _ORG_DIMENSION_KEYS}
+    return any(
+        _normalize_dimension_name(dim) in normalized_org_keys
+        for dim in dims
+        if str(dim).strip()
+    )
+
+
+def _qualify_expression_with_alias(expression_sql: str, alias: str) -> str:
+    """为表达式中的未限定列补齐表别名。"""
+    expr_text = str(expression_sql or "").strip()
+    if not expr_text:
+        return ""
+
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except Exception:
+        return expr_text
+
+    try:
+        parsed_expr = sqlglot.parse_one(expr_text, dialect="postgres")
+    except Exception:
+        return expr_text
+
+    for column in parsed_expr.find_all(exp.Column):
+        if column.table:
+            continue
+        column.set("table", exp.to_identifier(alias))
+
+    return parsed_expr.sql(dialect="postgres")
+
+
+def _build_org_dimension_projection_for_loan_metric(
+    plan: MetricTemplatePlan,
+    dimensions: Optional[List[str]],
+) -> Optional[MetricDimensionProjection]:
+    """为贷款指标的机构/分行维度构建映射投影。"""
+    if not _is_org_dimension_requested(dimensions):
+        return None
+
+    primary_table = _extract_primary_table_name(plan.from_expr)
+    if primary_table != _LOAN_METRIC_FACT_TABLE:
+        return None
+
+    fact_alias = "t"
+    dim_alias = "o"
+    mapped_from_expr = (
+        f"{_LOAN_METRIC_FACT_TABLE} {fact_alias} "
+        f"JOIN {_ORG_TREE_DIM_TABLE} {dim_alias} "
+        f"ON {fact_alias}.dept_cd = {dim_alias}.dept_cd "
+        f"AND {dim_alias}.org_lv = '{_DEFAULT_BRANCH_ORG_LEVEL}'"
+    )
+
+    return MetricDimensionProjection(
+        select_parts=[
+            f"{dim_alias}.org_no AS org_no",
+            f"{dim_alias}.org_val AS org_name",
+        ],
+        group_by_fields=[
+            f"{dim_alias}.org_no",
+            f"{dim_alias}.org_val",
+        ],
+        from_expr_override=mapped_from_expr,
+        where_expr_override=_qualify_expression_with_alias(plan.where_expr, fact_alias),
+        measure_expr_override=_qualify_expression_with_alias(plan.measure_expr, fact_alias),
+    )
 
 
 def _parse_metric_template_plan(sql: str) -> Optional[MetricTemplatePlan]:
@@ -269,12 +365,9 @@ def _resolve_dimension_fields_for_table(
     if not candidates:
         return []
 
-    # 从 from_expr 提取 schema.table（如 "fdmdata.f_mid_loan_k_tb"）
-    table_match = re.match(r"([a-zA-Z_]\w*\.[a-zA-Z_]\w*)", from_expr.strip())
-    if not table_match:
+    full_table = _extract_primary_table_name(from_expr)
+    if not full_table:
         return [candidates[0]]
-
-    full_table = table_match.group(1).lower()
 
     try:
         from sqlalchemy import text
@@ -306,6 +399,26 @@ def _resolve_dimension_fields_for_table(
     return []
 
 
+def _build_dimension_projection_for_plan(
+    plan: MetricTemplatePlan,
+    dimension_candidates: List[str],
+    dimensions: Optional[List[str]],
+) -> Optional[MetricDimensionProjection]:
+    """根据模板与维度候选构建分组投影。"""
+    org_projection = _build_org_dimension_projection_for_loan_metric(plan, dimensions)
+    if org_projection is not None:
+        return org_projection
+
+    dimension_fields = _resolve_dimension_fields_for_table(dimension_candidates, plan.from_expr)
+    if not dimension_fields:
+        return None
+
+    return MetricDimensionProjection(
+        select_parts=dimension_fields,
+        group_by_fields=dimension_fields,
+    )
+
+
 def _build_metric_sql_from_plan(
     plan: MetricTemplatePlan,
     question: str,
@@ -321,24 +434,33 @@ def _build_metric_sql_from_plan(
 
     select_parts: List[str] = []
     group_by_fields: List[str] = []
+    from_expr_sql = plan.from_expr
+    where_expr_sql = plan.where_expr
+    measure_expr_sql = plan.measure_expr
 
     if shape in ("dimension", "top_n"):
-        # 根据模板表的实际字段过滤候选
-        dimension_fields = _resolve_dimension_fields_for_table(
-            dimension_candidates, plan.from_expr
+        projection = _build_dimension_projection_for_plan(
+            plan=plan,
+            dimension_candidates=dimension_candidates,
+            dimensions=dimensions,
         )
-        if not dimension_fields:
+        if projection is None:
             logger.info("维度候选字段在模板表中均不存在，shape=%s", shape)
             return None
-        for dim_field in dimension_fields:
-            select_parts.append(dim_field)
-            group_by_fields.append(dim_field)
+        select_parts.extend(projection.select_parts)
+        group_by_fields.extend(projection.group_by_fields)
+        if projection.from_expr_override:
+            from_expr_sql = projection.from_expr_override
+        if projection.where_expr_override is not None:
+            where_expr_sql = projection.where_expr_override
+        if projection.measure_expr_override:
+            measure_expr_sql = projection.measure_expr_override
 
-    measure_part = f"{plan.measure_expr} AS {plan.measure_alias}"
+    measure_part = f"{measure_expr_sql} AS {plan.measure_alias}"
     select_parts.append(measure_part)
 
-    where_sql = f" WHERE {plan.where_expr}" if plan.where_expr else ""
-    sql = f"SELECT {', '.join(select_parts)} FROM {plan.from_expr}{where_sql}"
+    where_sql = f" WHERE {where_expr_sql}" if where_expr_sql else ""
+    sql = f"SELECT {', '.join(select_parts)} FROM {from_expr_sql}{where_sql}"
 
     if group_by_fields:
         sql += f" GROUP BY {', '.join(group_by_fields)}"
@@ -865,6 +987,68 @@ def _is_total_aggregate_sql(sql: str) -> bool:
     return has_aggregate and not (has_group_by or has_order_by or has_limit or has_window)
 
 
+def _extract_group_by_fields(sql: str) -> List[str]:
+    """提取 SQL 的 GROUP BY 字段列表。"""
+    if not sql:
+        return []
+
+    try:
+        import sqlglot
+    except Exception:
+        sqlglot = None
+
+    if sqlglot is not None:
+        try:
+            parsed = sqlglot.parse_one(sql, dialect="postgres")
+            group_expr = parsed.args.get("group")
+            if group_expr is not None:
+                return [
+                    str(expr.sql(dialect="postgres")).strip()
+                    for expr in list(group_expr.expressions or [])
+                    if str(expr.sql(dialect="postgres")).strip()
+                ]
+        except Exception:
+            pass
+
+    lowered = sql.lower()
+    match = re.search(r"\bgroup\s+by\b(.+?)(?:\border\s+by\b|\blimit\b|$)", lowered, re.DOTALL)
+    if not match:
+        return []
+
+    raw_group = match.group(1).strip()
+    if not raw_group:
+        return []
+    return [part.strip() for part in raw_group.split(",") if part.strip()]
+
+
+def _normalize_group_field(field: str) -> str:
+    """标准化分组字段文本。"""
+    compact = re.sub(r'["`\s]', "", str(field or "").lower())
+    return compact.rsplit(".", 1)[-1] if "." in compact else compact
+
+
+def _is_group_by_legal_org_cd_only(sql: str) -> bool:
+    """判断 SQL 是否仅按 legal_org_cd 分组。"""
+    group_fields = _extract_group_by_fields(sql)
+    if not group_fields:
+        return False
+
+    normalized_fields = [_normalize_group_field(field) for field in group_fields if str(field).strip()]
+    if not normalized_fields:
+        return False
+
+    return all(field == "legal_org_cd" for field in normalized_fields)
+
+
+def _is_org_dimension_intent(question: str, dimensions: Optional[List[str]]) -> bool:
+    """判断问题是否命中机构/分行维度语义。"""
+    if _is_org_dimension_requested(dimensions):
+        return True
+
+    compact_question = re.sub(r"\s+", "", question or "")
+    return any(keyword in compact_question for keyword in _ORG_DIMENSION_KEYS)
+
+
 def _is_sql_semantically_compatible(
     sql: str,
     question: str,
@@ -881,6 +1065,10 @@ def _is_sql_semantically_compatible(
 
     # 明细/分组场景下，拒绝仅总量聚合 SQL（避免“第二问复用第一问结果”）
     if _is_total_aggregate_sql(sql):
+        return False
+
+    if _is_org_dimension_intent(question, dimensions) and _is_group_by_legal_org_cd_only(sql):
+        logger.info("语义护栏拦截：机构维度 SQL 仅按 legal_org_cd 分组")
         return False
 
     # TopN/排名问题要求具备 ORDER BY + LIMIT

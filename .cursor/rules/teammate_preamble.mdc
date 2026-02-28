@@ -1,0 +1,37 @@
+---
+description: Teammate 硬约束（CC Team 模式专用）
+alwaysApply: false
+---
+
+# Teammate 硬约束（CC Team 模式专用）
+
+以下规则在 team 模式中每个 teammate 必须遵守，不可跳过。
+
+## 语言
+- 思考和输出永远使用中文
+
+## 双数据库
+- chat_db (DATABASE_URL): 主应用库
+- data_db (ANALYTICS_DATABASE_URL): 分析库（只读）
+- 代码中 analytics_engine 连接 data_db，vanna.run_sql() 执行在 data_db
+
+## 代码风格
+- Python: snake_case 文件/变量，PascalCase 类，中文注释，禁止 emoji
+- TypeScript: 严格类型，避免 any，中文注释
+- 表名 t_ 开头，字段 snake_case
+
+## LangGraph 三段式（禁止跳过）
+- START → Preprocess → AgentCore → Postprocess → END
+- 禁止跳过 Pre/Post 节点，禁止 legacy AgentExecutor
+
+## 高风险文件（修改前必须确认）
+- app/ai/prompts/agent_prompts.py
+- app/ai/state.py
+- *_graph.py 中的 preprocess/postprocess 节点
+
+## 文档同步
+- 涉及架构/API/表结构/配置变更时，先更新文档再改代码
+- 映射详情见 .cursor/rules/doc_sync.mdc
+
+## 智能体优先
+- 涉及 app/ai/** 时优先采用流程编排、策略配置、工具抽象，禁止硬编码业务分支

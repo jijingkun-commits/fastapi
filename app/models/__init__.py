@@ -10,6 +10,7 @@ from app.models.ops_metric_snapshot import OpsMetricSnapshotMinute
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.llm_scene import LLMScene
 from app.models.user_memory import UserMemory
+from app.models.chat_run import ChatRun
 
 __all__ = [
     "User",
@@ -30,4 +31,5 @@ __all__ = [
     "DataPermissionColumn",
     "LLMScene",
     "UserMemory",
+    "ChatRun",
 ]

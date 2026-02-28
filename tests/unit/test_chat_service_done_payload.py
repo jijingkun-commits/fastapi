@@ -223,6 +223,51 @@ def test_result_event_payload_includes_frozen_required_fields():
     assert payload["meta"]["node"] == "todo_expert"
 
 
+def test_stream_forwards_final_answer_and_done_final_content() -> None:
+    """stream() 收到 final_answer 事件时应透传并回填 done.final_content。"""
+
+    final_text = "按你的问题顺序：待办已查询，嘉兴天气为多云 18-24℃。"
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                HumanMessage(content="查待办并看天气", id="human-final"),
+                AIMessage(content=final_text),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "final_answer",
+                "data": {"content": final_text, "meta": {"coverage_pass": True}},
+                "node": "final_composer",
+            }
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="查待办并看天气", thread_id="thread-final", user_id=1)
+        )
+
+    final_events = [payload for event, payload in events if event == "final_answer"]
+    assert len(final_events) == 1
+    assert final_events[0]["content"] == final_text
+    assert final_events[0]["meta"]["coverage_pass"] is True
+
+    done_events = [payload for event, payload in events if event == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["final_content"] == final_text
+
+
 def test_interrupt_event_payload_includes_frozen_required_fields():
     """interrupt 事件应包含 reason/message 必填字段并保留兼容字段。"""
 

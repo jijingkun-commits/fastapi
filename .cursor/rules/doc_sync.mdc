@@ -75,7 +75,7 @@ docs/
 | `app/models/` | `docs/开发文档/架构设计/数据库设计.md` |
 | `web/src/components/` | `docs/开发文档/架构设计/前端架构.md` |
 | 环境变量 | `docs/开发文档/快速入门/配置说明.md` + `.env.example` |
-| `.cursor/commands/` | `docs/开发文档/工作流/开发工作流.md`（命令速查表） |
+| `.cursor/commands/` | `docs/开发文档/工作流/开发工作流.md`（命令速查表）+ `docs/开发文档/技巧与速查/vibe-coding开发技巧.md` + `docs/开发文档/技巧与速查/AI协作速查表.md` |
 | 特殊处理（兜底逻辑/兼容补丁/临时绕过） | `docs/开发文档/架构设计/防屎山记录手册.md` |
 
 ### 需求文档映射
@@ -107,6 +107,11 @@ docs/
 | 新增特殊处理 | 新增 SP 编号，并补全“问题描述/涉及文件/风险/优化方向” |
 | 调整已有特殊处理 | 更新对应 SP 条目的“最后更新”、状态与涉及文件 |
 | 删除特殊处理 | 标记 SP 条目为“已修复”或“已废弃”，保留历史记录 |
+
+**强制门禁（新增）**：
+- 当变更命中手册中已登记的“涉及文件”时，必须同步修改 `docs/开发文档/架构设计/防屎山记录手册.md`。
+- 本地提交门禁：`python3 scripts/check_special_doc_sync.py --cached --strict`
+- CI 门禁：`python3 scripts/check_special_doc_sync.py --diff-range origin/<base>...HEAD --strict`
 
 ### 测试脚本双向同步规则
 

@@ -150,35 +150,28 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
-* [需求基线（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_requirements.md)
-* [实施方案（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_implementation_plan.md)
-* [实施附录（AI 工具治理架构）](内部参考/迭代需求/ai_tools_governance_implementation_appendix.md)
 * [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
-* [需求基线（全面代码审查整改）](内部参考/迭代需求/全面代码审查整改_requirements.md)
-* [实施方案（全面代码审查整改）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
-* [需求基线（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_requirements.md)
-* [实施方案（技能后台前端）](内部参考/迭代需求/skill_admin_frontend_plan.md)
-* [需求基线（文档治理执行）](内部参考/迭代需求/docs_governance_requirements.md)
-* [实施方案（文档治理执行）](内部参考/迭代需求/docs_governance_implementation_plan.md)
-* [需求基线（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_requirements.md)
-* [实施方案（问数双角色权限）](内部参考/迭代需求/askdata_dual_role_permission_implementation_plan.md)
-* [需求基线（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_requirements.md)
-* [实施方案（跨会话用户偏好记忆）](内部参考/迭代需求/user_preference_memory_implementation_plan.md)
-* [需求基线（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_requirements.md)
-* [实施方案（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_implementation_plan.md)
-* [进展日志（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_progress_log.md)
-* [评估报告（Agent 去特殊化收敛）](内部参考/迭代需求/agent_despecialization_evaluation_report.md)
+* [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
+* [实施方案（全面代码审查整改，非安全范围路线）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
 * [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
 * [需求基线（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_requirements.md)
 * [实施方案（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md)
+* [需求基线（OpenClaw特性迁移完善）](内部参考/迭代需求/openclaw特性迁移完善_requirements.md)
+* [实施方案（OpenClaw特性迁移完善）](内部参考/迭代需求/openclaw特性迁移完善_implementation_plan.md)
+* [验证报告（OpenClaw特性迁移完善，2026-02-27）](内部参考/迭代需求/openclaw特性迁移完善_verification_report_20260227_worker3.md)
+* [需求基线（意图目标分解治理）](内部参考/迭代需求/意图目标分解治理_requirements.md)
+* [实施方案（意图目标分解治理）](内部参考/迭代需求/意图目标分解治理_implementation_plan.md)
 * [实施方案（迁移执行波次 P1~P6）](内部参考/迭代需求/迁移执行波次_implementation_plan.md)
-* [实施方案（运行时可取消控制）](内部参考/迭代需求/runtime_cancel_control_implementation_plan.md)
-* [实施方案（Skill 多用户版本治理）](内部参考/迭代需求/skill_multi_user_versioning_implementation_plan.md)
+* [需求基线（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_requirements.md)
+* [实施方案（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_implementation_plan.md)
+* [研究报告（heartbeat替代cron交叉验证）](内部参考/迭代需求/heartbeat替代cron_交叉验证研究报告.md)
+* [依赖分析报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban依赖分析报告.md)
+* [方案评审报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban方案评审报告.md)
+* [设计方案（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发设计方案.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
 * [问题修复卡（管理员 dept_code 拒绝，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
-* [评估报告（技能检索对齐，2026-02-13）](内部参考/迭代需求/skill_retrieval_evaluation_report_20260213.md)
-* [评估报告（通用入口）](内部参考/迭代需求/evaluation_report.md)
 * [问题修复卡（问数查询结果展示，2026-02-25）](内部参考/迭代需求/fix_plan_data_query_display_20260225.md)
+* [问题修复卡（问数权限/CTE/占位符/SSE字段，2026-02-26）](内部参考/迭代需求/fix_plan_cte_permission_reject_20260226.md)
 * [需求基线（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_requirements.md)
 * [实施方案（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_implementation_plan.md)
 
@@ -191,73 +184,6 @@
 * [并行计划模板](内部参考/任务拆解/_templates/parallel_plan_template.md)
 * [工作包模板](内部参考/任务拆解/_templates/workstream_template.md)
 * [合并检查模板](内部参考/任务拆解/_templates/merge_checklist_template.md)
-
-#### 当前并行拆解（2026-02-09 待办隐式指代并行拆解）
-
-* [并行总计划](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/parallel_plan.md)
-* [合并检查清单](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/merge_checklist.md)
-* [WS-01 后端意图与工作流收敛](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-01_后端意图与工作流收敛.md)
-* [WS-02 后端契约与持久化收敛](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-02_后端契约与持久化收敛.md)
-* [WS-03 前端SSE与交互收敛](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-03_前端SSE与交互收敛.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-09_待办隐式指代并行拆解/workstreams/WS-G2_文档终稿门禁.md)
-
-#### 当前并行拆解（2026-02-12 Skill检索对齐 Cursor MVP）
-
-* [并行总计划](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/parallel_plan.md)
-* [合并检查清单](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/merge_checklist.md)
-* [WS-00 G0 协议冻结](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-00_G0_协议冻结.md)
-* [WS-01 技能元数据与迁移](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-01_技能元数据与迁移.md)
-* [WS-02 SKILL导入与frontmatter治理](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-02_SKILL导入与frontmatter治理.md)
-* [WS-03 混合检索与注入策略](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-03_混合检索与注入策略.md)
-* [WS-04 可观测与离线评测](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-04_可观测与离线评测.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-12_skill检索对齐_cursor_mvp/workstreams/WS-G2_文档终稿门禁.md)
-
-#### 当前并行拆解（2026-02-13 管理后台总览驾驶舱）
-
-* [并行总计划](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/parallel_plan.md)
-* [WS-00 G0 协议冻结](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-00_G0_协议冻结.md)
-* [WS-01 总览观测快照模型与迁移](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-01_总览观测快照模型与迁移.md)
-* [WS-02 指标采集与健康聚合服务](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-02_指标采集与健康聚合服务.md)
-* [WS-03 总览API与SSE通道](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-03_总览API与SSE通道.md)
-* [WS-04 前端驾驶舱页面与实时接入](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-04_前端驾驶舱页面与实时接入.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-13_管理后台总览驾驶舱/workstreams/WS-G2_文档终稿门禁.md)
-
-#### 当前并行拆解（2026-02-14 文档治理执行）
-
-* [并行总计划](内部参考/任务拆解/2026-02-14_文档治理执行/parallel_plan.md)
-* [WS-00 G0 治理协议冻结](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-00_G0_治理协议冻结.md)
-* [WS-01 P0准确性修正](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-01_P0准确性修正.md)
-* [WS-02 命令权威源与百科校准](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-02_命令权威源与百科校准.md)
-* [WS-03 架构设计与代码解读边界收敛](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-03_架构设计与代码解读边界收敛.md)
-* [WS-04 迭代需求命名规范与索引治理](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-04_迭代需求命名规范与索引治理.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-14_文档治理执行/workstreams/WS-G2_文档终稿门禁.md)
-
-#### 当前并行拆解（2026-02-15 问数双角色权限并行拆解）
-
-* [并行总计划](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/parallel_plan.md)
-* [G0 数据权限契约（JSON）](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/contracts/data_permission_contract_v1.json)
-* [WS-00 G0 数据权限契约冻结](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-00_G0_数据权限契约冻结.md)
-* [WS-00 G0 协议冻结（vksync兼容）](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-00_G0_协议冻结.md)
-* [WS-01 用户模型与迁移改造](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-01_用户模型与迁移改造.md)
-* [WS-02 权限引擎与 SQL 重写收敛](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-02_权限引擎与SQL重写收敛.md)
-* [WS-03 权限配置 API 与审计能力](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-03_权限配置API与审计能力.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-15_问数双角色权限并行拆解/workstreams/WS-G2_文档终稿门禁.md)
-
-#### 当前并行拆解（2026-02-16 AI工具治理架构并行拆解）
-
-* [并行总计划](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/parallel_plan.md)
-* [G0 SSE 契约（JSON）](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/contracts/sse_events_v1.json)
-* [WS-00 G0 协议冻结](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-00_G0_协议冻结.md)
-* [WS-01 工具注册中心与策略管线落地](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-01_工具注册中心与策略管线落地.md)
-* [WS-02 工具调用钩子与审计链路接线](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-02_工具调用钩子与审计链路接线.md)
-* [WS-03 编排接入与回归测试闭环](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-03_编排接入与回归测试闭环.md)
-* [WS-G1 集成回归门禁](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-G1_集成回归门禁.md)
-* [WS-G2 文档终稿门禁](内部参考/任务拆解/2026-02-16_AI工具治理架构并行拆解/workstreams/WS-G2_文档终稿门禁.md)
 
 #### 当前并行拆解（2026-02-21 OpenClaw迁移重建基线）
 

@@ -12,7 +12,7 @@ Vibe Kanban 在当前工作流中承担的核心角色是"看板状态存储与�
 
 > 定位说明：本报告为决策草案，覆盖仓内 + 仓外依赖的全链路分析。工时估算基于静态代码分析，实际实施前建议对仓外依赖做专项评审以确认改造细节。
 
-> **决策结论（2026-02-26）**：VK 故障率高且不具备自动化场景的不可替代性，定位为"人类查看进度的带界面工具"。选定方向：**把定时+重试+恢复交给工作流引擎（Temporal/Prefect），看板只做展示**。详见第 7 章。
+> **决策结论（2026-02-27 更新）**：VK 故障率高且不具备自动化场景的不可替代性，定位为"人类查看进度的带界面工具"。选定方向：**OpenClaw 保留为编排核心（Telegram 交互 + Codex 代码执行），调度机制从 cron 切换为 heartbeat，VK 从执行链路移除、仅做只读展示**。工作流引擎（Temporal/Prefect）作为可选的第二阶段增强。详见第 7 章。
 
 ---
 
@@ -25,7 +25,7 @@ flowchart TD
     A["/jjk-plan<br/>需求与技术方案"] --> B["/jjk-vkplan<br/>并行拆解与卡片生成"]
     B --> C["/jjk-vktodo<br/>VK 看板落卡"]
     C --> D["set_active_task.py<br/>作用域真理源绑定"]
-    D --> E["coder4 cron<br/>每 3 分钟自动执行"]
+    D --> E["coder4 heartbeat<br/>OpenClaw 周期性唤醒"]
     E --> F["wt-flow.sh<br/>worktree 隔离开发"]
 
     B -->|"产出"| G["vk_cards.json"]
@@ -214,7 +214,7 @@ flowchart TD
     A["/jjk-plan"] --> B["本地拆解<br/>vk_cards.json 保留"]
     B --> C["wt-flow.sh next<br/>本地状态推进"]
     C --> D["set_active_task.py<br/>作用域绑定"]
-    D --> E["coder4 cron<br/>自动执行"]
+    D --> E["coder4 heartbeat<br/>OpenClaw 周期性唤醒"]
     E --> F["wt-flow.sh create/merge<br/>worktree 隔离"]
 
     E -->|"读取"| G["task-runner-state.json"]
@@ -237,7 +237,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     A["task-runner-state.json<br/>(真理源)"] -->|"异步推送"| B["VK 看板<br/>(只读镜像)"]
-    C["coder4 cron"] -->|"读写"| A
+    C["coder4 heartbeat"] -->|"读写"| A
     C -->|"不再直接调用"| B
     D["人工查看"] -->|"只读"| B
 ```
@@ -373,7 +373,7 @@ flowchart LR
 
 | 风险 | 等级 | 描述 | 缓解措施 |
 |------|------|------|---------|
-| coder4 自动执行中断 | 极高 | 改造期间 coder4 cron 必须停止 | Phase 1 先降级为只读，不中断执行 |
+| coder4 自动执行中断 | 极高 | 改造期间 coder4 heartbeat 必须停止 | Phase 1 先降级为只读，不中断执行 |
 | 历史任务数据丢失 | 高 | VK 中已有的卡片历史和 attempt 记录 | 改造前导出 VK 数据到本地 JSON 归档 |
 | 五方一致性校验失效 | 高 | 移除 VK 后校验逻辑需要重写 | 简化为三方校验（本地 JSON / vk_cards.json / coder4 状态） |
 | 团队可视化能力下降 | 中 | 失去 Web UI 看板 | 用 `wt-flow.sh list` 命令行替代；长期可接入 GitHub Projects |
@@ -398,7 +398,7 @@ flowchart LR
 
 | 文件路径 | 行数 | 职责 | 改造需求 |
 |---------|------|------|---------|
-| `~/.openclaw-dev/cron/jobs.json` | - | coder4 cron 调度配置 | 移除 VK 相关的 job 参数（如 `--vk-api-base`）；若 cron 调度逻辑引用 VK project_id，需替换为本地标识符 |
+| `~/.openclaw-dev/cron/jobs.json` | - | coder4 调度配置（当前 cron，目标 heartbeat） | coder4 job 从 `kind: cron` 切换为 `kind: heartbeat`；移除 VK 相关参数（如 `--vk-api-base`）；payload 精简 |
 | `~/.openclaw/workspace-dev/state/` | 目录 | coder4 运行态状态文件 | 包含 `coder4_scope_request.json` 等文件，其中 `project_id` 字段指向 VK；需清理或迁移到本地标识符体系 |
 | `~/.openclaw/workspace-dev/WORKFLOW_AUTO.md` | 447 | coder4 自动执行规则 | 内含 VK 卡片状态检查、MCP 调用指令等规则，需重写为本地状态驱动 |
 | `~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md` | 622 | Agent 提示词（VK 专属） | 大量 VK 语义（卡片、看板、attempt），需重写或删除 |
@@ -412,7 +412,7 @@ flowchart LR
 | `VK_AGENT_PROMPTS.md` 重写或删除（622 行） | 中 | 0.5-1 人天 |
 | cron `jobs.json` 参数清理 | 低 | 0.5 天 |
 | 运行态 state 目录迁移 | 低 | 0.5 天 |
-| 回归验证（coder4 cron 端到端） | 中 | 0.5-1 人天 |
+| 回归验证（coder4 heartbeat 端到端） | 中 | 0.5-1 人天 |
 | **仓外合计** | | **3-5 人天** |
 
 #### 3.5.3 仓外改造风险
@@ -474,7 +474,7 @@ flowchart LR
 - `wt-flow.sh list` 能展示完整任务队列
 - `wt-flow.sh next` 能按依赖链推进卡片
 - `wt-flow.sh verify` 能执行验收检查
-- coder4 cron 能在无 VK 的情况下完成完整任务链
+- coder4 heartbeat 能在无 VK 的情况下完成完整任务链
 
 ### Phase 3：完全移除 VK 依赖（2-3 天）
 
@@ -563,73 +563,107 @@ flowchart LR
 | 编号 | 问题 | 影响范围 | 建议处理时机 |
 |------|------|---------|-------------|
 | Q1 | VK 中已有的历史卡片数据是否需要导出归档？如需要，导出格式和存储位置是什么？ | Phase 3 | Phase 1 启动前确认 |
-| Q2 | ~~coder4 的 cron 调度机制（OpenClaw `jobs.json`）是否也需要一并迁移为本地方案？~~ | **已解决** | 迁移到工作流引擎，见第 7 章 |
-| Q3 | ~~长期是否需要接入 GitHub Projects 或其他看板工具替代 VK 的可视化能力？~~ | **已解决** | 工作流引擎自带 Web UI，见 7.9 |
+| Q2 | ~~coder4 的 cron 调度机制（OpenClaw `jobs.json`）是否也需要一并迁移为本地方案？~~ | **已解决** | 从 cron 切换为 OpenClaw heartbeat，见第 7 章 |
+| Q3 | ~~长期是否需要接入 GitHub Projects 或其他看板工具替代 VK 的可视化能力？~~ | **已解决** | Telegram 双向交互 + 命令行满足日常需求，见 7.9 |
 | Q4 | `vk_cards.json` 的格式是否需要版本化管理？当前无 schema 校验。 | Phase 2 | Phase 2 实施时确认 |
-| Q5 | ~~多人协作场景下，本地 JSON 真理源如何处理并发写入冲突？~~ | **已解决** | 工作流引擎保证串行，见 7.9 |
+| Q5 | ~~多人协作场景下，本地 JSON 真理源如何处理并发写入冲突？~~ | **已解决** | heartbeat 串行执行，无并发问题，见 7.9 |
 | Q6 | attempt 系统的本地替代方案是否需要支持跨会话查询（如"查看 C01 的所有历史尝试"）？ | Phase 2 | Phase 2 设计时确认 |
-| Q7 | ~~`scripts/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数、通过 HTTP REST 直连 `127.0.0.1:3001`），当前未被任何文档记录。是否需要在 Phase 1 即处理？~~ | **已解决** | Phase 1 拆分 Activities 时一并处理，见 7.4 |
+| Q7 | ~~`scripts/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数、通过 HTTP REST 直连 `127.0.0.1:3001`），当前未被任何文档记录。是否需要在 Phase 1 即处理？~~ | **已解决** | Phase 1 新增 `--local-mode` 时一并处理，见 7.4 |
 | Q8 | ~~历史上 coder4 是否出现过因 VK MCP 不可用导致的连续超时？如有，需补充故障频次数据以量化 VK 依赖的实际影响。~~ | **不再需要** | VK 从执行链路移除，见 7.9 |
 
 ---
 
-## 7. 工作流引擎替代方案（用户选定方向）
+## 7. OpenClaw Heartbeat + 本地状态驱动方案（用户选定方向）
 
-> **核心决策**：VK 在自动化场景中不具备不可替代性，其 worktree/rebase/merge 能力实际由 `wt-flow.sh` 提供，attempt 系统可本地化。VK 定位降级为"人类查看进度的带界面工具"。coder4 的定时调度、失败重试、状态恢复交由工作流引擎（Temporal 或 Prefect）承接。
+> **核心决策**：VK 在自动化场景中不具备不可替代性，其 worktree/rebase/merge 能力实际由 `wt-flow.sh` 提供，attempt 系统可本地化。VK 定位降级为"人类查看进度的带界面工具"。OpenClaw 保留为编排核心（Telegram 交互 + Codex 代码执行），调度机制从 cron 切换为 heartbeat，本地 JSON 作为唯一真理源。工作流引擎（Temporal/Prefect）作为可选的第二阶段增强。
 
-### 7.1 当前 cron 机制的问题
+### 7.1 从 cron 切换到 heartbeat 的动机
 
-coder4 当前通过 OpenClaw 的 `~/.openclaw-dev/cron/jobs.json` 以 `*/3 * * * *` 频率触发，每轮发送一个 `agentTurn` 消息给 `jjk_coder4_bot`。该机制存在以下结构性缺陷：
+coder4 当前通过 OpenClaw 的 `~/.openclaw-dev/cron/jobs.json` 以 `*/3 * * * *` 频率触发，每轮发送一个 `agentTurn` 消息给 `jjk_coder4_bot`。该 cron 机制存在以下结构性缺陷：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
+| 固定频率盲触发 | 每 3 分钟无条件触发，不感知当前任务状态 | 任务已完成时仍空转；任务执行中时可能重叠 |
 | 无原生重试策略 | `consecutiveErrors` 仅计数，不触发自动恢复 | 连续失败后需人工介入 |
 | 无状态持久化 | 每轮 cron 独立执行，跨轮次状态靠外部文件 | 状态散落在 `_active_task.json` / `coder4_cron_state.json` / VK API 三处 |
 | 无条件分支 | 每轮执行相同 prompt，靠 LLM 自行判断分支 | 决策不确定性高，同一状态可能产生不同行为 |
-| 无 DAG 可视化 | 只有 Telegram 三行通知 | 无法追溯完整执行链路 |
 | 无超时恢复 | `timeoutSeconds: 240` 超时后静默丢弃 | 超时轮次的中间状态无法回滚 |
 | VK API 单点故障 | `bootstrap_kernel.py` L196 `GET /api/tasks` 失败即阻断 | VK 不可用时整个自动化链路中断 |
 
-引用来源：`~/.openclaw-dev/cron/jobs.json` coder4 job 配置（`schedule.expr: "*/3 * * * *"`、`payload.timeoutSeconds: 240`、`state.consecutiveErrors`）
+**OpenClaw heartbeat 的优势**：
 
-### 7.2 Temporal vs Prefect 选型对比
+| 维度 | cron | heartbeat |
+|------|------|-----------|
+| 触发方式 | 固定 `*/3 * * * *`，盲触发 | Agent 周期性唤醒，读取 `HEARTBEAT.md` 任务清单 |
+| 状态感知 | 无，每轮独立 | 有，`HEARTBEAT.md` 持有当前任务上下文 |
+| 自适应 | 无，固定间隔 | 可根据任务状态调整行为（空闲时轻量检查，有任务时全力执行） |
+| 任务清单 | 硬编码在 `payload.message` 中（jobs.json L53） | 写在 `HEARTBEAT.md` 中，可动态更新 |
+| 与 Telegram 集成 | 仅 `delivery.mode=announce` 单向通知 | 双向：用户可通过 Telegram 修改 HEARTBEAT.md 内容 |
+
+引用来源：`~/.openclaw-dev/cron/jobs.json` coder4 job 配置、`~/.openclaw/workspace-dev/AGENTS.md` L34-36（Heartbeats 章节）
+
+### 7.2 Heartbeat 实现方案
+
+#### 7.2.1 HEARTBEAT.md 设计
+
+OpenClaw 的 heartbeat 机制通过 `~/.openclaw/workspace-dev/HEARTBEAT.md` 文件驱动。Agent 每次被唤醒时读取该文件，获取当前任务清单和执行指令。
+
+```markdown
+# coder4 Heartbeat 任务清单
+
+## 当前任务链
+- active_task: /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json
+- task_runner_state: .omc/state/task-runner-state.json
+- ledger: .omc/state/task-ledger.jsonl
+
+## 每轮执行协议
+1. 读取 task-runner-state.json，获取 current_card + card_status_map
+2. 执行 bootstrap_kernel（本地模式，不调用 VK API）
+3. 按 action 分支执行最小步骤
+4. 更新 task-runner-state.json
+5. 输出三行结论
+
+## 状态感知规则
+- all_done → 输出 ALL_DONE，不再触发后续 heartbeat
+- blocked_depends → 输出 BLOCKED，等待下一次 heartbeat
+- dispatch → 执行一步，更新状态
+```
+
+#### 7.2.2 从 cron job 迁移到 heartbeat
+
+| 改造项 | cron 方式（当前） | heartbeat 方式（目标） |
+|--------|-----------------|---------------------|
+| 调度配置 | `jobs.json` 中 `"kind": "cron", "expr": "*/3 * * * *"` | `jobs.json` 中 `"kind": "heartbeat"` 或 OpenClaw 内置 heartbeat 触发 |
+| 执行指令 | 硬编码在 `payload.message`（约 3000 字符） | 写在 `HEARTBEAT.md` 中，可动态更新 |
+| 状态传递 | 每轮独立，靠外部文件 | `HEARTBEAT.md` + `task-runner-state.json` 持有跨轮上下文 |
+| 任务完成 | 无感知，继续空转 | `all_done` 时停止触发 |
+| Telegram 交互 | 单向通知 | 双向：用户可通过 Telegram 修改任务清单 |
+
+#### 7.2.3 工作流引擎（可选第二阶段）
+
+若后续需要更强的重试/恢复/DAG 可视化能力，可引入 Temporal 或 Prefect 作为增强层：
 
 | 维度 | Temporal | Prefect |
 |------|----------|---------|
 | 定位 | 分布式工作流编排引擎 | Python 原生任务编排框架 |
-| 状态持久化 | 内置 Event Sourcing，自动持久化每个 Activity 结果 | 内置状态追踪，支持 Result Persistence |
-| 重试策略 | `RetryPolicy(max_attempts, backoff, non_retryable_errors)` | `task(retries=N, retry_delay_seconds=M)` |
-| 超时控制 | `start_to_close_timeout` / `schedule_to_close_timeout` 精细粒度 | `timeout_seconds` 任务级 |
-| 恢复机制 | Workflow 自动恢复（Worker 重启后从断点续跑） | Flow 可配置 `on_failure` hook + 手动 resume |
-| 定时调度 | `CronSchedule("*/3 * * * *")` 原生支持 | `IntervalSchedule` / `CronSchedule` 原生支持 |
-| DAG 可视化 | Temporal Web UI（内置） | Prefect UI / Prefect Cloud |
-| 部署复杂度 | 需要 Temporal Server（Docker Compose 或 Cloud） | `prefect server start` 或 Prefect Cloud |
-| Python SDK | `temporalio` (官方维护) | `prefect` (原生 Python) |
-| 学习曲线 | 中等（Workflow/Activity 分离概念） | 低（装饰器 `@flow` / `@task`） |
-| 适合场景 | 长时间运行、需要强一致性的工作流 | 数据管道、轻量任务编排 |
+| 状态持久化 | 内置 Event Sourcing | 内置状态追踪 |
+| 重试策略 | `RetryPolicy(max_attempts, backoff)` | `task(retries=N, retry_delay_seconds=M)` |
+| 部署复杂度 | 需要 Temporal Server（Docker Compose） | `prefect server start` |
+| 学习曲线 | 中等 | 低 |
 
-**推荐**：
-
-- 若团队已有 Temporal 基础设施或需要强一致性保证 → **Temporal**
-- 若追求快速落地、Python 原生体验、轻量部署 → **Prefect**
-
-两者均能满足 coder4 的"定时+重试+恢复"需求。以下设计同时给出两种实现示例。
+**当前阶段不引入工作流引擎**。OpenClaw heartbeat + 本地状态文件已能满足 coder4 的调度需求。工作流引擎作为"锦上添花"的可选项，待 heartbeat 方案稳定运行后再评估。
 
 ### 7.3 目标架构
 
 ```mermaid
 flowchart TD
-    subgraph "工作流引擎层（Temporal/Prefect）"
-        S["定时调度<br/>CronSchedule */3 * * * *"]
-        W["Workflow: card_serial_flow"]
-        A1["Activity: bootstrap_kernel"]
-        A2["Activity: dispatch_coder4"]
-        A3["Activity: verify_done_gate"]
-        A4["Activity: advance_card"]
-        R["RetryPolicy<br/>max=3, backoff=exponential"]
+    subgraph "OpenClaw 编排层"
+        HB["Heartbeat 调度<br/>HEARTBEAT.md 任务清单"]
+        TG_IN["Telegram 双向交互<br/>用户下达指令 / 查看进度"]
+        CDX["Codex 代码执行<br/>model: codex"]
     end
 
-    subgraph "本地状态层（真理源）"
+    subgraph "本地状态层（唯一真理源）"
         F1["_active_task.json"]
         F2["vk_cards.json"]
         F3["task-runner-state.json"]
@@ -637,52 +671,57 @@ flowchart TD
         F5["attempts/<card_id>/"]
     end
 
-    subgraph "展示层（只读）"
-        VK["VK 看板<br/>异步推送，失败不阻断"]
-        TG["Telegram 通知"]
+    subgraph "本地执行层"
+        BK["bootstrap_kernel.py<br/>（本地模式，不调用 VK API）"]
+        WT["wt-flow.sh<br/>worktree 隔离开发"]
     end
 
-    S --> W
-    W --> A1
-    A1 -->|"读取"| F1
-    A1 -->|"读取"| F2
-    A1 -->|"写入"| F3
-    W --> A2
-    A2 -->|"写入"| F4
-    A2 -->|"写入"| F5
-    W --> A3
-    A3 -->|"读取"| F3
-    W --> A4
-    A4 -->|"更新"| F3
-    A4 -->|"异步推送"| VK
-    W -->|"通知"| TG
+    subgraph "展示层（只读，可选）"
+        VK["VK 看板<br/>异步推送，失败不阻断"]
+        TG_OUT["Telegram 通知<br/>三行结论"]
+    end
+
+    HB --> BK
+    TG_IN --> HB
+    BK -->|"读取"| F1
+    BK -->|"读取"| F2
+    BK -->|"写入"| F3
+    BK --> CDX
+    CDX --> WT
+    WT -->|"写入"| F4
+    WT -->|"写入"| F5
+    BK -->|"异步推送"| VK
+    BK -->|"通知"| TG_OUT
 
     style VK fill:#ddd,stroke:#999,stroke-dasharray: 5 5
-    style TG fill:#ddd,stroke:#999,stroke-dasharray: 5 5
+    style TG_OUT fill:#ddd,stroke:#999,stroke-dasharray: 5 5
 ```
 
 **关键变化**：
-1. VK API 从执行链路中完全移除，降为异步只读推送目标
-2. `bootstrap_kernel.py` 的 `build_kernel_context()` 不再调用 `list_tasks(api_base, project_id)`（L231），改为从本地 `task-runner-state.json` 读取 `card_status_map`
-3. 工作流引擎提供原生的重试、超时、恢复能力，替代 cron 的 `consecutiveErrors` 计数
-4. 每个 Activity 的执行结果自动持久化，支持断点续跑
+1. **OpenClaw 保留为编排核心**：Telegram 双向交互（用户下达指令、查看进度）+ Codex 代码执行 + heartbeat 调度
+2. **cron → heartbeat**：从固定 `*/3 * * * *` 盲触发，改为 heartbeat 状态感知调度，`HEARTBEAT.md` 持有任务清单
+3. **VK API 从执行链路完全移除**：`bootstrap_kernel.py` 的 `build_kernel_context()` 不再调用 `list_tasks(api_base, project_id)`（L231），改为从本地 `task-runner-state.json` 读取 `card_status_map`
+4. **本地 JSON 为唯一真理源**：状态变更先写本地，再异步推送 VK（推送失败不阻断）
+5. **代码执行层**：OpenClaw 通过 Codex model 执行代码，wt-flow.sh 管理 worktree 隔离
 
-### 7.4 核心改造：bootstrap_kernel.py 拆分为 Activities
+### 7.4 核心改造：bootstrap_kernel.py 本地化
 
-当前 `bootstrap_kernel.py`（463 行）是一个单体脚本，需要拆分为工作流引擎可调度的独立 Activity：
+当前 `bootstrap_kernel.py`（463 行）通过 HTTP REST API 直连 VK 服务。改造目标：移除 VK API 依赖，改为纯本地状态驱动。
 
-#### 7.4.1 Activity 拆分设计
+#### 7.4.1 模块拆分设计
 
-| Activity | 对应原函数 | 输入 | 输出 | 重试策略 |
-|----------|-----------|------|------|---------|
-| `load_context` | `build_kernel_context()` L212-302 | `active_task_path` | `KernelContext` | 不重试（本地文件读取） |
-| `decide_action` | `decide_action()` | `KernelContext` | `(action, target_card, target_task, status)` | 不重试（纯计算） |
-| `execute_seed` | `apply_action("seed")` L370-390 | `card_id, card_def, task_key` | `task_id` | 重试 3 次，指数退避 |
-| `execute_activate` | `apply_action("activate")` L392-404 | `task_id` | `status` | 重试 3 次，指数退避 |
-| `dispatch_coder4` | 当前 cron payload 中的执行逻辑 | `card_id, task_key, worktree_path` | `execution_result` | 重试 2 次，固定间隔 60s |
-| `verify_done_gate` | 当前 WORKFLOW_AUTO.md 中的 DONE_GATE_CHECK | `card_id, acceptance_checks` | `pass/fail + evidence` | 不重试 |
-| `advance_card` | 状态迁移 + 台账写入 | `card_id, new_status` | `ledger_entry` | 重试 2 次 |
-| `sync_to_vk` | 新增：异步推送到 VK | `card_id, status` | `sync_result` | 重试 1 次，失败静默 |
+将单体脚本拆分为可独立调用的模块，便于 heartbeat 按需组合：
+
+| 模块 | 对应原函数 | 输入 | 输出 | 失败处理 |
+|------|-----------|------|------|---------|
+| `load_context` | `build_kernel_context()` L212-302 | `active_task_path` | `KernelContext` | 本地文件读取，失败即阻断 |
+| `decide_action` | `decide_action()` | `KernelContext` | `(action, target_card, status)` | 纯计算，不会失败 |
+| `execute_seed` | `apply_action("seed")` L370-390 | `card_id, card_def` | 写入 `task-runner-state.json` | 写本地 JSON，失败即阻断 |
+| `execute_activate` | `apply_action("activate")` L392-404 | `card_id` | 更新 `task-runner-state.json` | 写本地 JSON，失败即阻断 |
+| `dispatch_coder4` | 当前 cron payload 中的执行逻辑 | `card_id, worktree_path` | `execution_result` | 由 OpenClaw/Codex 执行，超时由 heartbeat 下一轮重试 |
+| `verify_done_gate` | WORKFLOW_AUTO.md 中的 DONE_GATE_CHECK | `card_id, acceptance_checks` | `pass/fail + evidence` | 失败不重试，记录证据等下一轮 |
+| `advance_card` | 状态迁移 + 台账写入 | `card_id, new_status` | `ledger_entry` | 写本地文件 |
+| `sync_to_vk` | 新增：异步推送到 VK | `card_id, status` | `sync_result` | **失败静默**，不阻断任何逻辑 |
 
 #### 7.4.2 `load_context` 改造要点
 
@@ -699,213 +738,94 @@ card_status_map = load_local_card_status(task_runner_state_path)
 
 这是 **唯一需要改动的 VK API 读取点**。`seed` 和 `activate` 的写入操作改为写本地 JSON + 异步推送 VK。
 
-#### 7.4.3 Temporal 实现示例
+#### 7.4.3 改造后的执行流程（heartbeat 每轮）
 
 ```python
-# workflows/card_serial_flow.py
-from temporalio import workflow
-from temporalio.common import RetryPolicy
-from datetime import timedelta
-
-@workflow.defn
-class CardSerialFlow:
-    @workflow.run
-    async def run(self, active_task_path: str) -> dict:
-        retry = RetryPolicy(
-            maximum_attempts=3,
-            initial_interval=timedelta(seconds=10),
-            backoff_coefficient=2.0,
-            non_retryable_error_types=["PrefightBlockedError", "AllDoneError"],
-        )
-
-        # 1. 加载上下文（本地文件，不重试）
-        ctx = await workflow.execute_activity(
-            "load_context",
-            args=[active_task_path],
-            start_to_close_timeout=timedelta(seconds=30),
-        )
-
-        # 2. 决策（纯计算）
-        decision = await workflow.execute_activity(
-            "decide_action",
-            args=[ctx],
-            start_to_close_timeout=timedelta(seconds=10),
-        )
-
-        action = decision["action"]
-
-        # 3. 按 action 分支执行
-        if action == "preflight_blocked":
-            return {"status": "blocked", "reason": decision["blocked_details"]}
-
-        if action == "seed":
-            result = await workflow.execute_activity(
-                "execute_seed",
-                args=[decision["target_card_id"], ctx],
-                retry_policy=retry,
-                start_to_close_timeout=timedelta(seconds=60),
-            )
-            # 异步推送 VK（失败不阻断）
-            await workflow.execute_activity(
-                "sync_to_vk", args=[result],
-                start_to_close_timeout=timedelta(seconds=15),
-            )
-            return {"status": "seeded", "card_id": decision["target_card_id"]}
-
-        if action == "activate":
-            result = await workflow.execute_activity(
-                "execute_activate",
-                args=[decision["target_task_id"]],
-                retry_policy=retry,
-                start_to_close_timeout=timedelta(seconds=60),
-            )
-            await workflow.execute_activity(
-                "sync_to_vk", args=[result],
-                start_to_close_timeout=timedelta(seconds=15),
-            )
-            return {"status": "activated", "card_id": decision["target_card_id"]}
-
-        if action == "dispatch":
-            # 执行 coder4 单步
-            exec_result = await workflow.execute_activity(
-                "dispatch_coder4",
-                args=[decision],
-                retry_policy=RetryPolicy(maximum_attempts=2,
-                                         initial_interval=timedelta(seconds=60)),
-                start_to_close_timeout=timedelta(minutes=4),
-            )
-            # 验证 done gate
-            if decision["target_status"] == "inreview":
-                gate = await workflow.execute_activity(
-                    "verify_done_gate",
-                    args=[decision["target_card_id"]],
-                    start_to_close_timeout=timedelta(minutes=2),
-                )
-                if gate["passed"]:
-                    await workflow.execute_activity(
-                        "advance_card",
-                        args=[decision["target_card_id"], "done"],
-                        start_to_close_timeout=timedelta(seconds=30),
-                    )
-            return {"status": "dispatched", "result": exec_result}
-
-        if action == "all_done":
-            return {"status": "all_done"}
-
-        return {"status": "blocked", "action": action}
-```
-
-#### 7.4.4 Prefect 实现示例
-
-```python
-# flows/card_serial_flow.py
-from prefect import flow, task
-from prefect.tasks import task_input_hash
-
-@task(retries=0, timeout_seconds=30)
-def load_context(active_task_path: str) -> dict:
-    """从本地文件加载执行上下文（不依赖 VK API）"""
-    ...
-
-@task(retries=3, retry_delay_seconds=10, timeout_seconds=60)
-def execute_seed(card_id: str, ctx: dict) -> dict:
-    """创建卡片（写本地 JSON）"""
-    ...
-
-@task(retries=3, retry_delay_seconds=10, timeout_seconds=60)
-def execute_activate(task_id: str) -> dict:
-    """激活卡片（写本地 JSON）"""
-    ...
-
-@task(retries=2, retry_delay_seconds=60, timeout_seconds=240)
-def dispatch_coder4(decision: dict) -> dict:
-    """执行 coder4 单步"""
-    ...
-
-@task(retries=0, timeout_seconds=120)
-def verify_done_gate(card_id: str) -> dict:
-    """验收检查"""
-    ...
-
-@task(retries=1, retry_delay_seconds=5, timeout_seconds=15)
-def sync_to_vk(card_id: str, status: str) -> dict:
-    """异步推送到 VK（失败不阻断）"""
-    try:
-        http_json("PUT", f"{VK_API_BASE}/api/tasks/{task_id}", {"status": status})
-        return {"synced": True}
-    except Exception:
-        return {"synced": False, "error": "VK unreachable, skipped"}
-
-@flow(name="card-serial-flow", log_prints=True)
-def card_serial_flow(active_task_path: str) -> dict:
+# heartbeat 每轮执行逻辑（伪代码）
+def heartbeat_turn(active_task_path: str):
+    # 1. 加载上下文（纯本地）
     ctx = load_context(active_task_path)
-    decision = decide_action(ctx)
 
-    if decision["action"] == "seed":
-        result = execute_seed(decision["target_card_id"], ctx)
-        sync_to_vk(decision["target_card_id"], "todo")
-        return {"status": "seeded"}
+    # 2. 决策（纯计算）
+    action, target_card, target_status = decide_action(ctx)
 
-    if decision["action"] == "dispatch":
-        exec_result = dispatch_coder4(decision)
-        if decision["target_status"] == "inreview":
-            gate = verify_done_gate(decision["target_card_id"])
+    # 3. 按 action 分支执行
+    if action == "preflight_blocked":
+        return "BLOCKED_PREFLIGHT"
+
+    if action == "seed":
+        execute_seed(target_card, ctx)
+        sync_to_vk(target_card, "todo")  # 异步，失败静默
+        return "CARD_SEEDED"
+
+    if action == "activate":
+        execute_activate(target_card)
+        sync_to_vk(target_card, "inprogress")  # 异步，失败静默
+        return "CARD_ACTIVATED"
+
+    if action == "dispatch":
+        # OpenClaw 通过 Codex 执行代码
+        result = dispatch_coder4(target_card, ctx)
+        if target_status == "inreview":
+            gate = verify_done_gate(target_card)
             if gate["passed"]:
-                advance_card(decision["target_card_id"], "done")
-                sync_to_vk(decision["target_card_id"], "done")
-        return {"status": "dispatched"}
+                advance_card(target_card, "done")
+                sync_to_vk(target_card, "done")
+        return "DISPATCHED"
 
-    return {"status": decision["action"]}
+    if action == "all_done":
+        # 更新 HEARTBEAT.md 标记完成，停止后续触发
+        return "ALL_DONE"
 
-# 定时调度
-if __name__ == "__main__":
-    from prefect.deployments import Deployment
-    from prefect.server.schemas.schedules import CronSchedule
-
-    Deployment.build_from_flow(
-        flow=card_serial_flow,
-        name="coder4-serial",
-        schedule=CronSchedule(cron="*/3 * * * *", timezone="Asia/Shanghai"),
-        parameters={"active_task_path": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json"},
-    )
+    return f"BLOCKED_{action}"
 ```
 
-### 7.5 重试与恢复策略详细设计
+#### 7.4.4 `--vk-api-base` 参数处理
+
+`bootstrap_kernel.py` 当前接受 `--vk-api-base` 参数（L60，默认 `http://127.0.0.1:3001`）。改造后：
+
+- 新增 `--local-mode` 参数，启用时跳过所有 VK API 调用
+- `--vk-api-base` 保留但仅用于 `sync_to_vk`（异步推送），不再用于 `load_context`
+- 长期目标：完全移除 `--vk-api-base` 参数
+
+### 7.5 重试与恢复策略（heartbeat 模式）
 
 #### 7.5.1 重试策略矩阵
 
-| 失败类型 | 当前处理 | 工作流引擎处理 |
-|---------|---------|--------------|
+heartbeat 的天然重试机制：每次唤醒都会重新读取 `task-runner-state.json`，若上一轮失败但状态未推进，下一轮自动从同一位置重试。
+
+| 失败类型 | 当前处理（cron） | heartbeat 处理 |
+|---------|----------------|---------------|
 | VK API 502/超时 | `consecutiveErrors++`，人工介入 | **不再发生**（VK 从执行链路移除） |
-| coder4 执行超时 | 静默丢弃，下轮重新开始 | `start_to_close_timeout=4min`，超时后自动重试 1 次 |
-| bootstrap_kernel 异常 | `ok=false`，下轮重新开始 | 区分可重试/不可重试错误，可重试自动 backoff |
-| worktree 冲突 | 人工介入 | 标记为 `non_retryable`，触发告警 |
-| done_gate 验收失败 | 保持 inreview，下轮重试 | 不重试，记录失败证据，等待下一个调度周期 |
+| coder4 执行超时 | 静默丢弃，下轮重新开始 | 下一次 heartbeat 唤醒时重新读取状态，从断点继续 |
+| bootstrap_kernel 异常 | `ok=false`，下轮重新开始 | 同上，heartbeat 下一轮自动重试 |
+| worktree 冲突 | 人工介入 | `wt-flow.sh` auto-commit + rebuild 策略（见 L134-142），下一轮自动重建 |
+| done_gate 验收失败 | 保持 inreview，下轮重试 | 保持 inreview，记录失败证据，下一次 heartbeat 重新验收 |
 | 网络中断 | 整个链路阻断 | **不再发生**（全本地执行，VK 推送失败静默） |
 
 #### 7.5.2 不可重试错误清单
 
-以下错误类型应标记为 `non_retryable`，避免无意义重试：
+以下状态应在 `task-runner-state.json` 中标记为 `blocked`，heartbeat 检测到后输出 BLOCKED 并等待人工干预：
 
 ```python
-NON_RETRYABLE_ERRORS = [
-    "PrefightBlockedError",      # 前置卡未完成
-    "AllDoneError",              # 所有卡片已完成
-    "BlockedDependsError",       # 依赖未满足
-    "WorktreeConflictError",     # git 冲突需人工解决
-    "ActiveTaskMissingError",    # _active_task.json 不存在
-    "CardDefinitionMissingError", # vk_cards.json 中找不到卡片定义
+BLOCKED_STATES = [
+    "preflight_blocked",       # 前置卡未完成
+    "all_done",                # 所有卡片已完成（停止 heartbeat）
+    "blocked_depends",         # 依赖未满足
+    "worktree_conflict",       # git 冲突需人工解决（auto-commit 也失败时）
+    "active_task_missing",     # _active_task.json 不存在
+    "card_definition_missing", # vk_cards.json 中找不到卡片定义
 ]
 ```
 
 #### 7.5.3 恢复机制
 
-| 场景 | Temporal 恢复方式 | Prefect 恢复方式 |
-|------|-----------------|-----------------|
-| Worker 进程崩溃 | 自动恢复：新 Worker 从 Event History 重放 | 手动 resume 或配置 `on_failure` hook |
-| 执行到一半断电 | 自动恢复：从最后完成的 Activity 续跑 | 需要 `result_storage` 配置 + 手动 resume |
-| 调度器重启 | 自动恢复：Temporal Server 持久化调度状态 | 自动恢复：Prefect Server 持久化调度状态 |
-| 状态文件损坏 | Activity 级别捕获，触发 `rebuild_state` Activity | Task 级别捕获，触发 `rebuild_state` task |
+| 场景 | heartbeat 恢复方式 |
+|------|-------------------|
+| Agent 进程崩溃 | OpenClaw 自动重启 agent，下一次 heartbeat 从 `task-runner-state.json` 恢复 |
+| 执行到一半断电 | `task-runner-state.json` 记录最后完成的步骤，heartbeat 从断点续跑 |
+| 状态文件损坏 | heartbeat 检测到异常，输出 `BLOCKED_STATE_CORRUPTED`，等待人工修复 |
+| 连续失败 N 轮 | `task-runner-state.json` 中 `no_increment_count` 累加，超过阈值后降频或暂停 |
 
 ### 7.6 VK 只读推送设计
 
@@ -934,58 +854,54 @@ async def push_card_status(card_id: str, status: str, vk_api_base: str) -> dict:
 
 ### 7.7 对现有改造清单的影响
 
-引入工作流引擎后，第 4 章路线图需要调整：
+引入 heartbeat 方案后，第 4 章路线图需要调整：
 
 #### 7.7.1 改造方式变化
 
-| 文件 | 原方案（第 4 章） | 新方案（工作流引擎） |
+| 文件 | 原方案（第 4 章） | 新方案（heartbeat） |
 |------|-----------------|-------------------|
-| `scripts/coder4_bootstrap_kernel.py` | 移除 `--vk-api-base` 参数 | 拆分为 Activities，`build_kernel_context()` 改读本地 JSON |
-| `scripts/wt-flow.sh` | 扩展 +150 行（next/verify/list） | 保持扩展，但 `next` 逻辑由 Workflow 驱动而非 shell 脚本 |
-| `~/.openclaw-dev/cron/jobs.json` | 清理 VK 参数 | **整个 coder4 job 迁移到工作流引擎**，cron job 可删除 |
-| `~/.openclaw/workspace-dev/WORKFLOW_AUTO.md` | 重写 VK 规则 | 大幅精简：执行协议由 Workflow 定义，WORKFLOW_AUTO.md 仅保留 LLM 行为约束 |
+| `scripts/coder4_bootstrap_kernel.py` | 移除 `--vk-api-base` 参数 | 新增 `--local-mode`，`build_kernel_context()` 改读本地 JSON |
+| `scripts/wt-flow.sh` | 扩展 +150 行（next/verify/list） | 保持扩展，`next` 逻辑由 heartbeat 驱动 |
+| `~/.openclaw-dev/cron/jobs.json` | 清理 VK 参数 | **coder4 job 从 `kind: cron` 改为 `kind: heartbeat`**，payload 精简 |
+| `~/.openclaw/workspace-dev/HEARTBEAT.md` | 不存在 | **新建**：coder4 heartbeat 任务清单 |
+| `~/.openclaw/workspace-dev/WORKFLOW_AUTO.md` | 重写 VK 规则 | 大幅精简：移除 VK 规则，保留 LLM 行为约束 |
 | `~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md` | 重写或删除 | 删除 VK 语义，保留通用 Agent 提示词 |
 
 #### 7.7.2 新增文件
 
 | 文件 | 用途 | 估算行数 |
 |------|------|---------|
-| `scripts/workflows/card_serial_flow.py` | 主工作流定义 | 150-200 |
-| `scripts/workflows/activities.py` | Activity 实现（从 bootstrap_kernel 拆出） | 200-250 |
-| `scripts/workflows/models.py` | 数据模型（KernelContext 等） | 50-80 |
+| `~/.openclaw/workspace-dev/HEARTBEAT.md` | coder4 heartbeat 任务清单 | 30-50 |
 | `scripts/vk_readonly_push.py` | VK 只读推送模块 | 60-80 |
-| `scripts/workflows/config.py` | 工作流配置（重试策略、超时等） | 30-50 |
-| `docker-compose.workflow.yml`（Temporal）或 `prefect.yaml`（Prefect） | 工作流引擎部署配置 | 30-50 |
+| `.omc/state/task-runner-state.json` | 运行时状态文件（自动生成） | - |
+| `.cursor/commands/jjk-task.md` | 替代 `/jjk-vktodo` 的本地任务管理命令 | 100-150 |
+| `docs/开发文档/工作流/本地任务编排手册.md` | 替代 VK 相关文档 | 100-150 |
 
 #### 7.7.3 可删除文件（相比原方案新增）
 
 | 文件 | 理由 |
 |------|------|
-| `~/.openclaw-dev/cron/jobs.json` 中 coder4 job | 调度由工作流引擎接管 |
-| `~/.openclaw/workspace-dev/state/coder4_cron_state.json` | 状态由工作流引擎持久化 |
+| `~/.openclaw-dev/cron/jobs.json` 中 coder4 job 的 cron 配置 | 调度由 heartbeat 接管 |
+| `~/.openclaw/workspace-dev/state/coder4_cron_state.json` | 状态由 `task-runner-state.json` 统一管理 |
 | `~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md` | VK 语义全部移除 |
 
 ### 7.8 修订后的实施路线图
 
 ```
-Phase 0: 工作流引擎基础设施搭建（1-2 天）
-  ├── 选定引擎（Temporal 或 Prefect）并部署
-  ├── 验证定时调度 + 重试 + 恢复基本能力
-  └── 产出：引擎可运行，空 Workflow 可调度
-
-Phase 1: bootstrap_kernel 拆分 + 本地状态层（3-4 天）
-  ├── 拆分 bootstrap_kernel.py 为 Activities
-  ├── build_kernel_context() 改读本地 task-runner-state.json
-  ├── 新建 card_serial_flow Workflow
+Phase 1: heartbeat 基础 + bootstrap_kernel 本地化（2-3 天）
+  ├── 新建 HEARTBEAT.md，配置 coder4 heartbeat 任务清单
+  ├── jobs.json 中 coder4 job 从 kind:cron 切换为 kind:heartbeat
+  ├── bootstrap_kernel.py 新增 --local-mode，build_kernel_context() 改读本地 JSON
+  ├── 新建 task-runner-state.json 读写模块
   ├── 新建 vk_readonly_push.py（异步推送）
-  └── 产出：Workflow 可驱动单卡推进，VK 为只读
+  └── 产出：heartbeat 可驱动单卡推进，VK 为只读
 
-Phase 2: coder4 cron 迁移 + 规则精简（2-3 天）
-  ├── coder4 job 从 OpenClaw cron 迁移到工作流引擎
+Phase 2: 规则精简 + wt-flow.sh 扩展（2-3 天）
   ├── WORKFLOW_AUTO.md 精简（移除 VK 规则，保留 LLM 约束）
   ├── VK_AGENT_PROMPTS.md 删除或精简
   ├── scope_guard / set_active_task 移除 project_id VK 语义
-  └── 产出：coder4 完全由工作流引擎调度
+  ├── wt-flow.sh 新增 next/verify/list 子命令
+  └── 产出：coder4 完全由 heartbeat 调度，无 VK 执行依赖
 
 Phase 3: VK 依赖清除 + 收尾（2-3 天）
   ├── 删除 VK MCP 配置、运维脚本（778 行）
@@ -994,36 +910,36 @@ Phase 3: VK 依赖清除 + 收尾（2-3 天）
   └── 产出：grep "vibe_kanban" 零结果
 
 缓冲: 端到端回归测试（1-2 天）
-  ├── 完整串行任务链路验证
-  ├── 故障注入测试（模拟 Activity 失败、Worker 崩溃）
-  └── VK 不可用时链路不受影响验证
+  ├── 完整串行任务链路验证（heartbeat 触发 → bootstrap → dispatch → done gate）
+  ├── 故障注入测试（模拟 bootstrap 失败、worktree 冲突、VK 不可用）
+  └── Telegram 双向交互验证
 ```
 
 #### 7.8.1 修订后工作量估算
 
 | 阶段 | 工作内容 | 工作量 |
 |------|---------|--------|
-| Phase 0 | 工作流引擎基础设施 | 1-2 人天 |
-| Phase 1 | bootstrap_kernel 拆分 + 本地状态层 | 3-4 人天 |
-| Phase 2 | coder4 cron 迁移 + 规则精简 | 2-3 人天 |
+| Phase 1 | heartbeat 基础 + bootstrap_kernel 本地化 | 2-3 人天 |
+| Phase 2 | 规则精简 + wt-flow.sh 扩展 | 2-3 人天 |
 | Phase 3 | VK 依赖清除 + 收尾 | 2-3 人天 |
 | 缓冲 | 端到端回归测试 | 1-2 人天 |
-| **总计** | | **9-14 人天** |
+| **总计** | | **7-11 人天** |
 
-> 对比原方案（11-18 人天）：引入工作流引擎后，WORKFLOW_AUTO.md 的改造从"重写"降级为"精简"（执行协议由 Workflow 承接），cron 迁移替代了手动重试逻辑的开发，整体工作量略有下降。但新增了 Phase 0 的引擎搭建成本。
+> 对比原方案（11-18 人天）：去掉了工作流引擎搭建成本（Phase 0），heartbeat 是 OpenClaw 内置能力无需额外部署；WORKFLOW_AUTO.md 从"重写"降级为"精简"；cron payload 中 3000 字符的硬编码 prompt 迁移到 HEARTBEAT.md 后更易维护。整体工作量显著下降。
 
 ### 7.9 开放问题更新
 
 | 编号 | 原问题 | 状态 | 说明 |
 |------|--------|------|------|
 | Q1 | VK 历史数据是否需要导出归档？ | **待确认** | 若 VK 保留为只读展示层，历史数据仍可通过 VK UI 查看；若最终完全移除 VK，需在 Phase 3 前导出 |
-| Q2 | coder4 cron 是否需要迁移？ | **已解决** | 迁移到工作流引擎（Temporal/Prefect） |
-| Q3 | 长期是否需要替代 VK 的可视化？ | **已解决** | 工作流引擎自带 Web UI（Temporal UI / Prefect UI），可替代 VK 看板 |
-| Q4 | vk_cards.json 是否需要 schema 校验？ | **待确认** | 建议在 `load_context` Activity 中加入 JSON Schema 校验 |
-| Q5 | 本地 JSON 并发写入冲突？ | **已解决** | 工作流引擎保证单 Workflow 实例串行执行，无并发问题 |
-| Q6 | attempt 系统是否需要跨会话查询？ | **待确认** | 工作流引擎的 Workflow History 天然支持跨会话查询 |
-| Q7 | bootstrap_kernel 幽灵依赖何时处理？ | **已解决** | Phase 1 拆分 Activities 时一并处理 |
+| Q2 | coder4 cron 是否需要迁移？ | **已解决** | 从 cron 切换为 OpenClaw heartbeat，不引入外部工作流引擎 |
+| Q3 | 长期是否需要替代 VK 的可视化？ | **已解决** | Telegram 双向交互 + `wt-flow.sh list` 命令行满足日常需求；若需 Web UI 可后续引入工作流引擎（可选） |
+| Q4 | vk_cards.json 是否需要 schema 校验？ | **待确认** | 建议在 `load_context` 模块中加入 JSON Schema 校验 |
+| Q5 | 本地 JSON 并发写入冲突？ | **已解决** | heartbeat 串行执行，同一时刻只有一个 agent turn 在运行，无并发问题 |
+| Q6 | attempt 系统是否需要跨会话查询？ | **待确认** | 本地 `attempts/<card_id>/` 目录支持文件级查询；Telegram 可查询历史 |
+| Q7 | bootstrap_kernel 幽灵依赖何时处理？ | **已解决** | Phase 1 新增 `--local-mode` 时一并处理 |
 | Q8 | VK MCP 故障频次数据？ | **不再需要** | VK 从执行链路移除，故障频次不再影响自动化 |
+| Q9 | OpenClaw heartbeat 的具体配置方式？ | **新增，待确认** | 需确认 `jobs.json` 中 heartbeat kind 的配置语法，以及 `HEARTBEAT.md` 的读取时机 |
 
 ---
 

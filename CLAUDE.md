@@ -53,18 +53,18 @@
 领域规则（代码风格、LangGraph、文档同步等）见 .claude/rules/ 目录。
 
 ## 规则与脚本速查
-- 改规则 → 跑 `python3 scripts/sync_rules_to_cc.py`
+- 改规则/命令 → CC 侧 PostToolUse hook 自动同步（也可手动 `python3 scripts/sync_rules_to_cc.py`）
 - 加工作流脚本 → 放 `.cursor/scripts/` + 在 `scripts/` 补 symlink
 - 加项目脚本 → 直接放 `scripts/` 或子目录
 - 建立新约定/流程 → 必须同步写入操作手册（本文件或对应 docs）
 
 ## 规则维护
-- 规则唯一源：.cursor/rules/*.mdc（手工维护）
-- 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（自动生成 .claude/rules/*.md）
-- 手工维护文件（不被 sync 覆盖）：teammate-preamble.md、doc-sync-lite.md
-- 改规则后必须跑 sync 脚本，否则 CC 侧规则会过时
-- 新增规则：在 .cursor/rules/ 创建 .mdc 文件，跑 sync 脚本即可同步到 CC
-- 新增手工维护规则：创建 .claude/rules/xxx.md，并在 sync 脚本 MANUAL_FILES 中注册文件名
+- 规则唯一源：.cursor/rules/*.mdc
+- 命令唯一源：.cursor/commands/*.md
+- 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（rules 去 frontmatter 生成 .claude/rules/*.md，commands 直接复制到 .claude/commands/*.md）
+- 自动同步：CC 侧 PostToolUse hook 在编辑 .cursor/rules/*.mdc 或 .cursor/commands/*.md 时自动触发 sync
+- 新增规则：在 .cursor/rules/ 创建 .mdc 文件，编辑保存后自动同步
+- 新增命令：在 .cursor/commands/ 创建 .md 文件，编辑保存后自动同步
 
 ## 脚本目录
 - 个人工作流脚本实体在 `.cursor/scripts/`，`scripts/` 下为 symlink

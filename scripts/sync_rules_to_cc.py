@@ -1,16 +1,24 @@
-"""Cursor 规则同步到 Claude Code 的转换脚本。
+"""Cursor 配置同步脚本：同步到 Claude Code 与 Codex。
 
-从 .cursor/rules/*.mdc 读取规则文件，去除 frontmatter（--- 块），
-输出到 .claude/rules/*.md。文件名下划线转连字符，后缀 .mdc -> .md。
+同步三类文件：
+1. Rules: .cursor/rules/*.mdc -> .claude/rules/*.md（去 frontmatter，下划线转连字符）
+2. Commands: .cursor/commands/*.md -> .claude/commands/*.md（直接复制，替代 symlink）
+3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（供 Codex `/prompts:<name>` 调用）
 
 用法:
-    python scripts/sync_rules_to_cc.py
-    python scripts/sync_rules_to_cc.py --exclude doc_sync,banking-context
-    python scripts/sync_rules_to_cc.py --lite doc_sync
+    python scripts/sync_rules_to_cc.py          # 同步 rules + commands
+    python scripts/sync_rules_to_cc.py --only rules
+    python scripts/sync_rules_to_cc.py --only commands
+    python scripts/sync_rules_to_cc.py --exclude banking-context
+    python scripts/sync_rules_to_cc.py --skip-codex-prompts
+    python scripts/sync_rules_to_cc.py --codex-prompts-dir ~/.codex/prompts
 """
 
 import argparse
+import hashlib
+import json
 import re
+import shutil
 from pathlib import Path
 from typing import Optional, Set
 
@@ -20,14 +28,19 @@ if _script_path.parent.parent.name == ".cursor":
     ROOT = _script_path.parent.parent.parent
 else:
     ROOT = _script_path.parent.parent
+
 CURSOR_RULES_DIR = ROOT / ".cursor" / "rules"
 CLAUDE_RULES_DIR = ROOT / ".claude" / "rules"
+CURSOR_COMMANDS_DIR = ROOT / ".cursor" / "commands"
+CLAUDE_COMMANDS_DIR = ROOT / ".claude" / "commands"
+DEFAULT_CODEX_PROMPTS_DIR = Path.home() / ".codex" / "prompts"
+CODEX_MANIFEST_FILENAME = ".cursor_commands_manifest.json"
+TEAM_BRIDGE_PREFIX = "jjk-team-"
+TEAM_BRIDGE_MARKER = "<!-- AUTO-GENERATED: jjk-team-bridge -->"
+TEAM_DEFAULT_ROLE = "planner"
 
 # frontmatter 正则：匹配文件开头的 --- ... --- 块
 FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
-
-# 手工维护的文件，sync 脚本不会覆盖
-MANUAL_FILES = {"teammate-preamble", "doc-sync-lite"}
 
 
 def strip_frontmatter(content: str) -> str:
@@ -41,13 +54,175 @@ def mdc_to_md_name(mdc_name: str) -> str:
     return stem.replace("_", "-") + ".md"
 
 
-def sync_rules(
-    exclude: Optional[Set[str]] = None,
-    lite: Optional[Set[str]] = None,
-) -> list[str]:
+def _sha1_file(path: Path) -> str:
+    return hashlib.sha1(path.read_bytes()).hexdigest()
+
+
+def _extract_frontmatter_description(path: Path) -> str:
+    """读取命令 frontmatter 的 description 字段（若存在）。"""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if not content.startswith("---\n"):
+        return ""
+    lines = content.splitlines()
+    for line in lines[1:40]:
+        stripped = line.strip()
+        if stripped == "---":
+            break
+        if stripped.startswith("description:"):
+            return stripped.split(":", 1)[1].strip()
+    return ""
+
+
+def _team_role_for_command(stem: str) -> str:
+    """根据命令名给出 team 角色建议。"""
+    if stem in {"jjk-plan", "jjk-clarify", "jjk-vkplan"}:
+        return "planner"
+    if stem in {"jjk-imp", "jjk-imp-ws", "jjk-feature", "jjk-quick", "jjk-refactor"}:
+        return "executor"
+    if stem in {"jjk-debug", "jjk-diagnose", "jjk-pc"}:
+        return "debugger"
+    if stem in {"jjk-review"}:
+        return "code-reviewer"
+    if stem in {"jjk-test"}:
+        return "test-engineer"
+    if stem in {"jjk-verify"}:
+        return "verifier"
+    if stem in {"jjk-security-audit"}:
+        return "security-reviewer"
+    if stem in {"jjk-doc-check", "jjk-diagrams", "jjk-api-docs"}:
+        return "writer"
+    if stem in {"jjk-git-commit", "jjk-create-pr"}:
+        return "git-master"
+    return TEAM_DEFAULT_ROLE
+
+
+def _collect_jjk_command_specs() -> list[dict[str, str]]:
+    specs = []
+    for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("jjk-*.md")):
+        stem = cmd_file.stem
+        if stem.startswith("jjk-team-"):
+            continue
+        suffix = stem.removeprefix("jjk-")
+        specs.append(
+            {
+                "stem": stem,
+                "suffix": suffix,
+                "file": cmd_file.name,
+                "sha1": _sha1_file(cmd_file),
+                "sha8": _sha1_file(cmd_file)[:8],
+                "description": _extract_frontmatter_description(cmd_file) or "-",
+                "role": _team_role_for_command(stem),
+                "team_file": f"{TEAM_BRIDGE_PREFIX}{suffix}.md",
+            }
+        )
+    return specs
+
+
+def _render_team_bridge_command(spec: dict[str, str]) -> str:
+    stem = spec["stem"]
+    suffix = spec["suffix"]
+    source_file = spec["file"]
+    role = spec["role"]
+    source_sha1 = spec["sha1"]
+    source_sha8 = spec["sha8"]
+    team_file = spec["team_file"]
+    description = spec["description"]
+    return f"""---
+description: Team 封装命令：执行 /prompts:{stem}（自动同步源命令）
+---
+{TEAM_BRIDGE_MARKER}
+<!-- source: {source_file} -->
+<!-- source_sha1: {source_sha1} -->
+
+# Team 命令封装（`/{team_file.removesuffix(".md")}`）
+
+将 `/{stem}` 封装为 Team 入口，且始终以源命令文档为唯一真理源。
+
+## 使用方式
+
+在命令后可选补充：
+
+1. `workers=<N>`（默认建议 5）
+2. `role=<agent_type>`（默认建议 `{role}`）
+3. `mode=ralph|team`（默认建议 `ralph`）
+4. 任务正文（你希望 AI 完成什么）
+
+示例：
+
+```text
+/{team_file.removesuffix(".md")} workers=5 role={role} mode=ralph
+任务：<在这里写你的任务目标>
+```
+
+## 执行协议（强制）
+
+1. 先读取源文件：`.cursor/commands/{source_file}`，严格沿用其约束与产物要求。
+2. 以 Team 方式组织执行，并显式执行：`/prompts:{stem}`。
+3. 禁止把 `/{stem}` 当普通文本描述。
+4. 每一步回传：`命令原文 + 产物绝对路径 + 校验结果(PASS/FAIL)`。
+
+## 源命令元数据（自动同步）
+
+| 字段 | 值 |
+|---|---|
+| source | `.cursor/commands/{source_file}` |
+| source_sha8 | `{source_sha8}` |
+| actual_prompt | `/prompts:{stem}` |
+| recommended_role | `{role}` |
+| description | {description} |
+
+## 同步机制
+
+本文件由 `python3 scripts/sync_rules_to_cc.py --only commands` 自动生成。
+
+当 `.cursor/commands/{source_file}` 变更后，重新执行同步脚本即可自动刷新本文件，并同步到：
+
+1. `.claude/commands/{team_file}`（CC 端）
+2. `~/.codex/prompts/{team_file}`（Codex 端）
+"""
+
+
+def ensure_team_bridge_commands() -> list[str]:
+    """为每个 /jjk-xxx 自动生成 /jjk-team-xxx 命令。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+    specs = _collect_jjk_command_specs()
+    generated: list[str] = []
+
+    for spec in specs:
+        team_name = spec["team_file"]
+        generated.append(team_name)
+        target = CURSOR_COMMANDS_DIR / team_name
+        rendered = _render_team_bridge_command(spec)
+        current = ""
+        if target.exists():
+            try:
+                current = target.read_text(encoding="utf-8")
+            except OSError:
+                current = ""
+        if current != rendered:
+            target.write_text(rendered, encoding="utf-8")
+
+    generated_set = set(generated)
+    for existing in CURSOR_COMMANDS_DIR.glob(f"{TEAM_BRIDGE_PREFIX}*.md"):
+        if existing.name in generated_set:
+            continue
+        try:
+            content = existing.read_text(encoding="utf-8")
+        except OSError:
+            content = ""
+        if TEAM_BRIDGE_MARKER in content:
+            existing.unlink()
+
+    return generated
+
+
+def sync_rules(exclude: Optional[Set[str]] = None) -> list[str]:
     """同步规则文件，返回生成的文件列表。"""
     exclude = exclude or set()
-    lite = lite or set()
     CLAUDE_RULES_DIR.mkdir(parents=True, exist_ok=True)
 
     generated = []
@@ -55,61 +230,157 @@ def sync_rules(
         stem = mdc_file.stem
         if stem in exclude:
             continue
-        if stem in lite:
-            # 精简模式跳过，由外部手工处理
-            continue
 
         out_name = mdc_to_md_name(mdc_file.name)
-        # 保护手工维护的文件
-        if Path(out_name).stem in MANUAL_FILES:
-            print(f"  跳过手工文件: {out_name}")
-            continue
-
         content = mdc_file.read_text(encoding="utf-8")
         cleaned = strip_frontmatter(content)
         out_path = CLAUDE_RULES_DIR / out_name
         out_path.write_text(cleaned, encoding="utf-8")
         generated.append(out_name)
 
-    # 清理孤儿文件：删除不在本次生成列表中的自动生成文件
+    # 清理孤儿文件
     generated_set = set(generated)
     for existing in CLAUDE_RULES_DIR.glob("*.md"):
-        if existing.stem in MANUAL_FILES:
-            continue
         if existing.name not in generated_set:
             existing.unlink()
-            print(f"  清理孤儿: {existing.name}")
+            print(f"  清理孤儿规则: {existing.name}")
 
     return generated
 
 
+def sync_commands() -> list[str]:
+    """同步命令文件（直接复制），返回同步的文件列表。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+    ensure_team_bridge_commands()
+    CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
+
+    synced = []
+    for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("*.md")):
+        dest = CLAUDE_COMMANDS_DIR / cmd_file.name
+        # 如果目标是 symlink，先删除再复制
+        if dest.is_symlink():
+            dest.unlink()
+        shutil.copy2(cmd_file, dest)
+        synced.append(cmd_file.name)
+
+    # 清理孤儿命令
+    synced_set = set(synced)
+    for existing in CLAUDE_COMMANDS_DIR.glob("*.md"):
+        if existing.is_symlink():
+            existing.unlink()
+            print(f"  清理残留 symlink: {existing.name}")
+        elif existing.name not in synced_set:
+            existing.unlink()
+            print(f"  清理孤儿命令: {existing.name}")
+
+    return synced
+
+
+def _read_codex_manifest(manifest_path: Path) -> Set[str]:
+    """读取 Codex 命令镜像 manifest。"""
+    if not manifest_path.exists():
+        return set()
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    files = data.get("managed_files", [])
+    return {name for name in files if isinstance(name, str)}
+
+
+def _write_codex_manifest(manifest_path: Path, managed_files: list[str]) -> None:
+    """写入 Codex 命令镜像 manifest。"""
+    payload = {"managed_files": managed_files}
+    manifest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def sync_commands_to_codex(codex_prompts_dir: Path) -> list[str]:
+    """同步命令到 Codex prompts 目录，并按 manifest 清理孤儿文件。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+    ensure_team_bridge_commands()
+    codex_prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    synced = []
+    for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("*.md")):
+        dest = codex_prompts_dir / cmd_file.name
+        if dest.is_symlink():
+            dest.unlink()
+        shutil.copy2(cmd_file, dest)
+        synced.append(cmd_file.name)
+
+    manifest_path = codex_prompts_dir / CODEX_MANIFEST_FILENAME
+    previous_files = _read_codex_manifest(manifest_path)
+    current_files = set(synced)
+
+    for orphan in sorted(previous_files - current_files):
+        orphan_path = codex_prompts_dir / orphan
+        if orphan_path.exists() and orphan_path.is_file():
+            orphan_path.unlink()
+            print(f"  清理 Codex 孤儿命令: {orphan}")
+
+    _write_codex_manifest(manifest_path, sorted(current_files))
+    return synced
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="同步 Cursor 规则到 Claude Code")
-    parser.add_argument(
-        "--exclude",
-        default="doc_sync",
-        help="排除的规则文件名（逗号分隔，不含后缀），默认: doc_sync",
+    parser = argparse.ArgumentParser(
+        description="同步 Cursor 规则和命令到 Claude Code / Codex"
     )
     parser.add_argument(
-        "--lite",
+        "--exclude",
         default="",
-        help="需要精简处理的规则文件名（逗号分隔，不含后缀）",
+        help="排除的规则文件名（逗号分隔，不含后缀）",
+    )
+    parser.add_argument(
+        "--only",
+        choices=["rules", "commands"],
+        default=None,
+        help="只同步指定类型（默认两者都同步）",
+    )
+    parser.add_argument(
+        "--skip-codex-prompts",
+        action="store_true",
+        help="跳过同步到 Codex prompts（~/.codex/prompts）",
+    )
+    parser.add_argument(
+        "--codex-prompts-dir",
+        default=str(DEFAULT_CODEX_PROMPTS_DIR),
+        help="Codex prompts 目录（默认: ~/.codex/prompts）",
     )
     args = parser.parse_args()
 
     exclude = {s.strip() for s in args.exclude.split(",") if s.strip()}
-    lite = {s.strip() for s in args.lite.split(",") if s.strip()}
 
-    generated = sync_rules(exclude=exclude, lite=lite)
+    if args.only != "commands":
+        rules = sync_rules(exclude=exclude)
+        print(f"已同步 {len(rules)} 个规则文件到 {CLAUDE_RULES_DIR}/:")
+        for name in rules:
+            print(f"  - {name}")
+        if exclude:
+            print(f"已排除: {', '.join(sorted(exclude))}")
 
-    print(f"已生成 {len(generated)} 个规则文件到 {CLAUDE_RULES_DIR}/:")
-    for name in generated:
-        print(f"  - {name}")
+    if args.only != "rules":
+        commands = sync_commands()
+        print(f"已同步 {len(commands)} 个命令文件到 {CLAUDE_COMMANDS_DIR}/:")
+        for name in commands:
+            print(f"  - {name}")
 
-    if exclude:
-        print(f"已排除: {', '.join(sorted(exclude))}")
-    if lite:
-        print(f"精简模式: {', '.join(sorted(lite))}")
+        if args.skip_codex_prompts:
+            print("已跳过 Codex prompts 同步（--skip-codex-prompts）")
+        else:
+            codex_prompts_dir = Path(args.codex_prompts_dir).expanduser()
+            try:
+                codex_commands = sync_commands_to_codex(codex_prompts_dir)
+                print(f"已同步 {len(codex_commands)} 个命令文件到 {codex_prompts_dir}/:")
+                for name in codex_commands:
+                    print(f"  - {name}")
+            except OSError as exc:
+                print(f"警告: Codex prompts 同步失败（{codex_prompts_dir}）: {exc}")
 
 
 if __name__ == "__main__":

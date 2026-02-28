@@ -1,0 +1,80 @@
+"""意图目标分解：模型主判定与兜底策略测试。"""
+
+from langchain_core.messages import HumanMessage
+
+import app.ai.workflow.multi_agent_graph as graph
+from app.ai.workflow.multi_agent_graph import (
+    _build_planner_intent_plan,
+    _infer_initial_intent_plan,
+)
+
+
+def test_infer_initial_intent_plan_avoids_data_goal_for_generic_query_word() -> None:
+    """包含“查询”动作词的待办问句，不应误判为 data.query。"""
+    state = {"messages": [HumanMessage(content="帮我查询一下今天的待办清单")]}
+
+    plan = _infer_initial_intent_plan(state)
+    kinds = [str(goal.get("kind") or "") for goal in list(plan.get("goals") or [])]
+
+    assert "todo.query" in kinds
+    assert "data.query" not in kinds
+
+
+def test_build_planner_intent_plan_uses_model_primary_when_available(monkeypatch) -> None:
+    """模型路径可用时，应优先使用 model_primary 结果。"""
+
+    def _fake_model_plan(_state, _llm):
+        return {
+            "version": 1,
+            "source": "model_primary",
+            "user_query": "先看天气再看待办",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "external.lookup",
+                    "title": "外部信息",
+                    "must_answer": True,
+                    "confidence": 0.88,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(graph, "_infer_model_intent_plan", _fake_model_plan)
+
+    state = {"messages": [HumanMessage(content="先看天气再看待办")]}
+    plan = _build_planner_intent_plan(state, llm=object(), mode="model_primary")
+
+    assert plan["source"] == "model_primary"
+    assert plan["goals"][0]["kind"] == "external.lookup"
+
+
+def test_build_planner_intent_plan_fallbacks_when_model_fails(monkeypatch) -> None:
+    """模型失败时应回退到 heuristic_fallback，并记录原因。"""
+
+    def _raise_model_error(_state, _llm):
+        raise RuntimeError("mock-llm-down")
+
+    monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_model_error)
+
+    state = {"messages": [HumanMessage(content="请帮我看下待办")]}
+    plan = _build_planner_intent_plan(state, llm=object(), mode="model_primary")
+
+    assert plan["source"] == "heuristic_fallback"
+    assert plan.get("fallback_meta", {}).get("reason", "").startswith("planner_model_error:")
+    assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))
+
+
+def test_build_planner_intent_plan_supports_heuristic_only_mode(monkeypatch) -> None:
+    """显式指定 heuristic_only 时不调用模型路径。"""
+
+    def _raise_if_called(*_args, **_kwargs):
+        raise AssertionError("_infer_model_intent_plan should not be called in heuristic_only mode")
+
+    monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_if_called)
+
+    state = {"messages": [HumanMessage(content="请帮我看下待办")]}
+    plan = _build_planner_intent_plan(state, llm=object(), mode="heuristic_only")
+
+    assert plan["source"] == "heuristic_only"
+    assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))

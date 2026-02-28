@@ -9,8 +9,10 @@
 为保持“全量百科”定位且避免命令口径漂移，本文固定采用以下规则：
 
 1. 命令细节权威源：`.cursor/commands/*.md`（对应 `authority_rule.commands_detail`）。
+   - 运行时镜像：`.claude/commands/*.md`（Claude Code）与 `~/.codex/prompts/*.md`（Codex）。
+   - 触发方式：Claude Code / Cursor 用 `/jjk-xxx`；Codex 用 `/prompts:jjk-xxx`。
 2. 本文职责：保留命令百科、场景建议与链路示例，不替代权威命令文档。
-3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-02-14`，当前共 `26` 个命令文件。
+3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-02-27`，当前共 `28` 个命令文件。
 4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
 
 ## 1. Cursor Skills 使用指南
@@ -113,16 +115,19 @@ npx ai-agent-skills info <skill-name>
 ### 2.1 核心流程
 
 ```
-想法 → /jjk-plan → requirements.md → /jjk-imp → 代码 → /jjk-test → 验收
+想法 → /jjk-plan → requirements.md → /jjk-imp → 代码 → /jjk-verify → 验收
+                                                       （或 /jjk-review → /jjk-test → 验收）
 ```
 
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
 | **规划** | `/jjk-plan` | `requirements.md` | 明确需求和设计 |
 | **实现** | `/jjk-imp` | 代码 + 文档 | AI 实现功能 |
+| **一站式验证** | `/jjk-verify` | 验证报告 | 审查 + 测试 + 交互式 UAT |
 | **测试** | `/jjk-test` | 测试报告 | 验证功能 |
 | **调试** | `/jjk-debug` | 修复方案 | 排查问题 |
 | **审查** | `/jjk-review` | 审查意见 | 代码质量检查 |
+| **小改动** | `/jjk-quick` | 代码 | <= 3 文件快速修改 |
 | **全流程** | `/jjk-feature` | 完整功能 | Plan + Imp + Test |
 
 ### 2.2 上下文引用策略
@@ -359,7 +364,7 @@ description: 命令的简短描述
 你的场景是什么？
 │
 ├─ 需求不明确，想先澄清
-│   └─ /jjk-clarify （轻量问答，不产出文档）
+│   └─ /jjk-clarify （轻量问答；deep 模式做领域灰区分析）
 │
 ├─ 需要正式的需求文档
 │   └─ /jjk-plan （产出 requirements.md）
@@ -367,10 +372,16 @@ description: 命令的简短描述
 ├─ 已有明确计划，只需编码
 │   └─ /jjk-imp
 │
+├─ 小改动（<= 3 文件，无架构变更）
+│   └─ /jjk-quick （跳过完整流程，直接改码 + 最小验证）
+│
 ├─ 完整的新功能开发
 │   └─ /jjk-feature （= plan + imp + review）
 │
-├─ 代码写完了，需要审查
+├─ 代码写完了，一次性验证
+│   └─ /jjk-verify （审查 + 测试 + 交互式 UAT）
+│
+├─ 代码写完了，只需审查
 │   └─ /jjk-review （含快速自测）
 │
 ├─ 需要完整的测试流程
@@ -384,9 +395,11 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
-| `/jjk-clarify` | 快速澄清 - 通过问答确认理解，不产出文档 | 无 |
+| `/jjk-clarify` | 快速澄清 - 通过问答确认理解（支持 deep 模式做领域灰区分析） | 无 |
 | `/jjk-plan` | 正式规划 - 产出需求文档和技术方案 | `requirements.md` |
 | `/jjk-imp` | 代码实现 - 根据计划编写代码，同步文档 | 代码 + 文档 |
+| `/jjk-quick` | 小改动快速模式 - <= 3 文件，跳过完整流程 | 代码 |
+| `/jjk-verify` | 一站式验证 - 审查 + 测试 + 交互式 UAT | 验证报告 |
 | `/jjk-review` | 代码审查 - 功能验证 + 质量检查 + 安全审计 + 快速自测 | 审查意见 |
 | `/jjk-test` | 完整测试 - 用例生成、三重验证、报告产出 | `test_report.md` |
 | `/jjk-debug` | 问题排查 - 重现、定位、修复、预防 | 修复 + 测试用例 |
@@ -463,9 +476,11 @@ npx ai-agent-skills update --all    # 更新全部
 # === Commands（在聊天中输入）===
 
 # 核心开发流程 - 覆盖完整开发周期
-/jjk-clarify       # 通过问答澄清需求，避免返工
+/jjk-clarify       # 通过问答澄清需求（deep 模式做领域灰区分析）
 /jjk-plan          # 生成 requirements.md 和技术方案
 /jjk-imp           # 根据计划编写代码，自动同步文档
+/jjk-quick         # 小改动快速模式（<= 3 文件，跳过完整流程）
+/jjk-verify        # 一站式验证：审查 + 测试 + 交互式 UAT
 /jjk-test          # 全链路测试：环境准备、用例生成、执行验证
 /jjk-debug         # 重现、定位、修复、记录的标准排查流程
 /jjk-review        # 检查代码质量、文档同步、规范遵循
@@ -523,16 +538,17 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（24 个）
+### 9.2 Commands（28 个）
 
 ```
 .cursor/commands/
 ├── jjk-api-docs.md        # 生成 API 文档
-├── jjk-clarify.md         # 快速澄清需求
+├── jjk-clarify.md         # 快速澄清需求（支持 deep 模式）
 ├── jjk-create-pr.md       # 创建 PR
 ├── jjk-debug.md           # 调试问题
 ├── jjk-deslop.md          # 清理 AI 冗余代码
 ├── jjk-diagrams.md        # 生成 Mermaid 图表
+├── jjk-diagnose.md        # 问题诊断（/jjk-pc 的规范别名）
 ├── jjk-doc-check.md       # 文档同步检查
 ├── jjk-error-handling.md  # 添加错误处理
 ├── jjk-feature.md         # 全流程开发
@@ -543,14 +559,17 @@ npx ai-agent-skills update --all    # 更新全部
 ├── jjk-migration.md       # 数据库迁移
 ├── jjk-optimize.md        # 性能优化
 ├── jjk-pc.md              # 问题诊断（命令文档示例触发词 /jjk-diagnose）
-├── jjk-plan.md            # 需求规划
+├── jjk-plan.md            # 需求规划（含 TDD 测试策略前置）
+├── jjk-quick.md           # 小改动快速模式（<= 3 文件）
 ├── jjk-refactor.md        # 代码重构
 ├── jjk-review.md          # 代码审查
 ├── jjk-security-audit.md  # 安全审计
 ├── jjk-test.md            # 运行测试
+├── jjk-verify.md          # 一站式验证（审查 + 测试 + UAT）
 ├── jjk-vkplan.md          # 并行拆解
 ├── jjk-vksync.md          # 基线同步检查
-└── jjk-vktodo.md          # 批量建卡/推进
+├── jjk-vktodo.md          # 批量建卡/推进
+└── jjk-wtimp.md           # Worktree 隔离编码
 ```
 
 ### 9.3 Rules（8 个）

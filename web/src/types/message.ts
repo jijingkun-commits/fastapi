@@ -102,6 +102,11 @@ export type StreamEventType =
     | "tool_end"        // 工具调用结束
     | "status"          // 状态更新
     | "result"          // 结构化结果（待办列表、图片等）
+    | "plan_ready"      // 问题合同准备完成
+    | "task_started"    // 执行任务开始
+    | "task_finished"   // 执行任务结束
+    | "coverage_check"  // 覆盖率检查
+    | "final_answer"    // 最终答复
     | "confirmation"    // 确认请求
     | "clarification"   // 澄清问题
     | "interrupt"       // 中断等待
@@ -139,6 +144,14 @@ export interface ResultEventData {
     data_type: string;  // "todo_list" | "image" | "chart" | "sql_result" 等
     data: unknown;
     message?: string;
+}
+
+/**
+ * 最终答复事件数据
+ */
+export interface FinalAnswerEventData {
+    content: string;
+    meta?: Record<string, unknown>;
 }
 
 export type SqlChartFieldRole = "dimension" | "measure" | "time" | "identifier";

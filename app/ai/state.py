@@ -120,6 +120,7 @@ class MultiAgentState(BaseAgentState, total=False):
     # 意图识别（借鉴 Flock Intent Recognition）
     detected_intent: str
     intent_route: str
+    intent_mode: Literal["model_primary", "heuristic_only"]
     
     # Skills RAG
     skill_context: str            # 检索到的相关技能上下文（由 preprocess 节点填充）
@@ -129,6 +130,16 @@ class MultiAgentState(BaseAgentState, total=False):
 
     # 运行时恢复（P5 稳态增强）
     runtime_recovery_state: RuntimeRecoveryState
+
+    # 交付导向编排（Delivery Orchestrator V2）
+    turn_id: str                        # 当前轮唯一标识（thread/run 维度内）
+    intent_plan: Dict[str, Any]         # 问题合同（目标列表）
+    task_graph: Dict[str, Any]          # 执行任务图（预留）
+    task_runs: List[Dict[str, Any]]     # 任务运行记录（预留）
+    deliverables: List[Dict[str, Any]]  # 结构化交付物
+    coverage_report: Dict[str, Any]     # 覆盖率检查结果
+    final_answer: str                   # 唯一对外最终答复
+    delivery_meta: Dict[str, Any]       # 交付元数据（排序/去重/时效统计）
 
 
 class TodoAgentState(BaseAgentState, total=False):

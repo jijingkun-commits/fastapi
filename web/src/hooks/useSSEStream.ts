@@ -197,6 +197,38 @@ export function useSSEStream(): StreamContextValue {
         }
     }, [appendToAiMessage]);
 
+    const applyFinalAnswerToMessage = useCallback((
+        aiId: string,
+        content: string,
+        meta?: Record<string, unknown>,
+    ) => {
+        const normalized = content.trim();
+        if (!normalized) {
+            return;
+        }
+
+        setMessages((prev) => {
+            const updated = [...prev];
+            const idx = updated.findIndex((m) => m.id === aiId);
+            if (idx === -1) {
+                return updated;
+            }
+
+            const message = updated[idx] as MessageWithAdditionalKwargs;
+            const existingKwargs = message.additional_kwargs ?? {};
+            updated[idx] = {
+                ...updated[idx],
+                content: normalized,
+                additional_kwargs: {
+                    ...existingKwargs,
+                    final_source: "final_answer",
+                    ...(meta ? { final_answer_meta: meta } : {}),
+                },
+            } as Message;
+            return updated;
+        });
+    }, []);
+
     const completeStreamLifecycle = useCallback((aiId: string, messageId?: number) => {
         bindMessageIdToAiMessage(aiId, messageId);
         setCurrentStatus(null);
@@ -379,6 +411,10 @@ export function useSSEStream(): StreamContextValue {
                     onResult: (data: ResultEventData) => {
                         handleStructuredResultEvent(aiId, data, false);
                     },
+                    onFinalAnswer: (data) => {
+                        applyFinalAnswerToMessage(aiId, data.content, data.meta);
+                        setCurrentStatus(null);
+                    },
                     // 处理状态更新事件
                     onStatus: (statusData: StatusEventData) => {
                         const normalizedStatus = normalizeStatusData(statusData);
@@ -439,6 +475,7 @@ export function useSSEStream(): StreamContextValue {
         setThreadId,
         appendToAiMessage,
         handleStructuredResultEvent,
+        applyFinalAnswerToMessage,
         completeStreamLifecycle,
     ]);
 
@@ -482,6 +519,10 @@ export function useSSEStream(): StreamContextValue {
                 onResult: (data: ResultEventData) => {
                     handleStructuredResultEvent(aiId, data, true);
                 },
+                onFinalAnswer: (data) => {
+                    applyFinalAnswerToMessage(aiId, data.content, data.meta);
+                    setCurrentStatus(null);
+                },
                 onStatus: (statusData: StatusEventData) => {
                     const normalizedStatus = normalizeStatusData(statusData);
                     if (!normalizedStatus) return;
@@ -518,7 +559,7 @@ export function useSSEStream(): StreamContextValue {
             stopRef.current = null;
             currentAiIdRef.current = null;
         });
-    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, completeStreamLifecycle]);
+    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, applyFinalAnswerToMessage, completeStreamLifecycle]);
 
     const values: StateType = { messages, ui: [] };
 

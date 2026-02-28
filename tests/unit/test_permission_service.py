@@ -372,6 +372,7 @@ def test_validate_query_context_staff_no_dept_code_still_blocked(
 
     assert allowed is False
     assert "缺少 dept_code" in reason
+    assert "data_role=staff" in reason
 
 
 def test_get_row_filters_head_president_uses_explicit_org_code_rule(

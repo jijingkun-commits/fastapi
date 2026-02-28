@@ -17,7 +17,9 @@ description: 全流程开发：规划 -> 实现 -> 文档同步 -> 审查 -> 验
 | 完整的新功能开发 | `/jjk-feature` ✅ |
 | 只需要规划，暂不编码 | `/jjk-plan` |
 | 已有计划，只需编码 | `/jjk-imp` |
+| 代码已完成，一次性验证 | `/jjk-verify` |
 | 代码已完成，需要审查 | `/jjk-review` |
+| 小改动（<= 3 文件） | `/jjk-quick` |
 
 > **等效于**: `/jjk-plan` + `/jjk-imp` + `/jjk-review` + 文档同步闭环
 

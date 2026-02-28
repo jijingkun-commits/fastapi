@@ -1,11 +1,15 @@
 """问数 SQL 候选语义护栏单元测试。"""
 
+import json
 import unittest
 from unittest.mock import patch
+
+from langchain_core.messages import HumanMessage
 
 from app.services.result_enrichment_rule_service import ResultLookupEnrichmentRuleConfig
 
 from app.ai.workflow.data_graph import (
+    analyze_data_intent,
     _build_column_display_names,
     _build_display_sql,
     _build_sql_result_additional_kwargs,
@@ -19,8 +23,22 @@ from app.ai.workflow.data_graph import (
     _pick_chart_axes,
     _resolve_sql_empty_result_fallback_policy,
     _requires_detail_query,
+    metric_resolve,
     route_after_execute,
 )
+
+
+class _FakeResponse:
+    def __init__(self, content: str):
+        self.content = content
+
+
+class _FakeLLM:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def invoke(self, _prompt: str):
+        return _FakeResponse(json.dumps(self.payload, ensure_ascii=False))
 
 
 class TestDataGraphSemanticGuard(unittest.TestCase):
@@ -288,6 +306,93 @@ class TestDataGraphSemanticGuard(unittest.TestCase):
         self.assertIn("ORDER BY", derived)
         self.assertIn("LIMIT 10", derived)
         self.assertIn("data_dt = '20250630'", derived)
+
+    def test_derive_metric_sql_for_org_dimension_maps_to_org_tree(self):
+        template = (
+            "SELECT SUM(prin_bal) AS 贷款余额 "
+            "FROM fdmdata.f_mid_loan_k_tb "
+            "WHERE ccy_cd = 'CNY' AND data_dt = '${data_dt}'"
+        )
+        question = "查询2025年6月30日按机构分组贷款余额前10名"
+
+        derived = _derive_metric_sql(
+            query_template=template,
+            time_range="2025年6月30日",
+            question=question,
+            dimensions=["机构"],
+        )
+
+        self.assertIsNotNone(derived)
+        assert derived is not None
+        self.assertIn("JOIN fdmdata.f_mid_org_tree_k o", derived)
+        self.assertIn("o.org_lv = '04'", derived)
+        self.assertIn("o.org_no AS org_no", derived)
+        self.assertIn("o.org_val AS org_name", derived)
+        self.assertIn("SUM(t.prin_bal)", derived)
+        self.assertIn("GROUP BY o.org_no, o.org_val", derived)
+        self.assertNotIn("GROUP BY legal_org_cd", derived)
+
+    def test_org_dimension_sql_rejects_legal_org_cd_only_grouping(self):
+        sql = (
+            "SELECT legal_org_cd, SUM(prin_bal) AS loan_bal "
+            "FROM fdmdata.f_mid_loan_k_tb "
+            "WHERE data_dt = '20250630' "
+            "GROUP BY legal_org_cd"
+        )
+
+        self.assertFalse(
+            _is_sql_semantically_compatible(
+                sql=sql,
+                question="查询2025年6月30日各机构贷款余额",
+                dimensions=["机构"],
+            )
+        )
+
+    def test_metric_resolve_integration_org_prompt_generates_org_tree_sql(self):
+        prompt = "查询2025年6月30日各机构贷款余额前10名"
+        llm_payload = {
+            "intent": "metric_query",
+            "metric_name": "贷款余额",
+            "time_range": "2025年6月30日",
+            "filters": [],
+            "dimensions": ["机构"],
+            "chart_type": "",
+            "clarification_needed": "",
+        }
+        metric_template = (
+            "SELECT SUM(prin_bal) AS 贷款余额 "
+            "FROM fdmdata.f_mid_loan_k_tb "
+            "WHERE ccy_cd = 'CNY' AND data_dt = '${data_dt}'"
+        )
+        metric_candidates = [
+            {
+                "metric_id": "LOAN_BALANCE",
+                "metric_name": "贷款余额",
+                "query_template": metric_template,
+                "similarity": 1.0,
+            }
+        ]
+
+        with patch("app.ai.workflow.data_graph.get_scene_llm", return_value=_FakeLLM(llm_payload)):
+            analyzed_state = analyze_data_intent({"messages": [HumanMessage(content=prompt)]})
+
+        with patch("app.ai.workflow.data_graph._search_metrics_exact_name", return_value=metric_candidates):
+            resolved = metric_resolve(
+                {
+                    "query_context": analyzed_state.get("query_context", {}),
+                    "matched_metric": analyzed_state.get("matched_metric"),
+                    "time_range": analyzed_state.get("time_range"),
+                    "dimensions": analyzed_state.get("dimensions"),
+                }
+            )
+
+        sql = str(resolved.get("generated_sql") or "")
+        self.assertEqual(resolved.get("sql_source"), "metric")
+        self.assertIn("JOIN fdmdata.f_mid_org_tree_k o", sql)
+        self.assertIn("o.org_no AS org_no", sql)
+        self.assertIn("o.org_val AS org_name", sql)
+        self.assertIn("GROUP BY o.org_no, o.org_val", sql)
+        self.assertNotIn("GROUP BY legal_org_cd", sql)
 
     def test_derive_metric_sql_returns_none_when_dimension_unmapped(self):
         template = (

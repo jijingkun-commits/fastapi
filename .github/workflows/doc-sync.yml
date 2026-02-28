@@ -57,6 +57,12 @@ jobs:
             echo "  - 跳过条件：纯格式化/重构、简单 Bug 修复"
           fi
 
+      - name: Enforce anti-mess manual sync
+        run: |
+          python3 scripts/check_special_doc_sync.py \
+            --diff-range "origin/${{ github.base_ref }}...HEAD" \
+            --strict
+
       - name: Summary
         run: |
           echo "## 文档同步检查完成" >> $GITHUB_STEP_SUMMARY

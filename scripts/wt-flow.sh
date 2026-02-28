@@ -6,6 +6,9 @@
 #   wt-flow.sh cleanup
 #   wt-flow.sh status
 #   wt-flow.sh guard   # 检查是否在 master 上，返回 0=安全 1=在 master
+#
+# merge 默认 fail-fast：主仓 dirty 时直接退出。
+# 如需兼容旧行为，可显式设置 WT_FLOW_ALLOW_AUTOCOMMIT=1 启用 auto-commit + 重建。
 
 set -euo pipefail
 
@@ -130,6 +133,20 @@ cmd_merge() {
 
   # 切回主仓库执行合并
   cd "$REPO_ROOT"
+
+  # 主仓库不干净时默认 fail-fast；仅在显式开关开启时允许 auto-commit。
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    if [[ "${WT_FLOW_ALLOW_AUTOCOMMIT:-0}" == "1" ]]; then
+      _log "主仓库有未提交变更，检测到 WT_FLOW_ALLOW_AUTOCOMMIT=1，执行 auto-commit + 重建策略 ..."
+      git add -u
+      git commit -m "chore: auto-commit before worktree merge (wt-flow)"
+      _log "master auto-commit 完成，清理当前 worktree，等待下一轮重建"
+      cmd_cleanup
+      return 0
+    fi
+    _die "主仓库有未提交变更，默认策略为 fail-fast。请先手动提交/清理，或显式设置 WT_FLOW_ALLOW_AUTOCOMMIT=1"
+  fi
+
   git checkout "${base_branch}"
   if ! git merge --no-ff "${branch}" -m "merge: ${branch} into ${base_branch}"; then
     _err "merge 冲突，自动中止"
@@ -212,6 +229,9 @@ main() {
       echo "  cleanup               清理 worktree 和分支"
       echo "  status                查看当前会话"
       echo "  guard                 检查是否在主分支上"
+      echo ""
+      echo "环境变量:"
+      echo "  WT_FLOW_ALLOW_AUTOCOMMIT=1  主仓 dirty 时允许 auto-commit（默认关闭）"
       exit 1
       ;;
   esac

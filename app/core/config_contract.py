@@ -219,6 +219,22 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         env_key="ENABLE_USER_SKILL_BINDING",
         aliases=("skill.enable_user_binding",),
     ),
+    "feature.enable_memory_recall": ConfigSpec(
+        key="feature.enable_memory_recall",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_MEMORY_RECALL",
+        aliases=("memory.enable_recall",),
+    ),
+    "feature.enable_pre_compaction_flush": ConfigSpec(
+        key="feature.enable_pre_compaction_flush",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_PRE_COMPACTION_FLUSH",
+        aliases=("memory.enable_pre_compaction_flush",),
+    ),
     # ==================== 问数权限配置（主键 askdata.*, 兼容 data_access.*） ====================
     "askdata.table_whitelist": ConfigSpec(
         key="askdata.table_whitelist",

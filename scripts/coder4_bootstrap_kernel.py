@@ -9,16 +9,21 @@ This script computes a single action for the current scoped task chain:
 - blocked_depends
 - all_done
 
-Optional bootstrap apply mode can create/activate one card in VK API.
+Optional bootstrap apply mode can create/activate one card:
+- VK API mode (default)
+- local-mode state file (when --local-mode is enabled)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
@@ -28,6 +33,7 @@ DEFAULT_ACTIVE_TASK = (
     "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json"
 )
 DEFAULT_API_BASE = "http://127.0.0.1:3001"
+DEFAULT_STATE_FILE = ".omc/state/task-runner-state.json"
 
 STATUS_ORDER = {
     "inprogress": 0,
@@ -58,6 +64,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="coder4 deterministic bootstrap kernel")
     parser.add_argument("--active-task", default=DEFAULT_ACTIVE_TASK)
     parser.add_argument("--vk-api-base", default=DEFAULT_API_BASE)
+    parser.add_argument("--local-mode", action="store_true", default=False)
+    parser.add_argument("--state-file", default=DEFAULT_STATE_FILE)
     parser.add_argument("--apply-bootstrap", action="store_true")
     parser.add_argument("--output", default="")
     return parser.parse_args()
@@ -76,6 +84,77 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.write("\n")
+
+
+def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".kernel_", suffix=".tmp", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+
+
+def _normalize_card_status_map(raw_map: dict[str, Any]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in raw_map.items():
+        cid = str(key or "").strip().upper()
+        if not cid:
+            continue
+        normalized[cid] = normalize_status(value)
+    return normalized
+
+
+def load_local_state(state_path: Path, task_key: str, card_order: list[str]) -> dict[str, Any]:
+    if state_path.exists():
+        state = load_json(state_path)
+    else:
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    raw_map = state.get("card_status_map")
+    if not isinstance(raw_map, dict):
+        raw_map = state.get("card_status") if isinstance(state.get("card_status"), dict) else {}
+    card_status_map = _normalize_card_status_map(raw_map if isinstance(raw_map, dict) else {})
+    return {
+        "schema_version": str(state.get("schema_version") or "1.0.0"),
+        "task_key": str(state.get("task_key") or task_key),
+        "card_order": [str(x).strip().upper() for x in (state.get("card_order") or card_order)],
+        "card_status_map": card_status_map,
+        "last_updated": str(state.get("last_updated") or ""),
+        "created_at": str(state.get("created_at") or ""),
+    }
+
+
+def update_local_card_status(
+    state_path: Path,
+    *,
+    task_key: str,
+    card_order: list[str],
+    card_id: str,
+    status: str,
+) -> dict[str, Any]:
+    state = load_local_state(state_path, task_key, card_order)
+    state["schema_version"] = "1.0.0"
+    state["task_key"] = task_key
+    state["card_order"] = card_order
+    status_map = dict(state.get("card_status_map") or {})
+    status_map[card_id] = status
+    state["card_status_map"] = status_map
+    now = datetime.now(timezone.utc).isoformat()
+    if not state.get("created_at"):
+        state["created_at"] = now
+    state["last_updated"] = now
+    atomic_write_json(state_path, state)
+    return state
 
 
 def normalize_status(raw: Any) -> str:
@@ -175,6 +254,16 @@ def resolve_vk_cards_path(active_task_path: Path, active_payload: dict[str, Any]
     raise FileNotFoundError(f"vk_cards.json not found in candidates: {joined}")
 
 
+def resolve_state_file_path(active_task_path: Path, raw_state_file: str) -> Path:
+    state_path = Path(raw_state_file).expanduser()
+    if state_path.is_absolute():
+        return state_path.resolve()
+    for ancestor in active_task_path.parents:
+        if (ancestor / ".git").exists():
+            return (ancestor / state_path).resolve()
+    return (Path.cwd() / state_path).resolve()
+
+
 def pick_task_for_card(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     def key_fn(t: dict[str, Any]) -> tuple[int, str]:
         st = normalize_status(t.get("status"))
@@ -209,14 +298,22 @@ def count_statuses(tasks: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def build_kernel_context(active_task_path: Path, api_base: str) -> KernelContext:
+def build_kernel_context(
+    active_task_path: Path,
+    api_base: str,
+    *,
+    local_mode: bool = False,
+    state_path: Path | None = None,
+) -> KernelContext:
     active = load_json(active_task_path)
     project_id = str(active.get("project_id") or "").strip()
     task_split_dir = str(active.get("task_split_dir") or "").strip()
     task_key = str(active.get("task_key") or "").strip()
     preflight_required = str(active.get("preflight_required") or "").strip() or "C00"
-    if not project_id or not task_split_dir or not task_key:
-        raise ValueError("active task missing project_id/task_split_dir/task_key")
+    if not task_split_dir or not task_key:
+        raise ValueError("active task missing task_split_dir/task_key")
+    if not local_mode and not project_id:
+        raise ValueError("active task missing project_id (required when local-mode is disabled)")
 
     vk_cards_path = resolve_vk_cards_path(active_task_path, active, task_split_dir)
     vk_cards = load_json(vk_cards_path)
@@ -228,33 +325,59 @@ def build_kernel_context(active_task_path: Path, api_base: str) -> KernelContext
         if cid:
             cards_by_id[cid] = card
 
-    board_tasks = list_tasks(api_base, project_id)
     scoped: list[dict[str, Any]] = []
     unscoped: list[dict[str, Any]] = []
-    for t in board_tasks:
-        title = str(t.get("title") or "")
-        desc = str(t.get("description") or "")
-        if task_key in title or task_key in desc:
-            scoped.append(t)
-        else:
-            unscoped.append(t)
-
-    by_card: dict[str, list[dict[str, Any]]] = {}
-    for task in scoped:
-        cid = extract_card_id(task)
-        if cid:
-            by_card.setdefault(cid, []).append(task)
-
     card_status_map: dict[str, str] = {}
     card_task_map: dict[str, dict[str, Any]] = {}
-    for cid in card_order:
-        tasks = by_card.get(cid, [])
-        if not tasks:
-            card_status_map[cid] = "missing"
-            continue
-        selected = pick_task_for_card(tasks)
-        card_task_map[cid] = selected
-        card_status_map[cid] = normalize_status(selected.get("status"))
+
+    if local_mode:
+        if state_path is None:
+            for ancestor in active_task_path.parents:
+                if (ancestor / ".git").exists():
+                    state_path = (ancestor / DEFAULT_STATE_FILE).resolve()
+                    break
+            if state_path is None:
+                state_path = (Path.cwd() / DEFAULT_STATE_FILE).resolve()
+        local_state = load_local_state(state_path, task_key, card_order)
+        state_map = dict(local_state.get("card_status_map") or {})
+        for cid in card_order:
+            status = normalize_status(state_map.get(cid))
+            if not status:
+                card_status_map[cid] = "missing"
+                continue
+            card_status_map[cid] = status
+            pseudo_task = {
+                "id": cid,
+                "title": f"{cid} [{task_key}]",
+                "status": status,
+                "updated_at": str(local_state.get("last_updated") or ""),
+            }
+            card_task_map[cid] = pseudo_task
+            scoped.append(pseudo_task)
+    else:
+        board_tasks = list_tasks(api_base, project_id)
+        for t in board_tasks:
+            title = str(t.get("title") or "")
+            desc = str(t.get("description") or "")
+            if task_key in title or task_key in desc:
+                scoped.append(t)
+            else:
+                unscoped.append(t)
+
+        by_card: dict[str, list[dict[str, Any]]] = {}
+        for task in scoped:
+            cid = extract_card_id(task)
+            if cid:
+                by_card.setdefault(cid, []).append(task)
+
+        for cid in card_order:
+            tasks = by_card.get(cid, [])
+            if not tasks:
+                card_status_map[cid] = "missing"
+                continue
+            selected = pick_task_for_card(tasks)
+            card_task_map[cid] = selected
+            card_status_map[cid] = normalize_status(selected.get("status"))
 
     preflight_ok = False
     preflight_reason = f"{preflight_required}_not_done"
@@ -365,7 +488,14 @@ def build_card_description(card: dict[str, Any], task_key: str) -> str:
 
 
 def apply_action(
-    api_base: str, ctx: KernelContext, action: str, target_card_id: str | None, target_task_id: str | None
+    api_base: str,
+    ctx: KernelContext,
+    action: str,
+    target_card_id: str | None,
+    target_task_id: str | None,
+    *,
+    local_mode: bool = False,
+    state_path: Path | None = None,
 ) -> dict[str, Any]:
     if action == "seed":
         if not target_card_id:
@@ -373,6 +503,23 @@ def apply_action(
         card = ctx.cards_by_id.get(target_card_id)
         if not card:
             raise RuntimeError(f"card definition not found: {target_card_id}")
+        if local_mode:
+            if state_path is None:
+                raise RuntimeError("state_path is required when local-mode is enabled")
+            update_local_card_status(
+                state_path,
+                task_key=ctx.task_key,
+                card_order=ctx.card_order,
+                card_id=target_card_id,
+                status="todo",
+            )
+            return {
+                "performed": True,
+                "action": "seed",
+                "card_id": target_card_id,
+                "task_id": target_card_id,
+                "status": "todo",
+            }
         payload = {
             "project_id": ctx.project_id,
             "title": str(card.get("title") or f"{target_card_id} [{ctx.task_key}]"),
@@ -390,7 +537,26 @@ def apply_action(
         }
 
     if action == "activate":
-        if not target_card_id or not target_task_id:
+        if not target_card_id:
+            raise RuntimeError("activate action missing target identifiers")
+        if local_mode:
+            if state_path is None:
+                raise RuntimeError("state_path is required when local-mode is enabled")
+            update_local_card_status(
+                state_path,
+                task_key=ctx.task_key,
+                card_order=ctx.card_order,
+                card_id=target_card_id,
+                status="inprogress",
+            )
+            return {
+                "performed": True,
+                "action": "activate",
+                "card_id": target_card_id,
+                "task_id": target_card_id,
+                "status": "inprogress",
+            }
+        if not target_task_id:
             raise RuntimeError("activate action missing target identifiers")
         payload = {"status": "inprogress"}
         resp = http_json("PUT", f"{api_base}/api/tasks/{target_task_id}", payload)
@@ -409,16 +575,30 @@ def apply_action(
 def main() -> int:
     args = parse_args()
     active_task_path = Path(args.active_task).resolve()
+    state_path = resolve_state_file_path(active_task_path, args.state_file)
     if not active_task_path.exists():
         print(json.dumps({"ok": False, "action": "kernel_error", "error": f"active task not found: {active_task_path}"}, ensure_ascii=False))
         return 1
 
     try:
-        ctx = build_kernel_context(active_task_path, args.vk_api_base)
+        ctx = build_kernel_context(
+            active_task_path,
+            args.vk_api_base,
+            local_mode=args.local_mode,
+            state_path=state_path,
+        )
         action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
         applied = {"performed": False}
         if args.apply_bootstrap and action in {"seed", "activate"}:
-            applied = apply_action(args.vk_api_base, ctx, action, first_not_done, target_task_id)
+            applied = apply_action(
+                args.vk_api_base,
+                ctx,
+                action,
+                first_not_done,
+                target_task_id,
+                local_mode=args.local_mode,
+                state_path=state_path,
+            )
 
         scoped_counts = count_statuses(ctx.scoped_tasks)
         unscoped_counts = count_statuses(ctx.unscoped_tasks)
@@ -445,6 +625,8 @@ def main() -> int:
             "card_status_map": ctx.card_status_map,
             "blocked_details": blocked_details,
             "applied": applied,
+            "local_mode": args.local_mode,
+            "state_file": str(state_path),
         }
 
         if args.output:

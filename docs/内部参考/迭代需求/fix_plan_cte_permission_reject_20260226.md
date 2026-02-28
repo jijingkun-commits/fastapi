@@ -117,11 +117,11 @@ staff 角色白名单只有 `fdmdata.*` 和 `sdmdata.*`，`public.params` 不在
 ### 涉及文件
 
 #### [app/ai/utils/sql_rewriter.py](file:///Users/jijingkun/bojxAI/fastapi/app/ai/utils/sql_rewriter.py)
-- [ ] `_extract_tables_with_schema()` (L119-142): 收集 CTE 名称，仅排除无 schema 的 CTE 引用
-- [ ] `_extract_table_qualifiers()` (L146-177): 同步排除无 schema 的 CTE 引用
+- [x] `_extract_tables_with_schema()` (L119-142): 收集 CTE 名称，仅排除无 schema 的 CTE 引用
+- [x] `_extract_table_qualifiers()` (L146-177): 同步排除无 schema 的 CTE 引用
 
 #### [app/ai/utils/sql_parser.py](file:///Users/jijingkun/bojxAI/fastapi/app/ai/utils/sql_parser.py)
-- [ ] `_extract_tables_sqlglot()` (L54-84): 同步排除无 schema 的 CTE 引用（影响面广：敏感表检查、schema 白名单、权限轨迹、SQL 评估等）
+- [x] `_extract_tables_sqlglot()` (L54-84): 同步排除无 schema 的 CTE 引用（影响面广：敏感表检查、schema 白名单、权限轨迹、SQL 评估等）
 
 ### 修改点详情
 
@@ -374,14 +374,14 @@ ORDER BY "贷款余额" DESC, t.org_cd LIMIT 1000
 修改 `SQL_GENERATION_PROMPT` 第 5 条规则，禁止参数占位符：
 
 #### [app/ai/prompts/data_prompts.py](file:///Users/jijingkun/bojxAI/fastapi/app/ai/prompts/data_prompts.py)
-- [ ] 第 112 行：将 `"如果涉及时间范围，使用参数化查询或 CURRENT_DATE"` 改为 `"时间条件必须使用字面值（如 '2025-06-30'）或 CURRENT_DATE，禁止使用 $1、$2 等参数占位符"`
+- [x] 第 112 行：将 `"如果涉及时间范围，使用参数化查询或 CURRENT_DATE"` 改为 `"时间条件必须使用字面值（如 '2025-06-30'）或 CURRENT_DATE，禁止使用 $1、$2 等参数占位符"`
 
 #### 方案 B：安全检查兜底（防御性）
 
 在 SQL 提取或安全检查阶段检测并清理参数占位符：
 
 #### [app/ai/utils/sql_safety.py](file:///Users/jijingkun/bojxAI/fastapi/app/ai/utils/sql_safety.py)
-- [ ] 在 `check_sql_safety()` 中新增检查：检测 `$\d+` 模式，拒绝含参数占位符的 SQL 并返回明确错误信息，触发 LLM 重新生成
+- [x] 在 `check_sql_safety()` 中新增检查：检测 `$\d+` 模式，拒绝含参数占位符的 SQL 并返回明确错误信息，触发 LLM 重新生成
 
 #### 建议
 
@@ -467,15 +467,15 @@ SSE result 事件 → onResult(data) → storeStructuredResultToMessage(aiId, da
 #### 涉及文件
 
 ##### [app/ai/workflow/data_graph.py](file:///Users/jijingkun/bojxAI/fastapi/app/ai/workflow/data_graph.py)
-- [ ] L3799: `stream_result_payload` 的 `data` 字典中补充 `"total_rows": len(result_data)` 和 `"sql": sql`
+- [x] L3799: `stream_result_payload` 的 `data` 字典中补充 `"total_rows": len(result_data)` 和 `"sql": sql`
 
 ##### [web/src/components/chat/messages/sql-result-table.tsx](file:///Users/jijingkun/bojxAI/fastapi/web/src/components/chat/messages/sql-result-table.tsx)
-- [ ] L17: `totalRows: number` 改为 `totalRows?: number`（可选属性）
-- [ ] L105: `totalRows.toLocaleString()` 改为 `(totalRows ?? 0).toLocaleString()`
-- [ ] L106: `rows.length < totalRows` 改为 `totalRows != null && rows.length < totalRows`
+- [x] L17: `totalRows: number` 改为 `totalRows?: number`（可选属性）
+- [x] L105: `totalRows.toLocaleString()` 改为 `(totalRows ?? 0).toLocaleString()`
+- [x] L106: `rows.length < totalRows` 改为 `totalRows != null && rows.length < totalRows`
 
 ##### [web/src/components/chat/messages/ai.tsx](file:///Users/jijingkun/bojxAI/fastapi/web/src/components/chat/messages/ai.tsx)
-- [ ] L223: `totalRows={sqlResultData.total_rows as number}` 改为 `totalRows={sqlResultData.total_rows}`（去掉强制类型断言，配合 props 改为可选）
+- [x] L223: `totalRows={sqlResultData.total_rows as number}` 改为 `totalRows={sqlResultData.total_rows}`（去掉强制类型断言，配合 props 改为可选）
 
 #### 修改点详情
 
@@ -555,4 +555,4 @@ totalRows={sqlResultData.total_rows}
 - 需求文档: [问数助手需求.md](file:///Users/jijingkun/bojxAI/fastapi/docs/产品文档/问数助手需求.md)
 - 架构文档: [AI模块设计.md](file:///Users/jijingkun/bojxAI/fastapi/docs/开发文档/架构设计/AI模块设计.md)
 - 测试案例: [问数引擎测试案例.md](file:///Users/jijingkun/bojxAI/fastapi/docs/开发文档/测试管理/问数引擎测试案例.md)
-- 权限设计: [askdata_dual_role_permission_implementation_plan.md](file:///Users/jijingkun/bojxAI/fastapi/docs/内部参考/迭代需求/askdata_dual_role_permission_implementation_plan.md)
+- 权限设计: [问数助手需求.md](file:///Users/jijingkun/bojxAI/fastapi/docs/产品文档/问数助手需求.md)

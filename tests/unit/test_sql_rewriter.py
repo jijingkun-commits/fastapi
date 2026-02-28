@@ -287,6 +287,66 @@ class TestRewriteSqlWithPermissions(unittest.TestCase):
         self.assertIn("缺少过滤字段", error)
         self.assertIn("dept_cd", error)
 
+    @patch('app.ai.utils.sql_rewriter._load_table_columns_map')
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_head_president_loan_top10_query_should_be_allowed(self, mock_get_service, mock_load_columns):
+        """集成回归：head_president（admin 账号）应可通过贷款 Top10 查询。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (True, None)
+        mock_service.check_table_access.return_value = (True, None)
+        mock_service.get_row_filters_for_table.return_value = [("org_code", "=", "0000")]
+        mock_service.get_masked_columns_for_table.return_value = {}
+        mock_get_service.return_value = mock_service
+        mock_load_columns.return_value = {
+            ("fdmdata", "f_mid_loan_k_tb"): {"org_code", "data_dt", "ecif_cust_no", "loan_bal_amt"}
+        }
+
+        ctx = UserPermissionContext(
+            user_id=1,
+            data_role="head_president",
+            sys_role="admin",
+            org_code="0000",
+        )
+        sql = (
+            "SELECT t.ecif_cust_no, SUM(t.loan_bal_amt) AS loan_bal "
+            "FROM fdmdata.f_mid_loan_k_tb t "
+            "WHERE t.data_dt = '20250630' "
+            "GROUP BY t.ecif_cust_no "
+            "ORDER BY loan_bal DESC LIMIT 10"
+        )
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertTrue(allowed)
+        self.assertIsNone(error)
+        self.assertIn("t.org_code = '0000'", rewritten)
+
+    @patch('app.ai.utils.sql_rewriter.get_permission_service')
+    def test_staff_without_dept_loan_top10_query_should_be_rejected(self, mock_get_service):
+        """集成回归：staff 缺少 dept_code 时同一贷款查询必须拒绝。"""
+        mock_service = MagicMock()
+        mock_service.validate_query_context.return_value = (
+            False,
+            "用户 2 缺少 dept_code，命中默认部门隔离策略，拒绝查询（data_role=staff）",
+        )
+        mock_get_service.return_value = mock_service
+
+        ctx = UserPermissionContext(user_id=2, data_role="staff")
+        sql = (
+            "SELECT t.ecif_cust_no, SUM(t.loan_bal_amt) AS loan_bal "
+            "FROM fdmdata.f_mid_loan_k_tb t "
+            "WHERE t.data_dt = '20250630' "
+            "GROUP BY t.ecif_cust_no "
+            "ORDER BY loan_bal DESC LIMIT 10"
+        )
+
+        rewritten, allowed, error = rewrite_sql_with_permissions(sql, ctx)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rewritten, sql)
+        self.assertIn("缺少 dept_code", error)
+        self.assertIn("data_role=staff", error)
+
     def test_default_dept_filter_injection(self):
         """测试默认 dept_code 隔离自动注入。"""
         ctx = UserPermissionContext(

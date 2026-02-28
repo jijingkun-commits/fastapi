@@ -1,0 +1,26 @@
+{
+  "last_nudged_by_team": {
+    "jjk-plan-docs-requirements-md": {
+      "at": "2026-02-27T13:28:26.357Z",
+      "last_message_id": "804acbd5-6f4d-4441-8133-afbafef9e9d4"
+    },
+    "docs-md-5-p0": {
+      "at": "2026-02-27T13:43:42.496Z",
+      "last_message_id": "2979d3c8-90f0-4b02-82e6-4800d711443a"
+    },
+    "cursor-commands-jjk-imp-md-doc": {
+      "at": "2026-02-27T14:28:59.356Z",
+      "last_message_id": "d6441f67-5173-4ef7-849e-5773addfd6fa"
+    },
+    "cursor-commands-jjk-verify-md": {
+      "at": "2026-02-27T15:35:44.988Z",
+      "last_message_id": "80d22a91-f48b-4af4-afe1-bc49fb38db12"
+    }
+  },
+  "last_idle_nudged_by_team": {
+    "cursor-commands-jjk-imp-md-doc": {
+      "at": "2026-02-27T14:28:59.356Z",
+      "worker_count": 3
+    }
+  }
+}

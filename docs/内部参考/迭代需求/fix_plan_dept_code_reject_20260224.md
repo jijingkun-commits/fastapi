@@ -127,9 +127,9 @@ data_graph.py:2615  evaluate_sql_policy(sql, user_id=1)
 
 ### 集成测试
 
-- [ ] 执行 027 脚本后，admin 用户查询"2025年6月30日贷款余额前10名的客户"不再被拒绝
-- [ ] staff 用户（无 dept_code）执行同一查询仍被拒绝
-- [ ] 有 dept_code 的 staff 用户查询正常注入 dept_code 过滤
+- [x] 执行 027 脚本后，admin 用户查询"2025年6月30日贷款余额前10名的客户"不再被拒绝（自动化回归：`tests/unit/test_sql_rewriter.py::TestRewriteSqlWithPermissions::test_head_president_loan_top10_query_should_be_allowed`）
+- [x] staff 用户（无 dept_code）执行同一查询仍被拒绝（自动化回归：`tests/unit/test_sql_rewriter.py::TestRewriteSqlWithPermissions::test_staff_without_dept_loan_top10_query_should_be_rejected`）
+- [x] 有 dept_code 的 staff 用户查询正常注入 dept_code 过滤（见 `fix_plan_cte_permission_reject_20260226.md` P1 证据链）
 
 ### 手动验证
 
@@ -143,8 +143,8 @@ data_graph.py:2615  evaluate_sql_policy(sql, user_id=1)
 ## 5. 预防措施
 
 - [x] 种子用户包含完整权限字段（`data_role`、`org_code`）
-- [ ] 新增 `data_role` 时需同步配置表级 + 行级权限规则
-- [ ] 在 `validate_query_context` 拒绝日志中补充 `data_role` 信息，便于排查
+- [x] 新增 `data_role` 时需同步配置表级 + 行级权限规则
+- [x] 在 `validate_query_context` 拒绝日志中补充 `data_role` 信息，便于排查
 
 ---
 
@@ -162,4 +162,4 @@ data_graph.py:2615  evaluate_sql_policy(sql, user_id=1)
 - [x] 架构文档: `docs/开发文档/架构设计/AI模块设计.md`（权限子系统）
 - [x] 需求基线: `docs/内部参考/迭代需求/askdata_dual_role_permission_requirements.md`
 - [x] 产品需求: `docs/产品文档/问数助手需求.md`
-- [ ] 数据库设计: `docs/开发文档/架构设计/数据库设计.md`（t_user 表）
+- [x] 数据库设计: `docs/开发文档/架构设计/数据库设计.md`（t_user 表）

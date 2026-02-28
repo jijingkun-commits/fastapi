@@ -53,8 +53,22 @@ def _is_feature_enabled(env_name: str, fallback: bool) -> bool:
 
 def _is_memory_feature_enabled(env_name: str, fallback: bool) -> bool:
     """读取记忆功能开关，支持环境变量覆盖。"""
+    key_mapping = {
+        "ENABLE_MEMORY_RECALL": "feature.enable_memory_recall",
+        "ENABLE_PRE_COMPACTION_FLUSH": "feature.enable_pre_compaction_flush",
+    }
+    config_key = key_mapping.get(env_name)
+    if not config_key:
+        return _is_feature_enabled(env_name, fallback)
 
-    return _is_feature_enabled(env_name, fallback)
+    # 运行时优先读取配置中心（DB + ENV 回退），保证可灰度。
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool(config_key, fallback)
+        return _is_feature_enabled(env_name, bool(resolved))
+    except Exception:
+        return _is_feature_enabled(env_name, fallback)
 
 
 def _is_runtime_recovery_enabled() -> bool:
@@ -438,6 +452,7 @@ class ChatService:
         full_answer = []
         tool_data = []
         thinking_content = None
+        final_answer_content: Optional[str] = None
         keyword_logged = False
         cancelled_stream = False
         cancel_reason = "user_cancelled"
@@ -537,6 +552,21 @@ class ChatService:
                         else:
                             thinking_content += thinking_text
                         yield self._format_sse("thinking", {"content": thinking_text, "node": chunk.get("node", "")})
+
+                    elif event_type == "final_answer":
+                        content = _normalize_message_content(event_data.get("content", ""))
+                        if content:
+                            final_answer_content = content
+                            full_answer.clear()
+                            full_answer.append(content)
+                        yield self._format_sse(
+                            "final_answer",
+                            {
+                                "content": content,
+                                "meta": event_data.get("meta", {}),
+                                "node": chunk.get("node", ""),
+                            },
+                        )
 
                     elif event_type == "result":
                         # 结构化结果事件（待办列表、图片等）
@@ -663,6 +693,8 @@ class ChatService:
             message_id = self._get_latest_ai_message_id(thread_id)
             if message_id is not None:
                 done_payload["message_id"] = message_id
+            if final_answer_content:
+                done_payload["final_content"] = final_answer_content
 
             if run_control_enabled:
                 with get_db_context() as db:
@@ -912,6 +944,7 @@ async def sse_resume_stream(
 
     # 用于收集完整回复
     full_answer = []
+    final_answer_content: Optional[str] = None
     cancelled_stream = False
     cancel_after_token_count = 0
     cancel_reason = "user_cancelled"
@@ -1023,6 +1056,21 @@ async def sse_resume_stream(
                 elif event_type == "thinking":
                     yield format_sse("thinking", {"content": event_data.get("content", ""), "node": chunk.get("node", "")})
 
+                elif event_type == "final_answer":
+                    content = _normalize_message_content(event_data.get("content", ""))
+                    if content:
+                        final_answer_content = content
+                        full_answer.clear()
+                        full_answer.append(content)
+                    yield format_sse(
+                        "final_answer",
+                        {
+                            "content": content,
+                            "meta": event_data.get("meta", {}),
+                            "node": chunk.get("node", ""),
+                        },
+                    )
+
                 elif event_type == "result":
                     if event_data.get("message"):
                         full_answer.append(event_data["message"])
@@ -1097,6 +1145,8 @@ async def sse_resume_stream(
         message_id = svc._get_latest_ai_message_id(thread_id)
         if message_id is not None:
             done_payload["message_id"] = message_id
+        if final_answer_content:
+            done_payload["final_content"] = final_answer_content
 
         if run_control_service.is_enabled() and resolved_run_id:
             with get_db_context() as db:

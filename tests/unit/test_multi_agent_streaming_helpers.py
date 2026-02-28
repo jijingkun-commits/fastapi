@@ -500,6 +500,95 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
     assert handoff_return["multi_intent_mode"] is True
 
 
+def test_dispatch_values_mode_chunk_marks_multi_intent_for_direct_lookup_plus_single_handoff() -> None:
+    """supervisor 仅 1 个 handoff + 直连检索结果时也应进入 multi_intent_mode。"""
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={"messages": [HumanMessage(content="查待办并看天气")], "thread_id": "thread-1"},
+    )
+
+    final_state = {
+        "messages": [
+            ToolMessage(
+                content='{"answer":"嘉兴今天多云，气温 18-24 摄氏度"}',
+                tool_call_id="tc-1",
+                name="tavily_search",
+            ),
+            ToolMessage(content="handoff-json", tool_call_id="tc-2", name="assign_to_todo_expert"),
+        ],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "todo_expert",
+                "task_description": "查询待办并结合天气结果回复用户",
+            }
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "todo_expert"
+    assert handoff_return["multi_intent_mode"] is True
+    assert handoff_return["pending_handoff"]["frame"]["tool_observations"][0]["tool"] == "tavily_search"
+
+
+def test_dispatch_values_mode_chunk_uses_intent_plan_to_enable_multi_intent_mode() -> None:
+    """当 intent_plan 含多个必答目标时，单 handoff 也应进入 multi_intent_mode。"""
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="先查待办，再看天气")],
+            "thread_id": "thread-1",
+            "intent_plan": {
+                "goals": [
+                    {"goal_id": "GOAL-01", "kind": "todo.query", "must_answer": True},
+                    {"goal_id": "GOAL-02", "kind": "external.lookup", "must_answer": True},
+                ]
+            },
+        },
+    )
+
+    final_state = {
+        "messages": [ToolMessage(content="handoff-json", tool_call_id="tc-1", name="assign_to_todo_expert")],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "todo_expert",
+                "task_description": "先查询待办",
+            }
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "todo_expert"
+    assert handoff_return["multi_intent_mode"] is True
+
+
 @pytest.mark.asyncio
 async def test_run_streaming_dispatch_loop_routes_messages_and_values() -> None:
     """streaming 分发循环应按 messages/values 顺序处理并返回最终状态。"""

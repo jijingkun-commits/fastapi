@@ -478,6 +478,29 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 - 输出限制与 OpenClaw 风格对齐：最多 2000 行或 50KB（先到先截断），并返回 `next_offset` 用于续读。
 - 已在 `multi_agent_graph._get_common_tools()` 注册，Supervisor 可直接调用。
 
+### 工具治理运行时过滤（2026-02-27）
+
+**代码锚点**：`app/ai/workflow/multi_agent_graph.py`
+
+当前多智能体工具装配分两层：
+
+1. 构建候选工具条目（工具对象 + 分组标签，如 `group:file` / `group:web`）。
+2. 若 `tool_governance.enabled=true`，按 `ConfigResolver` 读取的策略执行过滤，再绑定到 `create_react_agent`。
+
+策略来源：
+
+- 全局策略：`tool_governance.policy.global`
+- Agent 策略：`tool_governance.policy.agent.supervisor`（或其他 agent 名）
+- 合并规则：全局 + Agent 递归合并（列表去重）
+
+匹配规则：
+
+- `allow` / `deny` 支持工具名与 `group:*`。
+- `deny` 优先级高于 `allow`。
+- 当 `allow` 为空时，默认行为由 `tool_governance.fail_mode` 决定：
+  - `compat/allow`：默认放行；
+  - `deny/minimal`：默认收紧，仅放行显式允许项。
+
 ---
 
 ## 📡 事件系统
@@ -646,13 +669,23 @@ llm = get_scene_llm(
 `multi_agent_graph` 在不改现有 Supervisor + Expert 主架构前提下，新增最小串行多意图闭环：
 
 1. Supervisor 当前轮识别到多个 `assign_to_*` 时，按出现顺序写入 `pending_handoff + handoff_queue`。
-2. `evaluate` 每轮消费一个专家结果并记录到 `handoff_execution_trace`，队列未空时直接路由下一个专家，避免提前 `complete`。
-3. 队列清空且命中 `multi_intent_mode` 时进入 `summarize` 节点，统一输出天气/知识检索 + 专家执行结论。
+2. 若当前轮存在“`tavily_search`/`knowledge_search` 直连结果 + 至少一个 `assign_to_*`”，也需开启 `multi_intent_mode`，确保后续进入统一汇总而不是只返回专家末条回复。
+3. `evaluate` 每轮消费一个专家结果并记录到 `handoff_execution_trace`，队列未空时直接路由下一个专家，避免提前 `complete`。
+4. 队列清空且命中 `multi_intent_mode` 时进入 `summarize` 节点，统一输出天气/知识检索 + 专家执行结论。
 
 **不影响生产的约束**：
 - 生产环境默认不启用实验适配分支。
 - 非实验 provider 继续走既有 `get_llm()` 逻辑，无额外协议分支。
 - 实验逻辑仅在命中条件时读取 `extra_config` 并注入参数，避免全量路径开销。
+
+### 意图目标分解治理（2026-02-28）
+
+`multi_agent_graph` 的 planner 节点从“关键词主判定”调整为“模型主判定 + 规则兜底”：
+
+1. planner 首选模型结构化输出 `intent_plan`（`source=model_primary`），目标按语义拆分，不再因动作词（如“查询”）直接扩增 `data.query`。
+2. 当模型输出异常（不可解析/超时/结构非法）时，自动降级为 `heuristic_fallback`，并记录 `fallback_meta.reason`。
+3. 关键词规则仅保留兜底职责；执行收口仍由 `handoff_execution_trace + deliverables + coverage_report` 完成。
+4. 状态事件仍通过 `plan_ready -> coverage_check -> final_answer` 三段输出，前端应以覆盖率收口结果作为最终口径。
 
 ### internal 调用输入兼容（2026-02-08）
 

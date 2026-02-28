@@ -8,6 +8,7 @@ from app.ai.utils.sql_safety import (
     check_dangerous_keywords,
     check_sensitive_tables,
     check_multiple_statements,
+    check_parameter_placeholders,
     add_limit_if_missing,
     sanitize_sql,
     DANGEROUS_KEYWORDS,
@@ -163,6 +164,22 @@ class TestCheckMultipleStatements(unittest.TestCase):
         is_safe, error = check_multiple_statements(sql)
         self.assertFalse(is_safe)
         self.assertIn("多条", error)
+
+
+class TestCheckParameterPlaceholders(unittest.TestCase):
+    """测试参数占位符检测。"""
+
+    def test_parameter_placeholder_blocked(self):
+        sql = "SELECT * FROM fdmdata.f_mid_loan_tb WHERE data_dt = $1::date"
+        is_safe, error = check_parameter_placeholders(sql)
+        self.assertFalse(is_safe)
+        self.assertIn("占位符", error)
+
+    def test_placeholder_in_string_allowed(self):
+        sql = "SELECT '$1' AS literal_text, id FROM orders"
+        is_safe, error = check_parameter_placeholders(sql)
+        self.assertTrue(is_safe)
+        self.assertIsNone(error)
 
 
 class TestAddLimitIfMissing(unittest.TestCase):

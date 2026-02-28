@@ -42,5 +42,7 @@ if [ -n "$CHANGED_CODE" ] && [ -z "$CHANGED_DOCS" ]; then
     echo ""
 fi
 
-# 不阻断提交
+# 特殊处理（防屎山）强制同步检查：命中已登记文件时必须更新手册
+python3 scripts/check_special_doc_sync.py --cached --strict
+
 exit 0

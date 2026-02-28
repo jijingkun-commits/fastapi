@@ -1,7 +1,7 @@
 {
-  "tool_name": "mcp__postgres__query",
-  "tool_input_preview": "{\"sql\":\"\\nSELECT metric_name, query_template \\nFROM t_metric_definitions \\nWHERE LOWER(metric_name) LIKE '%贷款%余额%' \\n   OR LOWER(metric_name) LIKE '%loan%bal%'\\nLIMIT 10\\n\"}",
-  "error": "MCP error -32603: relation \"t_metric_definitions\" does not exist",
-  "timestamp": "2026-02-26T09:35:01.009Z",
-  "retry_count": 1
+  "tool_name": "WebFetch",
+  "tool_input_preview": "{\"url\":\"https://www.geeky-gadgets.com/openclaw-explained-beginners-guide-2026/\",\"prompt\":\"提取 OpenClaw 的事件触发机制、队列系统、调度模式的完整信息。特别关注：1) 除了 heartbeat 和 cron 之外是否有第三种调度方式 2) event trigger 的类型和配置 3) 是否有 web...",
+  "error": "Unable to verify if domain www.geeky-gadgets.com is safe to fetch. This may be due to network restrictions or enterprise security policies blocking claude.ai.",
+  "timestamp": "2026-02-27T11:22:02.187Z",
+  "retry_count": 9
 }

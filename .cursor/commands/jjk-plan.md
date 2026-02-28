@@ -182,6 +182,36 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/...`（由 `/jjk-vkplan` 产出）
 4. 其余仅允许作为“输入来源”被引用，不得升级为新的主计划文档类别。
 
+### 2.A0 测试策略（TDD 前置，推荐）
+
+借鉴 TDD 测试先行理念，在规划阶段为每个 feature_id 预定义测试用例，确保实现有明确的验收锚点。
+
+`<topic>_implementation_plan.md` 推荐包含"测试策略"段：
+
+1. 每个 `feature_id` 至少关联 1 个预期测试用例 ID（`TC-xxx-xx`）
+2. 测试用例需明确：输入条件、预期行为、边界场景
+3. 关键路径的测试用例应在编码前写好（Red），实现后验证通过（Green）
+4. 测试策略段为推荐项，非强制；但涉及 AI 工作流或数据库变更时强烈建议填写
+
+示例：
+
+```yaml
+test_strategy:
+  - feature_id: P1-01
+    test_cases:
+      - TC-P1-01-01: 正常输入返回预期结果
+      - TC-P1-01-02: 空输入返回错误提示
+    test_first: true  # 建议先写测试
+  - feature_id: P1-02
+    test_cases:
+      - TC-P1-02-01: 权限不足时拒绝访问
+    test_first: false  # 可事后补测试
+```
+
+此段供 `/jjk-imp` 和 `/jjk-test` 消费：
+- `/jjk-imp` 读取 `test_first: true` 的 feature，优先编写测试再实现
+- `/jjk-test` 读取 `test_cases` 作为用例生成的输入
+
 ### 2.A 功能机制包（Feature Packet，必填）
 
 `<topic>_implementation_plan.md` 必须包含“功能机制包总表”，每个功能点至少包含：
