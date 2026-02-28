@@ -5,6 +5,12 @@ from unittest.mock import patch
 
 import pytest
 
+from app.ai.scene_registry import (
+    ROUTE_GROUP_LIGHTWEIGHT,
+    SCENE_KEY_INTENT_CLASSIFIER,
+    SCENE_KEY_LLM_JUDGE_RESPONSE,
+    SCENE_KEY_PARAM_TODO,
+)
 from app.services.llm_scene_service import (
     LLMSceneService,
     SceneConfigError,
@@ -108,3 +114,45 @@ def test_resolve_model_code_validates_model_type(mock_get_model_config):
     finally:
         LLMSceneService._scene_cache = old_cache
         LLMSceneService._initialized = old_initialized
+
+
+def test_get_route_group_default_model_code_prefers_majority_binding():
+    """同一路由分组若绑定不一致，应返回多数派模型。"""
+
+    old_cache = LLMSceneService._scene_cache
+    old_initialized = LLMSceneService._initialized
+
+    LLMSceneService._scene_cache = {
+        SCENE_KEY_INTENT_CLASSIFIER: _scene(SCENE_KEY_INTENT_CLASSIFIER, model_code="qwen3.5-flash"),
+        SCENE_KEY_LLM_JUDGE_RESPONSE: _scene(SCENE_KEY_LLM_JUDGE_RESPONSE, model_code="qwen3.5-flash"),
+        SCENE_KEY_PARAM_TODO: _scene(
+            SCENE_KEY_PARAM_TODO,
+            model_code="gpt-5.2",
+        ),
+    }
+    LLMSceneService._initialized = True
+
+    try:
+        with patch(
+            "app.services.llm_scene_service.get_scene_keys_by_route_group",
+            return_value=(
+                SCENE_KEY_INTENT_CLASSIFIER,
+                SCENE_KEY_LLM_JUDGE_RESPONSE,
+                SCENE_KEY_PARAM_TODO,
+            ),
+        ):
+            assert (
+                LLMSceneService.get_route_group_default_model_code(ROUTE_GROUP_LIGHTWEIGHT)
+                == "qwen3.5-flash"
+            )
+    finally:
+        LLMSceneService._scene_cache = old_cache
+        LLMSceneService._initialized = old_initialized
+
+
+def test_get_route_group_default_model_code_rejects_unknown_group():
+    """未知 route_group 应抛出配置错误。"""
+
+    with pytest.raises(SceneConfigError) as exc:
+        LLMSceneService.get_route_group_default_model_code("unknown")
+    assert "未知路由分组" in str(exc.value)

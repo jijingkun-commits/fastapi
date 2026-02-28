@@ -19,6 +19,17 @@ def test_extract_explicit_preference_candidates_returns_rules_when_triggered():
     assert candidate_map["response.length"] == "short"
 
 
+def test_extract_explicit_preference_candidates_supports_ai_persona():
+    """命中触发词并包含称呼约束时，应提取 AI 人设偏好。"""
+
+    text = "永久记住你叫“小哈”"
+    candidates = memory_service.extract_explicit_preference_candidates(text)
+
+    candidate_map = {item.memory_key: item.memory_value for item in candidates}
+
+    assert candidate_map["assistant.persona"] == "小哈"
+
+
 def test_extract_explicit_preference_candidates_ignores_non_trigger_text():
     """未命中触发词时，不应写入偏好。"""
 
@@ -52,6 +63,7 @@ def test_build_user_preference_context_formats_readable_lines(monkeypatch):
     records = [
         _DummyMemory("response.language", "zh-CN"),
         _DummyMemory("response.length", "short"),
+        _DummyMemory("assistant.persona", "小哈"),
     ]
 
     monkeypatch.setattr(
@@ -60,11 +72,14 @@ def test_build_user_preference_context_formats_readable_lines(monkeypatch):
         lambda db, user_id, scope, limit: records[:limit],
     )
 
-    context = memory_service.build_user_preference_context(_DummySession(), user_id=7, max_items=2)
+    context = memory_service.build_user_preference_context(_DummySession(), user_id=7, max_items=3)
 
     assert "跨会话偏好" in context
     assert "回复语言: 中文" in context
     assert "回复长度: 简短" in context
+    assert "AI人设: 小哈" in context
+    assert "按 AI 人设进行自称" in context
+    assert "不要回答“无法跨会话记住该称呼”" in context
 
 
 def test_build_user_preference_context_dedupes_conflicting_keys(monkeypatch):
@@ -209,3 +224,44 @@ def test_persist_explicit_preferences_from_input_flush_alias(monkeypatch):
     assert count == 2
     assert session.commit_called is True
     assert {item["memory_key"] for item in captured} == {"response.language", "response.length"}
+
+
+def test_normalize_controlled_memory_template_filters_unknown_keys():
+    """初始化模板应只保留受控记忆项并规范化值。"""
+
+    normalized = memory_service.normalize_controlled_memory_template(
+        {
+            "assistant.persona": "  小嘉。 ",
+            "response.language": "中文",
+            "unknown.key": "value",
+            "response.length": "LONG",
+        }
+    )
+
+    assert normalized == {
+        "assistant.persona": "小嘉",
+        "response.language": "zh-CN",
+    }
+
+
+def test_bootstrap_user_preferences_upserts_template(monkeypatch):
+    """新用户初始化模板应写入受控记忆并提交事务。"""
+
+    captured = []
+
+    def _fake_upsert(db, **kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(memory_service.user_memory_repo, "upsert_active_memory", _fake_upsert)
+    monkeypatch.setattr(
+        "app.services.config_resolver.ConfigResolver.get_json_dict",
+        lambda key, default: {"assistant.persona": "小嘉", "response.structure": "conclusion_first"},
+    )
+
+    session = _DummySession()
+    count = memory_service.bootstrap_user_preferences(session, user_id=11)
+
+    assert count == 2
+    assert session.commit_called is True
+    assert {item["memory_key"] for item in captured} == {"assistant.persona", "response.structure"}
+    assert all(item["source_thread_id"] == "system.user_bootstrap" for item in captured)

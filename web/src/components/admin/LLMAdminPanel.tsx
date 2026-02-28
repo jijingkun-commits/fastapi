@@ -477,9 +477,13 @@ export function LLMAdminPanel() {
                 <TableBody>
                   {modelRoutes.map((route, index) => {
                     const routeConfigKey = route.config_key ?? "";
+                    const isEmbeddingRoute = routeConfigKey === "embedding";
                     const isVisionRoute = routeConfigKey === "vision";
                     const routeModels = models.filter((m) => {
                       if (!m.is_active) return false;
+                      if (isEmbeddingRoute) {
+                        return m.model_type === "embedding";
+                      }
                       if (isVisionRoute) {
                         return ["vision", "chat", "reasoning"].includes(m.model_type);
                       }
@@ -488,8 +492,9 @@ export function LLMAdminPanel() {
                     const canSelectModel = Boolean(route.editable && routeConfigKey && routeModels.length > 0);
                     const isEditing = Boolean(canSelectModel && editingRoutes[routeConfigKey] !== undefined);
                     const isSaving = canSelectModel ? savingRoute === routeConfigKey : false;
+                    const isSceneBinding = route.source === "scene_binding" || route.source === "fixed_config";
                     const sourceLabel = route.source === "user_select" ? "用户选择" :
-                      route.source === "fixed_config" ? "可配置" :
+                      isSceneBinding ? "场景绑定" :
                       route.editable ? "专用模型（可选）" : "专用模型";
                     
                     return (
@@ -501,7 +506,7 @@ export function LLMAdminPanel() {
                         <TableCell>
                           <Badge variant={
                             route.source === "user_select" ? "outline" :
-                            route.source === "fixed_config" ? "default" :
+                            isSceneBinding ? "default" :
                             "secondary"
                           }>
                             {sourceLabel}

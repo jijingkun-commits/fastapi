@@ -51,24 +51,17 @@ def _is_feature_enabled(env_name: str, fallback: bool) -> bool:
     return raw_value.strip().lower() in _TRUE_VALUES
 
 
-def _is_memory_feature_enabled(env_name: str, fallback: bool) -> bool:
-    """读取记忆功能开关，支持环境变量覆盖。"""
-    key_mapping = {
-        "ENABLE_MEMORY_RECALL": "feature.enable_memory_recall",
-        "ENABLE_PRE_COMPACTION_FLUSH": "feature.enable_pre_compaction_flush",
-    }
-    config_key = key_mapping.get(env_name)
-    if not config_key:
-        return _is_feature_enabled(env_name, fallback)
+def _is_user_preference_memory_enabled(fallback: bool) -> bool:
+    """读取用户偏好记忆总开关，统一控制 recall/flush。"""
 
     # 运行时优先读取配置中心（DB + ENV 回退），保证可灰度。
     try:
         from app.services.config_resolver import ConfigResolver
 
-        resolved = ConfigResolver.get_bool(config_key, fallback)
-        return _is_feature_enabled(env_name, bool(resolved))
+        resolved = ConfigResolver.get_bool("feature.enable_user_preference_memory", fallback)
+        return _is_feature_enabled("ENABLE_USER_PREFERENCE_MEMORY", bool(resolved))
     except Exception:
-        return _is_feature_enabled(env_name, fallback)
+        return _is_feature_enabled("ENABLE_USER_PREFERENCE_MEMORY", fallback)
 
 
 def _is_runtime_recovery_enabled() -> bool:
@@ -403,17 +396,12 @@ class ChatService:
             logger.info("已将附件信息追加到 Prompt: %d 个附件 (%d 图片, %d 其他)", 
                        len(attachments), len(image_attachments), len(other_attachments))
 
-        memory_recall_enabled = _is_memory_feature_enabled(
-            "ENABLE_MEMORY_RECALL",
-            ENABLE_USER_PREFERENCE_MEMORY,
-        )
-        pre_compaction_flush_enabled = _is_memory_feature_enabled(
-            "ENABLE_PRE_COMPACTION_FLUSH",
+        user_preference_memory_enabled = _is_user_preference_memory_enabled(
             ENABLE_USER_PREFERENCE_MEMORY,
         )
 
         memory_context = ""
-        if memory_recall_enabled and user_id:
+        if user_preference_memory_enabled and user_id:
             try:
                 with get_db_context() as db:
                     memory_context = recall(
@@ -475,7 +463,7 @@ class ChatService:
                 title=title,
             )
 
-            if pre_compaction_flush_enabled and user_id:
+            if user_preference_memory_enabled and user_id:
                 try:
                     persisted_count = flush(
                         db,
@@ -490,6 +478,17 @@ class ChatService:
                             user_id,
                             persisted_count,
                         )
+                        latest_memory_context = recall(
+                            db,
+                            user_id=user_id,
+                            max_items=USER_PREFERENCE_MEMORY_MAX_ITEMS,
+                            refresh_last_seen=False,
+                        )
+                        if latest_memory_context:
+                            memory_context = latest_memory_context
+                            input_messages = [SystemMessage(content=latest_memory_context), human_message]
+                            input_state["messages"] = input_messages
+                            logger.info("本轮写入后即时注入用户偏好上下文: user_id=%s", user_id)
                 except Exception as memory_error:
                     logger.warning("写入用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         

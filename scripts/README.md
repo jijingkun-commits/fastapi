@@ -3,7 +3,7 @@
 ## 目录结构
 
 ```
-scripts/                        # 项目脚本（根目录保留高频/CI 脚本）
+scripts/                        # 项目脚本（根目录保留高频入口，实体按域归档）
 ├── db/                         # 数据库 schema、迁移、初始化
 │   ├── create_dim_tables.py
 │   ├── init_tables_ci.py
@@ -26,22 +26,45 @@ scripts/                        # 项目脚本（根目录保留高频/CI 脚本
 ├── check_doc_sync.sh           # 文档同步检查
 ├── check_special_doc_sync.py   # 防屎山手册强制同步检查
 ├── config_doctor.py            # 配置契约健康检查
+├── release_rollout_manager.py  # C-5 灰度发布/回滚管理（规则+命令）
 ├── init_llm_config.py          # 初始化 LLM 模型配置
 ├── test_llm_config.py          # LLM 配置测试
 ├── sync-docs.sh                # 文档仓库同步
 ├── sync-repos.sh               # 代码仓库同步
-├── *.py@ / *.sh@               # → symlink，实体见下方说明
+├── *.py@ / *.sh@               # → symlink（入口别名，实体见下方说明）
 └── README.md
 ```
 
 ### Symlink 说明
 
-- `scripts/vk_*.sh@`, `scripts/wt-flow.sh@`, `scripts/sync_rules_to_cc.py@` 等
-  → 实体在 `.cursor/scripts/`（个人工作流脚本）
-- `scripts/schema_sync.py@`, `scripts/import_skills.py@` 等
-  → 实体在 `scripts/db/` 或 `scripts/data/`（子目录归类）
+- 根目录 Python 入口（去重后的统一入口）：
+  - `scripts/schema_sync.py@`、`scripts/sync_database.py@`、`scripts/create_dim_tables.py@` 等
+  - `scripts/import_skills.py@`、`scripts/expand_metrics.py@`、`scripts/setup_data.py@` 等
+  - → 实体分别在 `scripts/db/` 或 `scripts/data/`（按领域归档）
+- `.cursor/scripts/` 中保留部分工作流脚本副本（兼容旧流程），但执行入口以 `scripts/` 为准。
 
-所有 symlink 保证现有引用（docs、commands、CI）无需修改。
+所有 symlink 保证现有引用（docs、commands、CI）无需修改；根目录不再保留与 `db/`、`data/` 的重复实体文件。
+
+### 重复脚本收敛清单（root -> 实体）
+
+| 根目录入口 | 实体路径 |
+|---|---|
+| `scripts/create_dim_tables.py` | `scripts/db/create_dim_tables.py` |
+| `scripts/init_tables_ci.py` | `scripts/db/init_tables_ci.py` |
+| `scripts/migrate_access_admin_keys.py` | `scripts/db/migrate_access_admin_keys.py` |
+| `scripts/migrate_query_template.py` | `scripts/db/migrate_query_template.py` |
+| `scripts/schema_sync.py` | `scripts/db/schema_sync.py` |
+| `scripts/sync_database.py` | `scripts/db/sync_database.py` |
+| `scripts/expand_metrics.py` | `scripts/data/expand_metrics.py` |
+| `scripts/extract_metric_sql.py` | `scripts/data/extract_metric_sql.py` |
+| `scripts/import_deposit_data.py` | `scripts/data/import_deposit_data.py` |
+| `scripts/import_dim_data.py` | `scripts/data/import_dim_data.py` |
+| `scripts/import_metrics_from_didp.py` | `scripts/data/import_metrics_from_didp.py` |
+| `scripts/import_skills.py` | `scripts/data/import_skills.py` |
+| `scripts/init_metric_definition.py` | `scripts/data/init_metric_definition.py` |
+| `scripts/setup_data.py` | `scripts/data/setup_data.py` |
+| `scripts/skill_offline_evaluation.py` | `scripts/data/skill_offline_evaluation.py` |
+| `scripts/verify_data_db.py` | `scripts/data/verify_data_db.py` |
 
 ## 常用脚本
 
@@ -73,6 +96,9 @@ python scripts/data/import_skills.py             # 修改 SKILL.md 后更新技�
 python scripts/data/skill_offline_evaluation.py  # Skill 检索离线评测
 python scripts/config_doctor.py --strict         # 配置健康检查
 python scripts/check_special_doc_sync.py --cached --strict  # 命中特殊处理文件时强制校验手册同步
+python scripts/release_rollout_manager.py status             # C-5 灰度状态
+python scripts/release_rollout_manager.py rollout --target all --percent 10 --sync
+python scripts/release_rollout_manager.py rollback --target all --reason "production issue" --sync
 ```
 
 ### Vibe Kanban 多 worktree

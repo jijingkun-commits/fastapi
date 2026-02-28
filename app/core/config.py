@@ -161,6 +161,14 @@ ENABLE_INTERNAL_CONTENT_SANITIZE = os.getenv(
     "true" if ENV != "prod" else "false",
 ).lower() == "true"
 
+# 规则体系与命令注册中心灰度开关（C-5）
+ENABLE_RULESET_V2 = os.getenv("ENABLE_RULESET_V2", "false").lower() == "true"
+ENABLE_PROMPT_REGISTRY_V2 = os.getenv("ENABLE_PROMPT_REGISTRY_V2", "false").lower() == "true"
+RULESET_V2_ROLLOUT_PERCENTAGE = int(os.getenv("RULESET_V2_ROLLOUT_PERCENTAGE", "0"))
+PROMPT_REGISTRY_V2_ROLLOUT_PERCENTAGE = int(
+    os.getenv("PROMPT_REGISTRY_V2_ROLLOUT_PERCENTAGE", "0")
+)
+
 # LLM Judge 输出评估（用于问数助手 SQL 质量评估）
 ENABLE_LLM_JUDGE = os.getenv("ENABLE_LLM_JUDGE", "false").lower() == "true"
 # 注意：运行时优先从 t_system_config 读取，此处为回退默认值
@@ -178,6 +186,7 @@ MODEL_ROUTING_DEFAULT_CHAT = "model_routing.default_chat"          # 默认对�
 MODEL_ROUTING_INTENT_CLASSIFIER = "model_routing.lightweight"      # 轻量任务：意图分类
 MODEL_ROUTING_LLM_JUDGE = "model_routing.lightweight"              # 轻量任务：评估/参数提取（与意图分类共享同一配置）
 MODEL_ROUTING_SQL_GENERATION = "model_routing.sql_generation"      # SQL 生成 / 内部分析
+MODEL_ROUTING_EMBEDDING = "embedding"                              # Embedding 向量化路由
 MODEL_ROUTING_VISION = "vision"                                    # Vision 多模态路由（优先于 type=vision 默认模型）
 
 # 模型调用场景（供 get_scene_llm 使用）

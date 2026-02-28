@@ -77,7 +77,7 @@ if [[ $need_rules -eq 1 ]]; then
 fi
 
 if [[ $need_commands -eq 1 ]]; then
-  output="$(python3 scripts/sync_rules_to_cc.py --only commands --skip-codex-prompts 2>&1)"
+  output="$(python3 scripts/sync_rules_to_cc.py --only commands 2>&1)"
   if [[ "$output" == *"警告:"* ]]; then
     echo "$output" | grep "警告:"
   fi

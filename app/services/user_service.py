@@ -4,15 +4,39 @@
 - 对于需要访问内部字段（如 password）的操作，返回 ORM 对象
 - 对于对外暴露的用户信息，应转换为 Pydantic Schema (UserOut)
 """
+import logging
+import os
 from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.core.config import ENV
+from app.core.config import ENABLE_USER_PREFERENCE_MEMORY, ENV
 from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.repositories import user_repo
 from app.schemas.user import UserCreate, UserListItem, UserListResponse, UserOut
+from app.services.user_preference_memory_service import bootstrap_user_preferences
+
+
+logger = logging.getLogger(__name__)
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _is_user_preference_memory_enabled() -> bool:
+    """读取用户偏好记忆总开关，支持环境变量覆盖配置中心。"""
+
+    fallback = ENABLE_USER_PREFERENCE_MEMORY
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool("feature.enable_user_preference_memory", fallback)
+    except Exception:
+        resolved = fallback
+
+    env_value = os.getenv("ENABLE_USER_PREFERENCE_MEMORY")
+    if env_value is None:
+        return bool(resolved)
+    return env_value.strip().lower() in _TRUE_VALUES
 
 
 def authenticate(
@@ -86,6 +110,18 @@ def create_user(db: Session, data: UserCreate) -> Tuple[Optional[UserListItem], 
         dept_code=data.dept_code,
         dept_name=data.dept_name,
     )
+
+    if _is_user_preference_memory_enabled():
+        try:
+            seeded_count = bootstrap_user_preferences(db, user_id=user.id)
+            if seeded_count:
+                logger.info("新用户偏好记忆模板初始化完成: user_id=%s, count=%d", user.id, seeded_count)
+        except Exception as memory_error:
+            rollback = getattr(db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            logger.warning("新用户偏好记忆模板初始化失败，已降级: user_id=%s, error=%s", user.id, memory_error)
+
     return UserListItem.model_validate(user), None
 
 

@@ -1,7 +1,6 @@
 """Vision 图片理解工具（中文注释）。
 
-提供图片理解能力，支持配置化的多模态模型路由。
-优先读取路由键 vision，未配置时回退 model_type='vision' 的默认模型。
+提供图片理解能力，支持基于场景绑定的多模态模型路由。
 """
 import httpx
 import logging
@@ -9,7 +8,9 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import tool
 
+from app.ai.scene_registry import SCENE_KEY_VISION_ANALYZE_IMAGE
 from app.services.llm_config_service import LLMConfigService
+from app.services.llm_scene_service import LLMSceneService, SceneConfigError
 from app.schemas.llm import LLMModelConfig
 from app.core import config as ai_config
 
@@ -31,18 +32,29 @@ def _is_supported_vision_route_model_type(model_type: Optional[str]) -> bool:
 
 
 def _get_vision_model_config() -> Optional[LLMModelConfig]:
-    """获取 Vision 工具使用的模型配置（优先显式路由，回退类型默认）。"""
-    routed_model_code = ai_config.get_routing_model(ai_config.MODEL_ROUTING_VISION, "")
-    if routed_model_code:
-        routed_config = LLMConfigService.get_model_config(routed_model_code)
-        if routed_config and _is_supported_vision_route_model_type(routed_config.model_type):
-            return routed_config
-        logger.warning(
-            "Vision 路由模型不可用，回退类型默认: code=%s",
-            routed_model_code,
+    """获取 Vision 工具使用的模型配置（来源：t_llm_scene 场景绑定）。"""
+    try:
+        routed_model_code = LLMSceneService.resolve_model_code(
+            SCENE_KEY_VISION_ANALYZE_IMAGE,
         )
+    except SceneConfigError as exc:
+        logger.warning("Vision 场景绑定不可用: %s", exc)
+        return None
 
-    return LLMConfigService.get_model_by_type("vision")
+    routed_config = LLMConfigService.get_model_config(routed_model_code)
+    if not routed_config:
+        logger.warning("Vision 场景绑定模型不可用: code=%s", routed_model_code)
+        return None
+
+    if not _is_supported_vision_route_model_type(routed_config.model_type):
+        logger.warning(
+            "Vision 场景绑定模型类型不支持: code=%s, model_type=%s",
+            routed_model_code,
+            routed_config.model_type,
+        )
+        return None
+
+    return routed_config
 
 
 def _is_truthy(value: Any) -> bool:
@@ -87,9 +99,7 @@ def _extract_responses_text(data: dict) -> str:
 
 def _call_vision_model(image_url: str, question: str) -> str:
     """调用 Vision 模型分析图片。
-    
-    优先读取 vision 路由配置，未命中时回退到 vision 类型默认模型。
-    
+
     Args:
         image_url: 图片 URL
         question: 关于图片的问题
@@ -99,7 +109,7 @@ def _call_vision_model(image_url: str, question: str) -> str:
     """
     config = _get_vision_model_config()
     if not config:
-        return "⚠️ Vision 模型未配置，请在模型路由中设置 vision，或添加 model_type='vision' 的模型"
+        return "⚠️ Vision 模型未配置，请在模型路由中配置 Vision 场景绑定"
     
     if not config.api_key:
         return f"⚠️ Vision 模型 {config.model_code} 的 API Key 未配置"
@@ -256,7 +266,7 @@ def analyze_image(image_url: str, question: str = "请描述这张图片的内�
     返回图片分析结果和问题的回答。
     """
     if not is_vision_configured():
-        return "⚠️ 图片分析功能未配置：请在模型路由中设置 vision，或添加 Vision 类型模型"
+        return "⚠️ 图片分析功能未配置：请在模型路由中配置 Vision 场景绑定"
     
     try:
         logger.info("分析图片: url=%s, question=%s", image_url[:50], question[:30])
@@ -280,5 +290,5 @@ def analyze_image(image_url: str, question: str = "请描述这张图片的内�
 
 
 def is_vision_configured() -> bool:
-    """检查 Vision 路由是否已配置可用模型。"""
+    """检查 Vision 场景绑定是否已配置可用模型。"""
     return _get_vision_model_config() is not None

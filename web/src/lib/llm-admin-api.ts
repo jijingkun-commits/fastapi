@@ -232,7 +232,7 @@ export async function toggleModelActive(modelId: number): Promise<{ is_active: b
 export interface ModelRouteItem {
   scene: string;
   call_point: string;
-  source: 'user_select' | 'fixed_config' | 'db_type';
+  source: 'user_select' | 'scene_binding' | 'fixed_config' | 'db_type';
   config_key: string | null;
   current_model: string;
   recommended: string;

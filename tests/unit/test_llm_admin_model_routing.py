@@ -11,145 +11,131 @@ from fastapi import HTTPException
 from app.api.v1.endpoints import llm_admin_api
 
 
-class _FakeQuery:
-    """最小查询桩，支持 filter/first/update 链式调用。"""
-
-    def __init__(self, first_result=None):
-        self._first_result = first_result
-        self.update_payload = None
-
-    def filter(self, *_args, **_kwargs):
-        return self
-
-    def first(self):
-        return self._first_result
-
-    def update(self, payload):
-        self.update_payload = payload
-        return 1
-
-
-@patch("app.core.config.get_routing_model")
-@patch("app.api.v1.endpoints.llm_admin_api._has_vision_route_candidates")
-@patch("app.api.v1.endpoints.llm_admin_api._get_vision_model_for_routing")
-@patch("app.api.v1.endpoints.llm_admin_api._get_type_default_model")
-@patch("app.api.v1.endpoints.llm_admin_api._get_chat_default_model_for_routing")
-def test_get_model_routing_marks_vision_as_editable_when_configured(
-    mock_get_chat_default,
-    mock_get_type_default,
-    mock_get_vision_model,
-    mock_has_vision_candidates,
-    mock_get_routing_model,
+@patch("app.api.v1.endpoints.llm_admin_api._get_route_group_model_for_routing")
+@patch("app.api.v1.endpoints.llm_admin_api.LLMSceneService.refresh_cache")
+def test_get_model_routing_all_rows_use_scene_binding(
+    mock_refresh_scene_cache,
+    mock_get_route_group_model,
 ):
-    """Vision 路由存在候选模型时应允许编辑。"""
+    """模型路由总览应全部来自 scene_binding。"""
 
-    mock_get_chat_default.return_value = "gpt-5.2"
-    mock_get_type_default.return_value = "embedding-3"
-    mock_get_vision_model.return_value = "qwen3-vl-flash-2026-01-22"
-    mock_has_vision_candidates.return_value = True
-    mock_get_routing_model.side_effect = lambda key, fallback: {
-        "model_routing.lightweight": "gpt-5.2-mini",
-        "model_routing.sql_generation": "gpt-5.2",
-    }.get(key, fallback)
+    mock_refresh_scene_cache.return_value = None
+    mock_get_route_group_model.side_effect = [
+        "gpt-5.2",
+        "gpt-5.2",
+        "qwen3.5-flash",
+        "embedding-3",
+        "qwen3-vl-flash-2026-01-22",
+    ]
 
     routes = llm_admin_api.get_model_routing(db=MagicMock())
 
+    assert len(routes) == 5
+    assert all(route.source == "scene_binding" for route in routes)
+
+    embedding_route = next(route for route in routes if route.scene == "Embedding")
+    assert embedding_route.config_key == "embedding"
+    assert embedding_route.current_model == "embedding-3"
+    assert embedding_route.editable is True
+
     vision_route = next(route for route in routes if route.scene == "Vision")
-    assert vision_route.current_model == "qwen3-vl-flash-2026-01-22"
     assert vision_route.config_key == "vision"
+    assert vision_route.current_model == "qwen3-vl-flash-2026-01-22"
     assert vision_route.editable is True
 
 
-@patch("app.core.config.get_routing_model")
-@patch("app.api.v1.endpoints.llm_admin_api._has_vision_route_candidates")
-@patch("app.api.v1.endpoints.llm_admin_api._get_vision_model_for_routing")
-@patch("app.api.v1.endpoints.llm_admin_api._get_type_default_model")
-@patch("app.api.v1.endpoints.llm_admin_api._get_chat_default_model_for_routing")
-def test_get_model_routing_disables_vision_when_no_candidates(
-    mock_get_chat_default,
-    mock_get_type_default,
-    mock_get_vision_model,
-    mock_has_vision_candidates,
-    mock_get_routing_model,
-):
-    """Vision 无候选模型时，路由应显示不可编辑。"""
-
-    mock_get_chat_default.return_value = "gpt-5.2"
-    mock_get_type_default.return_value = "embedding-3"
-    mock_get_vision_model.return_value = "未配置"
-    mock_has_vision_candidates.return_value = False
-    mock_get_routing_model.side_effect = lambda _key, fallback: fallback
-
-    routes = llm_admin_api.get_model_routing(db=MagicMock())
-
-    vision_route = next(route for route in routes if route.scene == "Vision")
-    assert vision_route.current_model == "未配置"
-    assert vision_route.editable is False
-
-
-@patch("app.services.system_config_service.SystemConfigService.refresh_cache")
-@patch("app.repositories.config_repo.upsert_config")
 @patch("app.api.v1.endpoints.llm_admin_api._refresh_llm_runtime_cache")
-def test_update_model_routing_supports_vision_default_switch(
+@patch("app.api.v1.endpoints.llm_admin_api.LLMSceneService.update_route_group_default_model")
+def test_update_model_routing_updates_scene_binding_for_lightweight(
+    mock_update_route_group,
     mock_refresh_llm_cache,
-    mock_upsert_config,
-    mock_refresh_system_cache,
 ):
-    """vision 类型模型绑定 Vision 路由时应同步刷新类型默认。"""
+    """轻量路由更新应落到 t_llm_scene 分组绑定。"""
 
     request = llm_admin_api.ModelRoutingUpdateRequest(
-        config_key="vision",
-        model_code="qwen3-vl-flash-2026-01-22",
+        config_key="model_routing.lightweight",
+        model_code="qwen3.5-flash",
     )
-    vision_model = SimpleNamespace(
-        model_code="qwen3-vl-flash-2026-01-22",
-        model_type="vision",
+    model = SimpleNamespace(
+        model_code="qwen3.5-flash",
+        model_type="chat",
         is_default=False,
     )
 
     db = MagicMock()
-    find_model_query = _FakeQuery(first_result=vision_model)
-    reset_default_query = _FakeQuery()
-    db.query.side_effect = [find_model_query, reset_default_query]
+    db.query.return_value.filter.return_value.first.return_value = model
 
     resp = llm_admin_api.update_model_routing(request, db)
 
     assert resp == {
         "message": "模型路由已更新",
-        "config_key": "vision",
-        "model_code": "qwen3-vl-flash-2026-01-22",
+        "config_key": "model_routing.lightweight",
+        "model_code": "qwen3.5-flash",
     }
-    assert reset_default_query.update_payload == {"is_default": False}
-    assert vision_model.is_default is True
-    db.commit.assert_called_once()
+    mock_update_route_group.assert_called_once_with(
+        db=db,
+        route_group="lightweight",
+        default_model_code="qwen3.5-flash",
+    )
     mock_refresh_llm_cache.assert_called_once_with(db)
-    mock_refresh_system_cache.assert_called_once_with(db)
-    mock_upsert_config.assert_called_once()
 
 
-@patch("app.services.system_config_service.SystemConfigService.refresh_cache")
-@patch("app.repositories.config_repo.upsert_config")
 @patch("app.api.v1.endpoints.llm_admin_api._refresh_llm_runtime_cache")
-def test_update_model_routing_accepts_chat_model_for_vision_key(
+@patch("app.api.v1.endpoints.llm_admin_api.LLMSceneService.update_route_group_default_model")
+def test_update_model_routing_updates_scene_binding_for_embedding(
+    mock_update_route_group,
     mock_refresh_llm_cache,
-    mock_upsert_config,
-    mock_refresh_system_cache,
 ):
-    """Vision 路由应允许绑定具备多模态能力的 chat 类型模型。"""
+    """Embedding 路由更新应落到 embedding 分组。"""
+
+    request = llm_admin_api.ModelRoutingUpdateRequest(
+        config_key="embedding",
+        model_code="embedding-3",
+    )
+    model = SimpleNamespace(
+        model_code="embedding-3",
+        model_type="embedding",
+        is_default=False,
+    )
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = model
+
+    resp = llm_admin_api.update_model_routing(request, db)
+
+    assert resp == {
+        "message": "模型路由已更新",
+        "config_key": "embedding",
+        "model_code": "embedding-3",
+    }
+    mock_update_route_group.assert_called_once_with(
+        db=db,
+        route_group="embedding",
+        default_model_code="embedding-3",
+    )
+    mock_refresh_llm_cache.assert_called_once_with(db)
+
+
+@patch("app.api.v1.endpoints.llm_admin_api._refresh_llm_runtime_cache")
+@patch("app.api.v1.endpoints.llm_admin_api.LLMSceneService.update_route_group_default_model")
+def test_update_model_routing_updates_scene_binding_for_vision(
+    mock_update_route_group,
+    mock_refresh_llm_cache,
+):
+    """Vision 路由更新应落到 vision 分组。"""
 
     request = llm_admin_api.ModelRoutingUpdateRequest(
         config_key="vision",
         model_code="gpt-5.2",
     )
-    chat_model = SimpleNamespace(
+    model = SimpleNamespace(
         model_code="gpt-5.2",
         model_type="chat",
         is_default=False,
     )
 
     db = MagicMock()
-    find_model_query = _FakeQuery(first_result=chat_model)
-    db.query.side_effect = [find_model_query]
+    db.query.return_value.filter.return_value.first.return_value = model
 
     resp = llm_admin_api.update_model_routing(request, db)
 
@@ -158,11 +144,35 @@ def test_update_model_routing_accepts_chat_model_for_vision_key(
         "config_key": "vision",
         "model_code": "gpt-5.2",
     }
-    assert chat_model.is_default is False
-    db.commit.assert_called_once()
+    mock_update_route_group.assert_called_once_with(
+        db=db,
+        route_group="vision",
+        default_model_code="gpt-5.2",
+    )
     mock_refresh_llm_cache.assert_called_once_with(db)
-    mock_refresh_system_cache.assert_called_once_with(db)
-    mock_upsert_config.assert_called_once()
+
+
+def test_update_model_routing_rejects_non_embedding_model_for_embedding_key():
+    """Embedding 路由应拒绝非 embedding 类型模型。"""
+
+    request = llm_admin_api.ModelRoutingUpdateRequest(
+        config_key="embedding",
+        model_code="qwen3.5-flash",
+    )
+    chat_model = SimpleNamespace(
+        model_code="qwen3.5-flash",
+        model_type="chat",
+        is_default=False,
+    )
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = chat_model
+
+    with pytest.raises(HTTPException) as exc:
+        llm_admin_api.update_model_routing(request, db)
+
+    assert exc.value.status_code == 400
+    assert "embedding 类型模型" in exc.value.detail
 
 
 def test_update_model_routing_rejects_embedding_model_for_vision_key():
@@ -186,3 +196,4 @@ def test_update_model_routing_rejects_embedding_model_for_vision_key():
 
     assert exc.value.status_code == 400
     assert "vision/chat/reasoning" in exc.value.detail
+

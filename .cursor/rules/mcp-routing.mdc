@@ -1,25 +1,26 @@
 ---
-description: MCP 工具路由强制规则（涉及数据库查询、第三方库、GitHub、浏览器测试、看板、对象存储时自动加载）
+description: MCP 工具路由优先规则（可降级，避免工具缺失导致阻塞）
 alwaysApply: true
 ---
 
-# MCP 工具路由（强制）
+# MCP 工具路由（优先 + 可降级）
 
-以下场景必须优先使用对应 MCP 工具，禁止用 Bash/内置工具替代：
+以下场景应优先使用对应 MCP 工具；当 MCP 未配置、不可用或权限受限时，允许降级到 CLI/脚本，并在结果中标注降级原因与替代命令。
 
-| 场景 | 必须使用的 MCP 工具 | 禁止替代方式 |
+| 场景 | 优先 MCP 工具 | 降级方式（MCP 不可用时） |
 |------|-------------------|-------------|
-| 查询 chat_db 数据/表结构 | `mcp__postgres__query` | 禁止用 psql 命令行 |
-| 查询 data_db 数据/表结构 | `mcp__postgres-data-db__query` | 禁止用 psql 命令行 |
-| LangChain/LangGraph/任何第三方库 API 用法不确定时 | `context7`（先 resolve-library-id 再 query-docs） | 禁止凭记忆猜测 API |
-| GitHub 操作（PR/Issue/代码搜索） | `github-mcp-server` 系列工具 | 禁止用 gh CLI |
-| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 禁止手写 playwright 脚本再执行 |
-| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 禁止手动操作 |
-| 对象存储操作 | `minio` 系列工具 | 禁止用 mc CLI |
+| 查询 chat_db 数据/表结构 | `mcp__postgres__query` | `psql`（需在输出说明 SQL 与目标库） |
+| 查询 data_db 数据/表结构 | `mcp__postgres-data-db__query` | `psql`（需在输出说明 SQL 与目标库） |
+| LangChain/LangGraph/第三方库 API 用法不确定时 | `context7`（先 resolve-library-id 再 query-docs） | 官方文档 + 版本说明（禁止纯记忆猜测） |
+| GitHub 操作（PR/Issue/代码搜索） | GitHub MCP（若已配置） | `gh` CLI 或 Web 操作记录 |
+| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 本地 Playwright CLI / 浏览器手动复现 |
+| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 项目内任务文档 + 明确状态变更记录 |
+| 对象存储操作 | `minio` 系列工具 | `mc` CLI / SDK 脚本（需记录桶与对象路径） |
 
 ## 触发规则
 
-1. 涉及数据库查询时，先判断目标库（chat_db vs data_db），然后直接调用对应 MCP，不要先用 Bash 尝试
-2. 涉及第三方库 API 且不是 100% 确定用法时，必须先用 context7 查文档，再写代码
-3. 涉及 GitHub 操作时，优先用 github-mcp-server，而非 gh CLI
-4. 需要浏览器测试时，直接用 playwright MCP，不要生成脚本文件再执行
+1. 涉及数据库查询时，先判断目标库（chat_db vs data_db），优先调用对应 MCP。
+2. 涉及第三方库 API 且不是 100% 确定用法时，优先用 context7 查文档再写代码。
+3. 涉及 GitHub 操作时，先检测是否存在 GitHub MCP；不存在则直接降级到 `gh` CLI，不阻塞任务。
+4. 需要浏览器测试时优先用 Playwright MCP；若不可用，可改为 Playwright CLI。
+5. 发生降级时，回复中必须包含：`原因`、`替代工具`、`验证结果`。

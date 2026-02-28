@@ -86,11 +86,25 @@ else:
 
 #### 涉及文件/操作
 
-- [ ] 数据库变更: 在 `t_data_permission_table` 插入 `staff` 角色对 `fdmdata.f_mid_loan_k_tb` 的 `allow_access=false` 记录
-- [ ] 确认: 需要与业务方确认哪些角色可以查贷款表（如 `analyst`、`head_president` 等）
-- [ ] 确认: 是否还有其他贷款相关表需要限制（如 `f_mid_loan_tb` 等）
+- [x] 数据库变更: 在 `t_data_permission_table` 插入 `staff` 角色对 `fdmdata.f_mid_loan_k_tb` 的 `allow_access=false` 记录
+- [x] 确认: 需要与业务方确认哪些角色可以查贷款表（如 `analyst`、`head_president` 等）
+- [x] 确认: 是否还有其他贷款相关表需要限制（如 `f_mid_loan_tb` 等）
 
-**注意**：此修改需要业务方确认具体的权限矩阵，不能仅凭技术判断。
+**确认与落地结果（2026-02-28）**：
+
+1. 角色范围确认（按当前 G0 冻结角色口径）：
+   - `head_president` / `department_gm` / `department_vgm`：保留贷款表访问能力（通过原有 allow + 行级规则控制）。
+   - `staff`：禁止访问贷款明细表。
+   - `analyst`：不在当前冻结数据角色枚举中（`FROZEN_DATA_ROLES`），不作为本次策略对象。
+2. 目标表确认：
+   - 主目标：`fdmdata.f_mid_loan_k_tb`
+   - 扩展限制：`fdmdata.f_mid_loan_tb`（防止通过同类贷款表绕过）
+3. 数据库脚本：
+   - 新增 `install/scripts/init_postgres.sql/028_restrict_staff_loan_tables.sql`
+   - 对 `staff` 写入两条精确 deny（`allow_access=false`），并采用 `ON CONFLICT ... DO UPDATE` 保证幂等。
+4. 回归测试：
+   - `tests/unit/test_permission_service.py::test_check_table_access_exact_deny_overrides_schema_wildcard_allow`
+   - `tests/unit/test_permission_service.py::test_check_table_access_staff_denies_multiple_loan_tables`
 
 ### 3.3 问题 3 修复：文案动态化
 
@@ -146,9 +160,9 @@ else:
 |--------|--------|-----------|
 | 1 (最高) | 问题 1: streaming_wrapper 转发 custom events | 小（改 2 处） |
 | 2 | 问题 3: 文案动态化 | 极小（改 1 行） |
-| 3 | 问题 2: 贷款表权限配置 | 需业务确认后执行 |
+| 3 | 问题 2: 贷款表权限配置 | 已完成（含角色口径确认 + 028 脚本） |
 
-建议问题 1 和问题 3 一起修复，问题 2 等业务方确认权限矩阵后再执行。
+问题 1、问题 2、问题 3 已全部收口，后续仅需按发布流程执行变更脚本并做联调验收。
 
 ---
 

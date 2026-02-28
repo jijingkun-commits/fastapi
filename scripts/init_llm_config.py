@@ -8,8 +8,10 @@ from sqlalchemy import create_engine, text
 
 from app.ai.scene_registry import (
     ROUTE_GROUP_DEFAULT_CHAT,
+    ROUTE_GROUP_EMBEDDING,
     ROUTE_GROUP_LIGHTWEIGHT,
     ROUTE_GROUP_SQL_GENERATION,
+    ROUTE_GROUP_VISION,
     SCENE_DEFINITIONS,
 )
 from app.core.config import DATABASE_URL, ZHIPU_API_KEY, QWEN_API_KEY
@@ -60,6 +62,39 @@ def _resolve_default_chat_model_id(conn):
     ).scalar()
 
 
+def _resolve_default_model_id_by_type(conn, model_type: str):
+    model_id = conn.execute(
+        text(
+            """
+            SELECT id
+            FROM t_llm_model
+            WHERE model_type = :model_type
+              AND is_default = TRUE
+              AND is_active = TRUE
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ),
+        {"model_type": model_type},
+    ).scalar()
+    if model_id:
+        return model_id
+
+    return conn.execute(
+        text(
+            """
+            SELECT id
+            FROM t_llm_model
+            WHERE model_type = :model_type
+              AND is_active = TRUE
+            ORDER BY sort_order ASC, id ASC
+            LIMIT 1
+            """
+        ),
+        {"model_type": model_type},
+    ).scalar()
+
+
 def _init_scene_configs(conn):
     scene_ddl = """
     CREATE TABLE IF NOT EXISTS t_llm_scene (
@@ -80,27 +115,36 @@ def _init_scene_configs(conn):
     """
     conn.execute(text(scene_ddl))
 
-    default_chat_code = conn.execute(
-        text("SELECT config_value FROM t_system_config WHERE config_key='model_routing.default_chat' LIMIT 1")
-    ).scalar()
-    lightweight_code = conn.execute(
-        text("SELECT config_value FROM t_system_config WHERE config_key='model_routing.lightweight' LIMIT 1")
-    ).scalar()
-    sql_generation_code = conn.execute(
-        text("SELECT config_value FROM t_system_config WHERE config_key='model_routing.sql_generation' LIMIT 1")
-    ).scalar()
-
-    default_chat_model_id = _resolve_model_id(conn, default_chat_code) or _resolve_default_chat_model_id(conn)
+    default_chat_model_id = _resolve_default_chat_model_id(conn)
     if not default_chat_model_id:
         raise RuntimeError("未找到可用模型，无法初始化 t_llm_scene")
 
-    lightweight_model_id = _resolve_model_id(conn, lightweight_code) or default_chat_model_id
-    sql_generation_model_id = _resolve_model_id(conn, sql_generation_code) or default_chat_model_id
+    # 单一来源模式下，scene 绑定即路由配置；初始化阶段采用稳定兜底模型。
+    lightweight_model_id = (
+        _resolve_model_id(conn, "qwen3.5-flash")
+        or _resolve_model_id(conn, "qwen-flash")
+        or default_chat_model_id
+    )
+    sql_generation_model_id = (
+        _resolve_model_id(conn, "qwen-plus")
+        or default_chat_model_id
+    )
+    embedding_model_id = _resolve_default_model_id_by_type(conn, "embedding")
+    if not embedding_model_id:
+        raise RuntimeError("未找到可用 embedding 模型，无法初始化 embedding 场景")
+    vision_model_id = (
+        _resolve_default_model_id_by_type(conn, "vision")
+        or _resolve_default_model_id_by_type(conn, "chat")
+        or _resolve_default_model_id_by_type(conn, "reasoning")
+        or default_chat_model_id
+    )
 
     model_id_by_group = {
         ROUTE_GROUP_DEFAULT_CHAT: default_chat_model_id,
         ROUTE_GROUP_LIGHTWEIGHT: lightweight_model_id,
         ROUTE_GROUP_SQL_GENERATION: sql_generation_model_id,
+        ROUTE_GROUP_EMBEDDING: embedding_model_id,
+        ROUTE_GROUP_VISION: vision_model_id,
     }
 
     upsert_sql = text(

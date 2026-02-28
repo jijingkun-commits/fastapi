@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.scene_registry import get_required_scene_keys
+from app.ai.scene_registry import get_required_scene_keys, get_scene_keys_by_route_group
 from app.models.llm_model import LLMModel
 from app.repositories import llm_scene_repo
 from app.services.llm_config_service import LLMConfigService
@@ -225,6 +226,86 @@ class LLMSceneService:
             raise SceneConfigError(f"LLM 场景配置校验失败:\n - {joined}")
 
         logger.info("LLM 场景配置校验通过: required=%d", len(required_keys))
+
+    @classmethod
+    def get_route_group_default_model_code(cls, route_group: str) -> Optional[str]:
+        """返回指定 route_group 当前生效模型代码（以场景绑定为准）。"""
+
+        cls._ensure_initialized()
+
+        scene_keys = get_scene_keys_by_route_group(route_group)
+        if not scene_keys:
+            raise SceneConfigError(f"未知路由分组: route_group={route_group}")
+
+        model_codes: list[str] = []
+        for scene_key in scene_keys:
+            scene = cls._scene_cache.get(scene_key)
+            if scene is None:
+                raise SceneConfigError(f"场景未配置: scene_key={scene_key}")
+            if scene.is_active and scene.default_model_code:
+                model_codes.append(scene.default_model_code)
+
+        if not model_codes:
+            return None
+
+        counter = Counter(model_codes)
+        model_code, _ = counter.most_common(1)[0]
+        if len(counter) > 1:
+            logger.warning(
+                "路由分组绑定不一致，按多数派返回: route_group=%s, bindings=%s",
+                route_group,
+                dict(counter),
+            )
+        return model_code
+
+    @classmethod
+    def update_route_group_default_model(
+        cls,
+        db: Session,
+        route_group: str,
+        default_model_code: str,
+    ) -> list[SceneRuntimeConfig]:
+        """批量更新指定 route_group 绑定场景的默认模型。"""
+
+        scene_keys = get_scene_keys_by_route_group(route_group)
+        if not scene_keys:
+            raise SceneConfigError(f"未知路由分组: route_group={route_group}")
+
+        model_row = db.query(LLMModel).filter(
+            LLMModel.model_code == default_model_code,
+            LLMModel.is_active == True,
+        ).first()
+        if model_row is None:
+            raise SceneConfigError(f"模型不存在或未启用: {default_model_code}")
+
+        scene_rows = {
+            scene.scene_key: scene
+            for scene in llm_scene_repo.list_scenes(db, include_inactive=True)
+        }
+        for scene_key in scene_keys:
+            scene_row = scene_rows.get(scene_key)
+            if scene_row is None:
+                raise SceneConfigError(f"场景不存在: scene_key={scene_key}")
+
+            scene_type = (scene_row.scene_type or "text").strip().lower()
+            model_type = (model_row.model_type or "chat").strip().lower()
+            if not cls._is_type_compatible(scene_type, model_type):
+                raise SceneConfigError(
+                    f"模型类型与场景不兼容: scene_type={scene_type}, model_type={model_type}, scene_key={scene_key}"
+                )
+            scene_row.default_model_id = model_row.id
+
+        try:
+            db.flush()
+            cls.load_from_db(db)
+            cls.validate_startup_integrity()
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        cls.load_from_db(db)
+        return [cls.get_scene(scene_key) for scene_key in scene_keys]
 
     @classmethod
     def list_scene_items(cls) -> list[SceneRuntimeConfig]:

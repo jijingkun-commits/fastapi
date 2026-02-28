@@ -31,6 +31,12 @@ CONFIGS = [
     # 实验开关（统一总开关）
     ("feature.proxy_experiment_enabled", "false", "boolean", "feature", "中转供应商实验总开关（建议仅开发/测试开启）"),
     ("feature.proxy_experiment_providers", "openai_proxy_trial", "string", "feature", "中转实验 provider 白名单（逗号分隔）"),
+    ("feature.enable_ruleset_v2", "false", "boolean", "feature", "规则体系 V2 开关（灰度发布）"),
+    ("feature.enable_prompt_registry_v2", "false", "boolean", "feature", "命令注册中心 V2 开关（灰度发布）"),
+    ("release.ruleset_v2_rollout_percentage", "0", "number", "release", "规则体系 V2 灰度比例（0-100）"),
+    ("release.prompt_registry_v2_rollout_percentage", "0", "number", "release", "命令注册中心 V2 灰度比例（0-100）"),
+    ("feature.enable_user_preference_memory", "true", "boolean", "feature", "跨会话用户偏好记忆总开关"),
+    ("memory.user_preference_bootstrap_template", "{\"assistant.persona\":\"小嘉\"}", "json", "memory", "新用户偏好记忆初始化模板（JSON）"),
     
     # MCP 配置
     ("mcp.chart_server_url", "http://localhost:1122/sse", "string", "mcp", "MCP 图表服务器 URL"),

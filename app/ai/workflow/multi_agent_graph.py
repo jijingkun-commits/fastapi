@@ -29,7 +29,10 @@ from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
 
 from app.ai.llm_util import get_scene_llm, _normalize_text_content
-from app.ai.scene_registry import SCENE_KEY_MULTI_AGENT_SUPERVISOR
+from app.ai.scene_registry import (
+    SCENE_KEY_INTENT_CLASSIFIER,
+    SCENE_KEY_MULTI_AGENT_SUPERVISOR,
+)
 from app.db.postgres_checkpoint import get_checkpointer
 
 # 自定义事件工具
@@ -2748,12 +2751,22 @@ async def create_multi_agent_graph(
     专家 Agent 执行完毕后，流程应该汇聚到 postprocess。
     """
     
-    # 获取 LLM
+    # 获取 Supervisor LLM（主对话）
     llm = get_scene_llm(
         scene_key=SCENE_KEY_MULTI_AGENT_SUPERVISOR,
         force_thinking=enable_thinking,
         model_id=model_id,
     )
+
+    # 获取 Planner LLM（轻量意图分析，独立于主对话模型）
+    try:
+        planner_llm = get_scene_llm(
+            scene_key=SCENE_KEY_INTENT_CLASSIFIER,
+            force_thinking=False,
+        )
+    except Exception as exc:
+        logger.warning("planner_llm_init_failed_fallback_to_supervisor_llm: %s", exc)
+        planner_llm = llm
     
     # 1. 创建 Handoff 工具（使用常量定义）
     handoff_tools = [
@@ -2913,7 +2926,7 @@ async def create_multi_agent_graph(
             return {}
 
         planner_mode = str(state.get("intent_mode") or "model_primary")
-        intent_plan = _build_planner_intent_plan(state, llm=llm, mode=planner_mode)
+        intent_plan = _build_planner_intent_plan(state, llm=planner_llm, mode=planner_mode)
         source = str(intent_plan.get("source") or "unknown")
         fallback_meta = intent_plan.get("fallback_meta") if isinstance(intent_plan.get("fallback_meta"), dict) else {}
         fallback_reason = str(fallback_meta.get("reason") or "").strip()

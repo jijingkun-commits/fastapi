@@ -11,7 +11,9 @@ from typing import List, Optional
 
 from openai import OpenAI
 
+from app.ai.scene_registry import SCENE_KEY_EMBEDDING_GENERATE
 from app.services.llm_config_service import LLMConfigService
+from app.services.llm_scene_service import LLMSceneService, SceneConfigError
 from app.core.config import EMBEDDING_DIMENSION
 
 logger = logging.getLogger(__name__)
@@ -39,14 +41,20 @@ def get_embedding(text: str, model_code: Optional[str] = None) -> Optional[List[
         logger.warning("嵌入文本为空，跳过")
         return None
     
-    # 获取 embedding 模型配置
-    if model_code:
-        config = LLMConfigService.get_model_config(model_code)
-    else:
-        config = LLMConfigService.get_model_by_type("embedding")
+    # 获取 embedding 模型配置（按场景绑定路由）
+    try:
+        resolved_model_code = LLMSceneService.resolve_model_code(
+            SCENE_KEY_EMBEDDING_GENERATE,
+            model_id=model_code,
+        )
+    except SceneConfigError as exc:
+        logger.error("Embedding 场景绑定不可用: %s", exc)
+        return None
+
+    config = LLMConfigService.get_model_config(resolved_model_code)
     
     if not config:
-        logger.error("未找到 embedding 模型配置，请在 t_llm_models 中配置类型为 'embedding' 的模型")
+        logger.error("未找到 embedding 模型配置: model_code=%s", resolved_model_code)
         return None
     
     try:

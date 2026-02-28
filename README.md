@@ -8,7 +8,7 @@
 |------|------|
 | **后端** | FastAPI 0.115 · LangGraph 1.0 · LangChain 1.0 · SQLAlchemy 2.0 |
 | **前端** | Next.js 15 · React 19 · TypeScript · TailwindCSS |
-| **数据库** | PostgreSQL 10 · MinIO |
+| **数据库** | PostgreSQL 16+（pgvector）· MinIO |
 | **AI** | Qwen · DeepSeek · OpenAI Compatible |
 
 ## 快速开始
@@ -35,10 +35,10 @@ cd web && pnpm install && pnpm dev
 
 详细文档请查看 [`docs/`](docs/) 目录：
 
-- **[快速入门](docs/快速入门/快速开始.md)** - 5 分钟上手
-- **[安装部署](docs/快速入门/安装部署.md)** - 完整部署指南
-- **[架构设计](docs/架构设计/系统总览.md)** - 系统架构总览
-- **[接口文档](docs/接口文档/接口概览.md)** - 接口说明
+- **[快速入门](docs/开发文档/快速入门/快速开始.md)** - 5 分钟上手
+- **[安装部署](docs/开发文档/快速入门/安装部署.md)** - 完整部署指南
+- **[架构设计](docs/开发文档/架构设计/系统总览.md)** - 系统架构总览
+- **[接口文档](docs/API文档/接口文档.md)** - 接口说明
 
 ## 项目结构
 

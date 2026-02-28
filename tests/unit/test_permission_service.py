@@ -75,6 +75,44 @@ def test_collect_permission_hits_for_sql_tracks_allow_and_deny(permission_servic
     assert hit_map["fdmdata.t_secret"].hit_rule_type == "deny"
 
 
+def test_check_table_access_exact_deny_overrides_schema_wildcard_allow(
+    permission_service: PermissionService,
+):
+    """精确 deny 规则应覆盖 schema.* 通配 allow 规则。"""
+
+    ctx = UserPermissionContext(
+        user_id=7,
+        data_role="staff",
+        allowed_tables=["fdmdata.*"],
+        denied_tables={"fdmdata.f_mid_loan_k_tb", "fdmdata.f_mid_loan_tb"},
+    )
+
+    allowed, reason = permission_service.check_table_access(ctx, "fdmdata", "f_mid_loan_k_tb")
+    assert allowed is False
+    assert "禁止访问" in str(reason or "")
+
+    allowed_other, reason_other = permission_service.check_table_access(ctx, "fdmdata", "f_mid_dep_tb")
+    assert allowed_other is True
+    assert reason_other is None
+
+
+def test_check_table_access_staff_denies_multiple_loan_tables(permission_service: PermissionService):
+    """staff 贷款表 deny 应覆盖多个目标表。"""
+
+    ctx = UserPermissionContext(
+        user_id=8,
+        data_role="staff",
+        allowed_tables=["fdmdata.*"],
+        denied_tables={"fdmdata.f_mid_loan_k_tb", "fdmdata.f_mid_loan_tb"},
+    )
+
+    deny_cases = [("fdmdata", "f_mid_loan_k_tb"), ("fdmdata", "f_mid_loan_tb")]
+    for schema, table in deny_cases:
+        allowed, reason = permission_service.check_table_access(ctx, schema, table)
+        assert allowed is False
+        assert f"{schema}.{table}" in str(reason or "")
+
+
 def test_replace_data_role_policy_rejects_duplicate_rules(permission_service: PermissionService):
     """重复规则应在写库前被拒绝。"""
 

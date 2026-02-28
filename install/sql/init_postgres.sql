@@ -497,7 +497,9 @@ COMMENT ON COLUMN t_system_config.is_secret IS '是否敏感（UI掩码显示）
 INSERT INTO t_system_config (config_key, config_value, value_type, category, description, is_secret, is_readonly)
 VALUES
     ('feature.proxy_experiment_enabled', 'false', 'boolean', 'feature', '中转供应商实验总开关（建议仅开发/测试开启）', false, false),
-    ('feature.proxy_experiment_providers', 'openai_proxy_trial', 'string', 'feature', '中转实验 provider 白名单（逗号分隔）', false, false)
+    ('feature.proxy_experiment_providers', 'openai_proxy_trial', 'string', 'feature', '中转实验 provider 白名单（逗号分隔）', false, false),
+    ('feature.enable_user_preference_memory', 'true', 'boolean', 'feature', '跨会话用户偏好记忆总开关', false, false),
+    ('memory.user_preference_bootstrap_template', '{"assistant.persona":"小嘉"}', 'json', 'memory', '新用户偏好记忆初始化模板（JSON）', false, false)
 ON CONFLICT (config_key) DO NOTHING;
 
 -- 更新时间触发器

@@ -15,16 +15,19 @@ from pydantic import BaseModel
 from app.db.session import get_db
 from app.models.llm_provider import LLMProvider
 from app.models.llm_model import LLMModel
+from app.ai.scene_registry import (
+    ROUTE_GROUP_DEFAULT_CHAT,
+    ROUTE_GROUP_EMBEDDING,
+    ROUTE_GROUP_LIGHTWEIGHT,
+    ROUTE_GROUP_SQL_GENERATION,
+    ROUTE_GROUP_VISION,
+)
 from app.services.llm_config_service import LLMConfigService
 from app.services.llm_scene_service import LLMSceneService, SceneConfigError
-from app.core.config import MODEL_ROUTING_VISION
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/llm-admin", tags=["LLM 配置管理"])
-
-VISION_ROUTE_KEY = MODEL_ROUTING_VISION
-
 
 # ==================== Schemas ====================
 
@@ -506,7 +509,7 @@ class ModelRouteItem(BaseModel):
     """模型路由项。"""
     scene: str           # 场景名称
     call_point: str      # 调用点
-    source: str          # 模型来源：fixed_config / db_type
+    source: str          # 模型来源：scene_binding / user_select
     config_key: Optional[str] = None  # 配置键名
     current_model: str   # 当前使用的模型代码
     recommended: str     # 推荐模型
@@ -574,20 +577,27 @@ def update_llm_scene(scene_key: str, request: SceneUpdateRequest, db: Session = 
     }
 
 
-def _get_chat_default_model_for_routing(db: Session) -> str:
-    """获取主对话默认模型（优先路由配置，其次 chat 类型默认）。"""
-    from app.core.config import MODEL_ROUTING_DEFAULT_CHAT, get_routing_model
+def _get_route_group_model_for_routing(
+    db: Session,
+    route_group: str,
+    *,
+    fallback_model_type: Optional[str] = "chat",
+) -> str:
+    """获取路由分组当前模型（单一来源：t_llm_scene）。"""
 
-    configured = get_routing_model(MODEL_ROUTING_DEFAULT_CHAT, "")
-    if configured:
-        model = db.query(LLMModel).filter(
-            LLMModel.model_code == configured,
-            LLMModel.model_type == "chat",
-            LLMModel.is_active == True,
-        ).first()
-        if model:
-            return model.model_code
-    return _get_type_default_model(db, "chat")
+    try:
+        model_code = LLMSceneService.get_route_group_default_model_code(route_group)
+    except SceneConfigError as exc:
+        logger.warning("路由分组读取失败，回退类型默认模型: group=%s, error=%s", route_group, exc)
+        model_code = None
+
+    if model_code:
+        return model_code
+
+    if fallback_model_type:
+        return _get_type_default_model(db, fallback_model_type)
+
+    return "未配置"
 
 
 def _get_type_default_model(db: Session, model_type: str) -> str:
@@ -611,31 +621,6 @@ def _is_supported_vision_route_model(model: LLMModel) -> bool:
     return (model.model_type or "chat") in {"vision", "chat", "reasoning"}
 
 
-def _has_vision_route_candidates(db: Session) -> bool:
-    """检查是否存在可用于 Vision 路由的候选模型。"""
-    candidate = db.query(LLMModel).filter(
-        LLMModel.is_active == True,
-        LLMModel.model_type.in_(["vision", "chat", "reasoning"]),
-    ).first()
-    return candidate is not None
-
-
-def _get_vision_model_for_routing(db: Session) -> str:
-    """获取 Vision 路由当前模型（优先显式路由，回退 vision 类型默认）。"""
-    from app.core.config import get_routing_model
-
-    configured = get_routing_model(VISION_ROUTE_KEY, "")
-    if configured:
-        model = db.query(LLMModel).filter(
-            LLMModel.model_code == configured,
-            LLMModel.is_active == True,
-        ).first()
-        if model and _is_supported_vision_route_model(model):
-            return model.model_code
-
-    return _get_type_default_model(db, "vision")
-
-
 @router.get("/model-routing", response_model=List[ModelRouteItem])
 def get_model_routing(db: Session = Depends(get_db)):
     """获取模型路由总览表（按能力分层，5 行）。
@@ -649,24 +634,33 @@ def get_model_routing(db: Session = Depends(get_db)):
     """
     from app.core.config import (
         MODEL_ROUTING_DEFAULT_CHAT,
-        INTENT_CLASSIFIER_MODEL, SQL_GENERATION_MODEL,
-        MODEL_ROUTING_INTENT_CLASSIFIER, MODEL_ROUTING_SQL_GENERATION,
-        get_routing_model
+        MODEL_ROUTING_EMBEDDING,
+        MODEL_ROUTING_INTENT_CLASSIFIER,
+        MODEL_ROUTING_SQL_GENERATION,
+        MODEL_ROUTING_VISION,
     )
-    
-    # 获取固定配置的当前值（优先 t_system_config，回退环境变量）
-    lightweight_model = get_routing_model(MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL)
-    sql_gen_model = get_routing_model(MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL)
-    default_chat_model = _get_chat_default_model_for_routing(db)
-    
-    vision_route_model = _get_vision_model_for_routing(db)
-    vision_route_editable = _has_vision_route_candidates(db)
+
+    # 单一来源：路由分组场景绑定（t_llm_scene）
+    LLMSceneService.refresh_cache(db)
+    default_chat_model = _get_route_group_model_for_routing(db, ROUTE_GROUP_DEFAULT_CHAT, fallback_model_type="chat")
+    sql_gen_model = _get_route_group_model_for_routing(db, ROUTE_GROUP_SQL_GENERATION, fallback_model_type="chat")
+    lightweight_model = _get_route_group_model_for_routing(db, ROUTE_GROUP_LIGHTWEIGHT, fallback_model_type="chat")
+    embedding_model = _get_route_group_model_for_routing(
+        db,
+        ROUTE_GROUP_EMBEDDING,
+        fallback_model_type="embedding",
+    )
+    vision_model = _get_route_group_model_for_routing(
+        db,
+        ROUTE_GROUP_VISION,
+        fallback_model_type="vision",
+    )
 
     routes = [
         ModelRouteItem(
             scene="主对话",
             call_point="Supervisor / Agent 回复",
-            source="fixed_config",
+            source="scene_binding",
             config_key=MODEL_ROUTING_DEFAULT_CHAT,
             current_model=default_chat_model,
             recommended="qwen-plus / deepseek-chat",
@@ -675,7 +669,7 @@ def get_model_routing(db: Session = Depends(get_db)):
         ModelRouteItem(
             scene="SQL 生成 / 内部分析",
             call_point="vanna_client, analyze_data_intent, todo analyze_intent",
-            source="fixed_config",
+            source="scene_binding",
             config_key=MODEL_ROUTING_SQL_GENERATION,
             current_model=sql_gen_model,
             recommended="qwen-plus / deepseek-chat",
@@ -684,7 +678,7 @@ def get_model_routing(db: Session = Depends(get_db)):
         ModelRouteItem(
             scene="轻量任务（意图分类 / 参数提取 / 评估）",
             call_point="intent_classifier, parameter_extractor, llm_judge, sql_evaluator",
-            source="fixed_config",
+            source="scene_binding",
             config_key=MODEL_ROUTING_INTENT_CLASSIFIER,
             current_model=lightweight_model,
             recommended="glm-4.5-air / qwen-flash",
@@ -692,21 +686,21 @@ def get_model_routing(db: Session = Depends(get_db)):
         ),
         ModelRouteItem(
             scene="Embedding",
-            call_point="embedding_util.py",
-            source="db_type",
-            config_key="embedding",
-            current_model=_get_type_default_model(db, "embedding"),
+            call_point="embedding_util.get_embedding",
+            source="scene_binding",
+            config_key=MODEL_ROUTING_EMBEDDING,
+            current_model=embedding_model,
             recommended="embedding-3",
-            editable=False
+            editable=True
         ),
         ModelRouteItem(
             scene="Vision",
-            call_point="vision_tool.py",
-            source="db_type",
-            config_key=VISION_ROUTE_KEY,
-            current_model=vision_route_model,
+            call_point="vision_tool.analyze_image",
+            source="scene_binding",
+            config_key=MODEL_ROUTING_VISION,
+            current_model=vision_model,
             recommended="glm-4v-flash / gpt-5.2",
-            editable=vision_route_editable
+            editable=True
         ),
     ]
     
@@ -716,26 +710,17 @@ def get_model_routing(db: Session = Depends(get_db)):
 @router.put("/model-routing")
 def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depends(get_db)):
     """更新模型路由配置。
-    
-    支持更新以下路由：
-    - model_routing.default_chat：主对话默认模型（用户未显式选择时）
-    - model_routing.lightweight：轻量任务（意图分类/参数提取/评估）
-    - model_routing.sql_generation：SQL 生成 / 内部分析
-    - vision：Vision 多模态模型（支持 vision/chat/reasoning）
 
-    fixed_config 路由持久化到 t_system_config 表；
-    vision 路由优先写入 t_system_config(vision)，若选择 vision 类型模型则同步更新
-    t_llm_model(vision) 默认值，兼容历史读取链路。
-    更新后统一刷新缓存，无需重启服务。
+    单一数据源：t_llm_scene 路由分组绑定。
     """
     from app.core.config import (
         MODEL_ROUTING_DEFAULT_CHAT,
+        MODEL_ROUTING_EMBEDDING,
         MODEL_ROUTING_INTENT_CLASSIFIER,
         MODEL_ROUTING_LLM_JUDGE,
         MODEL_ROUTING_SQL_GENERATION,
+        MODEL_ROUTING_VISION,
     )
-    from app.repositories import config_repo
-    from app.services.system_config_service import SystemConfigService
 
     # 验证 config_key 合法性（INTENT_CLASSIFIER 和 LLM_JUDGE 共享同一配置键 model_routing.lightweight）
     allowed_keys = {
@@ -743,11 +728,12 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
         MODEL_ROUTING_INTENT_CLASSIFIER,
         MODEL_ROUTING_LLM_JUDGE,
         MODEL_ROUTING_SQL_GENERATION,
-        VISION_ROUTE_KEY,
+        MODEL_ROUTING_EMBEDDING,
+        MODEL_ROUTING_VISION,
     }
     if request.config_key not in allowed_keys:
         raise HTTPException(status_code=400, detail=f"不支持修改此配置项: {request.config_key}")
-    
+
     # 验证模型代码是否存在且启用
     model = db.query(LLMModel).filter(
         LLMModel.model_code == request.model_code,
@@ -758,67 +744,44 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
 
     if request.config_key == MODEL_ROUTING_DEFAULT_CHAT and model.model_type != "chat":
         raise HTTPException(status_code=400, detail="默认对话模型必须为 chat 类型")
-    if request.config_key == VISION_ROUTE_KEY and not _is_supported_vision_route_model(model):
+    if request.config_key == MODEL_ROUTING_EMBEDDING and model.model_type != "embedding":
+        raise HTTPException(status_code=400, detail="Embedding 路由仅支持 embedding 类型模型")
+    if request.config_key == MODEL_ROUTING_VISION and not _is_supported_vision_route_model(model):
         raise HTTPException(
             status_code=400,
             detail="Vision 路由仅支持 vision/chat/reasoning 类型模型",
         )
 
-    # Vision 路由支持多模态模型显式绑定：
-    # - 始终写入 t_system_config("vision")，供运行时优先读取。
-    # - 若绑定的是 vision 类型模型，同时同步该类型默认值，保持旧逻辑兼容。
-    if request.config_key == VISION_ROUTE_KEY:
-        if model.model_type == "vision":
-            db.query(LLMModel).filter(
-                LLMModel.model_type == "vision",
-                LLMModel.is_default == True,
-            ).update({"is_default": False})
-            model.is_default = True
-
-        config_repo.upsert_config(
-            db=db,
-            key=request.config_key,
-            value=request.model_code,
-            value_type="string",
-            category="model_routing",
-            description="Vision 多模态模型路由（优先，支持 vision/chat/reasoning）",
-        )
-        db.commit()
-
-        # Vision 既依赖系统配置，也可能依赖类型默认模型，两个缓存都要刷新。
-        SystemConfigService.refresh_cache(db)
-        _refresh_llm_runtime_cache(db)
-
-        logger.info("更新模型路由: vision -> %s", request.model_code)
-        return {
-            "message": "模型路由已更新",
-            "config_key": request.config_key,
-            "model_code": request.model_code,
-        }
-    
-    # 描述映射
-    desc_map = {
-        MODEL_ROUTING_DEFAULT_CHAT: "主对话默认模型（用户未显式选择时）",
-        MODEL_ROUTING_INTENT_CLASSIFIER: "轻量任务模型（意图分类/参数提取/评估）",
-        MODEL_ROUTING_SQL_GENERATION: "SQL 生成 / 内部分析模型",
+    route_group_by_key = {
+        MODEL_ROUTING_DEFAULT_CHAT: ROUTE_GROUP_DEFAULT_CHAT,
+        MODEL_ROUTING_INTENT_CLASSIFIER: ROUTE_GROUP_LIGHTWEIGHT,
+        MODEL_ROUTING_LLM_JUDGE: ROUTE_GROUP_LIGHTWEIGHT,
+        MODEL_ROUTING_SQL_GENERATION: ROUTE_GROUP_SQL_GENERATION,
+        MODEL_ROUTING_EMBEDDING: ROUTE_GROUP_EMBEDDING,
+        MODEL_ROUTING_VISION: ROUTE_GROUP_VISION,
     }
-    
-    # 写入 t_system_config
-    config_repo.upsert_config(
-        db=db,
-        key=request.config_key,
-        value=request.model_code,
-        value_type="string",
-        category="model_routing",
-        description=desc_map.get(request.config_key, "模型路由配置")
+
+    route_group = route_group_by_key.get(request.config_key)
+    if route_group is None:
+        raise HTTPException(status_code=400, detail=f"不支持修改此配置项: {request.config_key}")
+
+    try:
+        LLMSceneService.update_route_group_default_model(
+            db=db,
+            route_group=route_group,
+            default_model_code=request.model_code,
+        )
+    except SceneConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    _refresh_llm_runtime_cache(db)
+    logger.info(
+        "更新模型路由(场景绑定): config_key=%s, route_group=%s, model=%s",
+        request.config_key,
+        route_group,
+        request.model_code,
     )
-    db.commit()
-    
-    # 刷新系统配置缓存
-    SystemConfigService.refresh_cache(db)
-    
-    logger.info(f"更新模型路由: {request.config_key} -> {request.model_code}")
-    
+
     return {
         "message": "模型路由已更新",
         "config_key": request.config_key,

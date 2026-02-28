@@ -8,7 +8,7 @@ alwaysApply: false
 
 ## 禁止修改（高风险）
 
-修改前必须询问用户确认：
+修改前必须完成风险自检并在交付中说明：
 - `app/ai/prompts/agent_prompts.py` - Agent Prompt
 - `app/ai/state.py` - State 定义
 - `*_graph.py` 中的 preprocess/postprocess 节点

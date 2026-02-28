@@ -21,14 +21,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config_contract import CONFIG_SPECS, ConfigSpec
-from app.db.session import SessionLocal, engine
-from app.models.system_config import SystemConfig
+from app.db.session import engine
 
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
@@ -58,6 +57,14 @@ class Issue:
 
 
 SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
+
+
+@dataclass(frozen=True)
+class ConfigRow:
+    """系统配置行（轻量结构，避免 ORM 初始化）。"""
+
+    config_key: str
+    config_value: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,12 +130,34 @@ def _normalize_value(value: str | None, value_type: str) -> str:
     return text.lower()
 
 
-def _load_db_map() -> dict[str, SystemConfig]:
+def _to_bool(value: str | None, default: bool = False) -> bool:
+    """将字符串解析为布尔值。"""
+
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _load_db_map() -> dict[str, ConfigRow]:
     """加载主库中的系统配置。"""
 
-    with SessionLocal() as db:
-        rows = db.execute(select(SystemConfig)).scalars().all()
-    return {row.config_key: row for row in rows}
+    sql = text("SELECT config_key, config_value FROM t_system_config")
+    with engine.begin() as conn:
+        rows = conn.execute(sql).all()
+
+    mapping: dict[str, ConfigRow] = {}
+    for config_key, config_value in rows:
+        key_text = str(config_key)
+        mapping[key_text] = ConfigRow(
+            config_key=key_text,
+            config_value="" if config_value is None else str(config_value),
+        )
+    return mapping
 
 
 def _validate_contract(specs: dict[str, ConfigSpec]) -> list[Issue]:
@@ -188,7 +217,7 @@ def _format_env_detail(spec: ConfigSpec) -> tuple[str, str | None]:
     return f"{spec.env_key}=unset", None
 
 
-def _analyze_dynamic_spec(spec: ConfigSpec, db_map: dict[str, SystemConfig]) -> tuple[CheckRow, list[Issue]]:
+def _analyze_dynamic_spec(spec: ConfigSpec, db_map: dict[str, ConfigRow]) -> tuple[CheckRow, list[Issue]]:
     """分析 db-dynamic 配置项。"""
 
     issues: list[Issue] = []
@@ -328,6 +357,95 @@ def _sort_issues(issues: Iterable[Issue]) -> list[Issue]:
     )
 
 
+def _resolve_effective_value(spec: ConfigSpec, db_map: dict[str, ConfigRow]) -> str:
+    """解析单个配置项运行时生效值（db -> env -> default）。"""
+
+    if spec.source == "db-dynamic":
+        for db_key in spec.all_db_keys():
+            row = db_map.get(db_key)
+            if row and _is_non_empty(row.config_value):
+                return row.config_value
+    if spec.env_key:
+        env_value = os.getenv(spec.env_key)
+        if _is_non_empty(env_value):
+            return env_value
+    return str(spec.default)
+
+
+def _validate_release_rollout_consistency(
+    specs: dict[str, ConfigSpec],
+    db_map: dict[str, ConfigRow],
+) -> list[Issue]:
+    """校验 C-5 灰度开关与比例的一致性。"""
+
+    checks = [
+        (
+            "feature.enable_ruleset_v2",
+            "release.ruleset_v2_rollout_percentage",
+            "ruleset_v2",
+        ),
+        (
+            "feature.enable_prompt_registry_v2",
+            "release.prompt_registry_v2_rollout_percentage",
+            "prompt_registry_v2",
+        ),
+    ]
+
+    issues: list[Issue] = []
+    for enable_key, rollout_key, label in checks:
+        enable_spec = specs.get(enable_key)
+        rollout_spec = specs.get(rollout_key)
+        if not enable_spec or not rollout_spec:
+            continue
+
+        enable_value = _to_bool(_resolve_effective_value(enable_spec, db_map), False)
+        rollout_raw = _resolve_effective_value(rollout_spec, db_map)
+        try:
+            rollout_value = int(float(str(rollout_raw).strip()))
+        except (TypeError, ValueError):
+            issues.append(
+                Issue(
+                    severity="P1",
+                    code="RELEASE_ROLLOUT_NOT_NUMBER",
+                    key=rollout_key,
+                    message=f"{label} 灰度比例不是有效数字: {rollout_raw!r}",
+                )
+            )
+            continue
+
+        if rollout_value < 0 or rollout_value > 100:
+            issues.append(
+                Issue(
+                    severity="P1",
+                    code="RELEASE_ROLLOUT_OUT_OF_RANGE",
+                    key=rollout_key,
+                    message=f"{label} 灰度比例必须在 0-100 之间，当前={rollout_value}",
+                )
+            )
+
+        if enable_value and rollout_value == 0:
+            issues.append(
+                Issue(
+                    severity="P1",
+                    code="RELEASE_ENABLE_WITH_ZERO_ROLLOUT",
+                    key=enable_key,
+                    message=f"{label} 已启用但灰度比例为 0，存在配置冲突",
+                )
+            )
+
+        if (not enable_value) and rollout_value > 0:
+            issues.append(
+                Issue(
+                    severity="P1",
+                    code="RELEASE_DISABLED_WITH_POSITIVE_ROLLOUT",
+                    key=rollout_key,
+                    message=f"{label} 未启用但灰度比例为 {rollout_value}，存在配置冲突",
+                )
+            )
+
+    return issues
+
+
 def _print_rows(rows: list[CheckRow], show_all: bool) -> None:
     """输出配置项检查结果。"""
 
@@ -408,6 +526,8 @@ def main() -> int:
             row, spec_issues = _analyze_env_only_spec(spec)
         rows.append(row)
         issues.extend(spec_issues)
+
+    issues.extend(_validate_release_rollout_consistency(CONFIG_SPECS, db_map))
 
     known_db_keys = _collect_known_db_keys(CONFIG_SPECS)
     unknown_db_keys = sorted(set(db_map.keys()) - known_db_keys)

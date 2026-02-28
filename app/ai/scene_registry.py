@@ -3,12 +3,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models.llm_scene import SCENE_TYPE_TEXT
+from app.models.llm_scene import (
+    SCENE_TYPE_EMBEDDING,
+    SCENE_TYPE_TEXT,
+    SCENE_TYPE_VISION,
+)
 
 
 ROUTE_GROUP_DEFAULT_CHAT = "default_chat"
 ROUTE_GROUP_LIGHTWEIGHT = "lightweight"
 ROUTE_GROUP_SQL_GENERATION = "sql_generation"
+ROUTE_GROUP_EMBEDDING = "embedding"
+ROUTE_GROUP_VISION = "vision"
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,8 @@ SCENE_KEY_LLM_JUDGE_CHART = "app.ai.llm_judge.evaluate_chart_response"
 SCENE_KEY_SQL_EVALUATOR_SEMANTIC = "app.ai.utils.sql_evaluator.evaluate_sql_semantic"
 SCENE_KEY_SQL_EVALUATOR_RETRY = "app.ai.utils.sql_evaluator.should_retry_sql_generation"
 SCENE_KEY_TODO_DESC_MERGE = "app.ai.workflow.todo_graph._merge_description"
+SCENE_KEY_EMBEDDING_GENERATE = "app.ai.utils.embedding_util.get_embedding"
+SCENE_KEY_VISION_ANALYZE_IMAGE = "app.ai.tools.vision_tool.analyze_image"
 
 
 SCENE_DEFINITIONS = (
@@ -203,12 +211,49 @@ SCENE_DEFINITIONS = (
         route_group=ROUTE_GROUP_LIGHTWEIGHT,
         description="待办描述语义融合",
     ),
+    SceneDefinition(
+        scene_key=SCENE_KEY_EMBEDDING_GENERATE,
+        scene_name="文本向量化",
+        scene_type=SCENE_TYPE_EMBEDDING,
+        route_group=ROUTE_GROUP_EMBEDDING,
+        description="Embedding 向量生成",
+    ),
+    SceneDefinition(
+        scene_key=SCENE_KEY_VISION_ANALYZE_IMAGE,
+        scene_name="图片理解",
+        scene_type=SCENE_TYPE_VISION,
+        route_group=ROUTE_GROUP_VISION,
+        description="Vision 图片分析工具",
+    ),
 )
 
 SCENE_DEFINITION_MAP = {item.scene_key: item for item in SCENE_DEFINITIONS}
+SCENE_KEYS_BY_ROUTE_GROUP = {
+    ROUTE_GROUP_DEFAULT_CHAT: tuple(
+        item.scene_key for item in SCENE_DEFINITIONS if item.route_group == ROUTE_GROUP_DEFAULT_CHAT
+    ),
+    ROUTE_GROUP_LIGHTWEIGHT: tuple(
+        item.scene_key for item in SCENE_DEFINITIONS if item.route_group == ROUTE_GROUP_LIGHTWEIGHT
+    ),
+    ROUTE_GROUP_SQL_GENERATION: tuple(
+        item.scene_key for item in SCENE_DEFINITIONS if item.route_group == ROUTE_GROUP_SQL_GENERATION
+    ),
+    ROUTE_GROUP_EMBEDDING: tuple(
+        item.scene_key for item in SCENE_DEFINITIONS if item.route_group == ROUTE_GROUP_EMBEDDING
+    ),
+    ROUTE_GROUP_VISION: tuple(
+        item.scene_key for item in SCENE_DEFINITIONS if item.route_group == ROUTE_GROUP_VISION
+    ),
+}
 
 
 def get_required_scene_keys() -> set[str]:
     """返回启动期必须存在的场景键集合。"""
 
     return set(SCENE_DEFINITION_MAP)
+
+
+def get_scene_keys_by_route_group(route_group: str) -> tuple[str, ...]:
+    """按路由分组返回场景键列表。"""
+
+    return SCENE_KEYS_BY_ROUTE_GROUP.get(route_group, ())

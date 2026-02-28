@@ -24,7 +24,7 @@ alwaysApply: false
 - START → Preprocess → AgentCore → Postprocess → END
 - 禁止跳过 Pre/Post 节点，禁止 legacy AgentExecutor
 
-## 高风险文件（修改前必须确认）
+## 高风险文件（修改前必须自检并说明）
 - app/ai/prompts/agent_prompts.py
 - app/ai/state.py
 - *_graph.py 中的 preprocess/postprocess 节点

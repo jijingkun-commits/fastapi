@@ -6,17 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.ai.tools import vision_tool
+from app.services.llm_scene_service import SceneConfigError
 
 
-@patch("app.ai.tools.vision_tool.ai_config.get_routing_model", return_value="gpt-5.2")
-@patch("app.ai.tools.vision_tool.LLMConfigService.get_model_by_type")
 @patch("app.ai.tools.vision_tool.LLMConfigService.get_model_config")
-def test_get_vision_model_config_prefers_routed_chat_model(
+@patch("app.ai.tools.vision_tool.LLMSceneService.resolve_model_code", return_value="gpt-5.2")
+def test_get_vision_model_config_uses_scene_binding(
+    mock_resolve_scene_model,
     mock_get_model_config,
-    mock_get_model_by_type,
-    _mock_get_routing,
 ):
-    """配置了 vision 路由时，应优先返回路由绑定模型。"""
+    """配置了 Vision 场景绑定时，应返回绑定模型。"""
 
     routed_config = SimpleNamespace(model_code="gpt-5.2", model_type="chat")
     mock_get_model_config.return_value = routed_config
@@ -24,30 +23,44 @@ def test_get_vision_model_config_prefers_routed_chat_model(
     result = vision_tool._get_vision_model_config()
 
     assert result is routed_config
-    mock_get_model_by_type.assert_not_called()
+    mock_resolve_scene_model.assert_called_once_with("app.ai.tools.vision_tool.analyze_image")
+    mock_get_model_config.assert_called_once_with("gpt-5.2")
 
 
-@patch("app.ai.tools.vision_tool.ai_config.get_routing_model", return_value="embedding-3")
-@patch("app.ai.tools.vision_tool.LLMConfigService.get_model_by_type")
 @patch("app.ai.tools.vision_tool.LLMConfigService.get_model_config")
-def test_get_vision_model_config_falls_back_when_routed_model_unsupported(
+@patch(
+    "app.ai.tools.vision_tool.LLMSceneService.resolve_model_code",
+    side_effect=SceneConfigError("场景未配置"),
+)
+def test_get_vision_model_config_returns_none_when_scene_missing(
+    mock_resolve_scene_model,
     mock_get_model_config,
-    mock_get_model_by_type,
-    _mock_get_routing,
 ):
-    """路由模型类型不支持时，应回退到 vision 类型默认模型。"""
+    """Vision 场景未配置时应返回 None。"""
+
+    result = vision_tool._get_vision_model_config()
+
+    assert result is None
+    mock_resolve_scene_model.assert_called_once_with("app.ai.tools.vision_tool.analyze_image")
+    mock_get_model_config.assert_not_called()
+
+
+@patch("app.ai.tools.vision_tool.LLMConfigService.get_model_config")
+@patch("app.ai.tools.vision_tool.LLMSceneService.resolve_model_code", return_value="embedding-3")
+def test_get_vision_model_config_returns_none_when_type_unsupported(
+    _mock_resolve_scene_model,
+    mock_get_model_config,
+):
+    """场景绑定模型类型不支持时，应返回 None。"""
 
     mock_get_model_config.return_value = SimpleNamespace(
         model_code="embedding-3",
         model_type="embedding",
     )
-    fallback_config = SimpleNamespace(model_code="qwen3-vl-flash-2026-01-22", model_type="vision")
-    mock_get_model_by_type.return_value = fallback_config
 
     result = vision_tool._get_vision_model_config()
 
-    assert result is fallback_config
-    mock_get_model_by_type.assert_called_once_with("vision")
+    assert result is None
 
 
 @patch("app.ai.tools.vision_tool._get_vision_model_config", return_value=object())
@@ -59,6 +72,7 @@ def test_is_vision_configured_true_when_route_resolves(_mock_get_config):
 
 @patch("app.ai.tools.vision_tool._get_vision_model_config", return_value=None)
 def test_is_vision_configured_false_when_route_missing(_mock_get_config):
-    """Vision 路由和回退模型都不可用时，配置状态应为 false。"""
+    """Vision 场景绑定不可用时，配置状态应为 false。"""
 
     assert vision_tool.is_vision_configured() is False
+

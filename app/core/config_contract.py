@@ -147,6 +147,36 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         default="openai_proxy_trial",
         env_key="PROXY_EXPERIMENT_PROVIDERS",
     ),
+    "feature.enable_ruleset_v2": ConfigSpec(
+        key="feature.enable_ruleset_v2",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_RULESET_V2",
+        aliases=("feature.ruleset_v2_enabled",),
+    ),
+    "feature.enable_prompt_registry_v2": ConfigSpec(
+        key="feature.enable_prompt_registry_v2",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="ENABLE_PROMPT_REGISTRY_V2",
+        aliases=("feature.prompt_registry_v2_enabled",),
+    ),
+    "release.ruleset_v2_rollout_percentage": ConfigSpec(
+        key="release.ruleset_v2_rollout_percentage",
+        source="db-dynamic",
+        value_type="number",
+        default=0,
+        env_key="RULESET_V2_ROLLOUT_PERCENTAGE",
+    ),
+    "release.prompt_registry_v2_rollout_percentage": ConfigSpec(
+        key="release.prompt_registry_v2_rollout_percentage",
+        source="db-dynamic",
+        value_type="number",
+        default=0,
+        env_key="PROMPT_REGISTRY_V2_ROLLOUT_PERCENTAGE",
+    ),
     # ==================== 技能检索 ====================
     "skill_similarity_threshold": ConfigSpec(
         key="skill_similarity_threshold",
@@ -219,21 +249,26 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         env_key="ENABLE_USER_SKILL_BINDING",
         aliases=("skill.enable_user_binding",),
     ),
-    "feature.enable_memory_recall": ConfigSpec(
-        key="feature.enable_memory_recall",
+    "feature.enable_user_preference_memory": ConfigSpec(
+        key="feature.enable_user_preference_memory",
         source="db-dynamic",
         value_type="boolean",
         default=False,
-        env_key="ENABLE_MEMORY_RECALL",
-        aliases=("memory.enable_recall",),
+        env_key="ENABLE_USER_PREFERENCE_MEMORY",
+        aliases=(
+            "feature.enable_memory_recall",
+            "memory.enable_recall",
+            "feature.enable_pre_compaction_flush",
+            "memory.enable_pre_compaction_flush",
+        ),
     ),
-    "feature.enable_pre_compaction_flush": ConfigSpec(
-        key="feature.enable_pre_compaction_flush",
+    "memory.user_preference_bootstrap_template": ConfigSpec(
+        key="memory.user_preference_bootstrap_template",
         source="db-dynamic",
-        value_type="boolean",
-        default=False,
-        env_key="ENABLE_PRE_COMPACTION_FLUSH",
-        aliases=("memory.enable_pre_compaction_flush",),
+        value_type="json",
+        default={"assistant.persona": "小嘉"},
+        env_key="USER_PREFERENCE_MEMORY_BOOTSTRAP_TEMPLATE",
+        aliases=("memory.bootstrap_template",),
     ),
     # ==================== 问数权限配置（主键 askdata.*, 兼容 data_access.*） ====================
     "askdata.table_whitelist": ConfigSpec(

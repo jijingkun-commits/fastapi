@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,10 @@ class PreferenceMemoryCandidate:
 
 
 _TRIGGER_PATTERN = re.compile(r"(记住|默认|以后都|之后都|请始终|都用|一直)")
+_PERSONA_LABEL_PATTERN = re.compile(r"AI人设\s*[:：]\s*([^\n，。！？；;]{1,40})")
+_PERSONA_NAME_PATTERN = re.compile(
+    r"(?:你叫|你以后叫|以后都叫你|自称|叫你|称呼你为|把你叫做)\s*[\"“'‘]?\s*([\u4e00-\u9fa5A-Za-z0-9_-]{1,24})\s*[\"”'’]?"
+)
 
 _DISPLAY_MAPPING = {
     "response.language": {
@@ -62,10 +66,17 @@ _DISPLAY_MAPPING = {
             "casual": "轻松口语化",
         },
     },
+    "assistant.persona": {
+        "label": "AI人设",
+        "values": {},
+    },
 }
 
 _FETCH_MULTIPLIER = 3
 _DEFAULT_MAX_CONTEXT_CHARS = 320
+USER_PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY = "memory.user_preference_bootstrap_template"
+DEFAULT_USER_PREFERENCE_BOOTSTRAP_TEMPLATE = {"assistant.persona": "小嘉"}
+_BOOTSTRAP_SOURCE_THREAD_ID = "system.user_bootstrap"
 
 
 def _normalize_text(text: str) -> str:
@@ -80,6 +91,91 @@ def _contains_any(text: str, patterns: Iterable[str]) -> bool:
     """判断文本是否命中任一模式。"""
 
     return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _normalize_persona_value(raw: str) -> str:
+    """清洗 AI 人设值。"""
+
+    value = str(raw or "").strip()
+    value = value.strip("\"'“”‘’")
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"[。！!？，,；;]+$", "", value)
+    if not value:
+        return ""
+    return value[:24]
+
+
+def _normalize_controlled_memory_value(memory_key: str, raw_value: Any) -> str:
+    """归一化受控记忆值。"""
+
+    if memory_key == "assistant.persona":
+        return _normalize_persona_value(str(raw_value or ""))
+
+    mapping = _DISPLAY_MAPPING.get(memory_key)
+    if not mapping:
+        return ""
+
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+
+    allowed_values = mapping.get("values", {})
+    if not allowed_values:
+        return value
+    if value in allowed_values:
+        return value
+
+    lowered = value.lower()
+    for candidate in allowed_values:
+        if str(candidate).lower() == lowered:
+            return str(candidate)
+
+    for candidate, display_value in allowed_values.items():
+        if str(display_value).strip().lower() == lowered:
+            return str(candidate)
+
+    return ""
+
+
+def normalize_controlled_memory_template(template: Any) -> dict[str, str]:
+    """规范化受控记忆模板，仅保留白名单 key。"""
+
+    if not isinstance(template, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in template.items():
+        key = str(raw_key or "").strip()
+        if not key or key not in _DISPLAY_MAPPING:
+            continue
+
+        normalized_value = _normalize_controlled_memory_value(key, raw_value)
+        if not normalized_value:
+            continue
+
+        normalized[key] = normalized_value
+
+    return normalized
+
+
+def load_bootstrap_template_from_config() -> dict[str, str]:
+    """读取并归一化用户偏好初始化模板。"""
+
+    fallback = dict(DEFAULT_USER_PREFERENCE_BOOTSTRAP_TEMPLATE)
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        template = ConfigResolver.get_json_dict(
+            USER_PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY,
+            fallback,
+        )
+    except Exception as config_error:
+        logger.warning("读取用户偏好初始化模板失败，已使用默认模板: error=%s", config_error)
+        return fallback
+
+    normalized = normalize_controlled_memory_template(template)
+    return normalized if normalized else fallback
 
 
 def extract_explicit_preference_candidates(user_text: str) -> list[PreferenceMemoryCandidate]:
@@ -147,6 +243,23 @@ def extract_explicit_preference_candidates(user_text: str) -> list[PreferenceMem
             memory_key="response.style",
             memory_value="casual",
             confidence=Decimal("0.900"),
+        )
+
+    persona_raw = ""
+    label_match = _PERSONA_LABEL_PATTERN.search(text)
+    if label_match:
+        persona_raw = label_match.group(1)
+    else:
+        name_match = _PERSONA_NAME_PATTERN.search(text)
+        if name_match:
+            persona_raw = name_match.group(1)
+
+    persona = _normalize_persona_value(persona_raw)
+    if persona:
+        candidates["assistant.persona"] = PreferenceMemoryCandidate(
+            memory_key="assistant.persona",
+            memory_value=persona,
+            confidence=Decimal("0.920"),
         )
 
     return list(candidates.values())
@@ -269,6 +382,9 @@ def _render_context(memories: list, max_context_chars: int) -> str:
         )
         for item in memories
     )
+    if any(str(getattr(item, "memory_key", "") or "") == "assistant.persona" for item in memories):
+        lines.append("执行要求：当用户未另行指定时，按 AI 人设进行自称。")
+        lines.append("说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。")
 
     context = "\n".join(lines)
     if max_context_chars > 0 and len(context) > max_context_chars:
@@ -355,6 +471,41 @@ def persist_explicit_preferences_from_input(
 
     db.commit()
     return len(candidates)
+
+
+def bootstrap_user_preferences(
+    db: Session,
+    *,
+    user_id: int,
+    template: dict[str, Any] | None = None,
+) -> int:
+    """为新用户初始化受控记忆模板。"""
+
+    if not user_id:
+        return 0
+
+    template_payload = (
+        load_bootstrap_template_from_config()
+        if template is None
+        else normalize_controlled_memory_template(template)
+    )
+    if not template_payload:
+        return 0
+
+    for memory_key, memory_value in template_payload.items():
+        user_memory_repo.upsert_active_memory(
+            db,
+            user_id=user_id,
+            scope="global",
+            memory_key=memory_key,
+            memory_value=memory_value,
+            confidence=Decimal("1.000"),
+            source_thread_id=_BOOTSTRAP_SOURCE_THREAD_ID,
+            source_message_id=None,
+        )
+
+    db.commit()
+    return len(template_payload)
 
 
 def flush(

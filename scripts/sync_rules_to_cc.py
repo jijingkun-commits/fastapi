@@ -3,7 +3,7 @@
 同步三类文件：
 1. Rules: .cursor/rules/*.mdc -> .claude/rules/*.md（去 frontmatter，下划线转连字符）
 2. Commands: .cursor/commands/*.md -> .claude/commands/*.md（直接复制，替代 symlink）
-3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（供 Codex `/prompts:<name>` 调用）
+3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（由 ENABLE_PROMPT_REGISTRY_V2 控制 symlink/copy）
 
 用法:
     python scripts/sync_rules_to_cc.py          # 同步 rules + commands
@@ -17,6 +17,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -38,6 +39,10 @@ CODEX_MANIFEST_FILENAME = ".cursor_commands_manifest.json"
 TEAM_BRIDGE_PREFIX = "jjk-team-"
 TEAM_BRIDGE_MARKER = "<!-- AUTO-GENERATED: jjk-team-bridge -->"
 TEAM_DEFAULT_ROLE = "planner"
+TEAM_BRIDGE_EXCLUDED_STEMS = {"jjk-clarify"}
+RULESET_V2_FLAG = "ENABLE_RULESET_V2"
+PROMPT_REGISTRY_V2_FLAG = "ENABLE_PROMPT_REGISTRY_V2"
+CLAUDE_RULES_V1_SNAPSHOT_DIR = ROOT / ".claude" / ".rules_v1_snapshot"
 
 # frontmatter 正则：匹配文件开头的 --- ... --- 块
 FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
@@ -46,6 +51,15 @@ FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
 def strip_frontmatter(content: str) -> str:
     """去除 MDC 文件开头的 frontmatter 块。"""
     return FRONTMATTER_RE.sub("", content).lstrip("\n")
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """读取布尔环境变量。"""
+
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
 def mdc_to_md_name(mdc_name: str) -> str:
@@ -104,6 +118,8 @@ def _collect_jjk_command_specs() -> list[dict[str, str]]:
     for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("jjk-*.md")):
         stem = cmd_file.stem
         if stem.startswith("jjk-team-"):
+            continue
+        if stem in TEAM_BRIDGE_EXCLUDED_STEMS:
             continue
         suffix = stem.removeprefix("jjk-")
         specs.append(
@@ -224,6 +240,16 @@ def sync_rules(exclude: Optional[Set[str]] = None) -> list[str]:
     """同步规则文件，返回生成的文件列表。"""
     exclude = exclude or set()
     CLAUDE_RULES_DIR.mkdir(parents=True, exist_ok=True)
+    ruleset_v2_enabled = _env_flag(RULESET_V2_FLAG, default=False)
+    print(f"[sync-rules] {RULESET_V2_FLAG}={str(ruleset_v2_enabled).lower()}")
+
+    if ruleset_v2_enabled:
+        _snapshot_current_rules_for_rollback()
+    else:
+        restored = _restore_rules_from_snapshot()
+        if restored:
+            print(f"{RULESET_V2_FLAG}=false，已从快照恢复 V1 规则集。")
+            return restored
 
     generated = []
     for mdc_file in sorted(CURSOR_RULES_DIR.glob("*.mdc")):
@@ -246,6 +272,44 @@ def sync_rules(exclude: Optional[Set[str]] = None) -> list[str]:
             print(f"  清理孤儿规则: {existing.name}")
 
     return generated
+
+
+def _snapshot_current_rules_for_rollback() -> None:
+    """在首次启用规则集 V2 时，为回滚保留 V1 快照。"""
+
+    if CLAUDE_RULES_V1_SNAPSHOT_DIR.exists():
+        existing = list(CLAUDE_RULES_V1_SNAPSHOT_DIR.glob("*.md"))
+        if existing:
+            return
+
+    CLAUDE_RULES_V1_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    for rule_file in CLAUDE_RULES_DIR.glob("*.md"):
+        shutil.copy2(rule_file, CLAUDE_RULES_V1_SNAPSHOT_DIR / rule_file.name)
+
+
+def _restore_rules_from_snapshot() -> list[str]:
+    """规则集 V2 关闭时恢复 V1 快照。
+
+    返回已恢复的规则文件名列表；若无快照则返回空列表。
+    """
+
+    if not CLAUDE_RULES_V1_SNAPSHOT_DIR.exists():
+        return []
+
+    snapshot_files = sorted(CLAUDE_RULES_V1_SNAPSHOT_DIR.glob("*.md"))
+    if not snapshot_files:
+        return []
+
+    CLAUDE_RULES_DIR.mkdir(parents=True, exist_ok=True)
+    for existing in CLAUDE_RULES_DIR.glob("*.md"):
+        existing.unlink()
+
+    restored: list[str] = []
+    for snapshot_file in snapshot_files:
+        target = CLAUDE_RULES_DIR / snapshot_file.name
+        shutil.copy2(snapshot_file, target)
+        restored.append(snapshot_file.name)
+    return restored
 
 
 def sync_commands() -> list[str]:
@@ -299,18 +363,39 @@ def _write_codex_manifest(manifest_path: Path, managed_files: list[str]) -> None
 
 
 def sync_commands_to_codex(codex_prompts_dir: Path) -> list[str]:
-    """同步命令到 Codex prompts 目录，并按 manifest 清理孤儿文件。"""
+    """同步命令到 Codex prompts 目录。"""
     if not CURSOR_COMMANDS_DIR.exists():
         return []
     ensure_team_bridge_commands()
     codex_prompts_dir.mkdir(parents=True, exist_ok=True)
+    registry_v2_enabled = _env_flag(PROMPT_REGISTRY_V2_FLAG, default=False)
+    mode = "symlink" if registry_v2_enabled else "copy"
+    print(f"[sync-prompts] {PROMPT_REGISTRY_V2_FLAG}={str(registry_v2_enabled).lower()} mode={mode}")
 
     synced = []
     for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("*.md")):
         dest = codex_prompts_dir / cmd_file.name
-        if dest.is_symlink():
-            dest.unlink()
-        shutil.copy2(cmd_file, dest)
+        if registry_v2_enabled:
+            source_abs = cmd_file.resolve()
+            rel_target = Path(os.path.relpath(source_abs, codex_prompts_dir))
+
+            if dest.is_symlink():
+                current_target = Path(os.readlink(dest))
+                if current_target == rel_target:
+                    synced.append(cmd_file.name)
+                    continue
+                dest.unlink()
+            elif dest.exists():
+                dest.unlink()
+
+            try:
+                dest.symlink_to(rel_target)
+            except OSError:
+                shutil.copy2(cmd_file, dest)
+        else:
+            if dest.is_symlink():
+                dest.unlink()
+            shutil.copy2(cmd_file, dest)
         synced.append(cmd_file.name)
 
     manifest_path = codex_prompts_dir / CODEX_MANIFEST_FILENAME
@@ -319,7 +404,7 @@ def sync_commands_to_codex(codex_prompts_dir: Path) -> list[str]:
 
     for orphan in sorted(previous_files - current_files):
         orphan_path = codex_prompts_dir / orphan
-        if orphan_path.exists() and orphan_path.is_file():
+        if orphan_path.exists() or orphan_path.is_symlink():
             orphan_path.unlink()
             print(f"  清理 Codex 孤儿命令: {orphan}")
 
