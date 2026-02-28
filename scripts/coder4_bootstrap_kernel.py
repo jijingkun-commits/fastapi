@@ -41,8 +41,11 @@ DEFAULT_API_BASE = "http://127.0.0.1:3001"
 DEFAULT_STATE_FILE = ".omc/state/task-runner-state.json"
 DEFAULT_RUN_LOCK_FILE = ".omc/state/coder4-run.lock"
 DEFAULT_IDEMPOTENCY_FILE = ".omc/state/coder4-idempotency.json"
+DEFAULT_ATTEMPTS_DIR = ".omc/state/attempts"
+DEFAULT_TASK_LEDGER_FILE = ".omc/state/task-ledger.jsonl"
 DEFAULT_IDEMPOTENCY_WINDOW_SECONDS = 120
 IDEMPOTENCY_RETENTION_MULTIPLIER = 3
+ATTEMPT_KEEP_LATEST = 20
 STATE_LOCK_SUFFIX = ".lock"
 STATE_BACKUP_SUFFIX = ".bak"
 
@@ -75,6 +78,7 @@ COUNT_STATUSES = ("todo", "inprogress", "inreview", "done")
 class KernelContext:
     project_id: str
     task_key: str
+    execution_mode: str
     preflight_required: str
     preflight_ok: bool
     preflight_reason: str
@@ -92,6 +96,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vk-api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--local-mode", action="store_true", default=False)
     parser.add_argument("--state-file", default=DEFAULT_STATE_FILE)
+    parser.add_argument("--attempts-dir", default=DEFAULT_ATTEMPTS_DIR)
+    parser.add_argument("--task-ledger-file", default=DEFAULT_TASK_LEDGER_FILE)
     parser.add_argument("--run-lock-file", default=DEFAULT_RUN_LOCK_FILE)
     parser.add_argument("--idempotency-file", default=DEFAULT_IDEMPOTENCY_FILE)
     parser.add_argument("--apply-bootstrap", action="store_true")
@@ -170,6 +176,163 @@ def atomic_write_json(
         if backup_ready and backup_path is not None and backup_path.exists():
             shutil.copy2(backup_path, path)
         raise
+
+
+def _sanitize_path_segment(value: str, *, fallback: str) -> str:
+    segment = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    segment = segment.strip("._")
+    return segment or fallback
+
+
+def _normalize_attempt_card_id(card_id: str | None) -> str:
+    normalized = str(card_id or "").strip().upper()
+    if not normalized:
+        return "SYSTEM"
+    return _sanitize_path_segment(normalized, fallback="SYSTEM")
+
+
+def _resolve_attempt_card_dir(attempts_root: Path, task_key: str, card_id: str | None) -> Path:
+    normalized_task_key = _sanitize_path_segment(task_key, fallback="unknown_task")
+    normalized_card_id = _normalize_attempt_card_id(card_id)
+    return attempts_root / normalized_task_key / normalized_card_id
+
+
+def cleanup_old_attempts(card_dir: Path, *, keep_latest: int = ATTEMPT_KEEP_LATEST) -> None:
+    attempt_files: list[tuple[int, Path]] = []
+    for candidate in card_dir.glob("attempt_*.json"):
+        match = re.fullmatch(r"attempt_(\d+)\.json", candidate.name)
+        if not match:
+            continue
+        attempt_files.append((int(match.group(1)), candidate))
+
+    if len(attempt_files) <= keep_latest:
+        return
+
+    attempt_files.sort(key=lambda item: item[0])
+    for _, old_file in attempt_files[:-keep_latest]:
+        old_file.unlink(missing_ok=True)
+
+
+def _next_attempt_id(card_dir: Path) -> str:
+    max_index = 0
+    for candidate in card_dir.glob("attempt_*.json"):
+        match = re.fullmatch(r"attempt_(\d+)\.json", candidate.name)
+        if not match:
+            continue
+        max_index = max(max_index, int(match.group(1)))
+    return f"attempt_{max_index + 1:03d}"
+
+
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _state_lock_path(path)
+    with with_file_lock(lock_path):
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False))
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+
+def _derive_attempt_result(action: str, *, applied_performed: bool, reason: str | None = None) -> str:
+    if reason:
+        return reason
+    if action == "seed":
+        return "card_seeded" if applied_performed else "seed_pending_apply"
+    if action == "activate":
+        return "card_activated" if applied_performed else "activate_pending_apply"
+    if action == "dispatch":
+        return "dispatch_pending"
+    if action == "blocked_depends":
+        return "blocked_depends"
+    if action == "preflight_blocked":
+        return "preflight_blocked"
+    if action == "all_done":
+        return "all_done"
+    return action or "unknown"
+
+
+def record_attempt_evidence(
+    *,
+    attempts_root: Path,
+    ledger_file: Path,
+    task_key: str,
+    card_id: str | None,
+    action: str,
+    result: str,
+    trigger_source: str,
+    started_at: datetime,
+    ended_at: datetime,
+    target_status: str | None = None,
+    applied: dict[str, Any] | None = None,
+    auto_wake: dict[str, Any] | None = None,
+    blocked_details: list[dict[str, Any]] | None = None,
+    idempotency_key: str = "",
+    execution_mode: str = "serial",
+    worktree_path: str | None = None,
+    commit_sha: str | None = None,
+) -> dict[str, Any]:
+    normalized_card_id = _normalize_attempt_card_id(card_id)
+    card_dir = _resolve_attempt_card_dir(attempts_root, task_key, normalized_card_id)
+    card_dir.mkdir(parents=True, exist_ok=True)
+
+    if not commit_sha and isinstance(applied, dict):
+        raw_sha = str(applied.get("commit_sha") or "").strip()
+        commit_sha = raw_sha or None
+
+    evidence = {
+        "target_status": target_status,
+        "applied": applied or {"performed": False},
+        "auto_wake": auto_wake or {},
+        "blocked_details": blocked_details or [],
+        "idempotency_key": idempotency_key,
+    }
+
+    duration_seconds = max(0, int((ended_at - started_at).total_seconds()))
+    lock_path = card_dir / ".attempt.lock"
+    with with_file_lock(lock_path):
+        attempt_id = _next_attempt_id(card_dir)
+        attempt_payload = {
+            "attempt_id": attempt_id,
+            "task_key": str(task_key or ""),
+            "card_id": normalized_card_id,
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "result": result,
+            "action": action,
+            "evidence": evidence,
+            "worktree_path": str(worktree_path or Path.cwd().resolve()),
+            "commit_sha": commit_sha,
+            "execution_mode": str(execution_mode or "serial"),
+            "trigger": str(trigger_source or "manual"),
+            "duration_seconds": duration_seconds,
+        }
+        attempt_file = card_dir / f"{attempt_id}.json"
+        atomic_write_json(attempt_file, attempt_payload)
+        cleanup_old_attempts(card_dir)
+
+    ledger_entry = {
+        "ts": ended_at.isoformat(),
+        "event": "kernel_round",
+        "task_key": str(task_key or ""),
+        "card_id": normalized_card_id,
+        "attempt_id": attempt_payload["attempt_id"],
+        "action": action,
+        "result": result,
+        "target_status": target_status,
+        "trigger_source": str(trigger_source or "manual"),
+        "execution_mode": str(execution_mode or "serial"),
+        "attempt_file": str(attempt_file),
+        "worktree_path": attempt_payload["worktree_path"],
+        "commit_sha": commit_sha,
+        "evidence": evidence,
+    }
+    append_jsonl(ledger_file, ledger_entry)
+    return {
+        "attempt": attempt_payload,
+        "attempt_file": str(attempt_file),
+        "ledger_entry": ledger_entry,
+    }
 
 
 def is_disabled_by_env(name: str) -> bool:
@@ -756,6 +919,7 @@ def build_kernel_context(
     project_id = str(active.get("project_id") or "").strip()
     task_split_dir = str(active.get("task_split_dir") or "").strip()
     task_key = str(active.get("task_key") or "").strip()
+    execution_mode = str(active.get("execution_mode") or "serial").strip().lower() or "serial"
     preflight_required = str(active.get("preflight_required") or "").strip() or "C00"
     if not task_split_dir or not task_key:
         raise ValueError("active task missing task_split_dir/task_key")
@@ -860,6 +1024,7 @@ def build_kernel_context(
     return KernelContext(
         project_id=project_id,
         task_key=task_key,
+        execution_mode=execution_mode,
         preflight_required=preflight_required,
         preflight_ok=preflight_ok,
         preflight_reason=preflight_reason,
@@ -934,6 +1099,28 @@ def build_card_description(card: dict[str, Any], task_key: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def advance_card(
+    state_path: Path,
+    *,
+    task_key: str,
+    card_order: list[str],
+    card_id: str,
+    new_status: str,
+    action: str,
+    action_result: str,
+) -> dict[str, Any]:
+    return update_local_card_status(
+        state_path,
+        task_key=task_key,
+        card_order=card_order,
+        card_id=card_id,
+        status=new_status,
+        action=action,
+        action_result=action_result,
+        current_card=card_id,
+    )
+
+
 def apply_action(
     api_base: str,
     ctx: KernelContext,
@@ -953,15 +1140,14 @@ def apply_action(
         if local_mode:
             if state_path is None:
                 raise RuntimeError("state_path is required when local-mode is enabled")
-            update_local_card_status(
+            advance_card(
                 state_path,
                 task_key=ctx.task_key,
                 card_order=ctx.card_order,
                 card_id=target_card_id,
-                status="todo",
+                new_status="todo",
                 action="seed",
                 action_result=f"CARD_SEEDED:{target_card_id}",
-                current_card=target_card_id,
             )
             return {
                 "performed": True,
@@ -992,15 +1178,14 @@ def apply_action(
         if local_mode:
             if state_path is None:
                 raise RuntimeError("state_path is required when local-mode is enabled")
-            update_local_card_status(
+            advance_card(
                 state_path,
                 task_key=ctx.task_key,
                 card_order=ctx.card_order,
                 card_id=target_card_id,
-                status="inprogress",
+                new_status="inprogress",
                 action="activate",
                 action_result=f"CARD_ACTIVATED:{target_card_id}",
-                current_card=target_card_id,
             )
             return {
                 "performed": True,
@@ -1039,6 +1224,8 @@ def main() -> int:
         return 1
 
     state_path = resolve_state_file_path(active_task_path, args.state_file)
+    attempts_root = resolve_runtime_file_path(active_task_path, args.attempts_dir)
+    task_ledger_file = resolve_runtime_file_path(active_task_path, args.task_ledger_file)
     run_lock_file = resolve_runtime_file_path(active_task_path, args.run_lock_file)
     idempotency_file = resolve_runtime_file_path(active_task_path, args.idempotency_file)
     trigger_source = normalize_trigger_source(args.trigger_source)
@@ -1077,6 +1264,7 @@ def main() -> int:
                 run_lock_file=str(run_lock_file),
                 lock_mode="disabled" if run_lock_disabled else "exclusive_nonblocking",
             )
+            round_started_at = datetime.now(timezone.utc)
 
             ctx = build_kernel_context(
                 active_task_path,
@@ -1129,12 +1317,45 @@ def main() -> int:
                     result.update(
                         {
                             "project_id": ctx.project_id,
+                            "execution_mode": ctx.execution_mode,
                             "preflight_required": ctx.preflight_required,
                             "preflight_ok": ctx.preflight_ok,
                             "preflight_reason": ctx.preflight_reason,
                             "target_card_id": first_not_done,
                             "target_task_id": target_task_id,
                             "target_status": target_status,
+                        }
+                    )
+                    attempt_result = _derive_attempt_result(
+                        action,
+                        applied_performed=False,
+                        reason="idempotency_window",
+                    )
+                    attempt_evidence = record_attempt_evidence(
+                        attempts_root=attempts_root,
+                        ledger_file=task_ledger_file,
+                        task_key=ctx.task_key,
+                        card_id=first_not_done,
+                        action=action,
+                        result=attempt_result,
+                        trigger_source=trigger_source,
+                        started_at=round_started_at,
+                        ended_at=datetime.now(timezone.utc),
+                        target_status=target_status,
+                        applied={"performed": False, "reason": "idempotency_window"},
+                        auto_wake={"attempted": False, "ok": False},
+                        blocked_details=blocked_details,
+                        idempotency_key=idempotency_key,
+                        execution_mode=ctx.execution_mode,
+                    )
+                    result.update(
+                        {
+                            "attempt": {
+                                "attempt_id": attempt_evidence["attempt"]["attempt_id"],
+                                "attempt_file": attempt_evidence["attempt_file"],
+                                "result": attempt_result,
+                            },
+                            "task_ledger_file": str(task_ledger_file),
                         }
                     )
                     write_output_file(args.output, result)
@@ -1172,12 +1393,40 @@ def main() -> int:
                             card_id=done_card,
                         )
 
+            worktree_path = None
+            if first_not_done:
+                worktree_path = str((Path.cwd() / ".worktrees" / first_not_done).resolve())
+            attempt_result = _derive_attempt_result(
+                action,
+                applied_performed=bool(applied.get("performed")),
+            )
+            attempt_evidence = record_attempt_evidence(
+                attempts_root=attempts_root,
+                ledger_file=task_ledger_file,
+                task_key=ctx.task_key,
+                card_id=first_not_done,
+                action=action,
+                result=attempt_result,
+                trigger_source=trigger_source,
+                started_at=round_started_at,
+                ended_at=datetime.now(timezone.utc),
+                target_status=target_status,
+                applied=applied,
+                auto_wake=auto_wake,
+                blocked_details=blocked_details,
+                idempotency_key=idempotency_key,
+                execution_mode=ctx.execution_mode,
+                worktree_path=worktree_path,
+                commit_sha=str(applied.get("commit_sha") or "").strip() or None,
+            )
+
             scoped_counts = count_statuses(ctx.scoped_tasks)
             unscoped_counts = count_statuses(ctx.unscoped_tasks)
             result = {
                 "ok": True,
                 "project_id": ctx.project_id,
                 "task_key": ctx.task_key,
+                "execution_mode": ctx.execution_mode,
                 "preflight_required": ctx.preflight_required,
                 "preflight_ok": ctx.preflight_ok,
                 "preflight_reason": ctx.preflight_reason,
@@ -1209,6 +1458,12 @@ def main() -> int:
                     "window_seconds": idempotency_window_seconds,
                     "key": idempotency_key,
                 },
+                "attempt": {
+                    "attempt_id": attempt_evidence["attempt"]["attempt_id"],
+                    "attempt_file": attempt_evidence["attempt_file"],
+                    "result": attempt_result,
+                },
+                "task_ledger_file": str(task_ledger_file),
                 "local_mode": args.local_mode,
                 "trigger_source": trigger_source,
                 "state_file": str(state_path),

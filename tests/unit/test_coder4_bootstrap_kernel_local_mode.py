@@ -188,6 +188,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
     ctx = module.KernelContext(
         project_id="",
         task_key=TASK_KEY,
+        execution_mode="serial",
         preflight_required="C01",
         preflight_ok=True,
         preflight_reason="preflight_card_done",
@@ -262,6 +263,8 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
         vk_api_base="http://127.0.0.1:3001",
         local_mode=True,
         state_file=str(state_path),
+        attempts_dir=str(tmp_path / ".omc" / "state" / "attempts"),
+        task_ledger_file=str(tmp_path / ".omc" / "state" / "task-ledger.jsonl"),
         run_lock_file=str(tmp_path / ".omc" / "state" / "coder4-run.lock"),
         idempotency_file=str(tmp_path / ".omc" / "state" / "coder4-idempotency.json"),
         apply_bootstrap=True,
@@ -281,7 +284,18 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
     assert result["action"] == "activate"
     assert result["auto_wake"]["attempted"] is True
     assert result["auto_wake"]["ok"] is True
+    assert result["execution_mode"] == "serial"
+    assert result["attempt"]["result"] == "card_activated"
+    assert Path(result["attempt"]["attempt_file"]).exists()
+    assert Path(result["task_ledger_file"]).exists()
     assert len(wake_calls) == 1
+
+    ledger_lines = Path(result["task_ledger_file"]).read_text(encoding="utf-8").strip().splitlines()
+    assert ledger_lines
+    latest_ledger = json.loads(ledger_lines[-1])
+    assert latest_ledger["task_key"] == TASK_KEY
+    assert latest_ledger["card_id"] == "C02"
+    assert latest_ledger["attempt_id"] == result["attempt"]["attempt_id"]
 
     refreshed_state = json.loads(state_path.read_text(encoding="utf-8"))
     assert refreshed_state["last_auto_wake_card"] == "C01"
