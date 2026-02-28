@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -42,6 +43,8 @@ DEFAULT_RUN_LOCK_FILE = ".omc/state/coder4-run.lock"
 DEFAULT_IDEMPOTENCY_FILE = ".omc/state/coder4-idempotency.json"
 DEFAULT_IDEMPOTENCY_WINDOW_SECONDS = 120
 IDEMPOTENCY_RETENTION_MULTIPLIER = 3
+STATE_LOCK_SUFFIX = ".lock"
+STATE_BACKUP_SUFFIX = ".bak"
 
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"
 IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
@@ -105,8 +108,44 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         f.write("\n")
 
 
-def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+def _state_lock_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}{STATE_LOCK_SUFFIX}")
+
+
+def _state_backup_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}{STATE_BACKUP_SUFFIX}")
+
+
+@contextmanager
+def with_file_lock(lock_file: Path, *, blocking: bool = True) -> Iterator[None]:
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("a+", encoding="utf-8") as lock_fd:
+        flags = fcntl.LOCK_EX
+        if not blocking:
+            flags |= fcntl.LOCK_NB
+        fcntl.flock(lock_fd, flags)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def atomic_write_json(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    backup_path: Path | None = None,
+    create_backup: bool = True,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if backup_path is not None:
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+
+    backup_ready = False
+    if backup_path is not None and create_backup and path.exists():
+        shutil.copy2(path, backup_path)
+        backup_ready = True
+
     fd, tmp_name = tempfile.mkstemp(prefix=".kernel_", suffix=".tmp", dir=str(path.parent))
     tmp_path = Path(tmp_name)
     try:
@@ -119,6 +158,8 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     except Exception:
         if tmp_path.exists():
             tmp_path.unlink()
+        if backup_ready and backup_path is not None and backup_path.exists():
+            shutil.copy2(backup_path, path)
         raise
 
 
@@ -293,11 +334,61 @@ def _normalize_card_status_map(raw_map: dict[str, Any]) -> dict[str, str]:
     return normalized
 
 
-def load_local_state(state_path: Path, task_key: str, card_order: list[str]) -> dict[str, Any]:
-    if state_path.exists():
-        state = load_json(state_path)
-    else:
-        state = {}
+def _safe_load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return load_json(path)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _recover_local_state_from_backup(
+    state_path: Path,
+    backup_path: Path,
+    backup_state: dict[str, Any],
+    *,
+    lock_held: bool,
+) -> dict[str, Any]:
+    def _restore() -> dict[str, Any]:
+        current_state = _safe_load_json(state_path)
+        if current_state is not None:
+            return current_state
+        atomic_write_json(
+            state_path,
+            backup_state,
+            backup_path=backup_path,
+            create_backup=False,
+        )
+        return backup_state
+
+    if lock_held:
+        return _restore()
+
+    with with_file_lock(_state_lock_path(state_path)):
+        return _restore()
+
+
+def load_local_state(
+    state_path: Path,
+    task_key: str,
+    card_order: list[str],
+    *,
+    lock_held: bool = False,
+) -> dict[str, Any]:
+    backup_path = _state_backup_path(state_path)
+    state = _safe_load_json(state_path)
+    if state is None:
+        backup_state = _safe_load_json(backup_path)
+        if backup_state is not None:
+            state = _recover_local_state_from_backup(
+                state_path,
+                backup_path,
+                backup_state,
+                lock_held=lock_held,
+            )
+        else:
+            state = {}
     if not isinstance(state, dict):
         state = {}
     raw_map = state.get("card_status_map")
@@ -322,19 +413,23 @@ def update_local_card_status(
     card_id: str,
     status: str,
 ) -> dict[str, Any]:
-    state = load_local_state(state_path, task_key, card_order)
-    state["schema_version"] = "1.0.0"
-    state["task_key"] = task_key
-    state["card_order"] = card_order
-    status_map = dict(state.get("card_status_map") or {})
-    status_map[card_id] = status
-    state["card_status_map"] = status_map
-    now = datetime.now(timezone.utc).isoformat()
-    if not state.get("created_at"):
-        state["created_at"] = now
-    state["last_updated"] = now
-    atomic_write_json(state_path, state)
-    return state
+    lock_path = _state_lock_path(state_path)
+    backup_path = _state_backup_path(state_path)
+
+    with with_file_lock(lock_path):
+        state = load_local_state(state_path, task_key, card_order, lock_held=True)
+        state["schema_version"] = "1.0.0"
+        state["task_key"] = task_key
+        state["card_order"] = card_order
+        status_map = dict(state.get("card_status_map") or {})
+        status_map[card_id] = status
+        state["card_status_map"] = status_map
+        now = datetime.now(timezone.utc).isoformat()
+        if not state.get("created_at"):
+            state["created_at"] = now
+        state["last_updated"] = now
+        atomic_write_json(state_path, state, backup_path=backup_path)
+        return state
 
 
 def normalize_status(raw: Any) -> str:
