@@ -39,7 +39,7 @@ CODEX_MANIFEST_FILENAME = ".cursor_commands_manifest.json"
 TEAM_BRIDGE_PREFIX = "jjk-team-"
 TEAM_BRIDGE_MARKER = "<!-- AUTO-GENERATED: jjk-team-bridge -->"
 TEAM_DEFAULT_ROLE = "planner"
-TEAM_BRIDGE_EXCLUDED_STEMS = {"jjk-clarify"}
+TEAM_BRIDGE_EXCLUDED_STEMS = {"jjk-clarify", "jjk-plan", "jjk-pc"}
 RULESET_V2_FLAG = "ENABLE_RULESET_V2"
 PROMPT_REGISTRY_V2_FLAG = "ENABLE_PROMPT_REGISTRY_V2"
 CLAUDE_RULES_V1_SNAPSHOT_DIR = ROOT / ".claude" / ".rules_v1_snapshot"
@@ -96,7 +96,7 @@ def _team_role_for_command(stem: str) -> str:
         return "planner"
     if stem in {"jjk-imp", "jjk-imp-ws", "jjk-feature", "jjk-quick", "jjk-refactor"}:
         return "executor"
-    if stem in {"jjk-debug", "jjk-diagnose", "jjk-pc"}:
+    if stem in {"jjk-debug", "jjk-pc"}:
         return "debugger"
     if stem in {"jjk-review"}:
         return "code-reviewer"

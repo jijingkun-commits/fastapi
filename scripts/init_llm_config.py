@@ -95,14 +95,23 @@ def _resolve_default_model_id_by_type(conn, model_type: str):
     ).scalar()
 
 
+ROUTE_GROUP_CONFIG_KEY = {
+    ROUTE_GROUP_DEFAULT_CHAT: "model_routing.default_chat",
+    ROUTE_GROUP_LIGHTWEIGHT: "model_routing.lightweight",
+    ROUTE_GROUP_SQL_GENERATION: "model_routing.sql_generation",
+    ROUTE_GROUP_EMBEDDING: "embedding",
+    ROUTE_GROUP_VISION: "vision",
+}
+
+
 def _init_scene_configs(conn):
     scene_ddl = """
     CREATE TABLE IF NOT EXISTS t_llm_scene (
         id SERIAL PRIMARY KEY,
         scene_key VARCHAR(255) NOT NULL UNIQUE,
         scene_name VARCHAR(120) NOT NULL,
+        route_group VARCHAR(32) NOT NULL DEFAULT 'default_chat',
         scene_type VARCHAR(32) NOT NULL DEFAULT 'text',
-        default_model_id INTEGER NOT NULL REFERENCES t_llm_model(id) ON DELETE RESTRICT,
         description TEXT,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         create_time TIMESTAMP DEFAULT NOW(),
@@ -114,6 +123,31 @@ def _init_scene_configs(conn):
     );
     """
     conn.execute(text(scene_ddl))
+    conn.execute(
+        text(
+            """
+            ALTER TABLE t_llm_scene
+            ADD COLUMN IF NOT EXISTS route_group VARCHAR(32)
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            UPDATE t_llm_scene
+            SET route_group = 'default_chat'
+            WHERE route_group IS NULL OR route_group = ''
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            ALTER TABLE t_llm_scene
+            ALTER COLUMN route_group SET NOT NULL
+            """
+        )
+    )
 
     default_chat_model_id = _resolve_default_chat_model_id(conn)
     if not default_chat_model_id:
@@ -152,23 +186,23 @@ def _init_scene_configs(conn):
         INSERT INTO t_llm_scene (
             scene_key,
             scene_name,
+            route_group,
             scene_type,
-            default_model_id,
             description,
             is_active
         ) VALUES (
             :scene_key,
             :scene_name,
+            :route_group,
             :scene_type,
-            :default_model_id,
             :description,
             TRUE
         )
         ON CONFLICT (scene_key)
         DO UPDATE SET
             scene_name = EXCLUDED.scene_name,
+            route_group = EXCLUDED.route_group,
             scene_type = EXCLUDED.scene_type,
-            default_model_id = EXCLUDED.default_model_id,
             description = EXCLUDED.description,
             is_active = TRUE,
             update_time = NOW()
@@ -181,9 +215,45 @@ def _init_scene_configs(conn):
             {
                 "scene_key": scene.scene_key,
                 "scene_name": scene.scene_name,
+                "route_group": scene.route_group,
                 "scene_type": scene.scene_type,
-                "default_model_id": model_id_by_group[scene.route_group],
                 "description": scene.description,
+            },
+        )
+    for route_group, model_id in model_id_by_group.items():
+        conn.execute(
+            text(
+                """
+                INSERT INTO t_system_config (
+                    config_key,
+                    config_value,
+                    value_type,
+                    category,
+                    description,
+                    is_secret,
+                    is_readonly
+                ) VALUES (
+                    :config_key,
+                    :config_value,
+                    'number',
+                    'model_routing',
+                    :description,
+                    FALSE,
+                    FALSE
+                )
+                ON CONFLICT (config_key)
+                DO UPDATE SET
+                    config_value = EXCLUDED.config_value,
+                    value_type = EXCLUDED.value_type,
+                    category = EXCLUDED.category,
+                    description = EXCLUDED.description,
+                    update_time = NOW()
+                """
+            ),
+            {
+                "config_key": ROUTE_GROUP_CONFIG_KEY[route_group],
+                "config_value": str(model_id),
+                "description": f"模型路由分组绑定: {route_group}",
             },
         )
 

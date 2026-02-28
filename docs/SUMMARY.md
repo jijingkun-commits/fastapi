@@ -150,7 +150,21 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
+* [模板索引（迭代需求）](内部参考/迭代需求/_templates/README.md)
+* [模板集（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.md)
+* [模板集覆盖（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.override.md)
+* [模板集（jjk-debug）](内部参考/迭代需求/_templates/jjk_debug_templates.md)
+* [模板集（jjk-feature）](内部参考/迭代需求/_templates/jjk_feature_templates.md)
+* [模板集（jjk-imp）](内部参考/迭代需求/_templates/jjk_imp_templates.md)
+* [模板集（jjk-pc）](内部参考/迭代需求/_templates/jjk_pc_templates.md)
+* [模板集（jjk-plan）](内部参考/迭代需求/_templates/jjk_plan_templates.md)
+* [模板集（jjk-verify）](内部参考/迭代需求/_templates/jjk_verify_templates.md)
+* [模板集（jjk-vktodo）](内部参考/迭代需求/_templates/jjk_vktodo_templates.md)
 * [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
+* [需求基线（文档化永久记忆）](内部参考/迭代需求/文档化永久记忆_requirements.md)
+* [实施方案（文档化永久记忆，两表）](内部参考/迭代需求/文档化永久记忆_implementation_plan.md)
+* [需求基线（文档记忆混合检索）](内部参考/迭代需求/文档记忆混合检索_requirements.md)
+* [实施方案（文档记忆混合检索，FTS+向量）](内部参考/迭代需求/文档记忆混合检索_implementation_plan.md)
 * [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
 * [实施方案（全面代码审查整改，非安全范围路线）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
 * [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
@@ -163,11 +177,17 @@
 * [实施方案（意图目标分解治理）](内部参考/迭代需求/意图目标分解治理_implementation_plan.md)
 * [实施方案（迁移执行波次 P1~P6）](内部参考/迭代需求/迁移执行波次_implementation_plan.md)
 * [需求基线（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_requirements.md)
+* [需求基线（多智能体合同驱动分层）](内部参考/迭代需求/多智能体合同驱动分层_requirements.md)
+* [实施方案（多智能体合同驱动分层）](内部参考/迭代需求/多智能体合同驱动分层_implementation_plan.md)
 * [实施方案（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_implementation_plan.md)
 * [研究报告（heartbeat替代cron交叉验证）](内部参考/迭代需求/heartbeat替代cron_交叉验证研究报告.md)
 * [依赖分析报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban依赖分析报告.md)
 * [方案评审报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban方案评审报告.md)
+* [融合参考报告（用户资产 + Superpowers + OMX，2026-02-28）](内部参考/迭代需求/用户资产_superpowers_omx融合参考报告_20260228.md)
+* [需求基线（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_requirements.md)
+* [实施方案（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md)
 * [设计方案（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发设计方案.md)
+* [全量打钩板清单（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
 * [问题修复卡（管理员 dept_code 拒绝，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
 * [问题修复卡（问数查询结果展示，2026-02-25）](内部参考/迭代需求/fix_plan_data_query_display_20260225.md)
@@ -199,6 +219,10 @@
 * [WS-G02 G-2 复合任务编排](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md)
 * [WS-G03 G-3 契约一致性](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md)
 * [WS-G04 G-4 回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md)
+
+#### 当前并行拆解（2026-02-28 自动化大型任务开发_主机方案）
+
+* [并行总计划](内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md)
 
 ---
 

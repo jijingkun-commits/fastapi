@@ -591,7 +591,7 @@ llm = get_scene_llm(
 **规则**:
 1. **业务链路必须通过 `get_scene_llm(scene_key=...)` 调用**，禁止新增裸 `get_llm()` 默认分支。
 2. **`scene_key` 必须使用 `模块.函数名`**，例如 `app.ai.workflow.data_graph.analyze_data_intent`。
-3. **每个场景只绑定一个默认模型**，绑定关系由 `t_llm_scene` 管理，`t_llm_model` 仅保存模型元数据。
+3. **模型绑定按路由分组治理**：`t_llm_scene` 维护 `scene_key -> route_group`，`t_system_config` 维护 `route_group(config_key) -> model_id`。
 4. **启动期强校验**：若任一必需调用点未配置 `t_llm_scene`，服务启动失败（Fail Fast）。
 5. **类型兼容校验**：`scene_type` 与 `model_type` 必须满足兼容矩阵（如 text->chat/reasoning）。
 
@@ -601,26 +601,27 @@ llm = get_scene_llm(
 代码调用点(scene_key)
   -> get_scene_llm(scene_key=...)
   -> LLMSceneService 读取 t_llm_scene 场景缓存
-  -> 解析 default_model_id -> model_code
+  -> 解析 route_group 对应 t_system_config(config_key) 的 model_id
+  -> model_id -> model_code
   -> get_llm(model_id=...) 构建客户端
 ```
 
 ### 模型分类路由表
 
-> **2026-02 更新**: 路由语义由“固定配置键”升级为“调用点场景键”。
+> **2026-02 更新**: 路由治理采用“调用点场景 + 路由分组 + 配置键”三层映射。
 
 #### 按场景分类
 
 | 场景类型 | 调用点示例（scene_key） | 默认模型来源 | 说明 |
 |------|--------|----------|------|
-| `text` | `app.ai.workflow.multi_agent_graph.create_multi_agent_graph` | `t_llm_scene.default_model_id` | 主对话/意图分析/SQL 生成等文本场景 |
-| `vision` | `app.ai.tools.vision_tool.analyze_image` | `t_llm_scene.default_model_id` | 图像理解、多模态分析 |
-| `video` | `app.ai.tools.video_tool.generate_video_summary` | `t_llm_scene.default_model_id` | 视频理解与摘要（预留） |
-| `audio` | `app.ai.tools.audio_tool.transcribe_audio` | `t_llm_scene.default_model_id` | 语音理解与转写（预留） |
-| `embedding` | `app.ai.utils.embedding_util.get_embedding` | `t_llm_scene.default_model_id` | 向量化调用 |
-| `rerank` | `app.ai.tools.rerank_tool.score_documents` | `t_llm_scene.default_model_id` | 检索重排 |
-| `asr` | `app.ai.tools.audio_tool.asr` | `t_llm_scene.default_model_id` | 语音识别 |
-| `tts` | `app.ai.tools.audio_tool.tts` | `t_llm_scene.default_model_id` | 语音合成 |
+| `text` | `app.ai.workflow.multi_agent_graph.create_multi_agent_graph` | `t_system_config(model_routing.default_chat/lightweight/sql_generation)` | 主对话/意图分析/SQL 生成等文本场景 |
+| `vision` | `app.ai.tools.vision_tool.analyze_image` | `t_system_config(vision)` | 图像理解、多模态分析 |
+| `video` | `app.ai.tools.video_tool.generate_video_summary` | `t_system_config` 路由键（预留） | 视频理解与摘要（预留） |
+| `audio` | `app.ai.tools.audio_tool.transcribe_audio` | `t_system_config` 路由键（预留） | 语音理解与转写（预留） |
+| `embedding` | `app.ai.utils.embedding_util.get_embedding` | `t_system_config(embedding)` | 向量化调用 |
+| `rerank` | `app.ai.tools.rerank_tool.score_documents` | `t_system_config` 路由键（预留） | 检索重排 |
+| `asr` | `app.ai.tools.audio_tool.asr` | `t_system_config` 路由键（预留） | 语音识别 |
+| `tts` | `app.ai.tools.audio_tool.tts` | `t_system_config` 路由键（预留） | 语音合成 |
 
 #### 调用场景注册表（开发规范）
 
@@ -628,8 +629,8 @@ llm = get_scene_llm(
 
 新增调用点标准步骤：
 
-1. 在 `app/ai/scene_registry.py` 注册 `scene_key / scene_type / scene_name`。
-2. 在 `t_llm_scene` 配置对应 `default_model_id`（可通过后台接口维护）。
+1. 在 `app/ai/scene_registry.py` 注册 `scene_key / scene_type / scene_name / route_group`。
+2. 确认 `t_system_config` 中对应路由键已配置 `model_id`（后台模型路由页维护）。
 3. 业务代码调用 `get_scene_llm(scene_key=..., model_id=...)`。
 4. 补充单测（场景解析、启动校验、调用约束）并同步更新本文档。
 
@@ -880,6 +881,21 @@ if full_answer:
  
 > [!NOTE]
 > 这种设计避免了依赖 LangGraph 的 `values` 模式来获取最终状态（`values` 往往只包含整个消息历史，提取最新增量较复杂且容易出错）。
+
+#### 3.1 运行时恢复策略单一真相源（2026-02-28）
+
+为避免 `ChatService` 与 `multi_agent_graph` 重复维护插件降级判定逻辑，运行时恢复策略统一收敛到：
+
+- `app/ai/runtime/recovery_policy.py`
+
+统一约束如下：
+
+1. `ENABLE_RUNTIME_RECOVERY` 与 `ENABLE_PLUGIN_REGISTRY` 的开关读取逻辑只维护一份。
+2. 插件故障关键词匹配（`plugin registry` / `plugin init` / `插件注册` 等）只维护一份。
+3. `ChatService` 与 `multi_agent_graph` 只消费策略函数，不再各自维护关键词集合与判定分支。
+4. 业务文案允许在调用方差异化（例如 supervisor 降级文案与 service 侧文案不同），但触发条件必须一致。
+
+> 目标：减少“改一处漏一处”的分叉，确保 normal/resume/fallback 三条链路行为可预测、可回归。
  
 #### 4. 前端处理 (useSSEStream.ts)
 

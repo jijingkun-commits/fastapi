@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-verify（自动同步源命
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-verify.md -->
-<!-- source_sha1: 111f36308d80c2d9879e9ddebf97456d6fff0467 -->
+<!-- source_sha1: 0b6117054ebfd7b2b3961d7062eeda8951c87513 -->
 
 # Team 命令封装（`/jjk-team-verify`）
 
@@ -37,7 +37,7 @@ description: Team 封装命令：执行 /prompts:jjk-verify（自动同步源命
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-verify.md` |
-| source_sha8 | `111f3630` |
+| source_sha8 | `0b611705` |
 | actual_prompt | `/prompts:jjk-verify` |
 | recommended_role | `verifier` |
 | description | 组合验证：审查 + 测试 + UAT 一站式验收 |

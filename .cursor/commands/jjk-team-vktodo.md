@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-vktodo（自动同步源命
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-vktodo.md -->
-<!-- source_sha1: 316c317f685b96c4345ef463481afcac7c71d04c -->
+<!-- source_sha1: 0f64e9099b351abdd3fbc0c99233d8c2ac9ba7c3 -->
 
 # Team 命令封装（`/jjk-team-vktodo`）
 
@@ -37,7 +37,7 @@ description: Team 封装命令：执行 /prompts:jjk-vktodo（自动同步源命
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-vktodo.md` |
-| source_sha8 | `316c317f` |
+| source_sha8 | `0f64e909` |
 | actual_prompt | `/prompts:jjk-vktodo` |
 | recommended_role | `planner` |
 | description | VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP（issue API），502 时自动切本地后端兜底 |

@@ -75,6 +75,8 @@ docs/
 | `app/models/` | `docs/开发文档/架构设计/数据库设计.md` |
 | `web/src/components/` | `docs/开发文档/架构设计/前端架构.md` |
 | 环境变量 | `docs/开发文档/快速入门/配置说明.md` + `.env.example` |
+| `app/core/config.py` / `app/core/config_contract.py` / `app/services/config_resolver.py` | `docs/开发文档/快速入门/配置说明.md`（配置键、优先级、默认值、健康检查） |
+| `install/scripts/init_system_config.py` / `scripts/config_doctor.py` | `docs/开发文档/快速入门/配置说明.md`（初始化与对账流程） |
 | `.cursor/commands/` | `docs/开发文档/工作流/开发工作流.md`（命令速查表）+ `docs/开发文档/技巧与速查/vibe-coding开发技巧.md` + `docs/开发文档/技巧与速查/AI协作速查表.md` |
 | 特殊处理（兜底逻辑/兼容补丁/临时绕过） | `docs/开发文档/架构设计/防屎山记录手册.md` |
 
@@ -150,6 +152,21 @@ docs/
 - 用户说"直接改代码"
 - 纯格式化/重构（不改功能）
 - 简单 Bug 修复（不涉及设计）
+
+## 配置参数同步门禁（新增）
+
+当变更命中以下任一项时，必须同步更新配置说明文档，禁止只改代码不改文档：
+- `app/core/config.py`
+- `app/core/config_contract.py`
+- `app/services/config_resolver.py`
+- `install/scripts/init_system_config.py`
+- `scripts/config_doctor.py`
+- `t_system_config` 相关初始化/迁移脚本（含 `install/**`、`scripts/**`）
+
+**强制动作**：
+1. 更新 `docs/开发文档/快速入门/配置说明.md` 对应章节（新增键、默认值、读取优先级、运维检查命令）。
+2. 涉及 `db-dynamic` 配置键时，确认 DB 存在主键或兼容别名键，并写明回退口径（DB -> ENV -> 默认值）。
+3. 执行 `python scripts/config_doctor.py --strict` 进行对账，若有缺失项需先补齐再结束任务。
 
 ## 执行流程
 

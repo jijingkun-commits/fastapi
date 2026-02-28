@@ -21,9 +21,98 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 > **与 `/jjk-clarify` 的区别**: `/jjk-plan` 会产出 `<topic>_requirements.md` 与 `<topic>_implementation_plan.md`；`/jjk-clarify` 只做问答确认。
 
+> **两层产物强制**: `/jjk-plan` 的完成态不是“有需求文档”，而是同时具备 WHAT（`requirements`）+ 工单级 HOW（`implementation_plan`）。
+
+---
+
+## 与 Superpowers / OMX 的分工（强制）
+
+`/jjk-plan` 与插件是互补关系，不是替代关系：
+
+1. `brainstorming`：负责澄清、方案比较、设计审批与 design 文档产出。
+2. `writing-plans`：负责把设计拆成 2-5 分钟粒度的执行步骤。
+3. `team`（OMX）：负责并行运行时编排（worker、状态、证据）。
+4. `/jjk-plan`：负责项目内“需求/技术方案/机读契约”主产物与下游衔接。
+
+约束：
+
+1. 禁止在 `/jjk-plan` 里复制 `brainstorming` / `writing-plans` 的完整正文。
+2. 插件可用时优先调用；插件不可用时必须显式 fallback，不得静默降级。
+3. `/jjk-plan` 只维护“命令契约与产物桥接”，不重写插件方法论。
+
 ---
 
 ## 输入模式（新增）
+
+### 0) Superpowers 产物对齐桥接（强制）
+
+目标：让 Superpowers 产物“跟着 `jjk-*` 指令走”，而不是形成第二套孤立产物。
+
+当本轮已使用 `brainstorming` / `writing-plans` 时，`/jjk-plan` 必须执行：
+
+1. 从 `docs/plans/` 读取同主题设计与计划输入，并在 `<topic>_implementation_plan.md` 记录“输入来源清单”。
+2. 把上游结论映射到本项目主产物：
+   - `docs/内部参考/迭代需求/<topic>_requirements.md`
+   - `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+3. 若上游文档缺失或主题无法对齐，输出标记 `SUPERPOWERS_ARTIFACT_UNALIGNED`，并给出对齐修复步骤后再继续。
+4. 下游执行链（`/jjk-vkplan`、`/jjk-vktodo`、`/jjk-imp-ws`）仅消费本项目主产物，不直接消费未经桥接的上游原文。
+
+### 0.1) 设计审批门禁（强制）
+
+`/jjk-plan` 在开始规划前，必须先确认“设计已获审批”：
+
+1. 优先读取同主题 design：`docs/plans/YYYY-MM-DD-<topic>-design.md`。
+2. design 中必须存在审批记录（至少包含：`design_approved: true` 与审批时间/轮次说明）。
+3. 若未找到审批记录，`FAIL_FAST` 并输出标记 `DESIGN_APPROVAL_REQUIRED`，回退到 `/jjk-clarify`。
+4. 若上游来自 `BRAINSTORM_UNAVAILABLE_FALLBACK`，需在本轮明确人工确认后再继续，并标记 `DESIGN_APPROVAL_FALLBACK_ACK`。
+
+### 0.5) 大任务自动启用 Team（强制判定）
+
+`/jjk-team-plan` 不再作为主入口。`/jjk-plan` 在任务规模较大时自动升级 Team 规划模式。
+
+触发阈值默认复用 `/jjk-clarify` 的“0.5 大任务自动启用 Team”判定，避免双份维护。
+
+补充：若本轮需要并行产出多个 `feature_id` / `card_seed` 分支并汇总裁决，也视为命中 Team 条件。
+
+执行策略：
+
+1. **有 Team 能力时**：自动启用 team 并行收集上下文与备选方案，Leader 汇总为单一 `planning_contract`。
+2. **无 Team 能力时**：降级为单代理执行，并在输出标记 `TEAM_UNAVAILABLE_FALLBACK`。
+3. 无论是否 Team，最终只允许产出一份主计划，禁止多个并行主计划同时生效。
+
+### 0.6) 模板来源优先级（跨项目，强制）
+
+为保证“换项目后工程化仍完整”，`/jjk-plan` 的模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`
+
+若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
+
+### 0.7) WHAT + 工单级 HOW（强制）
+
+为避免“方向正确但拆解不够细导致返工”，`/jjk-plan` 必须同时产出两层内容：
+
+1. WHAT：`<topic>_requirements.md`（目标、边界、验收）。
+2. HOW：`<topic>_implementation_plan.md`（可直接执行的工单级拆解）。
+
+工单级 HOW 的最低标准（缺一不可）：
+
+1. 每个 `feature_id` 至少绑定 1 条可执行 `task_id`。
+2. 每条 `task_id` 必须包含：
+   - `phase`
+   - `file_paths`（文件级）
+   - `symbols`（函数/类/模块级）
+   - `change_type`（新增/修改/删除）
+   - `acceptance_cmds`（可执行命令）
+   - `rollback_point`（失败回退点）
+3. 若仅有“架构思路/阶段标题”而无上述字段，必须标记 `HOW_NOT_ACTIONABLE`，并继续细化，不得宣称“可直接实施”。
+4. 文档末尾必须给出机读结论块：
+   - `implementation_ready: true|false`
+   - `blocked_by: []`
+   - `next_step: /jjk-imp | /jjk-vkplan | /jjk-plan`
 
 ### 参数写法（新增）
 
@@ -63,6 +152,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 - 适用于单人/单 AI 主导规划，改动范围可小可大（含跨模块/全局架构）
 - 默认无需并行落卡；若后续需要多人并行再切换 `/jjk-plan parallel` + `/jjk-vkplan`
 - 若属于全局改造，`<topic>_implementation_plan.md` 必须显式包含：分阶段路线图、跨模块依赖矩阵、回滚与观测方案
+- core 模式同样必须满足“工单级 HOW”标准，不得仅输出架构叙述
 
 ### 2) parallel 模式（并行规划）
 
@@ -72,6 +162,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 - 要求给出 `task_key`（后续卡片前缀）
 - 适用于多人/多 AI/多 worktree 拆解准备
 - 并行拆解与落卡前准备由后续 `/jjk-vkplan` 承接
+- 并行模式的每个 `card_seed` 必须能追溯到至少 1 条 `task_id`（禁止空壳 seed）
 
 ### 3) hydrate 模式（旧文档沉淀注入）
 
@@ -195,18 +286,8 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 示例：
 
-```yaml
-test_strategy:
-  - feature_id: P1-01
-    test_cases:
-      - TC-P1-01-01: 正常输入返回预期结果
-      - TC-P1-01-02: 空输入返回错误提示
-    test_first: true  # 建议先写测试
-  - feature_id: P1-02
-    test_cases:
-      - TC-P1-02-01: 权限不足时拒绝访问
-    test_first: false  # 可事后补测试
-```
+见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`test_strategy` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
 
 此段供 `/jjk-imp` 和 `/jjk-test` 消费：
 - `/jjk-imp` 读取 `test_first: true` 的 feature，优先编写测试再实现
@@ -227,35 +308,50 @@ test_strategy:
 
 补充：每个 `feature_id` 至少给 1 个“最小代码样例”（可伪代码），用于约束实现形态。
 
+### 2.A1 工单级任务包（Implementation Tasks，必填）
+
+`<topic>_implementation_plan.md` 必须包含“任务拆解表”（可 YAML 或表格），用于约束可直接执行的 HOW 粒度。
+
+每条任务至少包含：
+
+1. `task_id`（建议 `T-01` 起）
+2. `feature_id`（必须可回查到 2.A 的功能机制包）
+3. `phase`
+4. `file_paths`
+5. `symbols`
+6. `change_type`
+7. `acceptance_cmds`
+8. `rollback_point`
+
+约束：
+
+1. `task_id` 不允许只写“阶段说明”，必须是可执行动作。
+2. `acceptance_cmds` 必须是可运行命令，禁止写“人工验证即可”。
+3. `file_paths` 为空时，计划状态必须标注 `BLOCKED`。
+4. `feature_id` 与 `task_id` 映射不完整时，禁止进入 `/jjk-imp`。
+
+样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`implementation_tasks` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
+
 ### 2.B 与 `/jjk-vkplan` 的机读契约（必填）
 
-`<topic>_implementation_plan.md` 必须在末尾给出一个 YAML 代码块，供 `/jjk-vkplan` 直接消费：
+`<topic>_implementation_plan.md` 必须在末尾给出 `planning_contract` YAML，供 `/jjk-vkplan` 直接消费。
 
-```yaml
-planning_contract:
-  execution_mode: serial  # serial | parallel
-  card_order: [C01, C02, C03, C04, C05, C06, G01, G02, G03, G04]
-  strict_single_active_card: true
-  auto_done_policy:
-    implementation-card: hard_gate  # hard_gate | manual_gate
-    inspection/question-card: policy_gate
-  gate_contract:
-    mode: as_cards  # as_cards | inline_only
-    gate_ids: [G01, G02, G03, G04]
-    depends_on:
-      G01: [C06]
-      G02: [G01]
-      G03: [G02]
-      G04: [G03]
-  cards:
-    - card_id: C01
-      wave: P1
-      feature_ids: [P1-01, P1-02, P1-03, P1-04, P1-05]
-      depends_on: []
-      done_gate:
-        - P1-01~P1-05 tests green
-        - cancel_after_token_count=0
-```
+最小必备字段：
+
+1. `execution_mode`
+2. `card_order`
+3. `cards[].card_id`
+4. `cards[].feature_ids`
+5. `cards[].depends_on`
+6. `cards[].done_gate`
+7. `cards[].acceptance_checks`
+8. `cards[].task_mode`
+9. `cards[].merge_required`
+10. `cards[].evidence_entry`
+
+完整样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`planning_contract` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
 
 说明：
 
@@ -274,16 +370,13 @@ planning_contract:
 
 当任务目标是“自动跑完全链路”（尤其包含 `G-1~G-4`）时，`<topic>_implementation_plan.md` 必须满足：
 
-1. Gate 不得仅存在于“文字门禁说明”，必须实体化到 `planning_contract.cards`。
-2. 每张 Gate 卡至少包含：
-   - `card_id`（如 `G01`）
-   - `feature_ids`（如 `G-1`）
-   - `depends_on`
-   - `done_gate`
-   - `acceptance_checks`
-   - `evidence_entry`
-3. Gate 卡的 `acceptance_checks` 必须是可执行命令，不接受“人工判断通过”。
-4. Gate 卡默认位于串行尾部：`C*` 完成后才允许 `G*` 进入 `todo/inprogress`。
+1. Gate 不得仅存在于文字说明，必须实体化到 `planning_contract.cards`。
+2. Gate 卡最小字段：`card_id`、`feature_ids`、`depends_on`、`done_gate`、`acceptance_checks`、`evidence_entry`。
+3. `acceptance_checks` 必须是可执行命令，不接受“人工判断通过”。
+
+Gate 样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_plan_templates.md`（`Gate 卡模板` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_plan_templates.md`。
+详细字段校验与硬拦截交由 `/jjk-vkplan` 执行，避免在本命令重复维护。
 
 ### 2.1 主从文档机制
 
@@ -360,6 +453,7 @@ planning_contract:
 - 看板场景：执行 `/jjk-vktodo` 直接落卡；其前置会自动完成 G0 基线校验
 - 单任务实现：执行 `/jjk-imp`
 - 测试设计：执行 `/jjk-test` 基于模块需求文档生成测试用例
+- 若本轮命中大任务阈值且 Team 可用：优先以 Team 模式完成 `/jjk-plan`，再进入下游链路
 
 ---
 *使用 `/jjk-plan` 触发。是开发周期的正式起点。*

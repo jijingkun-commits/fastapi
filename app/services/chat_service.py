@@ -17,16 +17,32 @@ from app.ai.utils.message_factory import create_human_message
 
 from app.ai.events import stopped_event
 from app.ai.workflow import get_multi_agent_graph
-from app.core.config import ENABLE_USER_PREFERENCE_MEMORY, USER_PREFERENCE_MEMORY_MAX_ITEMS
+from app.core.config import (
+    DOCUMENT_MEMORY_HYBRID_MIN_SCORE,
+    DOCUMENT_MEMORY_MAX_INJECTED_CHARS,
+    DOCUMENT_MEMORY_MAX_RESULTS,
+    DOCUMENT_MEMORY_TEXT_WEIGHT,
+    DOCUMENT_MEMORY_VECTOR_WEIGHT,
+    ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH,
+    ENABLE_DOCUMENT_MEMORY,
+    ENABLE_DOCUMENT_MEMORY_FLUSH,
+    ENABLE_DOCUMENT_MEMORY_RECALL,
+    ENABLE_USER_PREFERENCE_MEMORY,
+    USER_PREFERENCE_MEMORY_MAX_ITEMS,
+)
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
 from app.db.session import get_db_context
 from app.repositories import chat_repo
+from app.services.document_memory_service import (
+    flush as flush_document_memory,
+    recall as recall_document_memory,
+)
 from app.services.run_control_service import run_control_service
 from app.services.user_preference_memory_service import (
-    flush,
-    recall,
+    flush as flush_user_preference_memory,
+    recall as recall_user_preference_memory,
 )
 
 
@@ -62,6 +78,120 @@ def _is_user_preference_memory_enabled(fallback: bool) -> bool:
         return _is_feature_enabled("ENABLE_USER_PREFERENCE_MEMORY", bool(resolved))
     except Exception:
         return _is_feature_enabled("ENABLE_USER_PREFERENCE_MEMORY", fallback)
+
+
+def _is_document_memory_enabled(fallback: bool) -> bool:
+    """读取文档化记忆总开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool("feature.enable_document_memory", fallback)
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY", bool(resolved))
+    except Exception:
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY", fallback)
+
+
+def _is_document_memory_recall_enabled(fallback: bool) -> bool:
+    """读取文档化记忆召回开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool("feature.enable_document_memory_recall", fallback)
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_RECALL", bool(resolved))
+    except Exception:
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_RECALL", fallback)
+
+
+def _is_document_memory_flush_enabled(fallback: bool) -> bool:
+    """读取文档化记忆写入开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool("feature.enable_document_memory_flush", fallback)
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_FLUSH", bool(resolved))
+    except Exception:
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_FLUSH", fallback)
+
+
+def _is_document_memory_hybrid_enabled(fallback: bool) -> bool:
+    """读取文档化记忆混合检索开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool(
+            "feature.enable_document_memory_hybrid_search",
+            fallback,
+        )
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH", bool(resolved))
+    except Exception:
+        return _is_feature_enabled("ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH", fallback)
+
+
+def _get_document_memory_max_results(fallback: int) -> int:
+    """读取文档化记忆检索结果上限。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_int("memory.document.max_results", fallback)
+        return max(1, int(resolved))
+    except Exception:
+        return max(1, int(fallback))
+
+
+def _get_document_memory_max_injected_chars(fallback: int) -> int:
+    """读取文档化记忆注入预算。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_int("memory.document.max_injected_chars", fallback)
+        return max(120, int(resolved))
+    except Exception:
+        return max(120, int(fallback))
+
+
+def _get_document_memory_weights(
+    fallback_vector_weight: float,
+    fallback_text_weight: float,
+) -> tuple[float, float]:
+    """读取文档化记忆混合检索权重。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        vector_weight = float(
+            ConfigResolver.get_float("memory.document.hybrid.vector_weight", fallback_vector_weight)
+        )
+        text_weight = float(
+            ConfigResolver.get_float("memory.document.hybrid.text_weight", fallback_text_weight)
+        )
+    except Exception:
+        vector_weight = float(fallback_vector_weight)
+        text_weight = float(fallback_text_weight)
+
+    vector_weight = max(0.0, vector_weight)
+    text_weight = max(0.0, text_weight)
+    total = vector_weight + text_weight
+    if total <= 0:
+        return 0.7, 0.3
+    return vector_weight / total, text_weight / total
+
+
+def _get_document_memory_hybrid_min_score(fallback: float) -> float:
+    """读取文档混合召回最小综合分。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_float("memory.document.hybrid.min_score", fallback)
+        return max(0.0, float(resolved))
+    except Exception:
+        return max(0.0, float(fallback))
 
 
 def _is_runtime_recovery_enabled() -> bool:
@@ -399,18 +529,71 @@ class ChatService:
         user_preference_memory_enabled = _is_user_preference_memory_enabled(
             ENABLE_USER_PREFERENCE_MEMORY,
         )
+        document_memory_enabled = _is_document_memory_enabled(ENABLE_DOCUMENT_MEMORY)
+        document_memory_recall_enabled = (
+            document_memory_enabled
+            and _is_document_memory_recall_enabled(ENABLE_DOCUMENT_MEMORY_RECALL)
+        )
+        document_memory_flush_enabled = (
+            document_memory_enabled
+            and _is_document_memory_flush_enabled(ENABLE_DOCUMENT_MEMORY_FLUSH)
+        )
+        document_memory_hybrid_enabled = (
+            document_memory_recall_enabled
+            and _is_document_memory_hybrid_enabled(ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH)
+        )
+        document_memory_max_results = _get_document_memory_max_results(
+            DOCUMENT_MEMORY_MAX_RESULTS,
+        )
+        document_memory_max_injected_chars = _get_document_memory_max_injected_chars(
+            DOCUMENT_MEMORY_MAX_INJECTED_CHARS,
+        )
+        document_vector_weight, document_text_weight = _get_document_memory_weights(
+            DOCUMENT_MEMORY_VECTOR_WEIGHT,
+            DOCUMENT_MEMORY_TEXT_WEIGHT,
+        )
+        document_hybrid_min_score = _get_document_memory_hybrid_min_score(
+            DOCUMENT_MEMORY_HYBRID_MIN_SCORE,
+        )
+        if not document_memory_hybrid_enabled:
+            document_vector_weight = 0.0
+            document_text_weight = 1.0
 
-        memory_context = ""
+        document_memory_context = ""
+        if document_memory_recall_enabled and user_id:
+            try:
+                with get_db_context() as db:
+                    document_memory_context = recall_document_memory(
+                        db,
+                        user_id=user_id,
+                        query_text=prompt,
+                        max_results=document_memory_max_results,
+                        max_injected_chars=document_memory_max_injected_chars,
+                        min_score=document_hybrid_min_score,
+                        vector_weight=document_vector_weight,
+                        text_weight=document_text_weight,
+                    )
+            except Exception as memory_error:
+                logger.warning("读取文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+
+        preference_memory_context = ""
         if user_preference_memory_enabled and user_id:
             try:
                 with get_db_context() as db:
-                    memory_context = recall(
+                    preference_memory_context = recall_user_preference_memory(
                         db,
                         user_id=user_id,
                         max_items=USER_PREFERENCE_MEMORY_MAX_ITEMS,
                     )
             except Exception as memory_error:
                 logger.warning("读取用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+
+        memory_context_parts = [
+            part
+            for part in (document_memory_context, preference_memory_context)
+            if str(part or "").strip()
+        ]
+        memory_context = "\n\n".join(memory_context_parts)
             
         input_messages = []
         if memory_context:
@@ -421,7 +604,13 @@ class ChatService:
         current_human_message_id = getattr(human_message, "id", None)
 
         if memory_context:
-            logger.info("已注入用户偏好上下文: user_id=%s", user_id)
+            logger.info(
+                "已注入记忆上下文: user_id=%s, has_document=%s, has_preference=%s, document_hybrid=%s",
+                user_id,
+                bool(document_memory_context),
+                bool(preference_memory_context),
+                document_memory_hybrid_enabled,
+            )
 
         config = {"configurable": {"thread_id": thread_id, "user_id": user_id, "current_todo_id": current_todo_id, "run_id": resolved_run_id}}
         
@@ -463,9 +652,40 @@ class ChatService:
                 title=title,
             )
 
+            if document_memory_flush_enabled and user_id:
+                try:
+                    persisted_doc_count = flush_document_memory(
+                        db,
+                        user_id=user_id,
+                        user_text=prompt,
+                        source_thread_id=thread_id,
+                        source_message_id=saved_human.id,
+                    )
+                    if persisted_doc_count:
+                        logger.info(
+                            "压缩前文档记忆 flush 成功: user_id=%s, count=%d",
+                            user_id,
+                            persisted_doc_count,
+                        )
+                        if document_memory_recall_enabled:
+                            latest_document_context = recall_document_memory(
+                                db,
+                                user_id=user_id,
+                                query_text=prompt,
+                                max_results=document_memory_max_results,
+                                max_injected_chars=document_memory_max_injected_chars,
+                                min_score=document_hybrid_min_score,
+                                vector_weight=document_vector_weight,
+                                text_weight=document_text_weight,
+                            )
+                            if latest_document_context:
+                                document_memory_context = latest_document_context
+                except Exception as memory_error:
+                    logger.warning("写入文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+
             if user_preference_memory_enabled and user_id:
                 try:
-                    persisted_count = flush(
+                    persisted_count = flush_user_preference_memory(
                         db,
                         user_id=user_id,
                         user_text=prompt,
@@ -478,19 +698,34 @@ class ChatService:
                             user_id,
                             persisted_count,
                         )
-                        latest_memory_context = recall(
+                        latest_preference_context = recall_user_preference_memory(
                             db,
                             user_id=user_id,
                             max_items=USER_PREFERENCE_MEMORY_MAX_ITEMS,
                             refresh_last_seen=False,
                         )
-                        if latest_memory_context:
-                            memory_context = latest_memory_context
-                            input_messages = [SystemMessage(content=latest_memory_context), human_message]
-                            input_state["messages"] = input_messages
-                            logger.info("本轮写入后即时注入用户偏好上下文: user_id=%s", user_id)
+                        if latest_preference_context:
+                            preference_memory_context = latest_preference_context
                 except Exception as memory_error:
                     logger.warning("写入用户偏好记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+
+            merged_context_parts = [
+                part
+                for part in (document_memory_context, preference_memory_context)
+                if str(part or "").strip()
+            ]
+            merged_memory_context = "\n\n".join(merged_context_parts)
+            if merged_memory_context:
+                memory_context = merged_memory_context
+                input_messages = [SystemMessage(content=merged_memory_context), human_message]
+                input_state["messages"] = input_messages
+                logger.info(
+                    "本轮写入后即时注入记忆上下文: user_id=%s, has_document=%s, has_preference=%s, document_hybrid=%s",
+                    user_id,
+                    bool(document_memory_context),
+                    bool(preference_memory_context),
+                    document_memory_hybrid_enabled,
+                )
         
         # 发送初始化事件
         yield self._format_sse("init", {"thread_id": thread_id, "run_id": resolved_run_id})

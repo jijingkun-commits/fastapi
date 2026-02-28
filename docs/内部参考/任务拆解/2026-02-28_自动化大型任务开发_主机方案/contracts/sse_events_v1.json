@@ -1,0 +1,47 @@
+{
+  "version": "v1",
+  "frozen_at": "2026-02-28",
+  "events": {
+    "done": {
+      "required": [
+        "run_id",
+        "message_id",
+        "timestamp"
+      ]
+    },
+    "result": {
+      "required": [
+        "run_id",
+        "payload"
+      ]
+    },
+    "interrupt": {
+      "required": [
+        "run_id",
+        "reason"
+      ]
+    },
+    "stopped": {
+      "required": [
+        "run_id",
+        "reason",
+        "timestamp"
+      ]
+    }
+  },
+  "rules": {
+    "terminal_mutex": [
+      "done",
+      "stopped"
+    ],
+    "interrupt_not_terminal": true,
+    "order_normal": [
+      "result",
+      "done"
+    ],
+    "order_cancel": [
+      "result",
+      "stopped"
+    ]
+  }
+}

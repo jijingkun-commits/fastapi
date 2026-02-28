@@ -483,5 +483,5 @@ planning_contract:
    - `acceptance_checks=["python3 scripts/docs_guard.py --strict"]`
    - `evidence_entry=docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7`
 4. 看板链路复核状态：
-   - 2026-02-26 本地尝试连接看板 API（`http://127.0.0.1:65422`）失败，当前以 `vk_cards.json` 作为机器字段镜像完成离线复核。
-   - API 恢复后需补做一次在线看板抽检，仅用于补证，不影响当前依赖链与串行约束判定。
+   - 2026-02-28 已完成一次在线看板抽检：`GET http://127.0.0.1:3001/api/tasks?project_id=2ea99dca-a111-43bb-ae73-f836bafe0fb0`，返回 `HTTP 200` 且 `data=[]`。
+   - 判定：看板 API 已恢复可连通；当前 project 尚无 scoped 卡（仍需后续落卡），依赖链与串行约束继续以 `vk_cards.json` 作为机器字段镜像。

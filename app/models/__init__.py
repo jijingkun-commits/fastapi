@@ -11,6 +11,7 @@ from app.models.data_permission import DataPermissionTable, DataPermissionRow, D
 from app.models.llm_scene import LLMScene
 from app.models.user_memory import UserMemory
 from app.models.chat_run import ChatRun
+from app.models.document_memory import UserMemoryDocument, UserMemoryChunk
 
 __all__ = [
     "User",
@@ -32,4 +33,6 @@ __all__ = [
     "LLMScene",
     "UserMemory",
     "ChatRun",
+    "UserMemoryDocument",
+    "UserMemoryChunk",
 ]

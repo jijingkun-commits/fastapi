@@ -31,6 +31,19 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 ---
 
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-vktodo` 的模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_vktodo_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_vktodo_templates.md`
+
+若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
+
+---
+
 ## 输入约定（支持路径直传）
 
 ### 1) 位置参数（推荐）
@@ -151,18 +164,8 @@ description: VK Todo 批量建卡：强制基线校验后落卡，优先走 MCP�
 
 ## 输出模板（推荐）
 
-```markdown
-VK 的 MCP 可直接操作 issue（`create_issue` / `update_issue`）。
-本次优先走 MCP，若返回 `502 Bad Gateway` 则自动走本地后端兜底。
-
-- 项目：`<project_name>`（`<project_id>`）
-- 来源目录：`<task_split_dir_or_path>`（可选，若使用路径直传）
-- 已处理卡片：`<N>` 张（`<start>` 到 `<end>`）
-- 目标状态：`<target_status>`
-- 当前统计：总计 `<total>` 张（`Backlog: <x>`，`Doing: <y>`，`Review: <z>`，`Gate: <g>`，`Done: <d>`）
-
-如需下一步，我可以继续把 `<filter>` 的 `<k>` 张卡片自动推进到 `<next_status>`。
-```
+见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_vktodo_templates.md`（`输出模板` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_vktodo_templates.md`。
 
 ---
 

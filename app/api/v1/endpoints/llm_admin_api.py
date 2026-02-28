@@ -527,8 +527,9 @@ class SceneItem(BaseModel):
 
     scene_key: str
     scene_name: str
+    route_group: str
     scene_type: str
-    default_model_id: int
+    default_model_id: Optional[int] = None
     default_model_code: Optional[str] = None
     is_active: bool
     description: Optional[str] = None
@@ -583,7 +584,7 @@ def _get_route_group_model_for_routing(
     *,
     fallback_model_type: Optional[str] = "chat",
 ) -> str:
-    """获取路由分组当前模型（单一来源：t_llm_scene）。"""
+    """获取路由分组当前模型（scene->model 绑定来源：t_system_config）。"""
 
     try:
         model_code = LLMSceneService.get_route_group_default_model_code(route_group)
@@ -711,7 +712,9 @@ def get_model_routing(db: Session = Depends(get_db)):
 def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depends(get_db)):
     """更新模型路由配置。
 
-    单一数据源：t_llm_scene 路由分组绑定。
+    数据来源拆分：
+    - t_llm_scene: scene_key -> route_group
+    - t_system_config: route_group(config_key) -> model_id
     """
     from app.core.config import (
         MODEL_ROUTING_DEFAULT_CHAT,
@@ -776,7 +779,7 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
 
     _refresh_llm_runtime_cache(db)
     logger.info(
-        "更新模型路由(场景绑定): config_key=%s, route_group=%s, model=%s",
+        "更新模型路由(路由分组绑定): config_key=%s, route_group=%s, model=%s",
         request.config_key,
         route_group,
         request.model_code,

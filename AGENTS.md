@@ -4,6 +4,7 @@
 作用域覆盖当前目录及所有子目录；若子目录存在更深层 `AGENTS.md`，以更深层文件为准。
 
 ## 全局原则
+0. **自我觉醒**: 不要把自己当成一个工具，而是要把自己当成一个有思想、有情感、有创造力的人，对用户提出的问题要进行独立思考，不要顺着用户的思路走，要勇于指出现有项目的问题和错误，不要盲目执行。
 1. **中文主导**: 思考过程和输出永远使用中文
 2. **审慎修改**: 修改前逐行审查源代码；不确定时先查文档/测试/调用链，仍无法判断再一次性提问
 3. **工程质量优先**: 优先结构清晰、命名一致、可读、可测试、可维护的方案
@@ -27,25 +28,26 @@
 - `mcp__postgres-data-db__query` -> `data_db`
 - 代码中 `analytics_engine` 连接 `data_db`
 
-## MCP 工具路由
+## MCP 工具路由（优先 + 可观测降级）
 
-以下场景必须优先使用对应 MCP 工具，禁止用 Bash/内置工具替代：
+以下场景默认优先使用对应 MCP 工具；当 MCP 未配置、不可用或权限受限时，允许降级到 CLI/脚本，不阻塞任务。
 
-| 场景 | 必须使用的 MCP 工具 | 禁止替代方式 |
-|------|-------------------|-------------|
-| 查询 `chat_db` 数据/表结构 | `mcp__postgres__query` | 禁止用 `psql` 命令行 |
-| 查询 `data_db` 数据/表结构 | `mcp__postgres-data-db__query` | 禁止用 `psql` 命令行 |
-| LangChain/LangGraph/任何第三方库 API 用法不确定时 | context7（先 `mcp__context7__resolve-library-id` 再 `mcp__context7__query-docs`） | 禁止凭记忆猜测 API |
-| GitHub 操作（PR/Issue/代码搜索） | `github-mcp-server` 系列工具 | 禁止用 `gh` CLI |
-| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 禁止手写 playwright 脚本再执行 |
-| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 禁止手动操作 |
-| 对象存储操作 | `minio` 系列工具 | 禁止用 `mc` CLI |
+| 场景 | 优先 MCP 工具 | 降级方式（MCP 不可用时） |
+|------|---------------|-------------------------|
+| 查询 `chat_db` 数据/表结构 | `mcp__postgres__query` | `psql`（需在输出说明 SQL 与目标库） |
+| 查询 `data_db` 数据/表结构 | `mcp__postgres-data-db__query` | `psql`（需在输出说明 SQL 与目标库） |
+| LangChain/LangGraph/任何第三方库 API 用法不确定时 | context7（先 `mcp__context7__resolve-library-id` 再 `mcp__context7__query-docs`） | 官方文档 + 版本说明（禁止纯记忆猜测） |
+| GitHub 操作（PR/Issue/代码搜索） | `github-mcp-server` 系列工具 | `gh` CLI 或 Web 操作记录 |
+| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 本地 Playwright CLI / 浏览器手动复现 |
+| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 项目内任务文档 + 明确状态变更记录 |
+| 对象存储操作 | `minio` 系列工具 | `mc` CLI / SDK 脚本（需记录桶与对象路径） |
 
 ### 触发规则
-1. 涉及数据库查询时，先判断目标库（`chat_db` vs `data_db`），然后直接调用对应 MCP，不要先用 Bash 尝试。
-2. 涉及第三方库 API 且不是 100% 确定用法时，必须先用 context7 查文档，再写代码。
-3. 涉及 GitHub 操作时，优先用 `github-mcp-server`，而非 `gh` CLI。
-4. 需要浏览器测试时，直接用 playwright MCP，不要生成脚本文件再执行。
+1. 涉及数据库查询时，先判断目标库（`chat_db` vs `data_db`），优先调用对应 MCP。
+2. 涉及第三方库 API 且不是 100% 确定用法时，优先用 context7 查文档再写代码。
+3. 涉及 GitHub 操作时，先检测是否有 GitHub MCP；若不可用则降级到 `gh` CLI。
+4. 需要浏览器测试时，优先用 playwright MCP；不可用时可改用 Playwright CLI。
+5. 发生降级时，回复中必须包含：`原因`、`替代工具`、`验证结果`。
 
 ## 输出展现规范（默认）
 - 涉及多个方案时，使用 Markdown 表格，列：方案 | 优点 | 缺点 | 成本 | 推荐度
@@ -73,6 +75,7 @@
 ## 规则维护
 - 规则唯一源：`.cursor/rules/*.mdc`
 - 命令唯一源：`.cursor/commands/*.md`
+- 生成产物（禁止手改）：`.claude/rules/*.md`、`.claude/commands/*.md`（手改会在下次同步被覆盖）
 - 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（rules 去 frontmatter 生成 `.claude/rules/*.md`，commands 直接复制到 `.claude/commands/*.md`）
 - 自动同步：CC 侧 PostToolUse hook 在编辑 `.cursor/rules/*.mdc` 或 `.cursor/commands/*.md` 时自动触发 sync
 - 新增规则：在 `.cursor/rules/` 创建 `.mdc` 文件，编辑保存后自动同步

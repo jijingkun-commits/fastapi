@@ -6,6 +6,7 @@ from app.ai.state import AgentType
 from app.ai.workflow.multi_agent_graph import (
     _build_multi_intent_summary_content,
     _evaluate_handoff_progress,
+    _resolve_coverage_gate_route,
 )
 
 
@@ -219,3 +220,46 @@ def test_build_multi_intent_summary_content_respects_user_question_order() -> No
 
     assert "外部信息" in first_line
     assert "待办事项" in second_line
+
+
+def test_resolve_coverage_gate_route_returns_supervisor_when_missing_goals() -> None:
+    """coverage 未通过时应先回到 supervisor 继续补齐。"""
+    route = _resolve_coverage_gate_route(
+        state={"coverage_retry_count": 0},
+        coverage_report={
+            "pass": False,
+            "missing_goals": [{"goal_id": "GOAL-02", "title": "外部信息", "reason": "missing_deliverable"}],
+        },
+    )
+
+    assert route["route"] == "supervisor"
+    assert route["coverage_retry_count"] == 1
+    assert route["retry_exhausted"] is False
+
+
+def test_resolve_coverage_gate_route_enters_postprocess_after_retry_exhausted(monkeypatch) -> None:
+    """补齐轮次超过上限后应转入 postprocess 输出缺口说明。"""
+    monkeypatch.setenv("COVERAGE_GATE_MAX_RETRIES", "1")
+
+    route = _resolve_coverage_gate_route(
+        state={"coverage_retry_count": 1},
+        coverage_report={
+            "pass": False,
+            "missing_goals": [{"goal_id": "GOAL-02", "title": "外部信息", "reason": "missing_deliverable"}],
+        },
+    )
+
+    assert route["route"] == "postprocess"
+    assert route["coverage_retry_count"] == 2
+    assert route["retry_exhausted"] is True
+
+
+def test_resolve_coverage_gate_route_goes_final_when_passed() -> None:
+    """coverage 通过时应进入 final_composer。"""
+    route = _resolve_coverage_gate_route(
+        state={"coverage_retry_count": 2},
+        coverage_report={"pass": True, "missing_goals": []},
+    )
+
+    assert route["route"] == "final_composer"
+    assert route["coverage_retry_count"] == 0

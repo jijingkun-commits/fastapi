@@ -8,9 +8,9 @@ from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.scene_registry import get_required_scene_keys, get_scene_keys_by_route_group
+from app.ai.scene_registry import SCENE_DEFINITION_MAP, get_required_scene_keys
 from app.models.llm_model import LLMModel
-from app.repositories import llm_scene_repo
+from app.repositories import config_repo, llm_scene_repo
 from app.services.llm_config_service import LLMConfigService
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,9 @@ class SceneRuntimeConfig:
 
     scene_key: str
     scene_name: str
+    route_group: str
     scene_type: str
-    default_model_id: int
+    default_model_id: Optional[int]
     default_model_code: Optional[str]
     default_model_type: Optional[str]
     is_active: bool
@@ -38,9 +39,28 @@ class LLMSceneService:
     """维护场景配置缓存与运行时解析。"""
 
     _scene_cache: Dict[str, SceneRuntimeConfig] = {}
+    _route_group_model_id_cache: Dict[str, Optional[int]] = {}
     _initialized: bool = False
 
-    # 场景类型 -> 可绑定模型类型
+    # route_group -> t_system_config.config_key
+    _ROUTE_GROUP_CONFIG_KEY: dict[str, str] = {
+        "default_chat": "model_routing.default_chat",
+        "lightweight": "model_routing.lightweight",
+        "sql_generation": "model_routing.sql_generation",
+        "embedding": "embedding",
+        "vision": "vision",
+    }
+
+    # route_group -> 可绑定模型类型
+    _ROUTE_GROUP_MODEL_COMPATIBILITY: dict[str, set[str]] = {
+        "default_chat": {"chat"},
+        "lightweight": {"chat"},
+        "sql_generation": {"chat"},
+        "embedding": {"embedding"},
+        "vision": {"vision", "chat", "reasoning"},
+    }
+
+    # 场景类型兼容（仅 route_group 不可识别时兜底）
     _SCENE_MODEL_COMPATIBILITY: dict[str, set[str]] = {
         "text": {"chat", "reasoning", "vision"},
         "image": {"vision", "chat"},
@@ -84,42 +104,23 @@ class LLMSceneService:
         return normalized
 
     @classmethod
-    def load_from_db(cls, db: Session):
-        """从数据库加载场景缓存。"""
+    def _normalize_route_group(cls, route_group: Optional[str], scene_key: str) -> str:
+        """规范化路由分组，缺失时回退注册表定义。"""
 
-        scenes = llm_scene_repo.list_scenes(db, include_inactive=True)
-        cache: Dict[str, SceneRuntimeConfig] = {}
+        normalized = (route_group or "").strip().lower()
+        if normalized:
+            return normalized
 
-        for scene in scenes:
-            scene_key = cls.normalize_scene_key(scene.scene_key)
-            scene_type = (scene.scene_type or "text").strip().lower()
+        scene_def = SCENE_DEFINITION_MAP.get(scene_key)
+        if scene_def:
+            return scene_def.route_group
 
-            default_model_code = None
-            default_model_type = None
-            if scene.default_model is not None:
-                default_model_code = scene.default_model.model_code
-                default_model_type = (scene.default_model.model_type or "chat").strip().lower()
-
-            cache[scene_key] = SceneRuntimeConfig(
-                scene_key=scene_key,
-                scene_name=scene.scene_name,
-                scene_type=scene_type,
-                default_model_id=scene.default_model_id,
-                default_model_code=default_model_code,
-                default_model_type=default_model_type,
-                is_active=bool(scene.is_active),
-                description=scene.description,
-            )
-
-        cls._scene_cache = cache
-        cls._initialized = True
-        logger.info("LLM 场景缓存加载完成: scenes=%d", len(cache))
+        return ""
 
     @classmethod
-    def refresh_cache(cls, db: Session):
-        """刷新场景缓存。"""
-
-        cls.load_from_db(db)
+    def _ensure_initialized(cls):
+        if not cls._initialized:
+            cls._lazy_init()
 
     @classmethod
     def _lazy_init(cls):
@@ -135,16 +136,107 @@ class LLMSceneService:
             cls.load_from_db(db)
 
     @classmethod
-    def _ensure_initialized(cls):
-        if not cls._initialized:
-            cls._lazy_init()
+    def _resolve_model_id_from_config_value(
+        cls,
+        raw_value: Optional[str],
+        model_by_id: dict[int, LLMModel],
+        model_by_code: dict[str, LLMModel],
+    ) -> Optional[int]:
+        """将 t_system_config 的值解析为模型 ID。"""
+
+        if raw_value is None:
+            return None
+
+        normalized = str(raw_value).strip()
+        if not normalized:
+            return None
+
+        # 新格式：直接存 model_id
+        if normalized.isdigit():
+            model_id = int(normalized)
+            if model_id in model_by_id:
+                return model_id
+            return None
+
+        # 兼容旧格式：存 model_code
+        model = model_by_code.get(normalized)
+        if model:
+            return model.id
+        return None
 
     @classmethod
-    def _is_type_compatible(cls, scene_type: str, model_type: str) -> bool:
-        expected_types = cls._SCENE_MODEL_COMPATIBILITY.get(scene_type)
-        if expected_types is None:
-            return False
+    def load_from_db(cls, db: Session):
+        """从数据库加载场景缓存。"""
 
+        scenes = llm_scene_repo.list_scenes(db, include_inactive=True)
+        active_models = db.query(LLMModel).filter(LLMModel.is_active == True).all()
+        model_by_id = {m.id: m for m in active_models}
+        model_by_code = {m.model_code: m for m in active_models if m.model_code}
+
+        route_group_model_ids: dict[str, Optional[int]] = {}
+        for route_group, config_key in cls._ROUTE_GROUP_CONFIG_KEY.items():
+            conf = config_repo.get_config_by_key(db, config_key)
+            model_id = cls._resolve_model_id_from_config_value(
+                conf.config_value if conf else None,
+                model_by_id,
+                model_by_code,
+            )
+            route_group_model_ids[route_group] = model_id
+
+            if conf and model_id is None and str(conf.config_value).strip():
+                logger.warning(
+                    "路由分组配置无法解析为启用模型: route_group=%s, config_key=%s, config_value=%s",
+                    route_group,
+                    config_key,
+                    conf.config_value,
+                )
+
+        cache: Dict[str, SceneRuntimeConfig] = {}
+        for scene in scenes:
+            scene_key = cls.normalize_scene_key(scene.scene_key)
+            route_group = cls._normalize_route_group(getattr(scene, "route_group", None), scene_key)
+            scene_type = (scene.scene_type or "text").strip().lower()
+
+            default_model_id = route_group_model_ids.get(route_group)
+            model = model_by_id.get(default_model_id) if default_model_id else None
+            default_model_code = model.model_code if model else None
+            default_model_type = (model.model_type or "chat").strip().lower() if model else None
+
+            cache[scene_key] = SceneRuntimeConfig(
+                scene_key=scene_key,
+                scene_name=scene.scene_name,
+                route_group=route_group,
+                scene_type=scene_type,
+                default_model_id=default_model_id,
+                default_model_code=default_model_code,
+                default_model_type=default_model_type,
+                is_active=bool(scene.is_active),
+                description=scene.description,
+            )
+
+        cls._scene_cache = cache
+        cls._route_group_model_id_cache = route_group_model_ids
+        cls._initialized = True
+        logger.info("LLM 场景缓存加载完成: scenes=%d", len(cache))
+
+    @classmethod
+    def refresh_cache(cls, db: Session):
+        """刷新场景缓存。"""
+
+        cls.load_from_db(db)
+
+    @classmethod
+    def _expected_model_types(cls, scene: SceneRuntimeConfig) -> set[str]:
+        by_group = cls._ROUTE_GROUP_MODEL_COMPATIBILITY.get(scene.route_group)
+        if by_group:
+            return by_group
+        return cls._SCENE_MODEL_COMPATIBILITY.get(scene.scene_type, set())
+
+    @classmethod
+    def _is_type_compatible(cls, scene: SceneRuntimeConfig, model_type: str) -> bool:
+        expected_types = cls._expected_model_types(scene)
+        if not expected_types:
+            return False
         return model_type in expected_types
 
     @classmethod
@@ -156,10 +248,29 @@ class LLMSceneService:
             )
 
         model_type = (model_cfg.model_type or "chat").strip().lower()
-        if not cls._is_type_compatible(scene.scene_type, model_type):
+        if not cls._is_type_compatible(scene, model_type):
             raise SceneConfigError(
-                f"场景 {scene.scene_key} 类型不兼容: scene_type={scene.scene_type}, model_type={model_type}"
+                "场景模型类型不兼容: "
+                f"scene_key={scene.scene_key}, route_group={scene.route_group}, "
+                f"scene_type={scene.scene_type}, model_type={model_type}"
             )
+
+    @classmethod
+    def _upsert_route_group_model_id(cls, db: Session, route_group: str, model_id: int):
+        """写入 route_group -> model_id 到 t_system_config。"""
+
+        config_key = cls._ROUTE_GROUP_CONFIG_KEY.get(route_group)
+        if not config_key:
+            raise SceneConfigError(f"未知路由分组: route_group={route_group}")
+
+        config_repo.upsert_config(
+            db=db,
+            key=config_key,
+            value=str(model_id),
+            value_type="number",
+            category="model_routing",
+            description=f"模型路由分组绑定: {route_group}",
+        )
 
     @classmethod
     def get_scene(cls, scene_key: str) -> SceneRuntimeConfig:
@@ -212,8 +323,20 @@ class LLMSceneService:
                 errors.append(f"场景已停用: {key}")
                 continue
 
+            if not scene.route_group:
+                errors.append(f"场景缺失 route_group: {key}")
+                continue
+
+            if scene.route_group not in cls._ROUTE_GROUP_CONFIG_KEY:
+                errors.append(f"场景 route_group 非法: {key} -> {scene.route_group}")
+                continue
+
+            if scene.default_model_id is None:
+                errors.append(f"路由未绑定模型: route_group={scene.route_group}, scene_key={key}")
+                continue
+
             if not scene.default_model_code:
-                errors.append(f"场景默认模型为空: {key}")
+                errors.append(f"路由绑定模型不可用: route_group={scene.route_group}, scene_key={key}")
                 continue
 
             try:
@@ -228,21 +351,36 @@ class LLMSceneService:
         logger.info("LLM 场景配置校验通过: required=%d", len(required_keys))
 
     @classmethod
+    def _scene_keys_by_route_group(cls, route_group: str) -> tuple[str, ...]:
+        cls._ensure_initialized()
+        normalized = (route_group or "").strip().lower()
+        if normalized not in cls._ROUTE_GROUP_CONFIG_KEY:
+            return ()
+        return tuple(
+            sorted(
+                scene.scene_key
+                for scene in cls._scene_cache.values()
+                if scene.route_group == normalized
+            )
+        )
+
+    @classmethod
     def get_route_group_default_model_code(cls, route_group: str) -> Optional[str]:
-        """返回指定 route_group 当前生效模型代码（以场景绑定为准）。"""
+        """返回指定 route_group 当前生效模型代码。"""
 
         cls._ensure_initialized()
-
-        scene_keys = get_scene_keys_by_route_group(route_group)
-        if not scene_keys:
+        normalized = (route_group or "").strip().lower()
+        if normalized not in cls._ROUTE_GROUP_CONFIG_KEY:
             raise SceneConfigError(f"未知路由分组: route_group={route_group}")
+
+        scene_keys = cls._scene_keys_by_route_group(normalized)
+        if not scene_keys:
+            raise SceneConfigError(f"路由分组未绑定场景: route_group={route_group}")
 
         model_codes: list[str] = []
         for scene_key in scene_keys:
             scene = cls._scene_cache.get(scene_key)
-            if scene is None:
-                raise SceneConfigError(f"场景未配置: scene_key={scene_key}")
-            if scene.is_active and scene.default_model_code:
+            if scene and scene.is_active and scene.default_model_code:
                 model_codes.append(scene.default_model_code)
 
         if not model_codes:
@@ -252,7 +390,7 @@ class LLMSceneService:
         model_code, _ = counter.most_common(1)[0]
         if len(counter) > 1:
             logger.warning(
-                "路由分组绑定不一致，按多数派返回: route_group=%s, bindings=%s",
+                "路由分组模型不一致，按多数派返回: route_group=%s, bindings=%s",
                 route_group,
                 dict(counter),
             )
@@ -265,10 +403,10 @@ class LLMSceneService:
         route_group: str,
         default_model_code: str,
     ) -> list[SceneRuntimeConfig]:
-        """批量更新指定 route_group 绑定场景的默认模型。"""
+        """批量更新指定 route_group 的模型绑定。"""
 
-        scene_keys = get_scene_keys_by_route_group(route_group)
-        if not scene_keys:
+        normalized = (route_group or "").strip().lower()
+        if normalized not in cls._ROUTE_GROUP_CONFIG_KEY:
             raise SceneConfigError(f"未知路由分组: route_group={route_group}")
 
         model_row = db.query(LLMModel).filter(
@@ -278,22 +416,35 @@ class LLMSceneService:
         if model_row is None:
             raise SceneConfigError(f"模型不存在或未启用: {default_model_code}")
 
-        scene_rows = {
-            scene.scene_key: scene
+        scene_rows = [
+            scene
             for scene in llm_scene_repo.list_scenes(db, include_inactive=True)
-        }
-        for scene_key in scene_keys:
-            scene_row = scene_rows.get(scene_key)
-            if scene_row is None:
-                raise SceneConfigError(f"场景不存在: scene_key={scene_key}")
+            if cls._normalize_route_group(getattr(scene, "route_group", None), scene.scene_key) == normalized
+        ]
+        if not scene_rows:
+            raise SceneConfigError(f"路由分组未绑定场景: route_group={route_group}")
 
-            scene_type = (scene_row.scene_type or "text").strip().lower()
-            model_type = (model_row.model_type or "chat").strip().lower()
-            if not cls._is_type_compatible(scene_type, model_type):
+        model_type = (model_row.model_type or "chat").strip().lower()
+        for scene_row in scene_rows:
+            runtime_scene = SceneRuntimeConfig(
+                scene_key=scene_row.scene_key,
+                scene_name=scene_row.scene_name,
+                route_group=normalized,
+                scene_type=(scene_row.scene_type or "text").strip().lower(),
+                default_model_id=model_row.id,
+                default_model_code=model_row.model_code,
+                default_model_type=model_type,
+                is_active=bool(scene_row.is_active),
+                description=scene_row.description,
+            )
+            if not cls._is_type_compatible(runtime_scene, model_type):
                 raise SceneConfigError(
-                    f"模型类型与场景不兼容: scene_type={scene_type}, model_type={model_type}, scene_key={scene_key}"
+                    "模型类型与路由分组不兼容: "
+                    f"route_group={normalized}, scene_key={scene_row.scene_key}, "
+                    f"scene_type={runtime_scene.scene_type}, model_type={model_type}"
                 )
-            scene_row.default_model_id = model_row.id
+
+        cls._upsert_route_group_model_id(db, normalized, model_row.id)
 
         try:
             db.flush()
@@ -305,7 +456,7 @@ class LLMSceneService:
             raise
 
         cls.load_from_db(db)
-        return [cls.get_scene(scene_key) for scene_key in scene_keys]
+        return [cls.get_scene(scene.scene_key) for scene in scene_rows]
 
     @classmethod
     def list_scene_items(cls) -> list[SceneRuntimeConfig]:
@@ -330,6 +481,10 @@ class LLMSceneService:
         if scene_row is None:
             raise SceneConfigError(f"场景不存在: scene_key={normalized_key}")
 
+        route_group = cls._normalize_route_group(getattr(scene_row, "route_group", None), normalized_key)
+        if getattr(scene_row, "route_group", None) != route_group:
+            scene_row.route_group = route_group
+
         if default_model_code is not None:
             model_row = db.query(LLMModel).filter(
                 LLMModel.model_code == default_model_code,
@@ -338,14 +493,32 @@ class LLMSceneService:
             if model_row is None:
                 raise SceneConfigError(f"模型不存在或未启用: {default_model_code}")
 
+            group_rows = [
+                scene
+                for scene in llm_scene_repo.list_scenes(db, include_inactive=True)
+                if cls._normalize_route_group(getattr(scene, "route_group", None), scene.scene_key) == route_group
+            ]
             model_type = (model_row.model_type or "chat").strip().lower()
-            scene_type = (scene_row.scene_type or "text").strip().lower()
-            if not cls._is_type_compatible(scene_type, model_type):
-                raise SceneConfigError(
-                    f"模型类型与场景不兼容: scene_type={scene_type}, model_type={model_type}"
+            for row in group_rows:
+                runtime_scene = SceneRuntimeConfig(
+                    scene_key=row.scene_key,
+                    scene_name=row.scene_name,
+                    route_group=route_group,
+                    scene_type=(row.scene_type or "text").strip().lower(),
+                    default_model_id=model_row.id,
+                    default_model_code=model_row.model_code,
+                    default_model_type=model_type,
+                    is_active=bool(row.is_active),
+                    description=row.description,
                 )
+                if not cls._is_type_compatible(runtime_scene, model_type):
+                    raise SceneConfigError(
+                        "模型类型与路由分组不兼容: "
+                        f"route_group={route_group}, scene_key={row.scene_key}, "
+                        f"scene_type={runtime_scene.scene_type}, model_type={model_type}"
+                    )
 
-            scene_row.default_model_id = model_row.id
+            cls._upsert_route_group_model_id(db, route_group, model_row.id)
 
         if is_active is False and normalized_key in get_required_scene_keys():
             raise SceneConfigError(f"核心场景禁止停用: scene_key={normalized_key}")
@@ -375,6 +548,7 @@ class LLMSceneService:
                 {
                     "scene_key": scene.scene_key,
                     "scene_name": scene.scene_name,
+                    "route_group": scene.route_group,
                     "scene_type": scene.scene_type,
                     "default_model_id": scene.default_model_id,
                     "default_model_code": scene.default_model_code,
@@ -384,3 +558,4 @@ class LLMSceneService:
             )
 
         return rows
+

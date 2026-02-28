@@ -6,12 +6,12 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 
 本命令是你 `jjk-*` 体系里的澄清入口，目标是**复用** `brainstorming`，而不是复制它。
 
-## 执行契约（最小）
+## 执行契约
 
 1. 若当前环境可用 `brainstorming`，**必须先调用并遵循其流程**。
-2. 若当前环境不可用 `brainstorming`，按本文件 fallback 流程执行，并在输出中标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
+2. 若当前环境不可用 `brainstorming`，按本文件 fallback 流程执行，并在“执行备注”区块标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
 3. 设计未获用户审批前，禁止进入实现阶段。
-4. 产物统一写入：`docs/plans/YYYY-MM-DD-<topic>-design.md`。
+4. 标准模式产物统一写入：`docs/plans/YYYY-MM-DD-<topic>-design.md`（轻量模式可不落盘）。
 5. 禁止在本文件复制完整 brainstorming 正文，避免双份维护漂移。
 
 ## 跨 IDE 调用方式
@@ -27,6 +27,21 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 
 1. `brainstorming`：流程门禁、设计审批、阶段收敛。
 2. `jjk-clarify`：提问效率增强（单主题问题包）+ 多 IDE fallback。
+
+---
+
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-clarify` 统一使用仓库内相对路径模板，禁止依赖用户绝对路径。
+
+模板按以下优先级读取：
+
+1. 项目主模板（必需）：
+   `docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`
+2. 项目覆盖模板（可选，仅放差异）：
+   `docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`
+
+若主模板缺失，使用本命令内置最小模板兜底，并在“执行备注”输出 `TEMPLATE_FILE_MISSING`。
 
 ---
 
@@ -50,22 +65,25 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 3. 默认模式最多 2 轮问题包；超过则建议切 `--deep`。
 4. 若还有关键不确定项，再加 1 个精准追问。
 
-模板：
+模板见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`单主题问题包模板` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
 
-```markdown
-## 本轮澄清主题：<主题名>
+---
 
-A. 目标优先级（单选）
-1) 先可用 2) 先稳定 3) 先性能
+## 轻量澄清模式（小任务）
 
-B. 范围边界（多选）
-1) 仅后端 2) 前后端都改 3) 含工作流/编排
+满足以下全部条件时，可走轻量模式（不强制写入 design 文档）：
 
-C. 交付约束（单选）
-1) 本周交付 2) 可分阶段 3) 先出方案不开发
+1. 预计改动 `<= 3` 个文件；
+2. 单模块内修改；
+3. 不涉及架构/API/表结构/配置变更；
+4. 不跨后端/前端/AI-workflow/数据库边界。
 
-请按 `A?/B?/C?` 回复。
-```
+轻量模式仍需输出：
+
+1. 目标、范围、成功标准；
+2. 至少 2 个方案 + 推荐；
+3. 若澄清中发现边界升级，立即切换为标准模式并落盘 design 文档。
 
 ---
 
@@ -79,22 +97,34 @@ C. 交付约束（单选）
 2. 相关文档（如 `docs/**` 与历史计划）
 3. 当前变更状态（`git status`）
 
-### 0.5) 大任务自动启用 Team（强制判定）
+### 0.5) Team 升级判定（先扫描后决策）
 
 `/jjk-team-clarify` 已废弃，不再作为独立入口。  
 统一由 `/jjk-clarify` 在大任务时自动升级为 Team 执行。
 
-触发条件（满足任一即可）：
+完成步骤 0 的上下文扫描后，先输出“Team 判定快照”：
 
-1. 预期改动 `>= 8` 个文件；
-2. 预期涉及 `>= 3` 个独立模块/子系统；
-3. 同时跨后端、前端、AI/workflow 或数据库两类以上边界；
-4. 预计澄清问题包轮次 `> 2` 且需要并行查证。
+1. `module_count`：涉及模块/子系统数量；
+2. `boundary_count`：跨边界数量（后端/前端/AI-workflow/数据库）；
+3. `uncertainty_count`：需要并行查证的不确定项数量；
+4. `estimated_file_count`：预估改动文件数量。
+
+判定规则：
+
+1. 命中条件：`module_count >= 3`；
+2. 命中条件：`boundary_count >= 2`；
+3. 命中条件：`uncertainty_count >= 2`；
+4. 命中条件：`estimated_file_count >= 8`。
+
+执行阈值：
+
+1. 命中条件 `>= 2` 条：自动升级 Team；
+2. 命中条件 `<= 1` 条：默认单代理执行（除非用户明确指定 Team）。
 
 执行策略：
 
 1. **有 Team 能力时**：自动以 team 方式并行收集上下文与方案草稿，Leader 对外保持单线程提问口径。
-2. **无 Team 能力时**：降级为单代理执行，但需在输出里标注 `TEAM_UNAVAILABLE_FALLBACK`。
+2. **无 Team 能力时**：降级为单代理执行，并在“执行备注”区块标注 `TEAM_UNAVAILABLE_FALLBACK`。
 
 ### 1) 进行澄清提问
 
@@ -118,45 +148,48 @@ C. 交付约束（单选）
 
 按 brainstorming 约束：设计需经用户确认后，才可进入下一阶段。
 
+审批通过后，必须在 design 文档补充“审批记录”：
+
+1. `design_approved: true`
+2. `approved_at: <YYYY-MM-DD HH:mm>`
+3. `approved_round: <轮次或版本>`
+
 ### 5) 产出物（与 brainstorming 名称和路径一致）
 
-统一写入：
+标准模式统一写入：
 
 `docs/plans/YYYY-MM-DD-<topic>-design.md`
 
 > 不再使用 `_context.md` 或 `*-clarify.md` 作为主产物。
 
-建议结构：
+建议结构见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`design 文档结构模板` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
 
-```markdown
-# <topic> 设计说明
+轻量模式可不落盘，但需在回复内给出简版结论与推荐方案。
 
-## 1. 需求澄清结论
-- 目标:
-- 范围:
-- 边界:
-- 成功标准:
+### 6) 执行备注（结构化可观测）
 
-## 2. 方案对比（2-3个）
-| 方案 | 优点 | 缺点 | 成本 | 推荐度 |
-|---|---|---|---|---|
-| A |  |  |  |  |
-| B |  |  |  |  |
-| C |  |  |  |  |
+若触发能力降级或模板异常，在回复末尾追加以下结构化区块，不插入正文主叙述：
 
-## 3. 推荐方案与理由
-- 推荐:
-- 理由:
-
-## 4. 设计概要
-- 架构:
-- 组件:
-- 数据流:
-- 异常与测试考虑:
-
-## 5. 未决问题（如有）
-- [ ]
+```yaml
+execution_notes:
+  fallback:
+    brainstorming: false
+    team: false
+  template:
+    missing: false
+    source: "docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md"
+  degrade_reason: ""
+  alternative_tool: ""
+  verification: ""
 ```
+
+填写规则：
+
+1. 触发 `brainstorming` 降级时，`fallback.brainstorming=true`。
+2. 触发 Team 降级时，`fallback.team=true`。
+3. 模板缺失时，`template.missing=true` 且补充 `degrade_reason`。
+4. 发生任何降级时，必须填写 `alternative_tool` 与 `verification`。
 
 ---
 

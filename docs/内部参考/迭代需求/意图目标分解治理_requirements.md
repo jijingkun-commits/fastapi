@@ -175,3 +175,48 @@ Happy Path：
 2. 影子对账指标稳定 3 天（误增率、漏判率、fallback 命中率均在阈值内）。
 3. `docs/SUMMARY.md` 与专题文档索引一致，`docs_guard --strict` 通过。
 4. 回滚演练至少完成 1 轮并产出记录。
+
+---
+
+## 9. D+B 统一补充需求（结构化兼容分层）
+
+> 生效日期：2026-02-28  
+> 适用原因：`planner` 在 `with_structured_output(json_object)` 下存在模型/网关兼容差异，需从“单路径依赖”升级为“能力路由 + 分级降级”。
+
+### 9.1 目标
+
+1. 引入能力路由（D）：按模型能力自动选择结构化输出路径，而非固定单路径。
+2. 引入 Tool Calling 主路径（B）：优先使用函数调用产出结构化 `intent_plan.goals`。
+3. 建立统一降级链：`tool_call -> json_object -> text_parse -> heuristic_fallback`。
+4. 标准化失败原因：`fallback_meta.reason` 必须输出稳定 `reason_code`，支持观测与运营定位。
+
+### 9.2 约束
+
+1. 不破坏既有 `intent_plan` 合同字段（兼容优先，新增字段只增不删）。
+2. 降级链任一环节失败不阻塞主回复，必须可解释、可回滚。
+3. 兼容策略必须由后端统一封装，前端不承担模型差异逻辑。
+
+### 9.3 验收标准（补充）
+
+1. AC-DB-01（能力路由命中）：
+   - 对支持 tool call 的模型，planner 默认走 tool call；
+   - 对不支持 tool call 的模型，自动降级到后续路径；
+   - 全过程无人工切换依赖。
+2. AC-DB-02（分级降级稳定）：
+   - 任一结构化路径失败时，能自动进入下一层；
+   - 最终最差退化到 `heuristic_fallback`，链路不中断。
+3. AC-DB-03（原因可观测）：
+   - `fallback_meta.reason` 为稳定枚举（示例：`planner_tool_call_error`、`planner_json_object_error`、`planner_text_parse_error`）；
+   - 指标可按 `reason_code` 聚合告警。
+4. AC-DB-04（回滚有效）：
+   - 可通过配置快速关闭 `tool_call/json_object/text_parse` 任一路径；
+   - 回滚后核心对话能力可用。
+
+### 9.4 预留测试用例（补充）
+
+| 用例 ID | 目标 | 验收点 |
+|---|---|---|
+| TC-IMG-09 | Tool Calling 主路径 | 支持 tool call 时直接产出结构化 goals |
+| TC-IMG-10 | json_object 次路径 | tool call 不可用时正确进入 json_object |
+| TC-IMG-11 | text_parse 三路径 | json_object 失败时可解析文本并校验 schema |
+| TC-IMG-12 | 全链路兜底 | 三层失败时进入 heuristic，且 reason_code 正确 |

@@ -32,6 +32,19 @@ description: 组合验证：审查 + 测试 + UAT 一站式验收
 
 ---
 
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-verify` 的模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`
+
+若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
+
+---
+
 ## 阶段 1: 变更分析 (Change Analysis)
 
 1. **获取变更范围**:
@@ -193,56 +206,9 @@ venv/bin/python scripts/docs_guard.py --strict
 2. **极简报告模式**：当用户明确提到“极简报告 / 简版报告 / 只要结论 / 8-12 行”时启用。
 3. 不论哪种模式，都必须包含：`总结 + 测试统计 + UAT结论 + 自动证据 + 文档同步 + 下一步建议`。
 
-极简报告模板（8-12 行）：
-
-```markdown
-## 验证报告（极简）
-- 总结: PASS / WARN / FAIL
-- 审查: 发现 N（已修复 M），遗留: [...]
-- 测试: 通过 X / Y，失败: [...]
-- UAT: 模式=AUTO/INTERACTIVE/MIXED，通过 A / B，待修复: [...]
-- 证据: [命令] <cmd> exit=<code> pass=<p> fail=<f>
-- 断言: <文件路径:行号> -> <断言内容>
-- 问题归类: 新增=[...]，历史=[...]
-- 文档同步: [x]/[ ]
-- 阻断与降级: 无 / <说明>
-- 建议: <下一步动作>
-```
-
-标准报告模板：
-
-```markdown
-## 验证报告
-
-### 总结: PASS / FAIL / WARN
-
-### 审查结果
-- 发现问题: N 个（已修复 M 个）
-- 遗留问题: [列表]
-
-### 测试结果
-- 通过: X / Y
-- 失败: [失败用例列表]
-
-### UAT 结果
-- 模式: AUTO / INTERACTIVE / MIXED
-- 通过: A / B
-- 待修复: [问题列表]
-
-### 自动判定证据
-- [命令] <原文> | exit=<code> | 通过=<pass> | 失败=<fail>
-- [断言] <文件路径:行号> -> <断言内容>
-- [问题归类] 新增问题: [...] / 历史问题: [...]
-
-### 阻断与降级记录
-- [记录] <若无则写“无”>
-
-### 文档同步
-- [x] 已同步 / [ ] 需要补充: [具体文档]
-
-### 建议
-- [下一步行动建议]
-```
+极简报告模板见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`极简报告模板` 段）。  
+标准报告模板见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`标准报告模板` 段）。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`。
 
 最低要求：
 1. 就算执行中出现错误，也必须输出报告（标准或极简其一，可将总结标记为 `FAIL` 或 `WARN`）。

@@ -18,6 +18,8 @@ def test_infer_initial_intent_plan_avoids_data_goal_for_generic_query_word() -> 
 
     assert "todo.query" in kinds
     assert "data.query" not in kinds
+    todo_goal = next(goal for goal in plan["goals"] if goal.get("kind") == "todo.query")
+    assert todo_goal["allowed_agents"] == ["todo_expert"]
 
 
 def test_build_planner_intent_plan_uses_model_primary_when_available(monkeypatch) -> None:
@@ -47,6 +49,7 @@ def test_build_planner_intent_plan_uses_model_primary_when_available(monkeypatch
 
     assert plan["source"] == "model_primary"
     assert plan["goals"][0]["kind"] == "external.lookup"
+    assert plan["goals"][0]["allowed_agents"] == []
 
 
 def test_build_planner_intent_plan_fallbacks_when_model_fails(monkeypatch) -> None:
@@ -78,3 +81,4 @@ def test_build_planner_intent_plan_supports_heuristic_only_mode(monkeypatch) -> 
 
     assert plan["source"] == "heuristic_only"
     assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))
+    assert all("allowed_agents" in goal for goal in list(plan.get("goals") or []))

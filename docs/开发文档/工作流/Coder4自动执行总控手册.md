@@ -252,23 +252,11 @@ coder4 每一轮按固定顺序执行：
 
 ---
 
-## 11. 开跑前 5 分钟检查单
-
-- [ ] `vk_cards.json` 已导入目标 project（能看到 scoped 卡）
-- [ ] scoped 活动卡 <= 1
-- [ ] `_active_task.json` 与 `vk_cards.json.task_key` 一致
-- [ ] C00 preflight 条件已满足
-- [ ] 同类 coder4 cron 仅 1 条 `enabled=true`（避免双调度）
-- [ ] cron 已启用且投递通道正确
-- [ ] 先做 2~3 轮 smoke，再放整夜
-
----
-
-## 12. 可复用提示词模板（精简版）
+## 11. 可复用提示词模板（精简版）
 
 默认场景：你只和 `jjk_coder4_bot` 对话，不手工跑脚本。
 
-### 12.1 `/jjk-plan -p -h`（短模板）
+### 11.1 `/jjk-plan -p -h`（短模板）
 
 ```text
 /jjk-plan -p -h
@@ -280,7 +268,7 @@ coder4 每一轮按固定顺序执行：
 3) 若 hydrate 映射不全，标注 BLOCKED 并给出 unmapped 清单
 ```
 
-### 12.2 `/jjk-vkplan`（短模板）
+### 11.2 `/jjk-vkplan`（短模板）
 
 ```text
 /jjk-vkplan
@@ -293,7 +281,7 @@ project_id：<VK_PROJECT_ID>
 4) 任一字段缺失或映射失败，直接 BLOCKED
 ```
 
-### 12.3 让 Bot 代办“落卡 + 绑定作用域”（你不手工）
+### 11.3 让 Bot 代办“落卡 + 绑定作用域”（你不手工）
 
 ```text
 请在 /Users/jijingkun/bojxAI/fastapi 执行以下任务并回报结果：
@@ -309,7 +297,7 @@ project_id：<VK_PROJECT_ID>
    - 与 vk_cards.json 是否一致
 ```
 
-### 12.4 让 Bot 代办“cron 启停与巡检”
+### 11.4 让 Bot 代办“cron 启停与巡检”
 
 ```text
 请做 coder4 cron 运维（先查后改）：
@@ -319,7 +307,7 @@ project_id：<VK_PROJECT_ID>
 注意：禁止 create 新 job，只能 update 现有 job。
 ```
 
-### 12.5 一条消息版（推荐）
+### 11.5 一条消息版（推荐）
 
 ```text
 请在 /Users/jijingkun/bojxAI/fastapi 按顺序一次完成以下动作，并在最后给出结构化回报：
@@ -350,7 +338,7 @@ project_id：<VK_PROJECT_ID>
 - final_status: READY_AUTORUN | READY_MANUAL | BLOCKED
 ```
 
-### 12.6 最短开跑口令（你只说一句）
+### 11.6 最短开跑口令（你只说一句）
 
 ```text
 开始执行 <task_split_dir> project_id=<VK_PROJECT_ID>

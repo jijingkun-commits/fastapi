@@ -20,6 +20,7 @@ def test_list_llm_scenes_returns_payload(
         {
             "scene_key": "app.ai.intent_classifier.classify_intent",
             "scene_name": "意图分类",
+            "route_group": "lightweight",
             "scene_type": "text",
             "default_model_id": 1,
             "default_model_code": "qwen-plus",

@@ -409,3 +409,201 @@ planning_contract:
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"
       evidence_entry: "gray rollout metrics and rollback drill record"
 ```
+
+---
+
+## 12. D+B 统一执行增补（2026-02-28）
+
+> 目标：将 planner 结构化输出从“单路径依赖”升级为“能力路由 + Tool Calling 主路径 + 分级降级链”。  
+> 标记：`DESIGN_APPROVAL_FALLBACK_ACK=true`（本轮基于会话内设计确认继续，无 `docs/plans/*-design.md` 审批文档）。
+
+### 12.1 执行链路（统一口径）
+
+```mermaid
+flowchart LR
+    A["Planner 请求进入"] --> B{"能力路由判定"}
+    B -->|supports_tool_call| C["策略1 Tool Calling"]
+    B -->|no_tool_call| D["策略2 json_object"]
+    C -->|失败| D
+    D -->|失败| E["策略3 text_parse + schema 校验"]
+    E -->|失败| F["策略4 heuristic_fallback"]
+    C --> G["normalize intent_plan"]
+    D --> G
+    E --> G
+    F --> G
+```
+
+### 12.2 功能机制包（P2）
+
+| feature_id | card_id | 目标摘要 | 代码锚点 | 验证命令 |
+|---|---|---|---|---|
+| P2-01 | C06 | 引入 planner 策略路由器与能力判定 | `app/ai/workflow/multi_agent_graph.py` `app/ai/llm_util.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` |
+| P2-02 | C06 | Tool Calling 作为结构化主路径 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` |
+| P2-03 | C07 | json_object 作为二级路径 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` |
+| P2-04 | C07 | text_parse 作为三级路径并做 schema 校验 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` |
+| P2-05 | C08 | fallback reason_code 标准化与观测字段统一 | `app/ai/workflow/multi_agent_graph.py` `app/services/chat_service.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` |
+| P2-06 | G03 | 文档、契约、索引门禁收口 | `docs/开发文档/架构设计/AI模块设计.md` `docs/开发文档/架构设计/防屎山记录手册.md` | `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict` |
+
+### 12.3 工单级任务包（implementation_tasks）
+
+```yaml
+implementation_tasks:
+  - task_id: T-09
+    feature_id: P2-06
+    phase: Phase-0
+    file_paths:
+      - docs/开发文档/架构设计/AI模块设计.md
+      - docs/开发文档/架构设计/防屎山记录手册.md
+    symbols:
+      - planner structured compatibility chain
+      - fallback reason_code contract
+    change_type: modify
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+    rollback_point: revert D+B doc section commit
+
+  - task_id: T-10
+    feature_id: P2-01
+    phase: Phase-1
+    file_paths:
+      - app/ai/workflow/multi_agent_graph.py
+      - app/ai/llm_util.py
+    symbols:
+      - _build_planner_intent_plan
+      - planner strategy router
+    change_type: modify
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py
+    rollback_point: PLANNER_STRUCTURED_STRATEGY=legacy_json_object
+
+  - task_id: T-11
+    feature_id: P2-02
+    phase: Phase-1
+    file_paths:
+      - app/ai/workflow/multi_agent_graph.py
+    symbols:
+      - _infer_model_intent_plan_via_tool_call
+    change_type: add
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py
+    rollback_point: PLANNER_DISABLE_TOOL_CALL=true
+
+  - task_id: T-12
+    feature_id: P2-03
+    phase: Phase-2
+    file_paths:
+      - app/ai/workflow/multi_agent_graph.py
+    symbols:
+      - _infer_model_intent_plan_via_json_object
+    change_type: modify
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py
+    rollback_point: PLANNER_DISABLE_JSON_OBJECT=true
+
+  - task_id: T-13
+    feature_id: P2-04
+    phase: Phase-2
+    file_paths:
+      - app/ai/workflow/multi_agent_graph.py
+    symbols:
+      - _infer_model_intent_plan_via_text_parse
+      - _IntentPlanModel
+    change_type: add
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py
+    rollback_point: PLANNER_DISABLE_TEXT_PARSE=true
+
+  - task_id: T-14
+    feature_id: P2-05
+    phase: Phase-3
+    file_paths:
+      - app/ai/workflow/multi_agent_graph.py
+      - app/services/chat_service.py
+    symbols:
+      - fallback_meta.reason
+      - planner_reason_code
+    change_type: modify
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py
+    rollback_point: PLANNER_REASON_CODE_VERBOSE=false
+```
+
+### 12.4 planning_contract（D+B 覆盖版）
+
+```yaml
+planning_contract:
+  execution_mode: serial
+  card_order: [C01, C02, C03, C04, C05, C06, C07, C08, G01, G02, G03]
+  strict_single_active_card: true
+  auto_done_policy:
+    implementation-card: hard_gate
+    inspection/question-card: policy_gate
+  gate_contract:
+    mode: as_cards
+    gate_ids: [G01, G02, G03]
+    depends_on:
+      G01: [C05]
+      G02: [G01]
+      G03: [C08]
+  cards:
+    - card_id: C06
+      wave: P2
+      feature_ids: [P2-01, P2-02]
+      depends_on: [C05]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - strategy router pass
+        - tool call primary pass
+      acceptance_checks:
+        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py"
+        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"
+      evidence_entry: "planner strategy + tool_call test evidence"
+
+    - card_id: C07
+      wave: P2
+      feature_ids: [P2-03, P2-04]
+      depends_on: [C06]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - json_object fallback pass
+        - text_parse fallback pass
+      acceptance_checks:
+        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py"
+        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"
+      evidence_entry: "planner fallback-chain test evidence"
+
+    - card_id: C08
+      wave: P2
+      feature_ids: [P2-05]
+      depends_on: [C07]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - reason_code normalization pass
+      acceptance_checks:
+        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"
+      evidence_entry: "reason_code contract evidence"
+
+    - card_id: G03
+      wave: G-3
+      feature_ids: [P2-06]
+      depends_on: [C08]
+      task_mode: inspection-card
+      merge_required: false
+      done_gate:
+        - docs sync and guard pass
+      acceptance_checks:
+        - "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      evidence_entry: "D+B docs and guard output"
+```
+
+### 12.5 implementation_readiness
+
+```yaml
+implementation_readiness:
+  implementation_ready: true
+  blocked_by: []
+  next_step: /jjk-vkplan
+```

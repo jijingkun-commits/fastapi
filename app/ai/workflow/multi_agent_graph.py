@@ -63,6 +63,11 @@ from app.ai.protocol import (
 )
 from app.ai.prompts.agent_prompts import SUPERVISOR_PROMPT
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
+from app.ai.contracts.delivery_contract_validators import (
+    build_contract_validation_meta,
+    validate_coverage_report_contract,
+    validate_intent_plan_contract,
+)
 
 # Schema 路由增强（借鉴 TypeAgent Dispatcher）
 from app.ai.schema.agent_schema import route_by_schema
@@ -226,6 +231,7 @@ class _IntentGoalModel(BaseModel):
     title: str = Field(default="")
     must_answer: bool = Field(default=True)
     confidence: float = Field(default=0.7)
+    allowed_agents: list[str] = Field(default_factory=list)
 
 
 class _IntentPlanModel(BaseModel):
@@ -269,6 +275,22 @@ def _is_delivery_orchestrator_v2_enabled() -> bool:
 def _is_sse_delivery_events_v2_enabled() -> bool:
     """SSE 交付事件开关（默认开启）。"""
     return _is_feature_flag_enabled("ENABLE_SSE_DELIVERY_EVENTS_V2", True)
+
+
+def _is_router_contract_guard_enabled() -> bool:
+    """Router 合同门禁开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_ROUTER_CONTRACT_GUARD", True)
+
+
+def _is_coverage_gate_enforced() -> bool:
+    """Coverage Gate 强门禁开关（默认开启）。"""
+    return _is_feature_flag_enabled("ENABLE_COVERAGE_GATE_ENFORCED", True)
+
+
+def _resolve_coverage_gate_max_retries() -> int:
+    """读取 Coverage Gate 最大补齐轮次（默认 2，允许 0 表示不重试）。"""
+    raw = os.getenv("COVERAGE_GATE_MAX_RETRIES")
+    return _parse_non_negative_int(raw, default=2)
 
 
 def _is_plugin_registry_error(error_text: str) -> bool:
@@ -428,6 +450,63 @@ def _default_goal_title(kind: str) -> str:
     return "问题回复"
 
 
+def _default_allowed_agents_for_goal_kind(kind: str) -> list[str]:
+    """按目标类型返回默认允许委派专家。"""
+    bucket = _goal_kind_bucket(kind)
+    if bucket == "todo":
+        return [AgentType.TODO]
+    if bucket == "data":
+        return [AgentType.DATA]
+    return []
+
+
+def _normalize_goal_allowed_agents(raw_allowed_agents: Any, kind: str) -> list[str]:
+    """规范化 allowed_agents，缺省时按 kind 自动补齐。"""
+    values: list[str] = []
+    if isinstance(raw_allowed_agents, (list, tuple, set)):
+        values = [str(item or "").strip() for item in raw_allowed_agents]
+    elif isinstance(raw_allowed_agents, str):
+        values = [raw_allowed_agents.strip()]
+
+    valid_targets = set(WORKFLOW_AGENT_NODE_BY_TYPE.keys())
+    normalized: list[str] = []
+    for value in values:
+        if not value or value not in valid_targets:
+            continue
+        if value not in normalized:
+            normalized.append(value)
+
+    if normalized:
+        return normalized
+    return _default_allowed_agents_for_goal_kind(kind)
+
+
+def _normalize_intent_plan_allowed_agents(intent_plan: Dict[str, Any]) -> Dict[str, Any]:
+    """对 intent_plan 的每个 goal 补齐 allowed_agents。"""
+    normalized_plan = dict(intent_plan or {})
+    goals = list(normalized_plan.get("goals") or [])
+    normalized_goals: list[Dict[str, Any]] = []
+
+    for goal in goals:
+        if not isinstance(goal, dict):
+            continue
+        normalized_goal = dict(goal)
+        kind = str(normalized_goal.get("kind") or "general.reply")
+        normalized_goal["allowed_agents"] = _normalize_goal_allowed_agents(
+            normalized_goal.get("allowed_agents"),
+            kind,
+        )
+        normalized_goals.append(normalized_goal)
+
+    if normalized_goals:
+        normalized_goals = sorted(
+            normalized_goals,
+            key=lambda item: int(item.get("order") or 0),
+        )
+    normalized_plan["goals"] = normalized_goals
+    return normalized_plan
+
+
 def _build_model_intent_plan_prompt(user_text: str) -> str:
     """构建模型意图规划提示词。"""
     return (
@@ -460,6 +539,7 @@ def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]
                     "title": "问题回复",
                     "must_answer": True,
                     "confidence": 0.5,
+                    "allowed_agents": [],
                 }
             ],
         }
@@ -506,6 +586,7 @@ def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]
                 "title": title,
                 "must_answer": bool(item.must_answer),
                 "confidence": confidence,
+                "allowed_agents": _normalize_goal_allowed_agents(item.allowed_agents, kind),
             }
         )
 
@@ -518,15 +599,18 @@ def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]
                 "title": "问题回复",
                 "must_answer": True,
                 "confidence": 0.5,
+                "allowed_agents": [],
             }
         ]
 
-    return {
+    return _normalize_intent_plan_allowed_agents(
+        {
         "version": 1,
         "source": "model_primary",
         "user_query": user_text,
         "goals": normalized_goals,
-    }
+        }
+    )
 
 
 def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
@@ -582,22 +666,26 @@ def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
     goals = sorted(goals, key=lambda item: int(item.get("order_hint", 10**9)))
     normalized_goals: list[Dict[str, Any]] = []
     for index, goal in enumerate(goals, start=1):
+        goal_kind = str(goal.get("kind") or "general.reply")
         normalized_goals.append(
             {
                 "goal_id": f"GOAL-{index:02d}",
                 "order": index,
-                "kind": goal["kind"],
+                "kind": goal_kind,
                 "title": goal["title"],
                 "must_answer": bool(goal.get("must_answer", True)),
+                "allowed_agents": _normalize_goal_allowed_agents(goal.get("allowed_agents"), goal_kind),
             }
         )
 
-    return {
-        "version": 1,
-        "source": "heuristic",
-        "user_query": user_text,
-        "goals": normalized_goals,
-    }
+    return _normalize_intent_plan_allowed_agents(
+        {
+            "version": 1,
+            "source": "heuristic",
+            "user_query": user_text,
+            "goals": normalized_goals,
+        }
+    )
 
 
 def _build_planner_intent_plan(
@@ -613,27 +701,31 @@ def _build_planner_intent_plan(
 
     heuristic_plan = _infer_initial_intent_plan(state)
     if normalized_mode == "heuristic_only":
-        return {
-            "version": heuristic_plan.get("version", 1),
-            "source": "heuristic_only",
-            "user_query": heuristic_plan.get("user_query", ""),
-            "goals": list(heuristic_plan.get("goals") or []),
-        }
+        return _normalize_intent_plan_allowed_agents(
+            {
+                "version": heuristic_plan.get("version", 1),
+                "source": "heuristic_only",
+                "user_query": heuristic_plan.get("user_query", ""),
+                "goals": list(heuristic_plan.get("goals") or []),
+            }
+        )
 
     try:
-        return _infer_model_intent_plan(state, llm)
+        return _normalize_intent_plan_allowed_agents(_infer_model_intent_plan(state, llm))
     except Exception as exc:
         logger.warning("planner_model_fallback_to_heuristic: %s", exc)
-        return {
-            "version": heuristic_plan.get("version", 1),
-            "source": "heuristic_fallback",
-            "user_query": heuristic_plan.get("user_query", ""),
-            "goals": list(heuristic_plan.get("goals") or []),
-            "fallback_meta": {
-                "reason": f"planner_model_error:{type(exc).__name__}",
-                "detail": str(exc)[:200],
-            },
-        }
+        return _normalize_intent_plan_allowed_agents(
+            {
+                "version": heuristic_plan.get("version", 1),
+                "source": "heuristic_fallback",
+                "user_query": heuristic_plan.get("user_query", ""),
+                "goals": list(heuristic_plan.get("goals") or []),
+                "fallback_meta": {
+                    "reason": f"planner_model_error:{type(exc).__name__}",
+                    "detail": str(exc)[:200],
+                },
+            }
+        )
 
 
 def _goal_kind_bucket(kind: str) -> str:
@@ -776,6 +868,7 @@ def _ensure_intent_plan_covers_runtime(
                 "kind": kind,
                 "title": title,
                 "must_answer": True,
+                "allowed_agents": _default_allowed_agents_for_goal_kind(kind),
             }
         )
 
@@ -800,6 +893,7 @@ def _ensure_intent_plan_covers_runtime(
                 "kind": "general.reply",
                 "title": "问题回复",
                 "must_answer": True,
+                "allowed_agents": [],
             }
         ]
 
@@ -808,7 +902,7 @@ def _ensure_intent_plan_covers_runtime(
         plan["version"] = 1
     if "source" not in plan:
         plan["source"] = "runtime"
-    return plan
+    return _normalize_intent_plan_allowed_agents(plan)
 
 
 def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
@@ -834,6 +928,7 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
     for item in trace:
         target_agent = str(item.get("target_agent") or "")
+        goal_id = str(item.get("goal_id") or "")
         result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=220)
         task_description = _normalize_tool_summary_text(item.get("task_description"), limit=120)
 
@@ -843,6 +938,7 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
             deliverables.append(
                 {
                     "kind": "todo.query",
+                    "goal_id": goal_id,
                     "status": "success",
                     "summary": summary,
                     "task_description": task_description,
@@ -857,6 +953,7 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
             deliverables.append(
                 {
                     "kind": "data.query",
+                    "goal_id": goal_id,
                     "status": "success",
                     "summary": summary,
                     "task_description": task_description,
@@ -869,6 +966,7 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
             deliverables.append(
                 {
                     "kind": "general.reply",
+                    "goal_id": goal_id,
                     "status": "success",
                     "summary": result_excerpt,
                     "task_description": task_description,
@@ -895,10 +993,19 @@ def _match_goals_with_deliverables(
         for idx, deliverable in enumerate(deliverables):
             if idx in used_indexes:
                 continue
-            deliverable_bucket = _goal_kind_bucket(str(deliverable.get("kind") or ""))
-            if goal_bucket == deliverable_bucket:
+            deliverable_goal_id = str(deliverable.get("goal_id") or "")
+            if goal_id and deliverable_goal_id and deliverable_goal_id == goal_id:
                 matched_idx = idx
                 break
+
+        if matched_idx is None:
+            for idx, deliverable in enumerate(deliverables):
+                if idx in used_indexes:
+                    continue
+                deliverable_bucket = _goal_kind_bucket(str(deliverable.get("kind") or ""))
+                if goal_bucket == deliverable_bucket:
+                    matched_idx = idx
+                    break
 
         if matched_idx is None and goal_bucket == "general":
             for idx, deliverable in enumerate(deliverables):
@@ -1019,6 +1126,39 @@ def _render_final_answer(
         lines.append("以上问题已全部覆盖。")
 
     return "\n".join(lines)
+
+
+def _render_coverage_blocked_message(
+    intent_plan: Dict[str, Any],
+    coverage_report: Dict[str, Any],
+) -> str:
+    """渲染 coverage 未通过时的用户可见阻塞说明。"""
+    goals = sorted(
+        list(intent_plan.get("goals") or []),
+        key=lambda item: int(item.get("order") or 0),
+    )
+    missing_goals = list(coverage_report.get("missing_goals") or [])
+    missing_ids = {str(item.get("goal_id") or "") for item in missing_goals}
+
+    pending_titles: list[str] = []
+    for goal in goals:
+        goal_id = str(goal.get("goal_id") or "")
+        if goal_id in missing_ids:
+            pending_titles.append(str(goal.get("title") or goal.get("kind") or "未命名目标"))
+
+    if not pending_titles:
+        pending_titles = [
+            str(item.get("title") or item.get("goal_id") or "未命名目标")
+            for item in missing_goals
+        ]
+
+    if pending_titles:
+        return (
+            "当前还有问题未补齐："
+            f"{'、'.join(pending_titles)}。"
+            "为避免给出不完整结论，我先不结束本轮答复，请继续授权我补齐这些部分。"
+        )
+    return "当前答复仍不完整。为避免误导，我先不输出结论，请允许我继续补齐后再返回。"
 
 
 def _augment_data_handoff_payload(
@@ -1451,6 +1591,148 @@ def _normalize_handoff_batch_for_supervisor(
     return normalized
 
 
+def _build_router_dispatch_goal_queue(intent_plan: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """按 intent_plan.order 构建 Router 待委派目标队列。"""
+    goals = sorted(
+        [goal for goal in list((intent_plan or {}).get("goals") or []) if isinstance(goal, dict)],
+        key=lambda item: int(item.get("order") or 0),
+    )
+    queue: list[Dict[str, Any]] = []
+    for goal in goals:
+        if not bool(goal.get("must_answer", True)):
+            continue
+        kind = str(goal.get("kind") or "general.reply")
+        allowed_agents = _normalize_goal_allowed_agents(goal.get("allowed_agents"), kind)
+        if not allowed_agents:
+            continue
+        queue.append(
+            {
+                "goal_id": str(goal.get("goal_id") or ""),
+                "order": int(goal.get("order") or 0),
+                "kind": kind,
+                "title": str(goal.get("title") or kind or "未命名目标"),
+                "allowed_agents": allowed_agents,
+            }
+        )
+    return queue
+
+
+def _build_router_blocked_entry(
+    *,
+    handoff: Dict[str, Any],
+    reason: str,
+    goal: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构造 Router 合同门禁阻塞条目。"""
+    target_agent = str(handoff.get("target_agent") or "")
+    blocked = {
+        "reason": reason,
+        "target_agent": target_agent or "unknown",
+        "task_description": str(handoff.get("task_description") or ""),
+    }
+    if goal:
+        blocked["goal_id"] = str(goal.get("goal_id") or "")
+        blocked["goal_title"] = str(goal.get("title") or "")
+        blocked["allowed_agents"] = list(goal.get("allowed_agents") or [])
+    return blocked
+
+
+def _apply_router_contract_guard(
+    handoffs: Sequence[Dict[str, Any]],
+    *,
+    state: MultiAgentState,
+) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]], list[Dict[str, Any]]]:
+    """按 allowed_agents 门禁筛选 handoff，并返回阻塞原因。"""
+    normalized_handoffs = [dict(item) for item in handoffs if isinstance(item, dict)]
+    if not normalized_handoffs:
+        return [], [], []
+
+    if not _is_router_contract_guard_enabled():
+        return normalized_handoffs, [], []
+
+    dispatch_queue = _build_router_dispatch_goal_queue(state.get("intent_plan"))
+    if not dispatch_queue:
+        return normalized_handoffs, [], []
+
+    accepted: list[Dict[str, Any]] = []
+    blocked: list[Dict[str, Any]] = []
+    pending_goals = [dict(goal) for goal in dispatch_queue]
+
+    for handoff in normalized_handoffs:
+        target_agent = str(handoff.get("target_agent") or "").strip()
+        if not target_agent:
+            blocked.append(
+                _build_router_blocked_entry(
+                    handoff=handoff,
+                    reason="invalid_target_agent",
+                )
+            )
+            continue
+
+        if not pending_goals:
+            blocked.append(
+                _build_router_blocked_entry(
+                    handoff=handoff,
+                    reason="no_pending_goal",
+                )
+            )
+            continue
+
+        current_goal = pending_goals[0]
+        allowed_agents = list(current_goal.get("allowed_agents") or [])
+        if target_agent not in allowed_agents:
+            blocked.append(
+                _build_router_blocked_entry(
+                    handoff=handoff,
+                    reason="target_not_in_allowed_agents",
+                    goal=current_goal,
+                )
+            )
+            continue
+
+        enriched_handoff = dict(handoff)
+        enriched_handoff["goal_id"] = str(current_goal.get("goal_id") or "")
+        enriched_handoff["route_decision"] = {
+            "goal_id": str(current_goal.get("goal_id") or ""),
+            "target_agent": target_agent,
+            "dispatch_reason": "intent_plan_allowed_agents",
+            "priority": int(current_goal.get("order") or 0),
+            "blocked_by": [],
+        }
+        accepted.append(enriched_handoff)
+        pending_goals.pop(0)
+
+    return accepted, blocked, pending_goals
+
+
+def _build_router_blocked_system_context(
+    *,
+    state: MultiAgentState,
+    pending_goals: Sequence[Dict[str, Any]],
+) -> str:
+    """构造 Router 门禁阻塞后的补齐提示上下文。"""
+    missing_goals = [
+        {
+            "goal_id": str(goal.get("goal_id") or ""),
+            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
+            "reason": "router_contract_blocked",
+        }
+        for goal in pending_goals
+    ]
+    if not missing_goals:
+        return str(state.get("system_context") or "")
+
+    intent_plan = state.get("intent_plan")
+    if not isinstance(intent_plan, dict):
+        return str(state.get("system_context") or "")
+
+    return _build_multi_intent_recovery_system_context(
+        str(state.get("system_context") or ""),
+        intent_plan,
+        missing_goals,
+    )
+
+
 def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bool:
     """决定是否抑制专家节点文本直出（复合任务改为最终统一汇总）。"""
     if node_name == "data_expert":
@@ -1549,6 +1831,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
             execution_trace.append(
                 {
                     "target_agent": pending_handoff.get("target_agent"),
+                    "goal_id": pending_handoff.get("goal_id"),
                     "task_description": pending_handoff.get("task_description"),
                     "result_excerpt": _extract_latest_visible_ai_excerpt(turn_messages),
                 }
@@ -1690,6 +1973,32 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
         "handoff_queue": handoff_queue,
         "completed_handoffs": completed_handoffs,
         "handoff_execution_trace": execution_trace,
+    }
+
+
+def _resolve_coverage_gate_route(
+    *,
+    state: MultiAgentState,
+    coverage_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    """决定 coverage_gate 下一跳与补齐轮次。"""
+    pass_flag = bool(coverage_report.get("pass"))
+    if pass_flag or not _is_coverage_gate_enforced():
+        return {
+            "route": "final_composer",
+            "coverage_retry_count": 0,
+            "retry_exhausted": False,
+        }
+
+    previous_retry = _parse_non_negative_int(state.get("coverage_retry_count"), default=0)
+    coverage_retry_count = previous_retry + 1
+    max_retries = _resolve_coverage_gate_max_retries()
+    retry_exhausted = coverage_retry_count > max_retries
+    return {
+        "route": "postprocess" if retry_exhausted else "supervisor",
+        "coverage_retry_count": coverage_retry_count,
+        "retry_exhausted": retry_exhausted,
+        "max_retries": max_retries,
     }
 
 
@@ -2041,9 +2350,6 @@ def _dispatch_values_mode_chunk(
                 delta_messages=delta_messages_for_scan,
                 state=ctx.state,
             )
-            first_handoff = normalized_batch[0]
-            remaining_handoffs = normalized_batch[1:]
-            target_agent = first_handoff.get("target_agent")
             direct_findings = _build_direct_lookup_findings(delta_messages_for_scan)
             has_direct_lookup = bool(direct_findings)
             planned_goal_count = _count_must_answer_goals(ctx.state.get("intent_plan"))
@@ -2052,23 +2358,93 @@ def _dispatch_values_mode_chunk(
                 has_direct_lookup=has_direct_lookup,
                 state=ctx.state,
             )
-            logger.info(
-                "[%s] values模式检测到 handoff_batch: total=%d, first_target=%s, direct_findings=%d, planned_goals=%d, multi_intent=%s",
-                ctx.node_name,
-                len(normalized_batch),
-                target_agent,
-                len(direct_findings),
-                planned_goal_count,
-                enable_multi_intent_mode,
+            guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
+                normalized_batch,
+                state=ctx.state,
             )
-            handoff_return = _build_streaming_handoff_return(
-                final_state=final_state,
-                delta_messages=delta_messages_for_scan,
-                handoff_data=first_handoff,
-                handoff_queue=remaining_handoffs,
-                multi_intent_mode=enable_multi_intent_mode,
+
+            existing_meta = (
+                final_state.get("delivery_meta")
+                if isinstance(final_state.get("delivery_meta"), dict)
+                else ctx.state.get("delivery_meta")
             )
-            return input_message_count, handoff_return
+            delivery_meta = dict(existing_meta or {})
+            if blocked_handoffs:
+                blocked_goal_ids = [
+                    str(item.get("goal_id") or "")
+                    for item in blocked_handoffs
+                    if str(item.get("goal_id") or "")
+                ]
+                delivery_meta.update(
+                    {
+                        "router_contract_blocked_count": len(blocked_handoffs),
+                        "router_contract_blocked": blocked_handoffs,
+                        "router_contract_blocked_goal_ids": blocked_goal_ids,
+                    }
+                )
+                emit_status(
+                    ctx.writer,
+                    message=f"路由门禁拦截 {len(blocked_handoffs)} 条无效委派，正在按目标合同重试。",
+                    node=ctx.node_name,
+                )
+            final_state["delivery_meta"] = delivery_meta
+
+            if not guarded_batch and blocked_handoffs:
+                pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in pending_goals]
+                if pending_titles:
+                    final_state["system_context"] = _build_router_blocked_system_context(
+                        state=ctx.state,
+                        pending_goals=pending_goals,
+                    )
+                    final_state["delivery_meta"] = {
+                        **dict(final_state.get("delivery_meta") or {}),
+                        "pending_goal_titles": pending_titles,
+                        "pending_goal_ids": [
+                            str(goal.get("goal_id") or "")
+                            for goal in pending_goals
+                            if str(goal.get("goal_id") or "")
+                        ],
+                    }
+                final_state["multi_intent_mode"] = True
+                return input_message_count, None
+
+            if not guarded_batch:
+                logger.info(
+                    "[%s] values模式检测到 handoff，但标准化后无可执行委派，回退到常规消息分发。",
+                    ctx.node_name,
+                )
+            else:
+                first_handoff = guarded_batch[0]
+                remaining_handoffs = guarded_batch[1:]
+                target_agent = str(first_handoff.get("target_agent") or "unknown")
+                existing_decisions = final_state.get("route_decisions")
+                if not isinstance(existing_decisions, list):
+                    existing_decisions = list(ctx.state.get("route_decisions") or [])
+                accepted_decisions = [
+                    dict(item.get("route_decision") or {})
+                    for item in guarded_batch
+                    if isinstance(item.get("route_decision"), dict)
+                ]
+                final_state["route_decisions"] = list(existing_decisions) + accepted_decisions
+                logger.info(
+                    "[%s] values模式检测到 handoff_batch: total=%d, accepted=%d, blocked=%d, first_target=%s, direct_findings=%d, planned_goals=%d, multi_intent=%s",
+                    ctx.node_name,
+                    len(normalized_batch),
+                    len(guarded_batch),
+                    len(blocked_handoffs),
+                    target_agent,
+                    len(direct_findings),
+                    planned_goal_count,
+                    enable_multi_intent_mode,
+                )
+                handoff_return = _build_streaming_handoff_return(
+                    final_state=final_state,
+                    delta_messages=delta_messages_for_scan,
+                    handoff_data=first_handoff,
+                    handoff_queue=remaining_handoffs,
+                    multi_intent_mode=enable_multi_intent_mode,
+                )
+                return input_message_count, handoff_return
 
     _emit_kb_images_from_delta_messages(
         delta_messages=delta_messages_for_scan,
@@ -2909,6 +3285,9 @@ async def create_multi_agent_graph(
             "coverage_report": None,
             "final_answer": None,
             "delivery_meta": {},
+            "coverage_retry_count": 0,
+            "coverage_gate_route": "final_composer",
+            "route_decisions": [],
 
             # === 稳态恢复观测 ===
             "runtime_recovery_state": _build_runtime_recovery_state(
@@ -2926,7 +3305,8 @@ async def create_multi_agent_graph(
             return {}
 
         planner_mode = str(state.get("intent_mode") or "model_primary")
-        intent_plan = _build_planner_intent_plan(state, llm=planner_llm, mode=planner_mode)
+        raw_intent_plan = _build_planner_intent_plan(state, llm=planner_llm, mode=planner_mode)
+        intent_plan, plan_valid, plan_error = validate_intent_plan_contract(raw_intent_plan)
         source = str(intent_plan.get("source") or "unknown")
         fallback_meta = intent_plan.get("fallback_meta") if isinstance(intent_plan.get("fallback_meta"), dict) else {}
         fallback_reason = str(fallback_meta.get("reason") or "").strip()
@@ -2945,7 +3325,17 @@ async def create_multi_agent_graph(
         if _is_sse_delivery_events_v2_enabled():
             emit_plan_ready(writer, intent_plan, node="planner")
 
-        return {"intent_plan": intent_plan}
+        return {
+            "intent_plan": intent_plan,
+            "coverage_retry_count": 0,
+            "coverage_gate_route": "final_composer",
+            "route_decisions": [],
+            "delivery_meta": build_contract_validation_meta(
+                existing_meta=state.get("delivery_meta") if isinstance(state.get("delivery_meta"), dict) else {},
+                intent_plan_valid=plan_valid,
+                intent_plan_error=plan_error,
+            ),
+        }
 
     # 9. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
@@ -3008,21 +3398,96 @@ async def create_multi_agent_graph(
 
         intent_plan = _ensure_intent_plan_covers_runtime(state)
         deliverables = _build_delivery_artifacts(state)
-        coverage_report = _compute_coverage_report(intent_plan, deliverables)
+        raw_coverage_report = _compute_coverage_report(intent_plan, deliverables)
+        coverage_report, coverage_valid, coverage_error = validate_coverage_report_contract(raw_coverage_report)
+        route_state = _resolve_coverage_gate_route(state=state, coverage_report=coverage_report)
+        route = str(route_state.get("route") or "final_composer")
+        missing_goals = list(coverage_report.get("missing_goals") or [])
+        missing_goal_ids = [str(item.get("goal_id") or "") for item in missing_goals]
+        missing_goal_titles = [
+            str(item.get("title") or item.get("goal_id") or "未命名目标")
+            for item in missing_goals
+        ]
 
         writer = get_stream_writer()
-        emit_status(
-            writer,
-            message="已完成问题覆盖检查，正在整理最终答复。",
-            node="coverage_gate",
-        )
+        if route == "final_composer":
+            emit_status(
+                writer,
+                message="已完成问题覆盖检查，正在整理最终答复。",
+                node="coverage_gate",
+            )
+        elif route == "supervisor":
+            emit_status(
+                writer,
+                message="检测到未覆盖目标，已返回执行层继续补齐。",
+                node="coverage_gate",
+            )
+        else:
+            emit_status(
+                writer,
+                message="未覆盖目标仍未补齐，已输出缺口说明。",
+                node="coverage_gate",
+            )
         if _is_sse_delivery_events_v2_enabled():
             emit_coverage_check(writer, coverage_report, node="coverage_gate")
+
+        coverage_retry_count = _parse_non_negative_int(route_state.get("coverage_retry_count"), default=0)
+        delivery_meta = build_contract_validation_meta(
+            existing_meta=state.get("delivery_meta") if isinstance(state.get("delivery_meta"), dict) else {},
+            coverage_valid=coverage_valid,
+            coverage_error=coverage_error,
+        )
+        delivery_meta = {
+            **delivery_meta,
+            "coverage_pass": bool(coverage_report.get("pass")),
+            "pending_goal_ids": missing_goal_ids,
+            "pending_goal_titles": missing_goal_titles,
+            "coverage_retry_count": coverage_retry_count,
+            "coverage_retry_exhausted": bool(route_state.get("retry_exhausted")),
+        }
+
+        if route == "supervisor":
+            return {
+                "intent_plan": intent_plan,
+                "deliverables": deliverables,
+                "coverage_report": coverage_report,
+                "delivery_meta": delivery_meta,
+                "coverage_retry_count": coverage_retry_count,
+                "coverage_gate_route": "supervisor",
+                "evaluation": "continue",
+                "evaluation_route": "supervisor",
+                "pending_handoff": None,
+                "handoff_queue": [],
+                "system_context": _build_multi_intent_recovery_system_context(
+                    str(state.get("system_context") or ""),
+                    intent_plan,
+                    missing_goals,
+                ),
+            }
+
+        if route == "postprocess":
+            blocked_answer = _render_coverage_blocked_message(intent_plan, coverage_report)
+            emit_token(writer, blocked_answer, node="coverage_gate")
+            return {
+                "messages": [create_ai_message(blocked_answer)],
+                "intent_plan": intent_plan,
+                "deliverables": deliverables,
+                "coverage_report": coverage_report,
+                "final_answer": blocked_answer,
+                "delivery_meta": delivery_meta,
+                "coverage_retry_count": coverage_retry_count,
+                "coverage_gate_route": "postprocess",
+                "evaluation": "complete",
+                "evaluation_route": "postprocess",
+            }
 
         return {
             "intent_plan": intent_plan,
             "deliverables": deliverables,
             "coverage_report": coverage_report,
+            "delivery_meta": delivery_meta,
+            "coverage_retry_count": coverage_retry_count,
+            "coverage_gate_route": "final_composer",
         }
 
     def _final_composer_node(state: MultiAgentState) -> dict:
@@ -3033,6 +3498,27 @@ async def create_multi_agent_graph(
         intent_plan = _ensure_intent_plan_covers_runtime(state)
         deliverables = list(state.get("deliverables") or _build_delivery_artifacts(state))
         coverage_report = dict(state.get("coverage_report") or _compute_coverage_report(intent_plan, deliverables))
+        if _is_coverage_gate_enforced() and not bool(coverage_report.get("pass")):
+            blocked_answer = _render_coverage_blocked_message(intent_plan, coverage_report)
+            writer = get_stream_writer()
+            emit_status(writer, message="覆盖门禁未通过，已阻止最终结论输出。", node="final_composer")
+            emit_token(writer, blocked_answer, node="final_composer")
+            return {
+                "messages": [create_ai_message(blocked_answer)],
+                "intent_plan": intent_plan,
+                "deliverables": deliverables,
+                "coverage_report": coverage_report,
+                "final_answer": blocked_answer,
+                "delivery_meta": {
+                    **dict(state.get("delivery_meta") or {}),
+                    "coverage_pass": False,
+                    "missing_goal_count": len(coverage_report.get("missing_goals") or []),
+                    "composer_guard_blocked": True,
+                },
+                "evaluation": "complete",
+                "evaluation_route": "postprocess",
+            }
+
         final_answer = _render_final_answer(intent_plan, coverage_report)
 
         writer = get_stream_writer()
@@ -3058,9 +3544,11 @@ async def create_multi_agent_graph(
             "coverage_report": coverage_report,
             "final_answer": final_answer,
             "delivery_meta": {
+                **dict(state.get("delivery_meta") or {}),
                 "coverage_pass": bool(coverage_report.get("pass")),
                 "missing_goal_count": len(coverage_report.get("missing_goals") or []),
             },
+            "coverage_gate_route": "final_composer",
             "evaluation": "complete",
             "evaluation_route": "postprocess",
         }
@@ -3107,6 +3595,19 @@ async def create_multi_agent_graph(
         if evaluation == "continue":
             return "supervisor"
         return "postprocess"
+
+    def coverage_gate_should_continue(
+        state: MultiAgentState,
+    ) -> Literal["final_composer", "supervisor", "postprocess"]:
+        """coverage_gate 条件路由：通过后进入 composer，否则回补齐或收口。"""
+        route = str(state.get("coverage_gate_route") or "").strip()
+        if route in {"final_composer", "supervisor", "postprocess"}:
+            return route  # type: ignore[return-value]
+
+        coverage_report = state.get("coverage_report")
+        if isinstance(coverage_report, dict) and not bool(coverage_report.get("pass")) and _is_coverage_gate_enforced():
+            return "supervisor"
+        return "final_composer"
 
     # 11. 构建 StateGraph（简化架构：移除 knowledge_expert）
     workflow = StateGraph(MultiAgentState)
@@ -3230,7 +3731,15 @@ async def create_multi_agent_graph(
         }
     )
 
-    workflow.add_edge("coverage_gate", "final_composer")
+    workflow.add_conditional_edges(
+        "coverage_gate",
+        coverage_gate_should_continue,
+        {
+            "final_composer": "final_composer",
+            "supervisor": "supervisor",
+            "postprocess": "postprocess",
+        },
+    )
     workflow.add_edge("final_composer", "postprocess")
     workflow.add_edge("summarize", "postprocess")
     

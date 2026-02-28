@@ -140,6 +140,9 @@ class MultiAgentState(BaseAgentState, total=False):
     coverage_report: Dict[str, Any]     # 覆盖率检查结果
     final_answer: str                   # 唯一对外最终答复
     delivery_meta: Dict[str, Any]       # 交付元数据（排序/去重/时效统计）
+    coverage_retry_count: int           # Coverage Gate 已触发的补齐轮次
+    coverage_gate_route: str            # Coverage Gate 下一跳（supervisor/final_composer/postprocess）
+    route_decisions: List[Dict[str, Any]]  # Router 合同化路由决策快照
 
 
 class TodoAgentState(BaseAgentState, total=False):

@@ -62,6 +62,8 @@ api_router.include_router(admin_overview_router, dependencies=[Depends(get_admin
 # 开发工具路由：仅管理员
 from app.api.v1.endpoints.dev_codex_api import router as dev_codex_router
 api_router.include_router(dev_codex_router, dependencies=[Depends(get_admin_user)])
-
+# 文档记忆运维路由：仅管理员
+from app.api.v1.endpoints.memory_admin_api import router as memory_admin_router
+api_router.include_router(memory_admin_router, dependencies=[Depends(get_admin_user)])
 
 

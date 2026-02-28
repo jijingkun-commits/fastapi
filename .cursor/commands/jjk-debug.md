@@ -1,99 +1,145 @@
 ---
-description: 问题排查：重现 -> 定位 -> 修复 -> 验证 -> 预防
+description: 问题修复入口（结合 systematic-debugging）：根因定位 -> 最小修复 -> 证据验证
 ---
 
 > 参考规则: @dual-database
 
-# 问题排查工作流 (Debug Workflow)
+# 问题修复 (Debug)
 
-系统化地排查和修复 Bug，确保问题彻底解决且不再复发。
-
-核心原则：**先重现，再修复** (Reproduce first, fix later)。
+`/jjk-debug` 是 `jjk-*` 体系里的修复入口，目标是**先根因后修复**，并以验证证据收口。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
+
+## 与 Superpowers / OMX 的分工（强制）
+
+1. `systematic-debugging`：负责根因调查、假设验证、最小修复策略。
+2. `test-driven-development`：负责回归测试先行（先失败后修复）。
+3. `verification-before-completion`：负责完成前证据校验。
+4. `team`（OMX）：负责大范围故障并行排查与修复分片。
+5. `/jjk-debug`：负责阶段编排、输入输出契约、文档回填与交付口径。
+
+约束：
+
+1. 禁止在 `/jjk-debug` 复制上述 skills 的完整正文。
+2. 插件可用时优先调用；插件不可用时必须显式 fallback，不得静默降级。
+3. `/jjk-debug` 是“可改码修复”；若只做诊断不改码，必须回退 `/jjk-pc`。
+
+## 跨 IDE 调用方式
+
+1. Cursor / Claude Code：`/jjk-debug`
+2. Codex：`/prompts:jjk-debug`
+
+> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
+
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-debug` 的模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_debug_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`
+
+若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 
 ## 何时使用
 
 | 场景 | 推荐命令 |
-|------|----------|
-| 遇到 Bug 或异常行为 | `/jjk-debug` ✅ |
-| 仅诊断不改码 | `/jjk-pc` |
-| 一次性完成审查+测试+验收 | `/jjk-verify` |
-| 小改动快速修复 | `/jjk-quick` |
+|---|---|
+| 遇到 Bug，需要直接修复并回归验证 | `/jjk-debug` ✅ |
+| 仅诊断并给修复计划，不改代码 | `/jjk-pc` |
+| 已有可执行计划，按任务落地 | `/jjk-imp` |
+| 修复后统一验收 | `/jjk-verify` |
 
 ---
 
-## 阶段 1: 定义与重现 (Define & Reproduce)
+## 执行流程（强制顺序）
 
-1. **收集证据**:
-    - `@Logs`: 粘贴报错日志
-    - `@Context`: 提供相关代码
+### 0) 先探索项目上下文（强制）
 
-2. **最小重现 (Minimal Reproduction)**:
-    - 编写独立脚本 `reproduce_issue.py` 或测试用例
-    - **目标**: 能够稳定触发 Bug
-    - *如果无法重现，就无法确认修复*
+至少检查：
 
-3. **对齐需求/测试**:
-    - 需求文档：`docs/产品文档/<模块>需求.md`
-    - 测试案例：`docs/开发文档/测试管理/<模块>测试案例.md`
+1. 相关日志、报错栈、触发路径。
+2. 最近相关改动与可疑提交。
+3. 相关需求/测试/架构文档与现有监控信息。
 
-## 阶段 2: 分析与定位 (Analyze & RCA)
+### 0.5) 大任务自动启用 Team（强制判定）
 
-1. **假设驱动**: 提出假设 -> 验证假设
-2. **日志分析**:
-    - 应用日志: `tail -n 100 logs/assistant.log`
-    - 容器日志: `docker compose logs postgres`
-3. **数据库分析**:
-    - `chat_db`（主应用库）: 可使用 MCP Postgres 查询（默认 `DATABASE_URL`）
-    - `data_db`（分析库，只读）: 必须通过 `ANALYTICS_DATABASE_URL` 对应脚本链路查询，避免误连主库
+`/jjk-team-debug` 不再作为主入口。
+统一由 `/jjk-debug` 在大任务时自动升级 Team 修复模式。
 
-## 阶段 3: 修复与验证 (Fix & Verify)
+触发条件（满足任一即可）：
 
-1. **实施修复**: 修改代码
-2. **验证修复**: 再次运行 `reproduce_issue.py`，确保 Bug 消失
-3. **回归测试**: 运行相关模块的测试，确保没引入新 Bug
+1. 涉及 `>= 3` 个模块/服务；
+2. 同时涉及代码、数据库、外部网关/依赖两类以上边界；
+3. 待验证根因假设 `>= 3`；
+4. 需要并行比对多个环境（dev/stage/prod）。
 
-## 阶段 4: 预防措施 (Prevention)
+执行策略：
 
-> 借鉴：防止类似问题再次发生
+1. **有 Team 能力时**：并行收集证据与验证假设，Leader 统一汇总根因与修复方案。
+2. **无 Team 能力时**：降级为单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-**Checklist**:
-- [ ] 是否需要添加输入验证？
-- [ ] 是否需要补充单元测试覆盖此场景？
-- [ ] 是否需要添加日志便于未来排查？
-- [ ] 是否存在类似的代码模式需要一并修复？
+### 1) 根因调查（先于修复，强制）
 
-## 阶段 5: 记录与沉淀 (Record)
+1. 可用 `systematic-debugging` 时，必须先完成 root cause 调查再修复。
+2. 不可用时输出 `SYSTEMATIC_DEBUGGING_UNAVAILABLE_FALLBACK`，但仍需遵守“先调查后改码”。
+3. 若无法稳定重现，输出 `REPRO_NOT_STABLE` 并补充观测计划，禁止盲修。
 
-1. **补充测试用例**: 将 `reproduce_issue.py` 转为永久测试
-2. **更新文档**:
-    - 测试案例文档与追溯矩阵
-    - 若是逻辑变更，更新需求文档与相关设计文档
+### 2) 回归测试先行（强制）
 
-## 阶段 6: 自动文档同步 (Auto Doc Sync)
+1. 可用 `test-driven-development` 时，必须先写失败回归测试再改码。
+2. 不可用时输出 `TDD_UNAVAILABLE_FALLBACK`，至少补最小复现测试并先验证失败。
+3. 禁止“先改后补测”作为默认路径。
 
-> 如果修复涉及以下变更，**自动按规范更新**对应文档：
+### 3) 最小修复与实现约束（强制）
 
-**API 变更** -> 更新 `docs/API文档/接口文档.md`：
-```markdown
-## POST /api/v1/xxx
-简要描述
-### 请求 / 响应 / 错误码
-```
+1. 每次仅针对一个根因假设落最小修复。
+2. 禁止打包多项无关修复或顺手重构。
+3. 若修复过程中发现上游设计问题，应标记 `DEBUG_ARCH_RISK_DETECTED`，并提示回到 `/jjk-plan` 做结构修订。
 
-**数据库变更** -> 更新 `docs/开发文档/架构设计/数据库设计.md`：
-```markdown
-### 表名: t_xxx
-| 字段 | 类型 | 约束 | 说明 |
-```
+### 4) 验证与证据收口（强制）
 
-**配置变更** -> 更新 `docs/开发文档/快速入门/配置说明.md`
+1. 必须执行：复现测试 + 受影响回归测试 + 最小验证命令。
+2. 可用 `verification-before-completion` 时，必须遵循其证据优先原则。
+3. 不可用时输出 `VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`，并手工附命令结果证据。
+4. 无新鲜命令证据，禁止宣称“修复完成”。
+
+### 5) 文档回填（强制）
+
+命中以下条件时必须同步文档：
+
+1. API 变更 -> `docs/API文档/接口文档.md`
+2. 数据库变更 -> `docs/开发文档/架构设计/数据库设计.md`
+3. 配置变更 -> `docs/开发文档/快速入门/配置说明.md` + `.env.example`
+4. 测试行为变更 -> `docs/开发文档/测试管理/测试用例库.md`
+
+### 6) 交付产物（强制）
+
+必须输出调试交付文档：
+
+`docs/内部参考/迭代需求/debug_report_<topic>.md`
+
+最小内容：
+
+1. 问题现象与影响范围
+2. 根因证据链（含被排除假设）
+3. 修复内容（文件/符号/变更摘要）
+4. 验证命令与结果（含失败->通过过程）
+5. 风险、回滚点与后续建议
+
+建议结构见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_debug_templates.md`。  
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`。
 
 ---
 
-## 如何使用
+## 禁止项（强制）
 
-```
-/jjk-debug 生产环境出现 500 错误，日志如下...
-```
+1. 禁止未定位根因直接修改代码。
+2. 禁止无回归测试证据就宣称“修复完成”。
+3. 禁止一次提交混入多个无关问题修复。
+4. 禁止命中文档同步规则时只改代码不回填文档。
+
+---
+
+*使用 `/jjk-debug` 触发。目标是“系统化修复 + 证据闭环”，不是猜测式打补丁。*

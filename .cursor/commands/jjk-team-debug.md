@@ -3,7 +3,7 @@ description: Team 封装命令：执行 /prompts:jjk-debug（自动同步源命�
 ---
 <!-- AUTO-GENERATED: jjk-team-bridge -->
 <!-- source: jjk-debug.md -->
-<!-- source_sha1: e5278c4d7dd83ca642d207041963211c46d7c3f9 -->
+<!-- source_sha1: 39fe4b12c9e8b78eda390c7093caaf6bdb7a6244 -->
 
 # Team 命令封装（`/jjk-team-debug`）
 
@@ -37,10 +37,10 @@ description: Team 封装命令：执行 /prompts:jjk-debug（自动同步源命�
 | 字段 | 值 |
 |---|---|
 | source | `.cursor/commands/jjk-debug.md` |
-| source_sha8 | `e5278c4d` |
+| source_sha8 | `39fe4b12` |
 | actual_prompt | `/prompts:jjk-debug` |
 | recommended_role | `debugger` |
-| description | 问题排查：重现 -> 定位 -> 修复 -> 验证 -> 预防 |
+| description | 问题修复入口（结合 systematic-debugging）：根因定位 -> 最小修复 -> 证据验证 |
 
 ## 同步机制
 

@@ -21,6 +21,7 @@ from app.services.llm_scene_service import (
 def _scene(
     key: str,
     *,
+    route_group: str = "lightweight",
     scene_type: str = "text",
     model_code: str = "qwen-plus",
     model_type: str = "chat",
@@ -29,6 +30,7 @@ def _scene(
     return SceneRuntimeConfig(
         scene_key=key,
         scene_name=key,
+        route_group=route_group,
         scene_type=scene_type,
         default_model_id=1,
         default_model_code=model_code,
@@ -96,6 +98,7 @@ def test_resolve_model_code_validates_model_type(mock_get_model_config):
     LLMSceneService._scene_cache = {
         "app.ai.intent_classifier.classify_intent": _scene(
             "app.ai.intent_classifier.classify_intent",
+            route_group="embedding",
             scene_type="embedding",
             model_code="qwen-plus",
         ),
@@ -110,7 +113,7 @@ def test_resolve_model_code_validates_model_type(mock_get_model_config):
     try:
         with pytest.raises(SceneConfigError) as exc:
             LLMSceneService.resolve_model_code("app.ai.intent_classifier.classify_intent")
-        assert "类型不兼容" in str(exc.value)
+        assert "不兼容" in str(exc.value)
     finally:
         LLMSceneService._scene_cache = old_cache
         LLMSceneService._initialized = old_initialized
@@ -133,18 +136,10 @@ def test_get_route_group_default_model_code_prefers_majority_binding():
     LLMSceneService._initialized = True
 
     try:
-        with patch(
-            "app.services.llm_scene_service.get_scene_keys_by_route_group",
-            return_value=(
-                SCENE_KEY_INTENT_CLASSIFIER,
-                SCENE_KEY_LLM_JUDGE_RESPONSE,
-                SCENE_KEY_PARAM_TODO,
-            ),
-        ):
-            assert (
-                LLMSceneService.get_route_group_default_model_code(ROUTE_GROUP_LIGHTWEIGHT)
-                == "qwen3.5-flash"
-            )
+        assert (
+            LLMSceneService.get_route_group_default_model_code(ROUTE_GROUP_LIGHTWEIGHT)
+            == "qwen3.5-flash"
+        )
     finally:
         LLMSceneService._scene_cache = old_cache
         LLMSceneService._initialized = old_initialized
@@ -153,6 +148,17 @@ def test_get_route_group_default_model_code_prefers_majority_binding():
 def test_get_route_group_default_model_code_rejects_unknown_group():
     """未知 route_group 应抛出配置错误。"""
 
-    with pytest.raises(SceneConfigError) as exc:
-        LLMSceneService.get_route_group_default_model_code("unknown")
-    assert "未知路由分组" in str(exc.value)
+    old_cache = LLMSceneService._scene_cache
+    old_initialized = LLMSceneService._initialized
+    LLMSceneService._scene_cache = {
+        SCENE_KEY_INTENT_CLASSIFIER: _scene(SCENE_KEY_INTENT_CLASSIFIER, model_code="qwen3.5-flash"),
+    }
+    LLMSceneService._initialized = True
+
+    try:
+        with pytest.raises(SceneConfigError) as exc:
+            LLMSceneService.get_route_group_default_model_code("unknown")
+        assert "未知路由分组" in str(exc.value)
+    finally:
+        LLMSceneService._scene_cache = old_cache
+        LLMSceneService._initialized = old_initialized
