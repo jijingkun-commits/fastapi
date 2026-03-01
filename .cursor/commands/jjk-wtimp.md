@@ -1,219 +1,181 @@
 ---
-description: Worktree 隔离实现：自动建分支 -> 隔离编码 -> 合并回主分支
+description: Worktree 隔离实现入口（消费 plan/manifest）：创建隔离分支执行实现并合并回主线，支持 Team 自动升级与 fallback
 ---
 
 > 参考规则: @dual-database
 
-# Worktree 隔离实现工作流 (Worktree-Isolated Implementation)
+# Worktree 隔离实现工作流 (Worktree Implementation Workflow)
 
-在独立 worktree 中执行代码修改，完成后自动合并回主分支，保证每次改动可追溯、可回滚。
+`/jjk-wtimp` 是 `jjk-*` 体系里的隔离实现入口，负责把“可追溯任务”放到独立 worktree 执行，并以可验证证据合并回主线。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
+
+## 与 Superpowers / OMX 的分工（强制）
+
+1. `using-git-worktrees`：提供 worktree 使用范式与隔离边界。
+2. `/jjk-imp` / `/jjk-imp-ws`：在 worktree 内执行实现任务。
+3. `/jjk-git-commit`：负责可追溯提交规范。
+4. `verification-before-completion`：提供证据优先的完成门禁。
+5. `team`（OMX）：复杂任务并行执行与结果汇总。
+6. `/jjk-wtimp`：负责上下文校验、worktree 生命周期编排、合并回主线与交接输出。
+
+约束：
+
+1. 禁止在 `/jjk-wtimp` 复制上游 skill 正文；仅保留调用契约与本地增强。
+2. 禁止把 `/jjk-team-wtimp` 作为主入口，统一由 `/jjk-wtimp` 按规模自动升级 Team。
+3. 禁止在 worktree 流程中直接修改主工作区代码。
+
+## 跨 IDE 调用方式
+
+1. Cursor / Claude Code：`/jjk-wtimp`
+2. Codex：`/prompts:jjk-wtimp`
+
+> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
+
+## 模板来源优先级（跨项目，强制）
+
+`/jjk-wtimp` 的模板按以下优先级读取：
+
+1. 全局共享模板（默认主模板）：
+   `/Users/jijingkun/.codex/engineering/templates/jjk_wtimp_templates.md`
+2. 项目覆盖模板（仅放差异，不放全量复制）：
+   `docs/内部参考/迭代需求/_templates/jjk_wtimp_templates.md`
+
+若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
+`GLOBAL_TEMPLATE_MISSING` 属于全局预检失败标记，可与命令级 `FAIL_FAST` 标记并存。
 
 ## 何时使用
 
 | 场景 | 推荐命令 |
-|------|----------|
-| 任何需要隔离的代码修改 | `/jjk-wtimp` |
-| 已有计划，只需编码（不隔离） | `/jjk-imp` |
-| 已拆分为 WS 子任务 | `/jjk-imp-ws` |
-| 一站式从需求到交付 | `/jjk-feature` |
-
-> **等效于**: worktree 创建 + `/jjk-imp` + 测试验证 + 自动合并 + 清理
+|---|---|
+| 需要隔离实现并避免污染主工作区 | `/jjk-wtimp` ✅ |
+| 已在目标 worktree 内，仅需继续编码 | `/jjk-imp` 或 `/jjk-imp-ws` |
+| 只做提交规范化 | `/jjk-git-commit` |
+| 最终验收结论 | `/jjk-verify` |
 
 ---
 
-## 阶段 0: 环境校验与 Worktree 创建
+## 输入前置（强制）
 
-### 0.1 执行上下文校验
+至少提供以下输入之一：
+
+1. `implementation_plan`（含 `task_id/file_paths/acceptance_cmds`）；
+2. `pr_ready_manifest` / `pr_ready_manifest_ws`；
+3. `_active_task` 可映射的卡片信息 + 明确执行主题。
+
+硬约束：
+
+1. 若无法解析 `task_id`（`pr_id` 可选），`FAIL_FAST` 输出 `WTIMP_INPUT_INCOMPLETE`。
+2. 若执行上下文校验失败（`pwd/branch/worktree` 不一致），`FAIL_FAST` 输出 `WTIMP_CONTEXT_INVALID`。
+3. 若 `scope_guard` 未通过，`FAIL_FAST` 输出 `WTIMP_SCOPE_GUARD_FAILED`。
+4. 若 `scripts/wt-flow.sh create|merge` 失败，`FAIL_FAST` 输出 `WTIMP_FLOW_SCRIPT_FAILED`。
+5. 若实现或合并后缺少验证证据，`FAIL_FAST` 输出 `WTIMP_EVIDENCE_MISSING`。
+6. 若命中文档同步规则却未回填，`FAIL_FAST` 输出 `WTIMP_DOC_SYNC_MISSING`。
+
+## 执行流程（强制顺序）
+
+### 0) 先探索上下文（强制）
+
+必须先执行并记录：
 
 ```bash
 pwd
-git rev-parse --show-toplevel
 git branch --show-current
 git worktree list
 ```
 
-- 确认当前在主仓库的 master/main 分支上
-- 确认工作区干净（无未提交变更）
+并至少检查：
 
-### 0.2 生成分支名
+1. 当前活跃任务与计划映射是否一致。
+2. 本轮改动范围是否限定在当前卡片职责内。
+3. 是否存在未合并的同主题 worktree。
 
-从用户输入中提取关键词，生成分支 slug：
+### 0.5) 大范围实现自动启用 Team（强制判定）
 
-- 格式: `<日期>-<关键词>`，如 `20260226-add-export-api`
-- 日期使用 YYYYMMDD
-- 关键词用英文短横线连接，不超过 40 字符
+触发条件（满足任一即可）：
 
-### 0.3 创建 Worktree
+1. 预期改动文件 `>= 8`；
+2. 涉及独立模块 `>= 2`；
+3. 任务切片 `task_id` 数量 `>= 6`；
+4. 同时涉及后端+前端+AI/数据库两类以上边界。
 
-```bash
-bash scripts/wt-flow.sh create <slug>
-```
+执行策略：
 
-脚本会自动：
-1. 从 master 创建 `feature/<slug>` 分支
-2. 在 `.worktrees/<slug>/` 创建 worktree
-3. 保存会话状态到 `.omc/state/wt-flow-state.json`
+1. **有 Team 能力时**：在同一 worktree 根目录下分任务并行执行，Leader 汇总统一交付。
+2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.4 切换工作目录
+### 1) 创建隔离 worktree
 
-创建成功后，**所有后续操作必须在 worktree 路径下执行**：
+1. 根据主题生成 slug（`YYYYMMDD-<topic-slug>`）。
+2. 执行 `bash scripts/wt-flow.sh create <slug>`。
+3. 记录输出的 `worktree_path` 与 `feature/<slug>` 分支。
 
-```bash
-cd <worktree-path>
-```
+### 2) 切换并校验 worktree 上下文
 
-验证切换成功：
+1. 切换到 `worktree_path` 后再次执行 `pwd/git branch --show-current/git worktree list`。
+2. 每轮分派前执行 `python3 scripts/coder4_scope_guard.py`，并记录结果。
+3. `scope_guard` 未通过不得继续实现。
 
-```bash
-git branch --show-current  # 应显示 feature/<slug>
-```
+### 3) 在 worktree 内执行实现
 
----
+1. 单代理模式：按 `/jjk-imp` 契约逐 `task_id` 实施。
+2. Team 模式：所有 teammate 必须共享当前 `worktree_path`，禁止再嵌套 worktree。
+3. 过程中发现计划漂移，输出 `WTIMP_PLAN_DRIFT_DETECTED` 并回退 `/jjk-plan`。
 
-## 阶段 1: 复杂度评估与执行模式选择
+### 4) 文档同步与验证
 
-进入编码前，先评估任务复杂度，决定单人执行还是 team 并行。
+1. 命中 API/数据库/配置/架构变更时，先完成文档同步再进入合并阶段。
+2. 执行 `acceptance_cmds` 与最小必要回归测试。
+3. 任一关键验证失败，`FAIL_FAST` 输出 `WTIMP_VERIFY_FAILED`。
 
-### 1.1 复杂度判定
+### 5) 提交、合并与清理
 
-根据 implementation_plan 或 requirements 文档，统计预期改动范围：
+1. 在 worktree 内按 `/jjk-git-commit` 契约完成提交。
+2. 执行 `bash scripts/wt-flow.sh merge`（可选 `--no-cleanup`）。
+3. 若冲突或脚本中断，保留 worktree 并输出下一步处理建议。
 
-| 指标 | 单人模式 | Team 并行模式 |
-|------|---------|--------------|
-| 预期改动文件数 | <= 5 | > 5 |
-| 涉及独立模块数 | 1 | >= 2 |
-| 前后端同时改动 | 否 | 是 |
-| 有 implementation_plan 且含多个 phase | 否 | 是 |
+### 6) 交付产物（强制）
 
-满足 Team 并行模式任一条件时，**建议用户切换到 team 模式**：
+必须产出：
 
-```
-检测到本次任务涉及 N 个文件 / M 个独立模块，建议使用 team 并行执行。
-是否切换？(Y/n)
-```
+- `docs/内部参考/迭代需求/wtimp_report_<topic>.md`
 
-- 用户确认后，进入阶段 1B（Team 并行）
-- 用户拒绝或任务简单，进入阶段 1A（单人编码）
+最小内容：
 
-### 1A: 单人编码
-
-完全复用 `/jjk-imp` 的编码规范，在 worktree 内执行：
-
-**输入**:
-- `docs/内部参考/迭代需求/<topic>_requirements.md`（迭代级概览）
-- `docs/产品文档/<模块>需求.md`（模块级用户故事/验收标准）
-- `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（如有）
-
-**规范**:
-- 遵循 `.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc` 与场景规则
-- 若涉及架构/API/表结构/配置变更，先更新对应文档草案，再进入代码修改
-- **禁止**: 自作聪明地修改需求
-- 关键行为变化需回填到测试案例文档与追溯矩阵
-
-### 1B: Team 并行编码
-
-在当前 worktree 内启动 team，**teammates 不得使用 `isolation: "worktree"`**（避免 worktree 嵌套）。
-
-**启动方式**:
-
-```
-/team N:executor "在 <worktree-path> 内完成以下任务：..."
-```
-
-**约束**:
-1. 所有 teammates 的工作目录必须是当前 worktree 路径
-2. teammates 之间按文件/模块划分职责，避免同文件冲突
-3. 每个 teammate 完成后提交各自的改动
-4. team 完成后，由主流程统一进入阶段 2（文档同步）和阶段 3（验证）
+1. 输入映射（`task_id/card_id/pr_id|none`）
+2. worktree 生命周期轨迹（create -> implement -> verify -> merge）
+3. 提交与合并证据（`commit sha`、`merge result`）
+4. 文档同步结果与遗留风险
+5. 下一步命令建议（`/jjk-review`、`/jjk-verify`）
 
 ---
 
-## 阶段 2: 文档同步闭环 (Doc Sync Loop)
+## 输出模板（推荐）
 
-完全复用 `/jjk-imp` 的文档同步规则：
+见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_wtimp_templates.md`（`输出模板` 段）。
+若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_wtimp_templates.md`。
 
-- API 变更 -> `docs/API文档/接口文档.md`
-- 数据库变更 -> `docs/开发文档/架构设计/数据库设计.md`
-- 配置变更 -> `docs/开发文档/快速入门/配置说明.md` + `.env.example`
-- 架构变更 -> 对应架构文档
+## 禁止项（强制）
 
----
+1. 禁止绕过执行上下文校验直接开工。
+2. 禁止跳过 `scope_guard` 分派并行任务。
+3. 禁止手工改写 `_active_task.json`。
+4. 禁止在 heartbeat 期间执行破坏性 git 操作（`reset --hard`、`checkout --`、强推）。
+5. 禁止无证据结束合并流程。
 
-## 阶段 3: 提交与验证
+## 推荐链路
 
-### 3.1 在 worktree 内提交
+`/jjk-plan -> /jjk-wtimp -> /jjk-review -> /jjk-verify`
 
-```bash
-cd <worktree-path>
-git add <files>
-git commit -m "<type>(<scope>): <描述>"
+## 使用示例
+
+```text
+/jjk-wtimp 新增导出 API 并完成隔离交付
 ```
 
-遵循 `/jjk-git-commit` 的提交规范。
-
-### 3.2 快速自测
-
-```bash
-# 在 worktree 内运行相关测试
-cd <worktree-path>
-python -m pytest tests/path/to/test.py -v
-```
-
-- 测试通过后才进入合并阶段
-- 测试失败则修复后重新提交
-
----
-
-## 阶段 4: 合并回主分支
-
-### 4.1 执行合并
-
-```bash
-bash scripts/wt-flow.sh merge
-```
-
-脚本会自动：
-1. 检查 worktree 内无未提交变更
-2. 检查 master 是否前进，如有则先 rebase
-3. rebase 冲突时自动 abort 并提示手动解决
-4. `git merge --no-ff` 合并回 master（保留合并提交）
-5. 清理 worktree 和分支
-
-### 4.2 异常处理
-
-| 场景 | 脚本行为 | 用户操作 |
-|------|---------|---------|
-| worktree 有未提交变更 | 拒绝合并 | 先 commit |
-| rebase 冲突 | 自动 abort，保留 worktree | 手动进入 worktree 解决冲突 |
-| merge 冲突 | 自动 abort | 手动解决后重新 merge |
-| 无新提交 | 跳过合并，直接清理 | 无需操作 |
-
-### 4.3 保留 worktree（可选）
-
-如果想合并但保留 worktree 供后续使用：
-
-```bash
-bash scripts/wt-flow.sh merge --no-cleanup
+```text
+/jjk-wtimp @docs/内部参考/迭代需求/<topic>_implementation_plan.md
 ```
 
 ---
-
-## 完整执行示例
-
-```
-/jjk-wtimp 添加导出 API 功能
-
-# 自动执行:
-# 1. bash scripts/wt-flow.sh create 20260226-add-export-api
-# 2. cd .worktrees/20260226-add-export-api
-# 3. 编码 + 文档同步（同 /jjk-imp）
-# 4. git add + git commit
-# 5. pytest 验证
-# 6. bash scripts/wt-flow.sh merge
-# 7. 回到 master，合并完成
-```
-
----
-*使用 `/jjk-wtimp` 触发。等效于 worktree 隔离版的 `/jjk-imp`，每次改动独立分支、可追溯、可原子回滚。*
+*使用 `/jjk-wtimp` 触发。目标是“隔离实现 + 可证据合并”，不是“手工切分支后随意开发”。*

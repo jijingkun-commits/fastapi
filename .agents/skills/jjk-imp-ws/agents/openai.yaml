@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-imp-ws"
+  short_description: "WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包实现、验证与回填，支持大 WS 自动 Team"
+  default_prompt: "$jjk-imp-ws"

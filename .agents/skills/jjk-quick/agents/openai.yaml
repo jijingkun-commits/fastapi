@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-quick"
+  short_description: "快速任务入口（小范围改动直达）：最小闭环实现与验证，支持越界自动升级 Team/正式流程"
+  default_prompt: "$jjk-quick"

@@ -555,6 +555,14 @@ def _build_model_intent_plan_tool_prompt(user_text: str) -> str:
     )
 
 
+def _build_model_intent_plan_text_parse_prompt(user_text: str) -> str:
+    """构建 text_parse 三级降级提示词。"""
+    return (
+        f"{_build_model_intent_plan_prompt(user_text)}\n"
+        "请直接返回 JSON 对象，不要使用 Markdown 代码块。"
+    )
+
+
 def _coerce_model_intent_plan_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     """兼容模型返回的弱结构 goals，避免字符串数组直接触发校验失败。"""
     normalized = dict(raw_data or {})
@@ -685,6 +693,65 @@ def _coerce_tool_call_args(raw_args: Any) -> Dict[str, Any]:
     raise _PlannerModelOutputError("planner_tool_call_args_invalid")
 
 
+def _extract_json_object_from_text(raw_text: str) -> Dict[str, Any]:
+    """从文本响应中提取 JSON 对象。"""
+    text = str(raw_text or "").strip()
+    if not text:
+        raise _PlannerModelOutputError("planner_text_parse_empty")
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    candidates = [text]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(text[start : end + 1])
+
+    last_error: Optional[Exception] = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        raise _PlannerModelOutputError("planner_text_parse_not_object")
+
+    if last_error is not None:
+        raise _PlannerModelOutputError(f"planner_text_parse_invalid_json:{last_error}") from last_error
+    raise _PlannerModelOutputError("planner_text_parse_invalid_json")
+
+
+def _coerce_llm_text_output(raw_output: Any) -> str:
+    """将 LLM 输出统一为可解析文本。"""
+    if isinstance(raw_output, str):
+        return raw_output
+    if isinstance(raw_output, dict):
+        content = raw_output.get("content")
+        if isinstance(content, str):
+            return content
+        return json.dumps(raw_output, ensure_ascii=False)
+
+    content = getattr(raw_output, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        pieces: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                pieces.append(item)
+                continue
+            if isinstance(item, dict):
+                text_part = item.get("text")
+                if isinstance(text_part, str):
+                    pieces.append(text_part)
+        return "\n".join(piece for piece in pieces if piece)
+    return ""
+
+
 def _infer_model_intent_plan_via_tool_call(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
     """使用 Tool Calling 主路径生成结构化 intent_plan。"""
     user_text = _resolve_semantic_user_query(state)
@@ -733,11 +800,14 @@ def _infer_model_intent_plan_via_tool_call(state: MultiAgentState, llm: Any) -> 
     return _build_model_primary_plan_from_parsed(parsed, user_text=user_text)
 
 
-def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
-    """使用模型生成结构化 intent_plan。"""
+def _infer_model_intent_plan_via_json_object(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """使用 json_object 路径生成结构化 intent_plan。"""
     user_text = _resolve_semantic_user_query(state)
     if not user_text:
         return _build_model_primary_plan_from_parsed(_IntentPlanModel(goals=[]), user_text="")
+
+    if _is_feature_flag_enabled("PLANNER_DISABLE_JSON_OBJECT", False):
+        raise _PlannerModelInvokeError("planner_json_object_disabled")
 
     if not hasattr(llm, "with_structured_output"):
         raise _PlannerModelInvokeError("planner_llm_structured_output_unsupported")
@@ -777,6 +847,44 @@ def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]
     return _build_model_primary_plan_from_parsed(parsed, user_text=user_text)
 
 
+def _infer_model_intent_plan_via_text_parse(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """使用 text_parse 三级降级路径生成结构化 intent_plan。"""
+    user_text = _resolve_semantic_user_query(state)
+    if not user_text:
+        return _build_model_primary_plan_from_parsed(_IntentPlanModel(goals=[]), user_text="")
+
+    if _is_feature_flag_enabled("PLANNER_DISABLE_TEXT_PARSE", False):
+        raise _PlannerModelInvokeError("planner_text_parse_disabled")
+
+    if not hasattr(llm, "invoke"):
+        raise _PlannerModelInvokeError("planner_llm_text_parse_unsupported")
+
+    prompt = _build_model_intent_plan_text_parse_prompt(user_text)
+    try:
+        raw_output = llm.invoke(prompt)
+    except TimeoutError as exc:
+        raise _PlannerModelTimeoutError(f"planner_text_parse_timeout:{exc}") from exc
+    except Exception as exc:
+        raise _PlannerModelInvokeError(f"planner_text_parse_invoke_failed:{exc}") from exc
+
+    parsed_text = _coerce_llm_text_output(raw_output)
+    if not parsed_text:
+        raise _PlannerModelOutputError("planner_text_parse_empty")
+
+    payload = _extract_json_object_from_text(parsed_text)
+    try:
+        parsed = _IntentPlanModel(**_coerce_model_intent_plan_data(payload))
+    except (ValidationError, TypeError, ValueError) as exc:
+        raise _PlannerModelOutputError(f"planner_text_parse_schema_invalid:{exc}") from exc
+
+    return _build_model_primary_plan_from_parsed(parsed, user_text=user_text)
+
+
+def _infer_model_intent_plan(state: MultiAgentState, llm: Any) -> Dict[str, Any]:
+    """兼容旧调用，默认走 json_object 路径。"""
+    return _infer_model_intent_plan_via_json_object(state, llm)
+
+
 def _infer_model_intent_plan_by_strategy(
     state: MultiAgentState,
     llm: Any,
@@ -785,6 +893,36 @@ def _infer_model_intent_plan_by_strategy(
     strategy_meta = _resolve_planner_structured_strategy(llm)
     strategy = str(strategy_meta.get("strategy") or "legacy_json_object")
 
+    def _json_object_then_text_parse(
+        *,
+        previous_error: Optional[Exception] = None,
+        previous_stage: str = "",
+    ) -> Dict[str, Any]:
+        previous_reason = str(previous_error)[:160] if previous_error is not None else ""
+        try:
+            plan = _infer_model_intent_plan(state, llm)
+            plan["planner_strategy"] = "legacy_json_object"
+            if previous_reason:
+                plan["planner_strategy_fallback"] = previous_stage
+                plan["planner_strategy_fallback_reason"] = previous_reason
+            return plan
+        except Exception as json_exc:
+            logger.warning("planner_json_object_failed_fallback_to_text_parse: %s", json_exc)
+            try:
+                plan = _infer_model_intent_plan_via_text_parse(state, llm)
+            except _PlannerModelInvokeError as text_exc:
+                text_error = str(text_exc)
+                if (
+                    "planner_llm_text_parse_unsupported" in text_error
+                    or "planner_text_parse_disabled" in text_error
+                ):
+                    raise json_exc
+                raise
+            plan["planner_strategy"] = "text_parse"
+            plan["planner_strategy_fallback"] = "json_object_failed"
+            plan["planner_strategy_fallback_reason"] = str(json_exc)[:160]
+            return plan
+
     if strategy == "tool_call_primary":
         try:
             plan = _infer_model_intent_plan_via_tool_call(state, llm)
@@ -792,15 +930,9 @@ def _infer_model_intent_plan_by_strategy(
             return plan
         except Exception as tool_exc:
             logger.warning("planner_tool_call_failed_fallback_to_json_object: %s", tool_exc)
-            plan = _infer_model_intent_plan(state, llm)
-            plan["planner_strategy"] = "legacy_json_object"
-            plan["planner_strategy_fallback"] = "tool_call_failed"
-            plan["planner_strategy_fallback_reason"] = str(tool_exc)[:160]
-            return plan
+            return _json_object_then_text_parse(previous_error=tool_exc, previous_stage="tool_call_failed")
 
-    plan = _infer_model_intent_plan(state, llm)
-    plan["planner_strategy"] = "legacy_json_object"
-    return plan
+    return _json_object_then_text_parse()
 
 
 def _classify_planner_fallback(exc: Exception) -> Optional[Tuple[str, str]]:
@@ -824,6 +956,28 @@ def _resolve_planner_fallback_strategy(exc: Exception) -> Tuple[bool, str, str]:
     if classified is None:
         return False, "", ""
     return True, classified[0], classified[1]
+
+
+def _resolve_planner_reason_code(
+    *,
+    fallback_rule_id: str,
+    fallback_trigger: str,
+) -> str:
+    """标准化 planner fallback reason_code。"""
+    trigger = str(fallback_trigger or "").strip().lower()
+    if trigger in {"timeout", "invalid_output", "model_failure", "legacy"}:
+        return trigger
+
+    normalized_rule = str(fallback_rule_id or "").strip().lower()
+    if normalized_rule.endswith(".timeout"):
+        return "timeout"
+    if normalized_rule.endswith(".invalid_output"):
+        return "invalid_output"
+    if normalized_rule.endswith(".model_failure"):
+        return "model_failure"
+    if normalized_rule.endswith(".legacy_catch_all"):
+        return "legacy"
+    return "unknown"
 
 
 def _extract_planner_fallback_meta(*intent_plans: Any) -> Dict[str, Any]:
@@ -982,6 +1136,11 @@ def _build_planner_intent_plan(
             logger.exception("planner_model_error_without_fallback: %s", exc)
             raise
 
+        fallback_reason_code = _resolve_planner_reason_code(
+            fallback_rule_id=fallback_rule_id,
+            fallback_trigger=fallback_trigger,
+        )
+
         logger.warning("planner_model_fallback_to_heuristic: %s", exc)
         return _normalize_intent_plan_allowed_agents(
             {
@@ -994,6 +1153,7 @@ def _build_planner_intent_plan(
                     "detail": str(exc)[:200],
                     "fallback_rule_id": fallback_rule_id,
                     "trigger": fallback_trigger,
+                    "reason_code": fallback_reason_code,
                 },
                 "planner_strategy": planner_strategy,
             }
@@ -3382,7 +3542,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     # 详见: app.ai.message_utils.fix_deepseek_reasoning
     # 原因: DeepSeek R1 要求历史消息必须包含 reasoning_content 字段
     # 方案: 已将修复逻辑封装为独立函数 validate_messages，保持代码整洁
-    # TODO: 等待 DeepSeek 官方修复此 API 限制后可移除此补丁
+    # 兼容策略：待 DeepSeek 官方修复 reasoning_content 历史消息校验后再评估移除
     from app.ai.message_utils import validate_messages
     
     enable_thinking = state.get("enable_thinking", False)
@@ -3769,6 +3929,7 @@ async def create_multi_agent_graph(
             delivery_meta["planner_fallback_reason"] = str(fallback_meta.get("reason") or "")
             delivery_meta["planner_fallback_rule_id"] = str(fallback_meta.get("fallback_rule_id") or "")
             delivery_meta["planner_fallback_trigger"] = str(fallback_meta.get("trigger") or "")
+            delivery_meta["planner_fallback_reason_code"] = str(fallback_meta.get("reason_code") or "")
 
         return {
             "intent_plan": intent_plan,

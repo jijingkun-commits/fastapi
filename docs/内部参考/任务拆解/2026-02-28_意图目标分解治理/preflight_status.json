@@ -1,11 +1,20 @@
 {
+  "preflight_required": "C00",
   "card_id": "C00",
   "task_key": "PP-20260228-INTENT-DECOMPOSITION-DB",
+  "passed": true,
   "status": "ready",
-  "checked_at": "2026-02-28",
+  "allow_enter": "C01/P1-01",
+  "checked_at": "2026-03-01",
+  "updated_at": "2026-03-01T14:40:00+08:00",
   "required_done_gate": [
     "planning_contract 与 vk_cards card_order/gate_contract 一致",
     "Gate 卡片化完整且字段齐全",
     "active_task 作用域三元组已绑定"
+  ],
+  "evidence": [
+    "active_task 三元组已绑定并通过 scope_guard",
+    "vk_cards 与 parallel_plan 预检字段一致",
+    "C00 预检完成后方可进入 C01"
   ]
 }

@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-wtimp"
+  short_description: "Worktree 隔离实现入口（消费 plan/manifest）：创建隔离分支执行实现并合并回主线，支持 Team 自动升级与 fallback"
+  default_prompt: "$jjk-wtimp"

@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-deslop"
+  short_description: "去冗余入口（消费 review/manifest）：清理 AI 风格冗余实现并产出可追溯报告，支持大范围自动 Team"
+  default_prompt: "$jjk-deslop"

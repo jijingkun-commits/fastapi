@@ -54,3 +54,12 @@
 1. 新建“docs 索引修复”子任务，按 `docs_guard` 输出逐批修复 `docs/SUMMARY.md`。
 2. 在 CI 中保留 `docs_guard` 非 strict 报告，strict 仅在索引债务清零后恢复为硬门禁。
 3. 保持 OpenClaw 相关开关按波次灰度：`ENABLE_RUN_CONTROL` -> `ENABLE_SKILL_VERSIONING`/`ENABLE_USER_SKILL_BINDING` -> `ENABLE_MEMORY_RECALL`/`ENABLE_PRE_COMPACTION_FLUSH` -> `ENABLE_TOOL_GOVERNANCE`。
+
+## 7. 补充复核（2026-03-01）
+
+为避免本报告中的历史快照误导后续执行，补充记录当前复核结果：
+
+1. 复核命令：`python3 scripts/docs_guard.py --strict`
+2. 复核时间：2026-03-01
+3. 复核结论：`errors: 0 | warnings: 0`
+4. 说明：第 3 节与第 4 节中的 `137 errors` 为 2026-02-27 当日快照，相关文档坏链已在后续批次清零，不再构成当前阻断项。

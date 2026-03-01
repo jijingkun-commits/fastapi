@@ -416,32 +416,25 @@ description: 命令的简短描述
 
 ### 7.4 代码质量
 
-提升代码质量的工具集，包括规范检查、重构、优化和安全审计。
+提升代码质量的工具集，包括规范检查、重构和安全审计。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/jjk-lint` | 代码规范检查 - 运行 ruff/eslint 并自动修复问题 | `/jjk-lint @app/services/` |
 | `/jjk-refactor` | 代码重构 - 在保持功能不变的前提下改善代码结构 | `/jjk-refactor @app/services/chat_service.py` |
 | `/jjk-deslop` | 清理 AI 冗余代码 - 移除不必要的复杂性和过度工程 | `/jjk-deslop` |
-| `/jjk-optimize` | 性能优化 - 分析瓶颈并提供优化方案 | `/jjk-optimize 这个查询很慢` |
-| `/jjk-error-handling` | 添加错误处理 - 为代码添加健壮的异常处理和验证 | `/jjk-error-handling @app/api/` |
 | `/jjk-security-audit` | 安全审计 - 检查注入漏洞、认证问题、数据泄露风险 | `/jjk-security-audit` |
 
 ### 7.5 数据库
 
-数据库相关的操作命令，确保迁移安全可回滚。
+数据库改动统一走标准研发链路（`/jjk-plan -> /jjk-imp -> /jjk-test -> /jjk-verify`），不再维护独立数据库迁移命令入口。
+
+### 7.6 文档同步
+
+自动生成与校验文档，保持文档与代码同步。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/jjk-migration` | 数据库迁移 - 创建带回滚脚本的迁移文件，自动更新文档 | `/jjk-migration 添加 user_profile 表` |
-
-### 7.6 文档与可视化
-
-自动生成文档和架构图，保持文档与代码同步。
-
-| 命令 | 说明 | 使用示例 |
-|------|------|----------|
-| `/jjk-diagrams` | 生成 Mermaid 图 - 支持流程图、时序图、类图、ER 图等 | `/jjk-diagrams 画一下聊天系统时序图` |
 | `/jjk-api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/jjk-api-docs @app/api/v1/endpoints/` |
 | `/jjk-doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/jjk-doc-check`（建议在 git commit 前执行） |
 
@@ -501,15 +494,9 @@ npx ai-agent-skills update --all    # 更新全部
 /jjk-lint          # 运行 ruff/eslint 并自动修复问题
 /jjk-refactor      # 在保持功能不变的前提下改善代码结构
 /jjk-deslop        # 移除 AI 生成的不必要复杂性
-/jjk-optimize      # 分析性能瓶颈并提供优化方案
-/jjk-error-handling # 添加健壮的异常处理和输入验证
 /jjk-security-audit # 检查注入漏洞、认证问题、数据泄露
 
-# 数据库 - 安全的数据库操作
-/jjk-migration     # 创建带回滚脚本的迁移文件
-
 # 文档与可视化 - 保持文档同步
-/jjk-diagrams      # 生成 Mermaid 图（流程图、时序图、ER 图等）
 /jjk-api-docs      # 根据代码自动生成接口文档
 /jjk-doc-check     # 检查代码变更是否有对应文档更新
 
@@ -538,7 +525,7 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（28 个）
+### 9.2 Commands（23 个）
 
 ```
 .cursor/commands/
@@ -547,17 +534,12 @@ npx ai-agent-skills update --all    # 更新全部
 ├── jjk-create-pr.md       # 创建 PR
 ├── jjk-debug.md           # 调试问题
 ├── jjk-deslop.md          # 清理 AI 冗余代码
-├── jjk-diagrams.md        # 生成 Mermaid 图表
-├── jjk-diagnose.md        # 问题诊断（/jjk-pc 的规范别名）
 ├── jjk-doc-check.md       # 文档同步检查
-├── jjk-error-handling.md  # 添加错误处理
 ├── jjk-feature.md         # 全流程开发
 ├── jjk-git-commit.md      # 规范化提交
 ├── jjk-imp-ws.md          # 子任务实现（WS）
 ├── jjk-imp.md             # 实现代码
 ├── jjk-lint.md            # 代码规范检查
-├── jjk-migration.md       # 数据库迁移
-├── jjk-optimize.md        # 性能优化
 ├── jjk-pc.md              # 问题诊断（命令文档示例触发词 /jjk-diagnose）
 ├── jjk-plan.md            # 需求规划（含 TDD 测试策略前置）
 ├── jjk-quick.md           # 小改动快速模式（<= 3 文件）

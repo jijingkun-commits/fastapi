@@ -4,13 +4,20 @@
 
 * [项目上下文](项目上下文.md)
 * [文档阅读指南](README.md)
-* [文档梳理与重构方案（2026-02-13）](文档梳理与重构方案_2026-02-13.md)
 
 ---
 
 ## 方案草案
 
 * [站内通知中心设计（2026-03-01）](plans/2026-03-01-in-app-notification-center-design.md)
+* [用户个性化永久记忆与管理能力需求方案（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-design.md)
+* [知识库检索 P2 分阶段治理方案（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-phased-design.md)
+
+---
+
+## 工程规范
+
+* [Bugfix 最小变更规范](工程规范/bugfix-minimal-change.md)
 
 ---
 
@@ -50,6 +57,7 @@
 * [后端架构](开发文档/架构设计/后端架构.md)
 * [前端架构](开发文档/架构设计/前端架构.md)
 * [数据库设计](开发文档/架构设计/数据库设计.md)
+* [用户个性化永久记忆](开发文档/架构设计/用户个性化永久记忆.md)
 * [问数引擎设计](开发文档/架构设计/问数引擎设计.md)
 * [RAG集成设计](开发文档/架构设计/RAG集成设计.md)
 * [待办Agent设计](开发文档/架构设计/待办Agent设计.md)
@@ -157,24 +165,37 @@
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
 * [模板索引（迭代需求）](内部参考/迭代需求/_templates/README.md)
+* [模板集（jjk-api-docs）](内部参考/迭代需求/_templates/jjk_api_docs_templates.md)
 * [模板集（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.md)
 * [模板集覆盖（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.override.md)
 * [模板集（jjk-create-pr）](内部参考/迭代需求/_templates/jjk_create_pr_templates.md)
 * [模板集（jjk-debug）](内部参考/迭代需求/_templates/jjk_debug_templates.md)
+* [模板集（jjk-deslop）](内部参考/迭代需求/_templates/jjk_deslop_templates.md)
+* [模板集（jjk-doc-check）](内部参考/迭代需求/_templates/jjk_doc_check_templates.md)
 * [模板集（jjk-feature）](内部参考/迭代需求/_templates/jjk_feature_templates.md)
+* [模板集（jjk-git-commit）](内部参考/迭代需求/_templates/jjk_git_commit_templates.md)
 * [模板集（jjk-imp）](内部参考/迭代需求/_templates/jjk_imp_templates.md)
 * [模板集（jjk-imp-ws）](内部参考/迭代需求/_templates/jjk_imp_ws_templates.md)
+* [模板集（jjk-lint）](内部参考/迭代需求/_templates/jjk_lint_templates.md)
 * [模板集（jjk-pc）](内部参考/迭代需求/_templates/jjk_pc_templates.md)
 * [模板集（jjk-plan）](内部参考/迭代需求/_templates/jjk_plan_templates.md)
+* [模板集（jjk-quick）](内部参考/迭代需求/_templates/jjk_quick_templates.md)
+* [模板集（jjk-refactor）](内部参考/迭代需求/_templates/jjk_refactor_templates.md)
+* [模板集（jjk-review）](内部参考/迭代需求/_templates/jjk_review_templates.md)
+* [模板集（jjk-security-audit）](内部参考/迭代需求/_templates/jjk_security_audit_templates.md)
+* [模板集（jjk-test）](内部参考/迭代需求/_templates/jjk_test_templates.md)
 * [模板集（jjk-verify）](内部参考/迭代需求/_templates/jjk_verify_templates.md)
 * [模板集（jjk-vkplan）](内部参考/迭代需求/_templates/jjk_vkplan_templates.md)
 * [模板集（jjk-vktodo）](内部参考/迭代需求/_templates/jjk_vktodo_templates.md)
 * [模板集（jjk-vksync）](内部参考/迭代需求/_templates/jjk_vksync_templates.md)
+* [模板集（jjk-wtimp）](内部参考/迭代需求/_templates/jjk_wtimp_templates.md)
 * [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
 * [需求基线（文档化永久记忆）](内部参考/迭代需求/文档化永久记忆_requirements.md)
 * [实施方案（文档化永久记忆，两表）](内部参考/迭代需求/文档化永久记忆_implementation_plan.md)
 * [需求基线（文档记忆混合检索）](内部参考/迭代需求/文档记忆混合检索_requirements.md)
 * [实施方案（文档记忆混合检索，FTS+向量）](内部参考/迭代需求/文档记忆混合检索_implementation_plan.md)
+* [需求基线（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md)
+* [实施方案（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md)
 * [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
 * [实施方案（全面代码审查整改，非安全范围路线）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
 * [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
@@ -239,6 +260,10 @@
 #### 当前并行拆解（2026-02-28 意图目标分解治理）
 
 * [并行总计划](内部参考/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md)
+
+#### 当前并行拆解（2026-03-01 用户个性化永久记忆与管理能力）
+
+* [并行总计划](内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md)
 
 ---
 

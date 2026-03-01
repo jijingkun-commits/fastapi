@@ -61,6 +61,11 @@ python3 scripts/set_active_task.py \
 
 - 推荐通过脚本更新，不建议手改 JSON。
 - 脚本会自动读取对应任务目录下的 `vk_cards.json`，同步 `task_key/execution_mode/preflight`。
+- `status_source_of_truth` 指向的 `preflight_status.json` 推荐使用标准字段：
+  - `preflight_required: "C00"`
+  - `passed: true`
+  - 可选 `task_key/evidence/updated_at`
+- 兼容字段 `status: "ready"` 仅作为过渡写法，建议逐步回收为 `passed: true`，避免门禁误判。
 
 ---
 

@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-vktodo"
+  short_description: "VK 落卡入口（消费 /jjk-vkplan 契约）：基线校验后批量建卡/推进，支持 MCP->本地兜底与作用域绑定"
+  default_prompt: "$jjk-vktodo"

@@ -65,7 +65,22 @@
 | `jjk-imp` | 与 `test-driven-development`、`verification-before-completion` 互补衔接 | 对 `team` 为条件依赖（大任务自动升级） | 融合完成（V1） | 输入计划粗粒度时仍可能返工 | 强制 `task_id` 粒度执行与 `implementation_ready` 前置校验 |
 | `jjk-imp-ws` | 与 `test-driven-development`、`verification-before-completion` 分段互补（单 WS 粒度） | 对 `team` 为条件依赖（大 WS 自动升级） | 融合完成（V1） | 易出现“跨 WS 越权”与“卡片状态/依赖未满足即开工” | 固化单 WS 契约 + 依赖硬拦截 + Gate 串行执行 |
 | `jjk-create-pr` | 与 `verification-before-completion`、`requesting-code-review` 互补（交付前校验） | 对 `team` 为条件依赖（批量 PR 自动升级） | 融合完成（V1） | 易出现“无映射 PR”或“证据不足就提 PR” | 固化 manifest 映射硬校验 + GitHub MCP 优先 + 禁止重复开放 PR |
-| `jjk-test` / `jjk-verify` / `jjk-review` | 方法可与 Superpowers 校验类技能互补，但非强依赖 | 可接 OMX 状态回填但非入口依赖 | 稳定 | 报告结构统一但与上游 feature 粒度可能脱节 | 统一引用 `feature_id` 作为验证追溯锚点 |
+| `jjk-review` | 与 `requesting-code-review`/`receiving-code-review`/`verification-before-completion` 分段互补 | 对 `team` 为条件依赖（大范围审查自动升级） | 融合完成（V1） | 易出现“无证据通过”或“审查与实现边界混淆” | 固化输入映射硬校验 + 发现分级 + 阻断判定 |
+| `jjk-verify` | 与 `verification-before-completion` 分段互补（验收层） | 对 `team` 为条件依赖（大范围验收自动升级） | 融合完成（V1） | 易出现“无证据 PASS”或“阻断项未解仍验收” | 固化输入映射校验 + 证据优先 + 阻断即失败 |
+| `jjk-test` | 与 `playwright`/`systematic-debugging` 分段互补（测试执行与失败诊断） | 对 `team` 为条件依赖（大范围测试自动升级） | 融合完成（V1） | 易出现“有执行无资产沉淀”或“失败即地修导致边界混乱” | 固化测试矩阵追溯 + 报告强制产出 + 修复回退实现命令 |
+| `jjk-security-audit` | 与 `security-review`/`security-best-practices`/`verification-before-completion` 分段互补 | 对 `team` 为条件依赖（大范围安全审计自动升级） | 融合完成（V1） | 易出现“无证据安全通过”或“审计阶段混入实现修复” | 固化输入映射 + 风险分级（S0-S3）+ 审计证据与修复清单 |
+| `jjk-api-docs` | 与 `deepsearch`/`analyze` 为互补（契约抽取与证据补齐） | 对 `team` 为条件依赖（多模块接口并行梳理） | 融合完成（V1） | 易出现“文档示例与真实接口漂移” | 固化接口矩阵 + 错误码对照 + 文档落盘校验 |
+| `jjk-diagrams` | 与 `brainstorming`/`analyze` 为互补（图谱粒度与关系抽取） | 对 `team` 为条件依赖（多图并行生成） | 融合完成（V1） | 易出现“脑补关系图”与图过载 | 固化图类型决策 + 假设标记 + 拆图规则 |
+| `jjk-doc-check` | 与 `verification-before-completion` 为互补（证据先行） | 对 `team` 为条件依赖（大规模映射核对） | 融合完成（V1） | 易出现“无基线 diff 仍给通过” | 固化基线硬门禁 + 映射规则校验 + 分级结论 |
+| `jjk-quick` | 与 `verification-before-completion` 为互补（小任务最小证据） | 对 `team` 为条件依赖（中等规模 quick 并行） | 融合完成（V1） | 易出现“quick 越界演变为隐式重构” | 固化 quick 阈值分段 + 越界转 `/jjk-plan` |
+| `jjk-deslop` | 与 `code-review`/`verification-before-completion` 互补（去冗余+证据） | 对 `team` 为条件依赖（多模块冗余并行清理） | 融合完成（V1） | 易出现“以去冗余名义改业务” | 固化语义等价约束 + 清理清单 + 保留项说明 |
+| `jjk-error-handling` | 与 `systematic-debugging`/`security-best-practices` 分段互补 | 对 `team` 为条件依赖（跨层错误链并行） | 融合完成（V1） | 易出现“错误契约跨层不一致” | 固化错误码映射 + 恢复策略 + 观测闭环 |
+| `jjk-lint` | 与 `build-fix`/`verification-before-completion` 互补（最小修复） | 对 `team` 为条件依赖（大规模静态治理并行） | 融合完成（V1） | 易出现“通过忽略规则掩盖问题” | 固化执行矩阵 + 自动/人工修复分界 + 报告必填 |
+| `jjk-optimize` | 与 `analyze`/`systematic-debugging`/`verification-before-completion` 分段互补 | 对 `team` 为条件依赖（多热点并行分析） | 融合完成（V1） | 易出现“无基线声称优化收益” | 固化基线-对比矩阵 + 回归校验 + 回滚策略 |
+| `jjk-git-commit` | 与 `git-master`/`verification-before-completion` 互补（提交门禁） | 对 `team` 为条件依赖（批量原子提交拆分） | 融合完成（V1） | 易出现“无追溯字段提交”或范围污染 | 固化 `task_id` 主键映射 + 原子提交 + 证据门禁 |
+| `jjk-migration` | 与 `verification-before-completion`/`systematic-debugging` 分段互补 | 对 `team` 为条件依赖（大范围迁移演练并行） | 融合完成（V1） | 易出现“无回滚迁移”与双库误写 | 固化 `chat_db` 目标库约束 + 回滚强制 + 演练证据 |
+| `jjk-refactor` | 与 `test-driven-development`/`verification-before-completion` 互补 | 对 `team` 为条件依赖（大范围切片重构并行） | 融合完成（V1） | 易出现“需求变更伪装成重构” | 固化行为等价约束 + 切片执行 + 证据收口 |
+| `jjk-wtimp` | 与 `using-git-worktrees`/`verification-before-completion` 互补 | 对 `team` 为条件依赖（worktree 内并行执行） | 融合完成（V1） | 易出现“越权改动主工作区”与 scope 漂移 | 固化上下文校验 + scope_guard + 生命周期报告 |
 
 ---
 
@@ -359,11 +374,27 @@ flowchart TD
 | `jjk-imp` | `test-driven-development`、`verification-before-completion` | 大任务自动 Team | `TDD_UNAVAILABLE_FALLBACK`、`VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | 实施证据 + 验收命令结果 | 已落地 |
 | `jjk-imp-ws` | `test-driven-development`、`verification-before-completion`（单 WS 粒度） | 大 WS 自动 Team | `IMP_WS_PR_MAPPING_MISSING`、`IMP_WS_DEPENDENCY_NOT_READY`、`IMP_WS_ACTIVE_TASK_MISMATCH`、`IMP_WS_CARD_NOT_EXECUTABLE`、`IMP_WS_GATE_BLOCKED`、`IMP_WS_SCOPE_BROKEN`、`IMP_WS_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | WS 自检卡 + `pr_ready_manifest_ws` + Gate 回填证据 | 已落地 |
 | `jjk-create-pr` | `verification-before-completion`、`requesting-code-review`（交付前校验） | 批量 PR 自动 Team | `CREATE_PR_INPUT_INCOMPLETE`、`CREATE_PR_MAPPING_MISMATCH`、`CREATE_PR_VERIFY_MISSING`、`CREATE_PR_BRANCH_MISMATCH`、`CREATE_PR_BRANCH_NOT_PUBLISHED`、`CREATE_PR_BASELINE_NOT_READY`、`CREATE_PR_DUPLICATE_OPEN`、`GITHUB_MCP_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | PR 描述草案 + 映射校验结果 + 证据摘要 + PR 链接回填 | 已落地 |
+| `jjk-review` | `requesting-code-review`、`receiving-code-review`、`verification-before-completion` | 大范围审查自动 Team | `REVIEW_INPUT_INCOMPLETE`、`REVIEW_MAPPING_MISMATCH`、`REVIEW_BASELINE_MISSING`、`REVIEW_EVIDENCE_MISSING`、`REVIEW_BLOCKER_FOUND`、`TEAM_UNAVAILABLE_FALLBACK` | `review_report_<topic>.md` + 分级发现清单 + 结论判定 | 已落地 |
+| `jjk-verify` | `verification-before-completion`（验收方法层） | 大范围验收自动 Team | `VERIFY_INPUT_INCOMPLETE`、`VERIFY_MAPPING_MISMATCH`、`VERIFY_EVIDENCE_MISSING`、`VERIFY_BLOCKER_UNRESOLVED`、`TEAM_UNAVAILABLE_FALLBACK` | `验证报告`（标准/极简）+ 证据摘要 + 最终判定 | 已落地 |
+| `jjk-test` | `playwright`（E2E）与 `systematic-debugging`（失败定位） | 大范围测试自动 Team | `TEST_INPUT_INCOMPLETE`、`TEST_SCOPE_UNCLEAR`、`TEST_ENV_NOT_READY`、`TEST_ONLINE_GATE_FAILED`、`TEST_REPORT_MISSING`、`PLAYWRIGHT_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | 测试报告 + 测试矩阵 + 缺陷清单 + 追溯回填结果 | 已落地 |
+| `jjk-security-audit` | `security-review`、`security-best-practices`、`verification-before-completion` | 大范围安全审计自动 Team | `SECURITY_AUDIT_INPUT_INCOMPLETE`、`SECURITY_AUDIT_SCOPE_UNCLEAR`、`SECURITY_AUDIT_TOOL_MISSING`、`SECURITY_AUDIT_EVIDENCE_MISSING`、`SECURITY_AUDIT_FINDING_BLOCKER`、`TEAM_UNAVAILABLE_FALLBACK` | `security_audit_report_<topic>.md` + 风险分级清单 + 修复建议 | 已落地 |
 | `jjk-debug` | `systematic-debugging`、`test-driven-development`、`verification-before-completion` | 大任务自动 Team | `SYSTEMATIC_DEBUGGING_UNAVAILABLE_FALLBACK`、`TDD_UNAVAILABLE_FALLBACK`、`VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | `debug_report_<topic>.md` + 验证命令证据 | 已落地 |
 | `jjk-pc` | `systematic-debugging`（诊断方法层） | 大任务自动 Team | `SYSTEMATIC_DEBUGGING_UNAVAILABLE_FALLBACK`、`TEAM_UNAVAILABLE_FALLBACK` | `docs/内部参考/迭代需求/fix_plan_<topic>.md` | 已落地 |
 | `jjk-vkplan` | `writing-plans`（上游方法输出） | 大任务自动 Team + OMX 落卡链路强耦合 | `VKPLAN_INPUT_NOT_READY`、`VKPLAN_MISSING_PROJECT_ID`、`VKPLAN_GATE_CONTRACT_BROKEN`、`VKPLAN_FEATURE_MAPPING_BROKEN`、`VKPLAN_ACTIVE_TASK_MISMATCH` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` + `_active_task.json` | 已落地 |
 | `jjk-vktodo` | 弱依赖（主消费 `jjk-vkplan` 契约，方法层不重写） | 大批量操作自动 Team + `vibe_kanban` 强依赖 | `VKTODO_BASELINE_NOT_READY`、`VKTODO_MISSING_PROJECT_ID`、`VKTODO_INPUT_INVALID`、`VKTODO_ACTIVE_TASK_MISMATCH`、`VKTODO_MCP_502_FALLBACK`、`VKTODO_SCOPE_BIND_MISMATCH`、`TEAM_UNAVAILABLE_FALLBACK` | 落卡执行回执 + 状态统计 + scope 对齐结果 | 已落地 |
 | `jjk-vksync` | 弱依赖（闸门命令，不承载方法论正文） | 大规模 worktree 自动 Team + git worktree 执行强相关 | `VKSYNC_G0_ARTIFACT_MISSING`、`VKSYNC_BASELINE_COMMIT_MISSING`、`VKSYNC_BASELINE_COMMIT_FALLBACK`、`VKSYNC_NOT_READY`、`VKSYNC_REBASE_CONFLICT`、`VKSYNC_BYPASS_ACK`、`TEAM_UNAVAILABLE_FALLBACK` | READY/NOT_READY 结构化回执 + 可选 `vksync_status.json` | 已落地 |
+| `jjk-api-docs` | `deepsearch`、`analyze`（契约抽取与一致性核对） | 大范围接口文档自动 Team | `GLOBAL_TEMPLATE_MISSING`、`API_DOCS_INPUT_INCOMPLETE`、`API_DOCS_SCOPE_UNCLEAR`、`API_DOCS_SOURCE_MISSING`、`API_DOCS_OUTPUT_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `docs/API文档/*` + 接口覆盖矩阵 + 示例与错误码清单 | 已落地 |
+| `jjk-diagrams` | `brainstorming`、`analyze`（图谱粒度与关系抽取） | 多图/多系统图谱自动 Team | `GLOBAL_TEMPLATE_MISSING`、`DIAGRAM_INPUT_INCOMPLETE`、`DIAGRAM_SOURCE_MISSING`、`DIAGRAM_SCOPE_UNCLEAR`、`DIAGRAM_OUTPUT_MISSING`、`DIAGRAM_ASSUMPTION`、`TEAM_UNAVAILABLE_FALLBACK` | `diagram_<topic>.md` 或架构图谱文档 + Mermaid 产物 | 已落地 |
+| `jjk-doc-check` | `verification-before-completion`（证据优先） | 大范围文档映射自动 Team | `GLOBAL_TEMPLATE_MISSING`、`DOC_CHECK_BASELINE_MISSING`、`DOC_CHECK_INPUT_INCOMPLETE`、`DOC_CHECK_MAPPING_RULE_MISSING`、`DOC_CHECK_REPORT_MISSING`、`DOC_CHECK_NO_CHANGES`、`TEAM_UNAVAILABLE_FALLBACK` | `doc_check_report_<topic>.md`（结论 + 漏项/豁免） | 已落地 |
+| `jjk-quick` | `systematic-debugging`（条件触发）、`verification-before-completion` | 中等规模 quick 自动 Team | `GLOBAL_TEMPLATE_MISSING`、`QUICK_INPUT_INCOMPLETE`、`QUICK_SCOPE_TOO_LARGE`、`QUICK_RISK_TOO_HIGH`、`QUICK_VERIFY_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | quick 交付摘要 + 最小验证证据 + 文档同步状态 | 已落地 |
+| `jjk-deslop` | `code-review`、`verification-before-completion` | 大范围去冗余自动 Team | `GLOBAL_TEMPLATE_MISSING`、`DESLOP_INPUT_INCOMPLETE`、`DESLOP_SCOPE_UNCLEAR`、`DESLOP_BASELINE_MISSING`、`DESLOP_EVIDENCE_MISSING`、`DESLOP_REPORT_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `deslop_report_<topic>.md` + 清理清单 + 保留项说明 | 已落地 |
+| `jjk-error-handling` | `systematic-debugging`、`security-best-practices`、`verification-before-completion` | 跨层错误链自动 Team | `GLOBAL_TEMPLATE_MISSING`、`ERROR_HANDLING_INPUT_INCOMPLETE`、`ERROR_HANDLING_SCOPE_UNCLEAR`、`ERROR_HANDLING_CONTRACT_UNKNOWN`、`ERROR_HANDLING_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `error_handling_report_<topic>.md` + 错误契约映射 | 已落地 |
+| `jjk-lint` | `build-fix`、`verification-before-completion` | 大规模 lint/type 自动 Team | `GLOBAL_TEMPLATE_MISSING`、`LINT_INPUT_INCOMPLETE`、`LINT_SCOPE_UNCLEAR`、`LINT_TOOLCHAIN_UNAVAILABLE`、`LINT_REPORT_MISSING`、`LINT_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `lint_report_<topic>.md` + 执行矩阵 + 修复清单 | 已落地 |
+| `jjk-optimize` | `analyze`、`systematic-debugging`、`verification-before-completion` | 多热点优化自动 Team | `GLOBAL_TEMPLATE_MISSING`、`OPTIMIZE_INPUT_INCOMPLETE`、`OPTIMIZE_BASELINE_MISSING`、`OPTIMIZE_SCOPE_UNCLEAR`、`OPTIMIZE_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `optimize_report_<topic>.md` + 基线/对比矩阵 + 回归证据 | 已落地 |
+| `jjk-git-commit` | `git-master`、`verification-before-completion` | 批量原子提交自动 Team | `GLOBAL_TEMPLATE_MISSING`、`GIT_COMMIT_NOTHING_STAGED`、`GIT_COMMIT_TRACE_MISSING`、`GIT_COMMIT_SCOPE_MISMATCH`、`GIT_COMMIT_BLOCKER_UNRESOLVED`、`GIT_COMMIT_EVIDENCE_MISSING`、`GIT_COMMIT_EXEC_FAILED`、`TEAM_UNAVAILABLE_FALLBACK` | 提交摘要 + 任务到 commit 映射 + 证据引用 | 已落地 |
+| `jjk-migration` | `verification-before-completion`、`systematic-debugging` | 大范围迁移自动 Team | `GLOBAL_TEMPLATE_MISSING`、`MIGRATION_INPUT_INCOMPLETE`、`MIGRATION_TARGET_DB_UNCLEAR`、`MIGRATION_SEQUENCE_CONFLICT`、`MIGRATION_ROLLBACK_MISSING`、`MIGRATION_RISK_UNASSESSED`、`MIGRATION_DATA_DB_WRITE_FORBIDDEN`、`MIGRATION_VERIFY_FAILED`、`TEAM_UNAVAILABLE_FALLBACK` | `migration_report_<topic>.md` + 脚本清单 + 演练证据 | 已落地 |
+| `jjk-refactor` | `test-driven-development`、`systematic-debugging`、`verification-before-completion` | 大范围重构自动 Team | `GLOBAL_TEMPLATE_MISSING`、`REFACTOR_INPUT_INCOMPLETE`、`REFACTOR_SCOPE_UNCLEAR`、`REFACTOR_BASELINE_MISSING`、`REFACTOR_BEHAVIOR_DRIFT`、`REFACTOR_REPORT_MISSING`、`REFACTOR_EVIDENCE_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `refactor_report_<topic>.md` + 切片清单 + 行为等价证据 | 已落地 |
+| `jjk-wtimp` | `using-git-worktrees`、`verification-before-completion` | worktree 实现自动 Team | `GLOBAL_TEMPLATE_MISSING`、`WTIMP_INPUT_INCOMPLETE`、`WTIMP_CONTEXT_INVALID`、`WTIMP_SCOPE_GUARD_FAILED`、`WTIMP_FLOW_SCRIPT_FAILED`、`WTIMP_PLAN_DRIFT_DETECTED`、`WTIMP_VERIFY_FAILED`、`WTIMP_EVIDENCE_MISSING`、`WTIMP_DOC_SYNC_MISSING`、`TEAM_UNAVAILABLE_FALLBACK` | `wtimp_report_<topic>.md` + 生命周期轨迹 + 合并证据 | 已落地 |
 
 ---
 
@@ -641,3 +672,450 @@ flowchart TD
 2. PR 描述含验收证据与回滚锚点；
 3. 批量交付可自动 Team 提效；
 4. 与 `jjk-review`、`jjk-verify` 可无缝衔接。
+
+---
+
+## 24. `jjk-review` 融合补全（2026-03-01）
+
+本轮把 `jjk-review` 从“通用审查清单”升级为“证据驱动的审查闸门”，目标是避免无映射、无证据、无分级的评审结论。
+
+### 24.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | 审查阶段直接混入实现修复 | 容易破坏阶段边界与审计链路 | 固化职责：`jjk-review` 只给结论与建议，修复回退 `jjk-debug`/`jjk-imp(-ws)` |
+| 冲突 | 无 `task_id/pr_id` 仍给通过结论 | 追溯断链风险 | 强制输入映射校验，缺失即 `REVIEW_INPUT_INCOMPLETE` |
+| 重叠 | `verification-before-completion` 与 `jjk-review` 都要求证据 | 证据校验重叠 | 分工为“方法层 + 审查层”：前者给原则，后者给审查门禁 |
+| 重叠 | Team 与单代理都可执行审查 | 执行路径重叠 | 按规模阈值自动 Team，单任务走轻路径 |
+| 互补 | `create-pr` 交付产物 + `review` 审查结论 + `verify` 验收 | 交付链路互补 | 形成“PR 交付 -> 审查分级 -> 验收闭环” |
+
+### 24.2 已完成改造
+
+1. 新增分工段：明确 `requesting-code-review`、`receiving-code-review`、`verification-before-completion` 与 `jjk-review` 边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 新增模板优先级与模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_review_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_review_templates.md`
+4. 新增输入硬约束与标记：
+   - `REVIEW_INPUT_INCOMPLETE`
+   - `REVIEW_MAPPING_MISMATCH`
+   - `REVIEW_BASELINE_MISSING`
+   - `REVIEW_EVIDENCE_MISSING`
+5. 新增大范围审查自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 固化审查流程：
+   - 范围锁定 -> 四维审查 -> 证据校验 -> 分级判定 -> 回填交接。
+7. 新增阻断闭环：
+   - 发现阻断项必须输出 `REVIEW_BLOCKER_FOUND`，禁止“有阻断仍 PASS”。
+
+### 24.3 结果
+
+`jjk-review` 现已成为交付链路中的稳定审查层：
+
+1. 输入与任务映射可追溯；
+2. 发现项分级标准清晰（P0-P3）；
+3. 审查结论可执行（PASS/CONDITIONAL/BLOCKED）；
+4. 可直接衔接 `/jjk-verify` 或回退修复命令。
+
+---
+
+## 25. `jjk-verify` 融合补全（2026-03-01）
+
+本轮把 `jjk-verify` 从“组合检查说明”升级为“证据驱动验收入口”，目标是确保验收结论可追溯、可复核、可执行。
+
+### 25.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | 无 `task_id/pr_id` 仍可验收 | 追溯链路断裂风险 | 强制输入映射校验，不满足即 `VERIFY_INPUT_INCOMPLETE` |
+| 冲突 | 审查已阻断但仍继续验收 | 流程语义冲突 | 增加 `VERIFY_BLOCKER_UNRESOLVED`，阻断继续验收 |
+| 重叠 | `verification-before-completion` 与 `jjk-verify` 都做证据校验 | 方法与执行重叠 | 固化“前者给方法，后者给验收门禁”分工 |
+| 重叠 | Team 与单代理都可执行综合验收 | 执行路径重叠 | 按规模阈值自动 Team，小任务保持单代理 |
+| 互补 | `review` 发现 + `test` 证据 + `verify` 判定 | 交付链路互补 | 形成“审查 -> 验收 -> PR/回修”闭环 |
+
+### 25.2 已完成改造
+
+1. 新增分工段：明确 `review/test/security-review/verification-before-completion` 与 `verify` 的边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 保留模板优先级并升级模板结构：
+   - 全局模板补充 `FAIL_FAST` 模板与映射字段；
+   - 项目覆盖继续采用轻量差异覆盖。
+4. 新增输入硬约束与标记：
+   - `VERIFY_INPUT_INCOMPLETE`
+   - `VERIFY_MAPPING_MISMATCH`
+   - `VERIFY_EVIDENCE_MISSING`
+   - `VERIFY_BLOCKER_UNRESOLVED`
+5. 新增大范围验收自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 固化执行流程：
+   - 上下文探索 -> 变更策略 -> 审查复核 -> 自动测试 -> UAT 判定 -> 验收报告。
+7. 固化输出契约：
+   - 无论成功或失败，必须输出 `## 验证报告`；
+   - 结论只允许 `PASS|WARN|FAIL`，并附下一步命令建议。
+
+### 25.3 结果
+
+`jjk-verify` 现已成为交付链路中的稳定验收层：
+
+1. 验收输入映射可追溯；
+2. 证据不足会显式阻断，不再“主观通过”；
+3. 阻断项闭环清晰（回退修复命令）；
+4. 可无缝衔接 `/jjk-create-pr` 或返工链路。
+
+---
+
+## 26. `jjk-test` 融合补全（2026-03-01）
+
+本轮把 `jjk-test` 从“测试流程说明”升级为“可追溯测试资产入口”，目标是确保测试不仅执行，而且可复盘、可沉淀、可衔接验收。
+
+### 26.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | 测试阶段发现问题后直接就地修复 | 易破坏“测试/实现”边界与审计链路 | 固化边界：`jjk-test` 只给测试结论，修复回退实现命令 |
+| 冲突 | 在线测试门禁失败被当作 skip | 会造成“假通过” | 增加在线门禁失败标记 `TEST_ONLINE_GATE_FAILED` 并阻断 |
+| 重叠 | `verify` 与 `test` 都会执行测试命令 | 职责边界模糊 | 固化分工：`test` 产出测试资产，`verify` 给最终验收判定 |
+| 重叠 | Team 与单代理都可执行测试矩阵 | 执行路径重叠 | 按规模阈值自动 Team，小范围保持单代理 |
+| 互补 | `review` 风险边界 + `test` 证据 + `verify` 判定 | 交付链路互补 | 形成“审查 -> 测试资产 -> 验收判定”闭环 |
+
+### 26.2 已完成改造
+
+1. 新增分工段：明确 `review/verify/playwright/systematic-debugging` 与 `jjk-test` 边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 新增模板优先级与模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_test_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_test_templates.md`
+4. 新增输入硬约束与标记：
+   - `TEST_INPUT_INCOMPLETE`
+   - `TEST_SCOPE_UNCLEAR`
+   - `TEST_ONLINE_GATE_FAILED`
+   - `TEST_REPORT_MISSING`
+5. 新增大范围测试自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 固化测试执行流程：
+   - 上下文探索 -> 环境门禁 -> 测试矩阵 -> 三层验证 -> Gate 回填 -> 报告沉淀。
+7. 固化资产沉淀要求：
+   - 强制报告产出 + 测试用例库追溯更新 + 索引同步。
+
+### 26.3 结果
+
+`jjk-test` 现已成为交付链路中的稳定测试层：
+
+1. 测试范围可追溯到 `feature_id/task_id/pr_id`；
+2. 测试执行结果可复盘（矩阵+缺陷+证据）；
+3. 在线测试不再允许“门禁失败但假通过”； 
+4. 可无缝衔接 `/jjk-verify` 给最终验收结论。
+
+---
+
+## 27. `jjk-security-audit` 融合补全（2026-03-01）
+
+本轮把 `jjk-security-audit` 从“通用安全清单”升级为“证据驱动安全审计入口”，目标是让安全结论可追溯、可分级、可回修。
+
+### 27.1 关系判定（冲突 / 重叠 / 互补）
+
+| 关系类型 | 点位 | 结论 | 处理策略 |
+|---|---|---|---|
+| 冲突 | 审计阶段直接就地修漏洞 | 会打破审计/实现边界 | 固化边界：`jjk-security-audit` 只产出风险与修复建议，修复回退实现命令 |
+| 冲突 | 无任务映射仍给“安全通过” | 追溯断链风险 | 强制 `task_id/pr_id` 输入映射校验 |
+| 重叠 | `security-review` 与本命令都能做代码安全检查 | 方法与执行重叠 | 分工为“方法层 + 审计执行层” |
+| 重叠 | Team 与单代理都可执行审计 | 执行路径重叠 | 按规模阈值自动 Team，小范围走单代理 |
+| 互补 | 依赖审计 + 代码审计 + 配置审计 + 验收链路 | 交付链路互补 | 形成“审查 -> 安全审计 -> 验收”闭环 |
+
+### 27.2 已完成改造
+
+1. 新增分工段：明确 `security-review/security-best-practices/verification-before-completion` 与 `jjk-security-audit` 边界。
+2. 新增跨 IDE 调用段：统一 Cursor/CC/Codex 调用口径。
+3. 新增模板优先级与模板文件：
+   - 全局：`/Users/jijingkun/.codex/engineering/templates/jjk_security_audit_templates.md`
+   - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_security_audit_templates.md`
+4. 新增输入硬约束与标记：
+   - `SECURITY_AUDIT_INPUT_INCOMPLETE`
+   - `SECURITY_AUDIT_SCOPE_UNCLEAR`
+   - `SECURITY_AUDIT_TOOL_MISSING`
+   - `SECURITY_AUDIT_EVIDENCE_MISSING`
+5. 新增大范围自动 Team 判定：
+   - 命中阈值自动 Team；
+   - 无 Team 能力标记 `TEAM_UNAVAILABLE_FALLBACK`。
+6. 固化风险分级：
+   - `S0-S3` 分级与阻断语义；
+   - `S0` 触发 `SECURITY_AUDIT_FINDING_BLOCKER`。
+7. 固化产物契约：
+   - 强制输出 `security_audit_report_<topic>.md`，包含风险清单、证据、修复建议与下一步动作。
+
+### 27.3 结果
+
+`jjk-security-audit` 现已成为质量链路中的稳定安全层：
+
+1. 安全结论可追溯（映射到任务与 PR）；
+2. 风险分级可执行（S0-S3 + 阻断策略）；
+3. 审计证据可复核（命令与结果保留）；
+4. 可无缝衔接 `/jjk-verify` 或回退修复命令。
+
+---
+
+## 28. `jjk-api-docs` 融合补全（2026-03-01）
+
+### 28.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：文档阶段顺手改代码会破坏阶段边界。
+2. 重叠：`review/test` 与 `api-docs` 都提供接口信息，需防止来源不一致。
+3. 互补：`deepsearch/analyze` 抽取契约，`jjk-api-docs` 负责落盘与一致性校验。
+
+### 28.2 已完成改造
+
+1. 命令补齐“分工、跨 IDE、模板优先级、输入前置、0.5 Team、禁止项、链路”。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_api_docs_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_api_docs_templates.md`。
+4. 引入标记：`API_DOCS_INPUT_INCOMPLETE`、`API_DOCS_SCOPE_UNCLEAR`、`API_DOCS_SOURCE_MISSING`、`API_DOCS_OUTPUT_MISSING`、`GLOBAL_TEMPLATE_MISSING`。
+
+### 28.3 结果
+
+`jjk-api-docs` 已升级为“接口契约文档化入口”，可稳定产出接口矩阵、错误码与示例证据。
+
+---
+
+## 29. `jjk-diagrams` 融合补全（2026-03-01）
+
+### 29.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：无来源依据的“脑补图”会污染架构认知。
+2. 重叠：`plan/review` 已有链路说明，但缺图形化表达。
+3. 互补：`analyze` 提供关系抽取，`jjk-diagrams` 负责图类型决策与落盘。
+
+### 29.2 已完成改造
+
+1. 补齐标准融合骨架并加入 `DIAGRAM_ASSUMPTION` 假设标记。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_diagrams_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_diagrams_templates.md`。
+4. 强制 Mermaid 产物 + 文字解读双输出，避免“只有代码块”。
+
+### 29.3 结果
+
+`jjk-diagrams` 已成为图谱资产入口，可稳定沉淀流程图/时序图/状态图并支持 Team 并行绘制。
+
+---
+
+## 30. `jjk-doc-check` 融合补全（2026-03-01）
+
+### 30.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：无基线 diff 就给“已同步”结论会导致假通过。
+2. 重叠：`review` 与 `doc-check` 都会触达文档一致性，但粒度不同。
+3. 互补：`doc_sync.mdc` 提供规则，`jjk-doc-check` 负责执行与分级报告。
+
+### 30.2 已完成改造
+
+1. 固化基线硬门禁：无法确定 `main/master` 基线时 `DOC_CHECK_BASELINE_MISSING`。
+2. 取消“无基线降级 diff”路径，保证结果可比性。
+3. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_doc_check_templates.md`。
+4. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_doc_check_templates.md`。
+
+### 30.3 结果
+
+`jjk-doc-check` 现为稳定闸门命令，结论只在可追溯基线下输出 `PASS/WARN/FAIL`。
+
+---
+
+## 31. `jjk-quick` 融合补全（2026-03-01）
+
+### 31.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：quick 越界会与 `plan/imp` 职责冲突。
+2. 重叠：小任务也需要验证，容易与 `verify` 语义混淆。
+3. 互补：`jjk-quick` 做“小步交付”，`jjk-doc-check/jjk-git-commit` 做闭环。
+
+### 31.2 已完成改造
+
+1. 输入改为“至少提供一项 + 可上下文补齐”，避免裸命令歧义。
+2. 固化规模分段：`<=3` 单代理、`4~8` Team quick、`>8` 强制转 `/jjk-plan`。
+3. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_quick_templates.md`。
+4. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_quick_templates.md`。
+
+### 31.3 结果
+
+`jjk-quick` 现已具备清晰边界与可追溯最小验证，避免“quick 变隐式重构”。
+
+---
+
+## 32. `jjk-deslop` 融合补全（2026-03-01）
+
+### 32.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：去冗余阶段混入业务改造会破坏语义等价。
+2. 重叠：`lint` 能做部分清理，但缺少“保留项理由”。
+3. 互补：`jjk-deslop` 负责清理清单与等价性证据，`jjk-lint` 负责规范收敛。
+
+### 32.2 已完成改造
+
+1. 统一为标准融合骨架，强调“语义不变”。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_deslop_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_deslop_templates.md`。
+4. 标记补齐：`DESLOP_INPUT_INCOMPLETE`、`DESLOP_SCOPE_UNCLEAR`、`DESLOP_BASELINE_MISSING`、`DESLOP_REPORT_MISSING`、`DESLOP_EVIDENCE_MISSING`。
+
+### 32.3 结果
+
+`jjk-deslop` 已具备“可删可不删都要有理由”的证据化交付能力。
+
+---
+
+## 33. `jjk-error-handling` 融合补全（2026-03-01）
+
+### 33.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：错误处理改造常与业务实现混写，导致边界失真。
+2. 重叠：`debug` 定位问题，`error-handling` 落地契约，需避免重复执行。
+3. 互补：`security-best-practices` 约束敏感信息，`jjk-error-handling` 负责分层一致性。
+
+### 33.2 已完成改造
+
+1. 固化错误分类、错误码/HTTP 映射、恢复策略与观测闭环。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_error_handling_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_error_handling_templates.md`。
+4. 标记补齐：`ERROR_HANDLING_INPUT_INCOMPLETE`、`ERROR_HANDLING_SCOPE_UNCLEAR`、`ERROR_HANDLING_CONTRACT_UNKNOWN`、`ERROR_HANDLING_EVIDENCE_MISSING`。
+
+### 33.3 结果
+
+`jjk-error-handling` 已从“补丁式 catch”升级为“分层契约式改造入口”。
+
+---
+
+## 34. `jjk-lint` 融合补全（2026-03-01）
+
+### 34.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：把 lint 修复扩大为重构会和 `jjk-refactor` 争抢职责。
+2. 重叠：`build-fix` 与 `lint` 都能修类型/构建问题。
+3. 互补：`build-fix` 给最小修复策略，`jjk-lint` 负责执行矩阵与资产沉淀。
+
+### 34.2 已完成改造
+
+1. 补齐标准融合骨架与 Team 自动升级判定。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_lint_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_lint_templates.md`。
+4. 标记补齐：`LINT_INPUT_INCOMPLETE`、`LINT_SCOPE_UNCLEAR`、`LINT_TOOLCHAIN_UNAVAILABLE`、`LINT_REPORT_MISSING`、`LINT_EVIDENCE_MISSING`。
+
+### 34.3 结果
+
+`jjk-lint` 已具备“执行矩阵 + 修复清单 + 残留问题”三段式输出能力。
+
+---
+
+## 35. `jjk-optimize` 融合补全（2026-03-01）
+
+### 35.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：无基线的“优化”会与真实收益脱钩。
+2. 重叠：`debug` 和 `optimize` 都会做链路分析。
+3. 互补：`analyze/systematic-debugging` 定位瓶颈，`jjk-optimize` 负责基线-对比闭环。
+
+### 35.2 已完成改造
+
+1. 强制基线、目标、复测三件套，不满足即阻断。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_optimize_templates.md`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_optimize_templates.md`。
+4. 标记补齐：`OPTIMIZE_INPUT_INCOMPLETE`、`OPTIMIZE_BASELINE_MISSING`、`OPTIMIZE_SCOPE_UNCLEAR`、`OPTIMIZE_EVIDENCE_MISSING`。
+
+### 35.3 结果
+
+`jjk-optimize` 已升级为“可复核收益”的性能优化入口，而非经验式调参。
+
+---
+
+## 36. `jjk-git-commit` 融合补全（2026-03-01）
+
+### 36.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：无追溯字段提交会造成链路断裂。
+2. 重叠：`git-master` 与本命令都涉及提交拆分。
+3. 互补：`git-master` 提供策略，`jjk-git-commit` 负责门禁、映射与回填。
+
+### 36.2 已完成改造
+
+1. 明确 `task_id` 必填，`pr_id` 可选。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_git_commit_templates.md`，补齐“任务到提交映射”。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_git_commit_templates.md`。
+4. 标记补齐：`GIT_COMMIT_NOTHING_STAGED`、`GIT_COMMIT_TRACE_MISSING`、`GIT_COMMIT_SCOPE_MISMATCH`、`GIT_COMMIT_BLOCKER_UNRESOLVED`、`GIT_COMMIT_EVIDENCE_MISSING`、`GIT_COMMIT_EXEC_FAILED`。
+
+### 36.3 结果
+
+`jjk-git-commit` 已成为“原子提交 + 任务映射 + 证据门禁”的标准入口。
+
+---
+
+## 37. `jjk-migration` 融合补全（2026-03-01）
+
+### 37.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：双库场景下误写 `data_db` 会触发高风险事故。
+2. 重叠：迁移脚本执行与问题排查路径交叉。
+3. 互补：`jjk-migration` 负责迁移契约，`systematic-debugging` 负责失败诊断。
+
+### 37.2 已完成改造
+
+1. 固化目标库约束：仅允许 `chat_db`；`data_db` 写入请求一律阻断。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_migration_templates.md`（`target_db` 收敛为 `chat_db`）。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_migration_templates.md`。
+4. 标记补齐：`MIGRATION_TARGET_DB_UNCLEAR`、`MIGRATION_DATA_DB_WRITE_FORBIDDEN`、`MIGRATION_ROLLBACK_MISSING`、`MIGRATION_VERIFY_FAILED` 等。
+
+### 37.3 结果
+
+`jjk-migration` 现已具备“可回滚 + 可演练 + 可审计”的迁移交付契约。
+
+---
+
+## 38. `jjk-refactor` 融合补全（2026-03-01）
+
+### 38.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：重构夹带需求会破坏“行为等价”目标。
+2. 重叠：`imp` 与 `refactor` 都会改代码。
+3. 互补：`tdd` 保证等价约束，`jjk-refactor` 负责切片执行与报告。
+
+### 38.2 已完成改造
+
+1. 固化行为等价门禁与切片执行流程。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_refactor_templates.md`，补齐 `refactor_report_path`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_refactor_templates.md`。
+4. 标记补齐：`REFACTOR_BASELINE_MISSING`、`REFACTOR_BEHAVIOR_DRIFT`、`REFACTOR_EVIDENCE_MISSING` 等。
+
+### 38.3 结果
+
+`jjk-refactor` 已可稳定输出“切片清单 + 等价证据 + 报告路径”的重构交付物。
+
+---
+
+## 39. `jjk-wtimp` 融合补全（2026-03-01）
+
+### 39.1 关系判定（冲突 / 重叠 / 互补）
+
+1. 冲突：worktree 实施时越权改主工作区会污染主线。
+2. 重叠：`wtimp` 与 `imp/imp-ws` 都涉及实现执行。
+3. 互补：`wtimp` 负责隔离生命周期编排，`imp/imp-ws` 负责实现本体。
+
+### 39.2 已完成改造
+
+1. 固化 `pwd/branch/worktree` 与 `scope_guard` 上下文门禁。
+2. 新增全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_wtimp_templates.md`，补齐多轮 scope_guard 记录与 `wtimp_report_path`。
+3. 新增项目覆盖模板：`docs/内部参考/迭代需求/_templates/jjk_wtimp_templates.md`。
+4. 标记补齐：`WTIMP_CONTEXT_INVALID`、`WTIMP_SCOPE_GUARD_FAILED`、`WTIMP_FLOW_SCRIPT_FAILED`、`WTIMP_PLAN_DRIFT_DETECTED`、`WTIMP_VERIFY_FAILED` 等。
+
+### 39.3 结果
+
+`jjk-wtimp` 已具备“隔离执行 -> 合并回主线 -> 证据回填”完整闭环。
+
+---
+
+## 40. 并行执行与互评记录（2026-03-01）
+
+1. 本轮按 A/B/C 三组并行改造 12 个命令，并补齐全局模板与项目覆盖模板。
+2. 互评阶段发现并修复关键问题：
+   - `jjk-doc-check` 基线策略冲突；
+   - `jjk-quick` 输入与边界阈值不闭合；
+   - `task_id/pr_id` 必填语义过严；
+   - 模板 `GLOBAL_TEMPLATE_MISSING` 标记集合不闭合；
+   - `jjk-migration` 的 `data_db` 写入策略歧义。
+3. 结果：12 个命令均完成“分析先行 + 最小改造 + 模板双层 + 可观测 fallback”口径对齐。

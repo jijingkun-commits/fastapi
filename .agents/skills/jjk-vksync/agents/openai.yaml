@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-vksync"
+  short_description: "VK 基线闸门入口（消费 /jjk-vkplan 产物）：多 worktree READY 校验与可控同步（check/apply）"
+  default_prompt: "$jjk-vksync"

@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-vkplan"
+  short_description: "并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解与 vk_cards 执行契约"
+  default_prompt: "$jjk-vkplan"

@@ -558,7 +558,7 @@ planning_contract:
       acceptance_checks:
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py"
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"
-      evidence_entry: "planner strategy + tool_call test evidence"
+      evidence_entry: "2026-03-01: planner_strategy_router + planner_tool_call_primary pytest 回归通过"
 
     - card_id: C07
       wave: P2
@@ -572,7 +572,7 @@ planning_contract:
       acceptance_checks:
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py"
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"
-      evidence_entry: "planner fallback-chain test evidence"
+      evidence_entry: "2026-03-01: planner_json_object_fallback + planner_text_parse_fallback pytest 回归通过"
 
     - card_id: C08
       wave: P2
@@ -584,7 +584,7 @@ planning_contract:
         - reason_code normalization pass
       acceptance_checks:
         - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"
-      evidence_entry: "reason_code contract evidence"
+      evidence_entry: "2026-03-01: planner_reason_codes pytest 回归通过"
 
     - card_id: G03
       wave: G-3
@@ -596,7 +596,7 @@ planning_contract:
         - docs sync and guard pass
       acceptance_checks:
         - "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
-      evidence_entry: "D+B docs and guard output"
+      evidence_entry: "2026-03-01: docs/SUMMARY.md 补齐模板索引后 docs_guard --strict 通过"
 ```
 
 ### 12.5 implementation_readiness
@@ -607,3 +607,26 @@ implementation_readiness:
   blocked_by: []
   next_step: /jjk-vkplan
 ```
+
+### 12.6 验收证据回填（2026-03-01）
+
+| 卡片 | 验收命令 | 结果 |
+| --- | --- | --- |
+| C06 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` | PASS |
+| C06 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` | PASS |
+| C07 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` | PASS |
+| C07 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` | PASS |
+| C08 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` | PASS |
+| G03 | `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict` | PASS |
+
+### 12.7 看板落卡与状态对账（2026-03-01）
+
+- `mcp__vibe_kanban__list_issues` 在本时段持续返回 `502 Bad Gateway`，按 `/jjk-vktodo` 兜底策略切换本地 VK API。
+- 兜底执行命令：
+  - `python3 scripts/coder4_vk_sync.py --active-task /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json --card-id C01 --status done`
+- 执行结果：
+  - `C01` 新建并置为 `done`，task_id=`6adb4f1d-47a4-4ded-914b-f83553e2d3ef`
+  - `PP-20260228-INTENT-DECOMPOSITION-DB` 全量 `11` 张卡片状态对账完成，统计为 `done=11`
+- 作用域绑定校验：
+  - `python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json`
+  - 返回 `{"ok": true, "action": "already_active"}`，三元组一致：`task_split_dir/project_id/task_key`

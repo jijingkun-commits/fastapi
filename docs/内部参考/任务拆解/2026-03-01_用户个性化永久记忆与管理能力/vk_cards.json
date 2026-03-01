@@ -1,0 +1,577 @@
+{
+  "task_key": "PP-20260301-USER-MEMORY-ADMIN",
+  "task_split_dir": "2026-03-01_用户个性化永久记忆与管理能力",
+  "plan_title": "用户个性化永久记忆与管理能力串行拆解计划",
+  "generated_at": "2026-03-01",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "auto_done_policy": {
+    "implementation-card": "hard_gate",
+    "inspection/question-card": "policy_gate"
+  },
+  "automation_contract": {
+    "source_of_truth": "docs/内部参考/任务拆解/_active_task.json",
+    "required_fields": [
+      "project_id",
+      "task_split_dir",
+      "task_key",
+      "execution_mode",
+      "single_active_card",
+      "auto_done_policy",
+      "preflight_required"
+    ],
+    "scope_match_rule": [
+      "title_contains_[task_key]",
+      "labels_contains_task_key",
+      "card_key_prefix_task_key"
+    ]
+  },
+  "card_order": [
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "G01"
+  ],
+  "gate_contract": {
+    "mode": "as_cards",
+    "gate_ids": [
+      "G01"
+    ],
+    "depends_on": {
+      "G01": [
+        "C06"
+      ]
+    }
+  },
+  "preflight": {
+    "card_id": "C00",
+    "feature_ids": [
+      "C00-01"
+    ],
+    "required_done_gate": [
+      "planning_contract 与 vk_cards card_order/gate_contract 一致",
+      "Gate 卡片化完整且字段齐全",
+      "active_task 作用域三元组已绑定"
+    ],
+    "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-00_C00_预检门禁冻结.md"
+  },
+  "source_files": {
+    "requirements": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md",
+    "implementation_plan": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md",
+    "parallel_plan": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C01_C01P1查询能力列表_详情_chunks.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C02_C02P2管理动作调试_归档_删除.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C03_C03P3管理审计落库.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C04_C04P4向量状态看板增强.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C05_C05P5管理后台页面列表+详情+操作.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C06_C06P6配置、迁移、文档与测试收口.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
+    ]
+  },
+  "mapping_checks": {
+    "forward_check": "PASS",
+    "reverse_check": "PASS",
+    "orphan_features": [],
+    "duplicate_features": [],
+    "pr_mapping_check": "PASS",
+    "pr_mapping_errors": []
+  },
+  "cards": [
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C01",
+      "card_id": "C01",
+      "title": "C01 P1 查询能力（列表/详情/chunks） [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-backend-memory-admin"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "depends_on": [],
+      "feature_ids": [
+        "P1-01",
+        "P1-02"
+      ],
+      "mechanism_summary": [
+        "提供 memories 语义列表接口，支持分页与多条件筛选",
+        "详情与 chunks 分离加载，避免列表返回全文",
+        "所有查询路径统一管理员鉴权并记录查询审计"
+      ],
+      "code_anchor_refs": [
+        "app/api/v1/endpoints/memory_admin_api.py::list_memories",
+        "app/api/v1/endpoints/memory_admin_api.py::get_memory_detail",
+        "app/repositories/document_memory_repo.py::list_documents",
+        "app/repositories/document_memory_repo.py::list_document_chunks"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memories_list",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memory_detail"
+      ],
+      "rollback_anchors": [
+        "feature.enable_document_memory_admin_api=false",
+        "移除 /memories 列表与详情路由"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/api/v1/endpoints/memory_admin_api.py",
+        "app/repositories/document_memory_repo.py",
+        "app/services/memory_admin_service.py",
+        "app/schemas/memory_admin.py",
+        "tests/api/test_memory_admin_api.py"
+      ],
+      "done_gate": [
+        "列表/详情/chunks API 通过自动化测试",
+        "分页过滤与用户隔离校验通过"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memories_list",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memory_detail"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C01_C01P1查询能力列表_详情_chunks.md",
+      "pr_id": "PR-01",
+      "pr_branch": "codex/user-memory-admin-pr-01",
+      "pr_depends_on": [],
+      "pr_subject": "P1 查询能力：记忆列表与详情接口"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C02",
+      "card_id": "C02",
+      "title": "C02 P2 管理动作（调试/归档/删除） [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-backend-memory-admin"
+      ],
+      "hard_depends_on": [
+        "C01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01"
+      ],
+      "feature_ids": [
+        "P1-03",
+        "P2-01",
+        "P2-02"
+      ],
+      "mechanism_summary": [
+        "新增 search-debug 供管理员查看片段分数与引用",
+        "归档采用 active->archived 逻辑状态流转",
+        "删除接口保持安全边界，优先归档后硬删策略"
+      ],
+      "code_anchor_refs": [
+        "app/api/v1/endpoints/memory_admin_api.py::search_memory_debug",
+        "app/api/v1/endpoints/memory_admin_api.py::archive_memory",
+        "app/api/v1/endpoints/memory_admin_api.py::delete_memory",
+        "app/repositories/document_memory_repo.py::archive_document"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k search_debug",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k archive",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k delete"
+      ],
+      "rollback_anchors": [
+        "关闭 search-debug 路由",
+        "关闭 delete 路由仅保留 archive"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/api/v1/endpoints/memory_admin_api.py",
+        "app/repositories/document_memory_repo.py",
+        "app/services/memory_admin_service.py",
+        "tests/api/test_memory_admin_api.py"
+      ],
+      "done_gate": [
+        "search-debug/archive/delete 均通过接口回归",
+        "删除与归档幂等行为验证通过"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k search_debug",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k archive",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k delete"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C02_C02P2管理动作调试_归档_删除.md",
+      "pr_id": "PR-02",
+      "pr_branch": "codex/user-memory-admin-pr-02",
+      "pr_depends_on": [
+        "PR-01"
+      ],
+      "pr_subject": "P2 管理能力：调试、归档、删除接口"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C03",
+      "card_id": "C03",
+      "title": "C03 P3 管理审计落库 [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-backend-security"
+      ],
+      "hard_depends_on": [
+        "C02"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C02"
+      ],
+      "feature_ids": [
+        "P3-01"
+      ],
+      "mechanism_summary": [
+        "新增 t_user_memory_admin_audit 存储关键管理动作",
+        "接口成功/失败均写审计，不阻塞主返回",
+        "审计记录保留 operator、target、action、status、error"
+      ],
+      "code_anchor_refs": [
+        "app/models/memory_admin_audit.py::UserMemoryAdminAudit",
+        "app/services/memory_admin_service.py::record_admin_audit",
+        "app/repositories/memory_admin_audit_repo.py::create_audit_log",
+        "install/sql/init_postgres.sql::t_user_memory_admin_audit"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/alembic upgrade head"
+      ],
+      "rollback_anchors": [
+        "feature.enable_document_memory_admin_audit=false",
+        "审计降级为结构化日志"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/models/memory_admin_audit.py",
+        "app/repositories/memory_admin_audit_repo.py",
+        "app/services/memory_admin_service.py",
+        "install/sql/init_postgres.sql",
+        "install/scripts/init_postgres.sql/032_add_memory_admin_audit.sql",
+        "tests/unit/test_memory_admin_audit_service.py"
+      ],
+      "done_gate": [
+        "审计表迁移可执行",
+        "关键接口审计写入通过"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/alembic upgrade head"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C03_C03P3管理审计落库.md",
+      "pr_id": "PR-03",
+      "pr_branch": "codex/user-memory-admin-pr-03",
+      "pr_depends_on": [
+        "PR-02"
+      ],
+      "pr_subject": "P3 安全治理：审计表与审计服务"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C04",
+      "card_id": "C04",
+      "title": "C04 P4 向量状态看板增强 [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-backend-observability"
+      ],
+      "hard_depends_on": [
+        "C01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01"
+      ],
+      "feature_ids": [
+        "P4-01"
+      ],
+      "mechanism_summary": [
+        "增强 embedding-status 支持 user/doc 维度聚合",
+        "新增 memory-overview 统计接口用于后台展示",
+        "保留旧 document 路由响应兼容"
+      ],
+      "code_anchor_refs": [
+        "app/repositories/document_memory_repo.py::get_embedding_status_counts",
+        "app/api/v1/endpoints/memory_admin_api.py::get_document_embedding_status",
+        "app/api/v1/endpoints/memory_admin_api.py::get_memory_overview"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k embedding_status",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memory_overview"
+      ],
+      "rollback_anchors": [
+        "回退到旧 embedding-status 响应结构",
+        "删除 memory-overview 路由"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/repositories/document_memory_repo.py",
+        "app/api/v1/endpoints/memory_admin_api.py",
+        "app/schemas/memory_admin.py",
+        "tests/api/test_memory_admin_api.py"
+      ],
+      "done_gate": [
+        "向量状态聚合校验通过",
+        "总览接口返回正确统计口径"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k embedding_status",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memory_overview"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C04_C04P4向量状态看板增强.md",
+      "pr_id": "PR-04",
+      "pr_branch": "codex/user-memory-admin-pr-04",
+      "pr_depends_on": [
+        "PR-01"
+      ],
+      "pr_subject": "P4 可观测：向量状态统计增强"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C05",
+      "card_id": "C05",
+      "title": "C05 P5 管理后台页面（列表+详情+操作） [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-frontend-admin"
+      ],
+      "hard_depends_on": [
+        "C01",
+        "C02"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01",
+        "C02"
+      ],
+      "feature_ids": [
+        "P5-01",
+        "P5-02"
+      ],
+      "mechanism_summary": [
+        "新增 /admin/memory 页面与 AdminSidebar 菜单",
+        "列表筛选、详情抽屉、调试面板统一复用 memory-admin-api SDK",
+        "治理动作（归档/删除/重建）具备明确反馈与错误提示"
+      ],
+      "code_anchor_refs": [
+        "web/src/app/admin/memory/page.tsx::MemoryAdminPage",
+        "web/src/components/admin/MemoryAdminPanel.tsx::MemoryAdminPanel",
+        "web/src/components/admin/memory/MemoryDetailDrawer.tsx::MemoryDetailDrawer",
+        "web/src/lib/memory-admin-api.ts::listMemories"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi/web && npm run lint"
+      ],
+      "rollback_anchors": [
+        "移除 AdminSidebar memory 菜单",
+        "下线 /admin/memory 页面路由"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "web/src/app/admin/memory/page.tsx",
+        "web/src/components/admin/MemoryAdminPanel.tsx",
+        "web/src/components/admin/memory/MemoryDetailDrawer.tsx",
+        "web/src/components/admin/memory/MemorySearchDebugPanel.tsx",
+        "web/src/components/admin/AdminSidebar.tsx",
+        "web/src/lib/memory-admin-api.ts",
+        "web/src/types/memory-admin.ts"
+      ],
+      "done_gate": [
+        "后台页面可完成查询与治理闭环",
+        "前端 lint 通过"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi/web && npm run lint"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C05_C05P5管理后台页面列表+详情+操作.md",
+      "pr_id": "PR-05",
+      "pr_branch": "codex/user-memory-admin-pr-05",
+      "pr_depends_on": [
+        "PR-01",
+        "PR-02"
+      ],
+      "pr_subject": "P5 前端：记忆管理页面与交互"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-C06",
+      "card_id": "C06",
+      "title": "C06 P6 配置、迁移、文档与测试收口 [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-release"
+      ],
+      "hard_depends_on": [
+        "C03",
+        "C04",
+        "C05"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C03",
+        "C04",
+        "C05"
+      ],
+      "feature_ids": [
+        "P6-01"
+      ],
+      "mechanism_summary": [
+        "新增 memory-admin web/audit 开关与分页配置",
+        "补齐 SQL 种子、迁移、文档索引一致性",
+        "统一跑 API+审计+docs_guard 回归作为发布门禁"
+      ],
+      "code_anchor_refs": [
+        "app/core/config_contract.py::CONFIG_SPECS",
+        "install/sql/init_postgres.sql::t_system_config seed",
+        "docs/SUMMARY.md::内部参考-迭代需求索引",
+        "tests/api/test_memory_admin_api.py"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "新增开关全部置 false",
+        "回退 memory admin 文档入口"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/core/config_contract.py",
+        "app/core/config.py",
+        "install/sql/init_postgres.sql",
+        "install/scripts/init_postgres.sql/033_memory_admin_config_seed.sql",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md",
+        "docs/SUMMARY.md",
+        "tests/api/test_memory_admin_api.py",
+        "tests/unit/test_memory_admin_audit_service.py"
+      ],
+      "done_gate": [
+        "配置与文档门禁通过",
+        "回归测试通过"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C06_C06P6配置、迁移、文档与测试收口.md",
+      "pr_id": "PR-06",
+      "pr_branch": "codex/user-memory-admin-pr-06",
+      "pr_depends_on": [
+        "PR-03",
+        "PR-04",
+        "PR-05"
+      ],
+      "pr_subject": "P6 收口：配置种子、文档、全量回归"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-G01",
+      "card_id": "G01",
+      "title": "G01 Gate 全链路验收门禁 [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "C06"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C06"
+      ],
+      "feature_ids": [
+        "G-1"
+      ],
+      "mechanism_summary": [
+        "聚合执行卡验收结果，确认 implementation hard gate 全绿",
+        "校验 docs_guard、关键测试、active_task 作用域一致性",
+        "门禁失败时禁止进入 /jjk-vktodo 自动落卡执行"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/任务拆解/_active_task.json::scope",
+        "scripts/docs_guard.py::strict mode",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "暂停 /jjk-vktodo",
+        "回退到 C06 前状态并复测"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/vk_cards.json",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md"
+      ],
+      "done_gate": [
+        "所有 acceptance_checks 通过",
+        "active_task 作用域绑定正确"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
+    }
+  ]
+}

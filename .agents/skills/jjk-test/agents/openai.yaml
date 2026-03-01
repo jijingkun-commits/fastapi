@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-test"
+  short_description: "测试入口（消费 review/plan/manifest）：执行可追溯测试矩阵并产出测试报告，支持大范围自动 Team"
+  default_prompt: "$jjk-test"

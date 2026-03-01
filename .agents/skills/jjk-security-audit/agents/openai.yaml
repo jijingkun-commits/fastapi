@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-security-audit"
+  short_description: "安全审计入口（消费 review/manifest）：依赖+代码+配置+运行面多层审计并产出可执行修复清单"
+  default_prompt: "$jjk-security-audit"

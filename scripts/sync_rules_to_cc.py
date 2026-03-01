@@ -1,10 +1,11 @@
 """Cursor 配置同步脚本：同步到 Claude Code 与 Codex。
 
-同步四类文件：
+同步五类文件：
 0. Guide: AGENTS.md -> CLAUDE.md（自动镜像，禁止手改 CLAUDE.md）
 1. Rules: .cursor/rules/*.mdc -> .claude/rules/*.md（去 frontmatter，下划线转连字符）
 2. Commands: .cursor/commands/*.md -> .claude/commands/*.md（直接复制，替代 symlink）
 3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（由 ENABLE_PROMPT_REGISTRY_V2 控制 symlink/copy）
+4. Skills: .cursor/commands/jjk-*.md -> .agents/skills/jjk-*/SKILL.md（禁用隐式触发）
 
 用法:
     python scripts/sync_rules_to_cc.py          # 同步 rules + commands
@@ -12,6 +13,7 @@
     python scripts/sync_rules_to_cc.py --only commands
     python scripts/sync_rules_to_cc.py --exclude banking-context
     python scripts/sync_rules_to_cc.py --skip-codex-prompts
+    python scripts/sync_rules_to_cc.py --skip-jjk-skills
     python scripts/sync_rules_to_cc.py --codex-prompts-dir ~/.codex/prompts
 """
 
@@ -35,15 +37,24 @@ CURSOR_RULES_DIR = ROOT / ".cursor" / "rules"
 CLAUDE_RULES_DIR = ROOT / ".claude" / "rules"
 CURSOR_COMMANDS_DIR = ROOT / ".cursor" / "commands"
 CLAUDE_COMMANDS_DIR = ROOT / ".claude" / "commands"
+AGENT_SKILLS_DIR = ROOT / ".agents" / "skills"
 AGENTS_GUIDE_FILE = ROOT / "AGENTS.md"
 CLAUDE_GUIDE_FILE = ROOT / "CLAUDE.md"
 CLAUDE_GUIDE_MARKER = "<!-- AUTO-GENERATED FROM AGENTS.md via scripts/sync_rules_to_cc.py. DO NOT EDIT. -->"
+SKILL_MIRROR_MARKER = "<!-- AUTO-GENERATED: jjk-skill-mirror -->"
 DEFAULT_CODEX_PROMPTS_DIR = Path.home() / ".codex" / "prompts"
 CODEX_MANIFEST_FILENAME = ".cursor_commands_manifest.json"
 TEAM_BRIDGE_PREFIX = "jjk-team-"
 TEAM_BRIDGE_MARKER = "<!-- AUTO-GENERATED: jjk-team-bridge -->"
 TEAM_DEFAULT_ROLE = "planner"
 TEAM_BRIDGE_EXCLUDED_STEMS = {"jjk-clarify", "jjk-plan", "jjk-pc"}
+TEAM_BRIDGE_ENABLED_FLAG = "ENABLE_TEAM_BRIDGE_COMMANDS"
+DISABLED_COMMAND_STEMS = {
+    "jjk-diagrams",
+    "jjk-error-handling",
+    "jjk-migration",
+    "jjk-optimize",
+}
 RULESET_V2_FLAG = "ENABLE_RULESET_V2"
 PROMPT_REGISTRY_V2_FLAG = "ENABLE_PROMPT_REGISTRY_V2"
 CLAUDE_RULES_V1_SNAPSHOT_DIR = ROOT / ".claude" / ".rules_v1_snapshot"
@@ -146,7 +157,7 @@ def _team_role_for_command(stem: str) -> str:
         return "verifier"
     if stem in {"jjk-security-audit"}:
         return "security-reviewer"
-    if stem in {"jjk-doc-check", "jjk-diagrams", "jjk-api-docs"}:
+    if stem in {"jjk-doc-check", "jjk-api-docs"}:
         return "writer"
     if stem in {"jjk-git-commit", "jjk-create-pr"}:
         return "git-master"
@@ -276,6 +287,52 @@ def ensure_team_bridge_commands() -> list[str]:
     return generated
 
 
+def cleanup_generated_team_bridge_commands() -> list[str]:
+    """清理自动生成的 /jjk-team-* 桥接命令。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+
+    removed: list[str] = []
+    for existing in CURSOR_COMMANDS_DIR.glob(f"{TEAM_BRIDGE_PREFIX}*.md"):
+        try:
+            content = existing.read_text(encoding="utf-8")
+        except OSError:
+            content = ""
+        if TEAM_BRIDGE_MARKER in content:
+            existing.unlink()
+            removed.append(existing.name)
+    return removed
+
+
+def cleanup_disabled_commands() -> list[str]:
+    """清理被禁用的命令文件，防止误恢复。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+
+    removed: list[str] = []
+    for stem in sorted(DISABLED_COMMAND_STEMS):
+        target = CURSOR_COMMANDS_DIR / f"{stem}.md"
+        if not target.exists():
+            continue
+        target.unlink()
+        removed.append(target.name)
+    return removed
+
+
+def prepare_team_bridge_commands() -> None:
+    """根据开关生成或清理 Team 桥接命令。"""
+    bridge_enabled = _env_flag(TEAM_BRIDGE_ENABLED_FLAG, default=False)
+    print(f"[team-bridge] {TEAM_BRIDGE_ENABLED_FLAG}={str(bridge_enabled).lower()}")
+
+    if bridge_enabled:
+        ensure_team_bridge_commands()
+        return
+
+    removed = cleanup_generated_team_bridge_commands()
+    if removed:
+        print(f"  已清理 {len(removed)} 个自动生成的 team 命令。")
+
+
 def sync_rules(exclude: Optional[Set[str]] = None) -> list[str]:
     """同步规则文件，返回生成的文件列表。"""
     exclude = exclude or set()
@@ -288,6 +345,20 @@ def sync_rules(exclude: Optional[Set[str]] = None) -> list[str]:
     else:
         restored = _restore_rules_from_snapshot()
         if restored:
+            expected_rules = {
+                mdc_to_md_name(path.name)
+                for path in CURSOR_RULES_DIR.glob("*.mdc")
+                if path.stem not in exclude
+            }
+            restored_set = set(restored)
+            missing_rules = sorted(expected_rules - restored_set)
+            if missing_rules:
+                print(
+                    "警告: 当前处于 V1 回滚模式，以下 .cursor/rules 新规则未进入 .claude/rules："
+                )
+                for name in missing_rules:
+                    print(f"  - {name}")
+                print(f"如需同步新规则，请开启 {RULESET_V2_FLAG}=true 后再执行同步。")
             print(f"{RULESET_V2_FLAG}=false，已从快照恢复 V1 规则集。")
             return restored
 
@@ -356,7 +427,10 @@ def sync_commands() -> list[str]:
     """同步命令文件（直接复制），返回同步的文件列表。"""
     if not CURSOR_COMMANDS_DIR.exists():
         return []
-    ensure_team_bridge_commands()
+    removed_disabled = cleanup_disabled_commands()
+    if removed_disabled:
+        print(f"  已清理 {len(removed_disabled)} 个禁用命令: {', '.join(removed_disabled)}")
+    prepare_team_bridge_commands()
     CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
 
     synced = []
@@ -406,7 +480,10 @@ def sync_commands_to_codex(codex_prompts_dir: Path) -> list[str]:
     """同步命令到 Codex prompts 目录。"""
     if not CURSOR_COMMANDS_DIR.exists():
         return []
-    ensure_team_bridge_commands()
+    removed_disabled = cleanup_disabled_commands()
+    if removed_disabled:
+        print(f"  已清理 {len(removed_disabled)} 个禁用命令: {', '.join(removed_disabled)}")
+    prepare_team_bridge_commands()
     codex_prompts_dir.mkdir(parents=True, exist_ok=True)
     registry_v2_enabled = _env_flag(PROMPT_REGISTRY_V2_FLAG, default=False)
     mode = "symlink" if registry_v2_enabled else "copy"
@@ -452,6 +529,125 @@ def sync_commands_to_codex(codex_prompts_dir: Path) -> list[str]:
     return synced
 
 
+def _skill_description_for_command(stem: str, source_description: str) -> str:
+    """生成 Skill frontmatter description。"""
+    desc = " ".join(source_description.split())
+    if desc:
+        return f"Use when you need `{stem}` in this repository. Source intent: {desc}"
+    return f"Use when you need `{stem}` in this repository."
+
+
+def _command_body_to_skill_body(stem: str, content: str) -> str:
+    """将命令正文转换为 Skill 正文。"""
+    body = FRONTMATTER_RE.sub("", content).lstrip("\n")
+
+    body = re.sub(
+        r"(?<![\w-])/prompts:(jjk-[a-z0-9-]+)",
+        lambda m: f"${m.group(1)}",
+        body,
+    )
+    body = re.sub(
+        r"(?<![\w-])/(jjk-[a-z0-9-]+)",
+        lambda m: f"${m.group(1)}",
+        body,
+    )
+
+    body = body.replace(
+        "Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。",
+        f"Codex 推荐显式调用 `${stem}`。",
+    )
+
+    return body.rstrip() + "\n"
+
+
+def _render_skill_markdown(stem: str, source_file: str, source_description: str, content: str) -> str:
+    """渲染 SKILL.md 内容。"""
+    skill_desc = _skill_description_for_command(stem, source_description)
+    body = _command_body_to_skill_body(stem=stem, content=content)
+    quoted_desc = json.dumps(skill_desc, ensure_ascii=False)
+
+    return (
+        f"---\n"
+        f"name: {stem}\n"
+        f"description: {quoted_desc}\n"
+        f"---\n"
+        f"{SKILL_MIRROR_MARKER}\n"
+        f"<!-- source: .cursor/commands/{source_file} -->\n\n"
+        f"{body}"
+    )
+
+
+def _render_skill_openai_yaml(stem: str, source_description: str) -> str:
+    """渲染 agents/openai.yaml（显式调用优先）。"""
+    short_desc = " ".join(source_description.split()) or f"{stem} workflow"
+    if len(short_desc) > 120:
+        short_desc = short_desc[:117] + "..."
+
+    return (
+        f"# {SKILL_MIRROR_MARKER}\n"
+        f"policy:\n"
+        f"  allow_implicit_invocation: false\n"
+        f"interface:\n"
+        f"  display_name: {json.dumps(stem, ensure_ascii=False)}\n"
+        f"  short_description: {json.dumps(short_desc, ensure_ascii=False)}\n"
+        f"  default_prompt: {json.dumps(f'${stem}', ensure_ascii=False)}\n"
+    )
+
+
+def sync_jjk_command_skills() -> list[str]:
+    """将 .cursor/commands/jjk-*.md 镜像为 .agents/skills/jjk-*/SKILL.md。"""
+    if not CURSOR_COMMANDS_DIR.exists():
+        return []
+
+    AGENT_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    managed: list[str] = []
+
+    for cmd_file in sorted(CURSOR_COMMANDS_DIR.glob("jjk-*.md")):
+        stem = cmd_file.stem
+        if stem.startswith("jjk-team-"):
+            continue
+
+        source_content = cmd_file.read_text(encoding="utf-8")
+        source_desc = _extract_frontmatter_description(cmd_file)
+        skill_dir = AGENT_SKILLS_DIR / stem
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        skill_md = skill_dir / "SKILL.md"
+        rendered_md = _render_skill_markdown(
+            stem=stem,
+            source_file=cmd_file.name,
+            source_description=source_desc,
+            content=source_content,
+        )
+        current_md = skill_md.read_text(encoding="utf-8") if skill_md.exists() else ""
+        if current_md != rendered_md:
+            skill_md.write_text(rendered_md, encoding="utf-8")
+
+        agents_dir = skill_dir / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        openai_yaml = agents_dir / "openai.yaml"
+        rendered_yaml = _render_skill_openai_yaml(stem=stem, source_description=source_desc)
+        current_yaml = openai_yaml.read_text(encoding="utf-8") if openai_yaml.exists() else ""
+        if current_yaml != rendered_yaml:
+            openai_yaml.write_text(rendered_yaml, encoding="utf-8")
+
+        managed.append(stem)
+
+    managed_set = set(managed)
+    for skill_dir in sorted(AGENT_SKILLS_DIR.glob("jjk-*")):
+        if skill_dir.name in managed_set or not skill_dir.is_dir():
+            continue
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        content = skill_md.read_text(encoding="utf-8")
+        if SKILL_MIRROR_MARKER in content:
+            shutil.rmtree(skill_dir)
+            print(f"  清理 JJK 孤儿技能: {skill_dir.name}")
+
+    return managed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="同步 Cursor 规则和命令到 Claude Code / Codex"
@@ -477,6 +673,11 @@ def main() -> None:
         default=str(DEFAULT_CODEX_PROMPTS_DIR),
         help="Codex prompts 目录（默认: ~/.codex/prompts）",
     )
+    parser.add_argument(
+        "--skip-jjk-skills",
+        action="store_true",
+        help="跳过将 .cursor/commands/jjk-*.md 同步为 .agents/skills",
+    )
     args = parser.parse_args()
 
     exclude = {s.strip() for s in args.exclude.split(",") if s.strip()}
@@ -500,6 +701,14 @@ def main() -> None:
         print(f"已同步 {len(commands)} 个命令文件到 {CLAUDE_COMMANDS_DIR}/:")
         for name in commands:
             print(f"  - {name}")
+
+        if args.skip_jjk_skills:
+            print("已跳过 JJK Skill 同步（--skip-jjk-skills）")
+        else:
+            jjk_skills = sync_jjk_command_skills()
+            print(f"已同步 {len(jjk_skills)} 个 JJK Skill 到 {AGENT_SKILLS_DIR}/:")
+            for name in jjk_skills:
+                print(f"  - {name}")
 
         if args.skip_codex_prompts:
             print("已跳过 Codex prompts 同步（--skip-codex-prompts）")

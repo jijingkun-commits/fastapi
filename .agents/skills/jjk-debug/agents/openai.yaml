@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-debug"
+  short_description: "问题修复入口（结合 systematic-debugging）：根因定位 -> 最小修复 -> 证据验证"
+  default_prompt: "$jjk-debug"

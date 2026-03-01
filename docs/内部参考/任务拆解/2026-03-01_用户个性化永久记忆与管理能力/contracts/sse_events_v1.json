@@ -1,0 +1,23 @@
+{
+  "version": "v1",
+  "frozen_fields": {
+    "required": [
+      "card_id",
+      "feature_ids",
+      "acceptance_checks",
+      "rollback_anchors"
+    ],
+    "optional": [
+      "example_refs",
+      "handoff_artifacts"
+    ]
+  },
+  "enum_constraints": {
+    "task_mode": [
+      "implementation-card",
+      "inspection-card",
+      "question-card"
+    ]
+  },
+  "compatibility": "append_only"
+}

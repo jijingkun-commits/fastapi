@@ -101,6 +101,26 @@ python scripts/release_rollout_manager.py rollout --target all --percent 10 --sy
 python scripts/release_rollout_manager.py rollback --target all --reason "production issue" --sync
 ```
 
+### Codex App 监控
+
+```bash
+# 基础健康检查（/health, /health/db, /health/pool）
+python scripts/codex_app_monitor.py --base-url http://127.0.0.1:8000/api/v1
+
+# 开发环境加 Codex 轻探针（/dev-tools/codex/exec）
+python scripts/codex_app_monitor.py \
+  --base-url http://127.0.0.1:8000/api/v1 \
+  --check-codex \
+  --alert-threshold 2
+```
+
+脚本输出 JSON，`ok=false` 时返回退出码 `2`，可直接接入 `cron` / `systemd timer` / `launchd`。
+
+示例（cron）：
+```bash
+*/3 * * * * cd /Users/jijingkun/bojxAI/fastapi && scripts/cron/codex_app_monitor.sh >> logs/codex-monitor.log 2>&1
+```
+
 ### Vibe Kanban 多 worktree
 
 ```bash
@@ -125,4 +145,5 @@ bash scripts/vk_cleanup.sh     # 清理进程
 | 新增个人工作流脚本 | 文件放 `.cursor/scripts/xxx`，然后 `ln -s ../.cursor/scripts/xxx scripts/xxx` |
 | 新增项目脚本 | 直接放 `scripts/` 根目录或对应子目录（`db/`、`data/`） |
 | 新增 Cursor 规则/命令 | 在 `.cursor/rules/` 或 `.cursor/commands/` 新增文件，然后 `python3 scripts/sync_rules_to_cc.py`（同时镜像 `AGENTS.md -> CLAUDE.md`，同步到 `.claude/*`，并将命令同步到 `~/.codex/prompts/`） |
+| 生成 JJK Skills 镜像 | 执行 `python3 scripts/sync_rules_to_cc.py --only commands`，将 `.cursor/commands/jjk-*.md` 生成到 `.agents/skills/jjk-*/SKILL.md`（默认显式调用，禁用隐式触发） |
 | 新增 CC 手工规则 | 创建 `.claude/rules/xxx.md`，在 sync 脚本 `MANUAL_FILES` 中注册文件名 |

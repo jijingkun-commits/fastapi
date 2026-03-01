@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-create-pr"
+  short_description: "PR 交付入口（消费 pr_ready_manifest）：校验任务映射与验收证据后创建/更新 Pull Request"
+  default_prompt: "$jjk-create-pr"

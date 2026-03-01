@@ -1032,6 +1032,31 @@ def count_statuses(tasks: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def _preflight_passed_from_json(
+    source_payload: dict[str, Any],
+    *,
+    preflight_required: str,
+    task_key: str,
+) -> bool:
+    src_required = str(
+        source_payload.get("preflight_required")
+        or source_payload.get("card_id")
+        or ""
+    ).strip()
+    if src_required and src_required != preflight_required:
+        return False
+
+    src_task_key = str(source_payload.get("task_key") or "").strip()
+    if src_task_key and src_task_key != task_key:
+        return False
+
+    if bool(source_payload.get("passed")):
+        return True
+
+    status = normalize_status(source_payload.get("status"))
+    return status in {"ready", "done", "passed", "pass"}
+
+
 def build_kernel_context(
     active_task_path: Path,
     api_base: str,
@@ -1127,9 +1152,11 @@ def build_kernel_context(
                 if source_path.suffix.lower() == ".json":
                     try:
                         source_payload = load_json(source_path)
-                        src_req = str(source_payload.get("preflight_required") or "").strip()
-                        src_pass = bool(source_payload.get("passed"))
-                        if src_pass and (not src_req or src_req == preflight_required):
+                        if _preflight_passed_from_json(
+                            source_payload,
+                            preflight_required=preflight_required,
+                            task_key=task_key,
+                        ):
                             preflight_ok = True
                             preflight_reason = "preflight_doc_passed_json"
                     except Exception:  # noqa: BLE001

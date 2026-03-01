@@ -43,9 +43,16 @@ class VannaPGVector(VannaBase):
         raise NotImplementedError("Use schema_sync.py to manage DDL/schema metadata.")
 
     def add_documentation(self, documentation: str, **kwargs) -> str:
-        """Add documentation for RAG."""
-        # TODO: Implement adding to t_metrics or documentation table
-        pass
+        """兼容 Vanna 接口：当前仓库不支持独立 documentation 持久化。"""
+        excerpt = (documentation or "").strip().replace("\n", " ")
+        if len(excerpt) > 80:
+            excerpt = f"{excerpt[:77]}..."
+        logger.warning(
+            "忽略 add_documentation 调用：项目未启用独立 documentation 存储，"
+            "请使用 t_metric_definition.description 维护语义文档。excerpt=%s",
+            excerpt or "<empty>",
+        )
+        return "IGNORED:add_documentation_not_supported"
 
     def add_question_sql(self, question: str, sql: str, **kwargs) -> str:
         """Add training data (question-SQL pair) to t_data_query_log."""

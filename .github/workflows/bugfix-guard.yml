@@ -1,0 +1,32 @@
+name: Bugfix Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+jobs:
+  check-bugfix-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check bugfix budget
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          python3 scripts/ci/check_bugfix_budget.py \
+            --diff-range "origin/${{ github.base_ref }}...HEAD" \
+            --strict
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Bugfix Guard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 规则文档: \`docs/工程规范/bugfix-minimal-change.md\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 预算脚本: \`scripts/ci/check_bugfix_budget.py\`" >> $GITHUB_STEP_SUMMARY

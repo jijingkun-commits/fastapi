@@ -1,36 +1,36 @@
 ---
-description: 组合验证：审查 + 测试 + UAT 一站式验收
+description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+UAT 一体化判定，支持大范围自动 Team
 ---
 
 > 参考规则: @dual-database
 
 # 组合验证工作流 (Verify Workflow)
 
-将代码审查、自动测试和 UAT 验收合为一体，一次完成验证闭环。
-默认采用“自动判定优先”，仅在自动证据不足时进入交互式确认。
+`/jjk-verify` 是 `jjk-*` 体系里的验收入口，负责基于审查结论与测试证据给出最终可执行判定（`PASS|WARN|FAIL`）。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
-## 何时使用
+## 与 Superpowers / OMX 的分工（强制）
 
-| 场景 | 推荐命令 |
-|------|----------|
-| 实现完成，一次性完成全部验证 | `/jjk-verify` ✅ |
-| 只需代码审查（不跑测试） | `/jjk-review` |
-| 只需完整测试流程（含报告产出） | `/jjk-test` |
-| 修复 Bug 后快速验证 | `/jjk-debug`（包含回归测试） |
+1. `/jjk-review`：提供结构化审查发现与阻断结论。
+2. `/jjk-test`：提供更完整的测试执行能力（本命令默认跑最小必要集）。
+3. `verification-before-completion`：提供“证据优先”方法论。
+4. `security-review`：高风险变更时补充安全验证深度。
+5. `team`（OMX）：大范围验收并行执行与结果汇总。
+6. `/jjk-verify`：负责输入映射校验、最小必要验证编排、UAT判定与最终验收报告。
 
-> **等效于**: `/jjk-review`（精简版）+ `/jjk-test`（精简版）+ 自动 UAT（默认）+ 交互 UAT（可选）
+约束：
 
-## 执行硬约束（防止无报告返回）
+1. 禁止在 `/jjk-verify` 复制上游 skill 正文；只保留调用契约与本地增强。
+2. 禁止“无证据给结论”；证据不足必须显式标记并降级判定。
+3. `/jjk-team-verify` 不再作为主入口，统一由 `/jjk-verify` 按规模自动升级 Team。
 
-1. 无论成功、失败或中断，本轮最后都必须输出 `## 验证报告`，禁止只停留在提问或中间状态。
-2. 若进入交互 UAT，必须先输出“自动证据版报告（AUTO/MIXED）”，再发起 1~3 条最小确认。
-3. 任一关键命令失败时，报告中必须记录：`命令原文 + 退出码 + 错误摘要 + 后续处理`。
-4. 变更范围获取失败时，必须自动降级为“工作区 + 最近提交”分析，不得因为分支名错误直接终止。
-5. 报告必须可复现：至少包含命令、退出码、通过/失败统计、关键断言与新增/历史问题区分。
+## 跨 IDE 调用方式
 
----
+1. Cursor / Claude Code：`/jjk-verify`
+2. Codex：`/prompts:jjk-verify`
+
+> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
 
 ## 模板来源优先级（跨项目，强制）
 
@@ -43,188 +43,135 @@ description: 组合验证：审查 + 测试 + UAT 一站式验收
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 
----
+## 何时使用
 
-## 阶段 1: 变更分析 (Change Analysis)
-
-1. **获取变更范围**:
-```bash
-# 1) 优先使用 main/master 与 HEAD 做三点对比
-BASE_REF=""
-if git show-ref --verify --quiet refs/heads/main || git show-ref --verify --quiet refs/remotes/origin/main; then
-  BASE_REF="main"
-elif git show-ref --verify --quiet refs/heads/master || git show-ref --verify --quiet refs/remotes/origin/master; then
-  BASE_REF="master"
-fi
-
-if [ -n "$BASE_REF" ]; then
-  # 已提交差异
-  git diff "${BASE_REF}...HEAD" --stat
-  # 工作区差异（兼容尚未提交的 /jjk-imp 结果）
-  git diff --stat
-  git diff --cached --stat
-else
-  # 2) 仓库无 main/master 时自动降级，避免命令直接失败
-  echo "⚠️ 未找到 main/master，降级为工作区 + 最近提交变更"
-  git diff --stat
-  git diff --cached --stat
-  git show --stat --oneline -n 1
-fi
-```
-
-2. **识别影响面**:
-   - 变更涉及哪些模块（AI/API/前端/数据库）
-   - 是否涉及高风险文件（`agent_prompts.py`、`state.py`、`*_graph.py`）
-   - 是否有 API/数据库/配置变更
-
-3. **确定验证策略**:
-
-| 变更类型 | 审查深度 | 测试范围 | UAT 必要性 |
-|---------|---------|---------|-----------|
-| 纯后端逻辑 | 标准 | 单元测试 | 可选 |
-| API 变更 | 深度 | 单元 + API 测试 | 推荐 |
-| 前端变更 | 标准 | E2E 测试 | 必须 |
-| AI 工作流变更 | 深度 | 单元 + 集成 | 必须 |
-| 数据库变更 | 深度 | 迁移验证 | 推荐 |
-
-## 阶段 2: 快速审查 (Quick Review)
-
-> 精简版 `/jjk-review`，聚焦关键问题。
-
-**Checklist**:
-- [ ] 功能是否符合需求/计划？
-- [ ] 有无明显逻辑错误或遗漏？
-- [ ] 安全问题（SQL 注入、XSS、硬编码密钥）？
-- [ ] 代码风格是否符合项目规范（中文注释、类型提示）？
-- [ ] 文档是否需要同步更新？
-
-发现问题时：
-- 简单问题：直接修复，继续验证
-- 严重问题：停止验证，报告问题，建议回到实现阶段
-
-## 阶段 3: 自动测试 (Auto Test)
-
-> 精简版 `/jjk-test`，只跑必要的测试。
-
-### 3.1 环境检查
-
-```bash
-ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-cd "$ROOT_DIR"
-
-if [ -f scripts/vk_ports.sh ]; then
-  eval "$(bash scripts/vk_ports.sh --export)"
-fi
-
-BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  BACKEND_PORT=8000; FRONTEND_PORT=3000
-else
-  BACKEND_PORT="${VK_BACKEND_PORT:-${TEST_BACKEND_PORT:-8000}}"
-  FRONTEND_PORT="${VK_FRONTEND_PORT:-${TEST_FRONTEND_PORT:-3000}}"
-fi
-export TEST_BACKEND_PORT="$BACKEND_PORT"
-export TEST_FRONTEND_PORT="$FRONTEND_PORT"
-```
-
-### 3.2 按变更范围选择测试
-
-```bash
-# 后端变更：跑相关单元测试
-venv/bin/python -m pytest tests/unit/ -v --tb=short -q
-
-# 前端变更：跑 E2E（需要服务启动）
-cd web && npx playwright test <相关spec>
-
-# API 变更：跑 API 测试
-venv/bin/python -m pytest tests/api/ -v --tb=short -q
-```
-
-规则：
-1. 只跑与变更相关的测试，不跑全量
-2. 测试失败时记录到验证报告，不中断流程
-3. 后端未启动时先尝试自动拉起一次
-
-### 3.3 文档同步检查
-
-- [ ] API 变更 -> `docs/API文档/接口文档.md` 已更新？
-- [ ] 数据库变更 -> `docs/开发文档/架构设计/数据库设计.md` 已更新？
-- [ ] 配置变更 -> `docs/开发文档/快速入门/配置说明.md` 已更新？
-
-## 阶段 4: UAT 验收（默认自动判定，可选交互）
-
-> 默认不要求用户逐项手工点 PASS/FAIL。优先用“可执行命令 + 断言”自动判定。
-
-### 4.0 模式选择规则
-
-1. **默认：自动判定（Auto UAT）**
-   - 若存在可执行测试或可脚本化接口校验，则直接运行并判定。
-   - 以“测试断言 + 命令退出码 + 关键回包字段”为准，不要求用户看日志。
-2. **降级：交互确认（Interactive UAT）**
-   - 仅在自动证据不足时启用（例如纯视觉体验、文案体验、主观可用性）。
-   - 交互项应最小化为 1~3 条，不做冗长逐项盘问。
-3. **直接出报告（强制优先）**
-   - 自动证据充分时，直接输出最终验证报告，不得再要求用户逐项手动确认。
-
-### 4.1 自动判定（Auto UAT）执行模板
-
-按变更类型执行对应校验：
-
-```bash
-# 1) 能力级回归（优先使用已存在测试）
-venv/bin/python -m pytest -q <相关 tests>
-
-# 2) API 契约（字段级断言）
-venv/bin/python -m pytest -q tests/api/ -k "<关键词>"
-
-# 3) 数据库与迁移状态（结构级断言）
-venv/bin/alembic current
-
-# 4) 文档门禁（如本次涉及文档）
-venv/bin/python scripts/docs_guard.py --strict
-```
-
-自动判定输出必须包含：
-- 命令、退出码、通过/失败用例数
-- 关键断言点（文件路径 + 行号）
-- 新增问题与历史问题区分（例如 docs 历史断链）
-
-### 4.2 交互确认（仅在必要时）
-
-当且仅当自动证据不足时，向用户发起最小确认：
-- 每项给出“你需要观察的对象”和“通过标准”（例如某个 API 回包字段）
-- 用户只需回复 `PASS` / `FAIL`，无需手工读大量日志
-- 若 `FAIL`，进入自动诊断并给出修复建议
-
-## 阶段 5: 验证报告 (Verification Report)
-
-输出精简的验证报告（不写入文件，直接展示）：
-
-### 5.0 报告模式选择
-
-1. **默认标准报告**：使用完整结构（适合 PR/评审留痕）。
-2. **极简报告模式**：当用户明确提到“极简报告 / 简版报告 / 只要结论 / 8-12 行”时启用。
-3. 不论哪种模式，都必须包含：`总结 + 测试统计 + UAT结论 + 自动证据 + 文档同步 + 下一步建议`。
-
-极简报告模板见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`极简报告模板` 段）。  
-标准报告模板见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`标准报告模板` 段）。  
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`。
-
-最低要求：
-1. 就算执行中出现错误，也必须输出报告（标准或极简其一，可将总结标记为 `FAIL` 或 `WARN`）。
-2. 禁止只输出“继续中/待确认”而不附报告。
-3. 若用户要求“简短”，优先使用极简模板；若用户要求“详细”，优先使用标准模板。
-
-### 判定规则
-
-| 条件 | 判定 |
-|------|------|
-| 审查无严重问题 + 测试全通过 + UAT 全通过 | PASS |
-| 有非阻塞问题但核心功能正常 | WARN |
-| 有阻塞问题或核心测试失败 | FAIL |
-
-PASS/WARN -> 建议提交或创建 PR
-FAIL -> 建议回到实现阶段修复
+| 场景 | 推荐命令 |
+|---|---|
+| 实现与评审完成，准备一次性给出验收结论 | `/jjk-verify` ✅ |
+| 只做代码审查结论 | `/jjk-review` |
+| 需要完整深度测试与测试资产产出 | `/jjk-test` |
+| 发现阻断问题需回修 | `/jjk-debug` 或 `/jjk-imp(-ws)` |
 
 ---
-*使用 `/jjk-verify` 触发。适合在 `/jjk-imp` 之后一次性完成全部验证。*
+
+## 输入前置（强制）
+
+至少提供以下证据来源之一：
+
+1. `review_report_<topic>.md`；
+2. `pr_ready_manifest` / `pr_ready_manifest_ws`；
+3. 当前分支可追溯到 `task_id/pr_id` 的改动与测试证据。
+
+硬约束：
+
+1. 若无法解析 `task_id` 或 `pr_id`，`FAIL_FAST` 输出 `VERIFY_INPUT_INCOMPLETE`。
+2. 若映射与计划不一致（`task_to_pr_mapping`），`FAIL_FAST` 输出 `VERIFY_MAPPING_MISMATCH`。
+3. 若无可复核的测试/命令证据，`FAIL_FAST` 输出 `VERIFY_EVIDENCE_MISSING`。
+4. 若审查结论已 `BLOCKED` 且未修复，`FAIL_FAST` 输出 `VERIFY_BLOCKER_UNRESOLVED`。
+
+## 执行硬约束（强制）
+
+1. 无论成功、失败或中断，本轮最后都必须输出 `## 验证报告`。
+2. 自动证据充分时，直接给最终结论；不得强制用户逐项手工确认。
+3. 仅在自动证据不足时进入交互 UAT，问题数限制 1~3 条。
+4. 任一关键命令失败，必须在报告记录：`命令原文 + 退出码 + 错误摘要 + 处理建议`。
+5. 必须区分“新增问题”与“历史问题”。
+
+---
+
+## 执行流程（强制顺序）
+
+### 0) 先探索上下文（强制）
+
+至少检查：
+
+1. 变更范围（相对 `main/master` + 工作区未提交改动）。
+2. 风险边界（AI workflow/API/DB/前端/SSE）。
+3. 输入证据是否满足最小验收要求。
+
+### 0.5) 大范围验收自动启用 Team（强制判定）
+
+触发条件（满足任一即可）：
+
+1. 待验文件 `>= 25`；
+2. 涉及模块 `>= 4`；
+3. 测试命令 `>= 8` 或跨后端+前端+AI 三类以上；
+4. 同时需要审查复核 + 自动测试 + UAT 组合判定。
+
+执行策略：
+
+1. **有 Team 能力时**：分维度并行执行，Leader 汇总统一验收报告。
+2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
+
+### 1) 变更分析与验证策略
+
+1. 解析变更范围（优先 `main/master...HEAD`，失败时降级为工作区 + 最近提交）。
+2. 按变更类型选择最小必要验证集（后端/API/前端/AI/数据库）。
+3. 生成验证计划（命令清单 + 断言点）。
+
+### 2) 快速审查复核
+
+1. 消费 `review_report` 或当前审查证据。
+2. 若存在 `P0/P1` 未关闭项，标记 `VERIFY_BLOCKER_UNRESOLVED` 并阻断。
+
+### 3) 自动测试执行
+
+1. 仅跑与变更相关的必要测试。
+2. 记录每条命令的退出码与结果统计。
+3. 测试失败不应静默吞掉，必须入报告。
+
+### 4) UAT 判定
+
+1. 默认自动判定（命令断言 + 回包字段 + 退出码）。
+2. 证据不足时进入交互确认（1~3 项），并给出清晰通过标准。
+3. UAT `FAIL` 时，输出回退修复建议。
+
+### 5) 报告输出与结论
+
+结论规则：
+
+1. `PASS`：审查无阻断 + 关键测试通过 + UAT 通过。
+2. `WARN`：存在非阻断问题，但核心链路通过。
+3. `FAIL`：阻断问题未解或关键测试/UAT 失败。
+
+必须输出：
+
+1. 总结（PASS/WARN/FAIL）
+2. 审查结果摘要
+3. 测试统计
+4. UAT 结论
+5. 自动证据与降级记录
+6. 文档同步状态
+7. 下一步建议命令（`/jjk-create-pr`、`/jjk-debug`、`/jjk-imp(-ws)`）
+
+---
+
+## 输出模板（推荐）
+
+- 极简报告模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`极简报告模板` 段）
+- 标准报告模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`标准报告模板` 段）
+- 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`
+
+## 禁止项（强制）
+
+1. 禁止只输出“进行中/待确认”而不输出验收报告。
+2. 禁止无证据直接给 `PASS`。
+3. 禁止忽略阻断项继续推进到交付阶段。
+4. 禁止把历史问题全部算作本次新增问题。
+
+## 推荐链路
+
+`/jjk-review -> /jjk-verify -> /jjk-create-pr`
+
+## 使用示例
+
+```text
+/jjk-verify
+```
+
+```text
+/jjk-verify @docs/内部参考/迭代需求/review_report_<topic>.md
+```
+
+---
+*使用 `/jjk-verify` 触发。目标是“证据驱动验收结论”，不是形式化汇总。*

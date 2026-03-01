@@ -319,3 +319,89 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
     refreshed_state = json.loads(state_path.read_text(encoding="utf-8"))
     assert refreshed_state["last_auto_wake_card"] == "C01"
     assert refreshed_state["last_action_result"] == "CARD_ACTIVATED:C02"
+
+
+def _build_scoped_board_tasks(task_key: str) -> list[dict[str, str]]:
+    return [
+        {
+            "id": "task-c01",
+            "title": f"C01 preflight [{task_key}]",
+            "description": f"card_id: C01\ntask_key: {task_key}\n",
+            "status": "done",
+            "updated_at": "2026-03-01T10:00:00+08:00",
+        },
+        {
+            "id": "task-c02",
+            "title": f"C02 kernel [{task_key}]",
+            "description": f"card_id: C02\ntask_key: {task_key}\n",
+            "status": "done",
+            "updated_at": "2026-03-01T10:01:00+08:00",
+        },
+        {
+            "id": "task-c03",
+            "title": f"C03 follow-up [{task_key}]",
+            "description": f"card_id: C03\ntask_key: {task_key}\n",
+            "status": "done",
+            "updated_at": "2026-03-01T10:02:00+08:00",
+        },
+    ]
+
+
+def test_build_kernel_context_non_local_accepts_ready_status_json(monkeypatch, tmp_path):
+    """非 local-mode 下 preflight JSON 使用 status=ready 也应放行。"""
+
+    module = _load_kernel_module()
+    active_task_path, _, _, _ = _prepare_workspace(tmp_path)
+    active_payload = json.loads(active_task_path.read_text(encoding="utf-8"))
+    active_payload["preflight_required"] = "C00"
+    source_path = tmp_path / "preflight_status.json"
+    _write_json(
+        source_path,
+        {
+            "card_id": "C00",
+            "task_key": TASK_KEY,
+            "status": "ready",
+        },
+    )
+    active_payload["status_source_of_truth"] = str(source_path)
+    _write_json(active_task_path, active_payload)
+
+    monkeypatch.setattr(
+        module,
+        "list_tasks",
+        lambda _api_base, _project_id: _build_scoped_board_tasks(TASK_KEY),
+    )
+
+    ctx = module.build_kernel_context(active_task_path, "http://127.0.0.1:3001")
+    assert ctx.preflight_ok is True
+    assert ctx.preflight_reason == "preflight_doc_passed_json"
+
+
+def test_build_kernel_context_non_local_rejects_mismatched_task_key(monkeypatch, tmp_path):
+    """preflight JSON task_key 与 active task 不一致时不得放行。"""
+
+    module = _load_kernel_module()
+    active_task_path, _, _, _ = _prepare_workspace(tmp_path)
+    active_payload = json.loads(active_task_path.read_text(encoding="utf-8"))
+    active_payload["preflight_required"] = "C00"
+    source_path = tmp_path / "preflight_status.json"
+    _write_json(
+        source_path,
+        {
+            "preflight_required": "C00",
+            "task_key": "PP-MISMATCH",
+            "passed": True,
+        },
+    )
+    active_payload["status_source_of_truth"] = str(source_path)
+    _write_json(active_task_path, active_payload)
+
+    monkeypatch.setattr(
+        module,
+        "list_tasks",
+        lambda _api_base, _project_id: _build_scoped_board_tasks(TASK_KEY),
+    )
+
+    ctx = module.build_kernel_context(active_task_path, "http://127.0.0.1:3001")
+    assert ctx.preflight_ok is False
+    assert ctx.preflight_reason == "C00_not_done"

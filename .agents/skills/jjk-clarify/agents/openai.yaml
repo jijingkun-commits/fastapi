@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-clarify"
+  short_description: "澄清入口（结合 brainstorming）：提高提问效率，产出标准 design 文档"
+  default_prompt: "$jjk-clarify"

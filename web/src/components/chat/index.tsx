@@ -184,7 +184,7 @@ export function Thread() {
     }
   }, [stream.error]);
 
-  // TODO: this should be part of the useStream hook
+  // 页面级首 Token 动画状态与组件渲染时序强耦合，暂保留在组件层维护。
   const prevMessageLength = useRef(0);
   useEffect(() => {
     if (
