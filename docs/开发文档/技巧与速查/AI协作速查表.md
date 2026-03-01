@@ -24,9 +24,10 @@
 ```text
 想法 -> /jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
      -> /jjk-vktodo <任务拆解目录>
-     -> /jjk-imp-ws @workstreams/WS-01...WS-N（并行层）
-     -> /jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md
-     -> /jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md
+     -> /jjk-cardrun <任务拆解目录>（串行调度入口）
+     -> /jjk-imp-ws @workstreams/WS-01...WS-N（由 cardrun 按卡触发）
+     -> /jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md（Gate）
+     -> /jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md（Gate）
      -> /jjk-verify -> 验收
                        （或 /jjk-review -> /jjk-test -> 验收）
 ```
@@ -47,8 +48,9 @@
 | 1. 需求与方案 | `/jjk-plan parallel`（或 `/jjk-plan core`） | 默认 `<topic>_requirements.md` + `<topic>_implementation_plan.md` | `task_key` 全局唯一；若 `card_seed` 缺失，需由 `/jjk-vkplan` 推导并在 `parallel_plan.md` 标注来源 |
 | 2. 并行拆解 | `/jjk-vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
 | 3. 看板落地 | `/jjk-vktodo <任务拆解目录>` | VK 实际卡片（`WS-01...WS-G2`） | 建卡成功且依赖关系正确 |
-| 4. 子任务执行 | `/jjk-imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
-| 5. Gate 回填 | `/jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
+| 4. 串行调度 | `/jjk-cardrun <任务拆解目录>` | 单活卡执行态 + 子代理分派记录 | 当前卡完成后才激活下一卡，不允许跳卡 |
+| 5. 子任务执行 | `/jjk-imp-ws @workstreams/WS-*.md` | 代码 + 自检卡 | 仅改白名单，完成最小验证 |
+| 6. Gate 回填 | `/jjk-imp-ws @workstreams/WS-G1_集成回归门禁.md` + `/jjk-imp-ws @workstreams/WS-G2_文档终稿门禁.md` | Gate 结果回填到 `parallel_plan.md` | 门禁命令通过，回填脚本成功 |
 
 ---
 
@@ -62,6 +64,7 @@
 | 基线同步（调试） | `/jjk-vksync <任务拆解目录>` | 校验 G0 是否在所有目标 worktree 生效 |
 | 看板落卡（推荐） | `/jjk-vktodo <任务拆解目录>` | 自动读取 `vk_cards.json` 批量建卡（不含 `WS-00`） |
 | 看板推进（简化） | `/jjk-vktodo <任务拆解目录> move <状态>` | 按 `task_key` 前缀筛选并推进 |
+| 串行卡片执行（推荐） | `/jjk-cardrun <任务拆解目录>` | 主控按 `card_order` 调度子代理逐卡执行 |
 | 执行单个 WS | `/jjk-imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/jjk-imp` | 不走并行流程时使用 |
 | 小改动（<= 3 文件） | `/jjk-quick` | 跳过完整流程，直接改码 + 最小验证 |

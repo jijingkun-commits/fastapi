@@ -219,34 +219,6 @@ MODEL_SCENE_DEFAULT_CHAT = "default_chat"
 MODEL_SCENE_LIGHTWEIGHT = "lightweight"
 MODEL_SCENE_SQL_GENERATION = "sql_generation"
 
-
-def get_scene_routing(scene: str) -> tuple[str, str]:
-    """获取模型调用场景对应的路由键与环境变量回退值。"""
-    scene_map = {
-        MODEL_SCENE_DEFAULT_CHAT: (MODEL_ROUTING_DEFAULT_CHAT, ""),
-        MODEL_SCENE_LIGHTWEIGHT: (MODEL_ROUTING_INTENT_CLASSIFIER, INTENT_CLASSIFIER_MODEL),
-        MODEL_SCENE_SQL_GENERATION: (MODEL_ROUTING_SQL_GENERATION, SQL_GENERATION_MODEL),
-    }
-    if scene not in scene_map:
-        raise ValueError(f"不支持的模型调用场景: {scene}")
-    return scene_map[scene]
-
-
-def get_routing_model(config_key: str, env_fallback: str) -> str:
-    """获取模型路由配置（优先 t_system_config，回退环境变量）。
-
-    Args:
-        config_key: t_system_config 中的配置键
-        env_fallback: 环境变量回退值
-
-    Returns:
-        模型代码
-    """
-    from app.services.config_resolver import ConfigResolver
-
-    value = ConfigResolver.get_string(config_key, env_fallback)
-    return value if value else env_fallback
-
 # MCP Chart
 MCP_CHART_SERVER_URL = os.getenv("MCP_CHART_SERVER_URL", "http://127.0.0.1:1122/sse")
 MCP_CHART_ENABLED = os.getenv("MCP_CHART_ENABLED", "true").lower() == "true"

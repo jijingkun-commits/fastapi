@@ -251,9 +251,3 @@ def get_required_scene_keys() -> set[str]:
     """返回启动期必须存在的场景键集合。"""
 
     return set(SCENE_DEFINITION_MAP)
-
-
-def get_scene_keys_by_route_group(route_group: str) -> tuple[str, ...]:
-    """按路由分组返回场景键列表。"""
-
-    return SCENE_KEYS_BY_ROUTE_GROUP.get(route_group, ())

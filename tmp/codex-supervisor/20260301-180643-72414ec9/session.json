@@ -1,0 +1,34 @@
+{
+  "session_id": "20260301-180643-72414ec9",
+  "workdir": "/Users/jijingkun/bojxAI/fastapi",
+  "created_at": 1772359603,
+  "turns": [
+    {
+      "turn_index": 1,
+      "turn_id": "t001",
+      "user_prompt": "Return exactly: turn1_ok",
+      "prompt_sent_chars": 24,
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 16419,
+      "assistant_answer": "turn1_ok",
+      "stdout_path": "/Users/jijingkun/bojxAI/fastapi/tmp/codex-supervisor/20260301-180643-72414ec9/t001.stdout.log",
+      "stderr_path": "/Users/jijingkun/bojxAI/fastapi/tmp/codex-supervisor/20260301-180643-72414ec9/t001.stderr.log",
+      "ts": 1772359619
+    },
+    {
+      "turn_index": 2,
+      "turn_id": "t002",
+      "user_prompt": "Based on previous answer, reply exactly: turn2_ok",
+      "prompt_sent_chars": 168,
+      "exit_code": 0,
+      "timed_out": false,
+      "duration_ms": 12422,
+      "assistant_answer": "turn2_ok",
+      "stdout_path": "/Users/jijingkun/bojxAI/fastapi/tmp/codex-supervisor/20260301-180643-72414ec9/t002.stdout.log",
+      "stderr_path": "/Users/jijingkun/bojxAI/fastapi/tmp/codex-supervisor/20260301-180643-72414ec9/t002.stderr.log",
+      "ts": 1772359641
+    }
+  ],
+  "updated_at": 1772359641
+}

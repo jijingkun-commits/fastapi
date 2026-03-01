@@ -53,10 +53,3 @@ async def close_checkpointer():
         _context_manager = None
         _checkpointer = None
         logger.info("PostgreSQL Checkpointer 连接已关闭")
-
-
-def reset_checkpointer():
-    """重置 Checkpointer 实例（用于测试，同步版本）。"""
-    global _checkpointer, _context_manager
-    _context_manager = None
-    _checkpointer = None

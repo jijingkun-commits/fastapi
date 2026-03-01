@@ -74,7 +74,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
    - `cards[]`
 3. `project_id` 必须可确定：
    - 优先显式参数 `project`；
-   - 其次读取 `docs/内部参考/任务拆解/_active_task.json`；
+   - 其次读取 `docs/内部参考/任务拆解/_active_task.json`（活跃索引）；
    - 再次尝试 workspace 绑定项目。
 4. 若仍无法解析 `project_id`，必须 `FAIL_FAST` 输出 `VKTODO_MISSING_PROJECT_ID`。
 5. 若 `vk_cards.json` 缺失或结构非法，必须 `FAIL_FAST` 输出 `VKTODO_INPUT_INVALID`。
@@ -151,11 +151,18 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 1. **有 Team 能力时**：并行分片执行 create/move/reconcile，Leader 汇总唯一结果。
 2. **无 Team 能力时**：降级为单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
+### 0.6) Team 交叉质检约束（新增，轻量）
+
+1. Team 模式下必须启用抽检互审：至少抽检 `20%` 工作项（向上取整，最少 `1` 项）。
+2. 每个抽检项必须包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
+3. 抽检未通过的工作项不得推进到下一阶段，必须先复核并补齐证据。
+4. 阶段汇报至少包含：`结论`、`证据`、`剩余风险`。
+
 ### 1) 解析来源目录、项目与契约
 
 1. 若传入 `task_split_dir`（或位置参数），先按路径规则解析并校验目录合法性。
 2. 校验命名衔接：`task_split_dir` 中 `<主题>` 必须与 `$jjk-plan` / `$jjk-vkplan` 产物一致。
-3. 读取 `vk_cards.json` 与 `_active_task.json`（若存在），校验 `task_key/task_split_dir/project_id`：
+3. 读取 `vk_cards.json`、任务级 `_active_task.json`（`<task_split_dir>/_active_task.json`）与活跃索引 `_active_task.json`（若存在），校验 `task_key/task_split_dir/project_id`：
    - 若冲突，`FAIL_FAST` 输出 `VKTODO_ACTIVE_TASK_MISMATCH`。
 4. 调用 `mcp__vibe_kanban__list_organizations` + `mcp__vibe_kanban__list_projects`，将 `project` 解析为唯一 `project_id`。
 5. 调用 `mcp__vibe_kanban__list_issues` 获取变更前统计（按状态聚合）。
@@ -218,7 +225,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 2. 重新统计项目卡片状态分布。
 3. 统计本轮按 `pr_id` 聚合的变更结果（created/moved/failed）。
 4. 若结果与目标集合不一致，输出 `VKTODO_RESULT_MISMATCH`。
-5. 输出“做了什么 + 结果数字 + PR 维度统计 + 下一步建议（$jjk-imp-ws 或下一批推进）”。
+5. 输出“做了什么 + 结果数字 + PR 维度统计 + 下一步建议（$jjk-cardrun、$jjk-imp-ws 或下一批推进）”。
 
 ### 6) 自动执行器作用域绑定（强制）
 
@@ -232,7 +239,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
    - `applied=false`
 2. 执行：
    - `python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json`
-3. 回读 `_active_task.json`，校验：
+3. 回读任务级 `_active_task.json` 与活跃索引 `_active_task.json`，校验：
    - `task_split_dir` 一致
    - `project_id` 一致
    - `task_key` 与 `vk_cards.json.task_key` 一致
@@ -256,7 +263,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 
 ## 推荐链路
 
-`$jjk-plan -> $jjk-vkplan -> $jjk-vksync -> $jjk-vktodo -> $jjk-imp-ws`
+`$jjk-plan -> $jjk-vkplan -> $jjk-vksync -> $jjk-vktodo -> $jjk-cardrun -> $jjk-imp-ws`
 
 ## 使用示例
 

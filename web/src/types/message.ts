@@ -127,6 +127,7 @@ export interface StreamEvent {
  */
 export interface InitEventData {
     thread_id: string;
+    run_id?: string;
 }
 
 /**
@@ -211,6 +212,7 @@ export interface SqlResultData {
  */
 export interface DoneEventData {
     thread_id: string;
+    run_id?: string;
     message_id?: number;
     final_content?: string;
     meta?: Record<string, unknown>;

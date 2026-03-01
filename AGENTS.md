@@ -8,7 +8,7 @@
 1. **中文主导**: 思考过程和输出永远使用中文
 2. **审慎修改**: 修改前逐行审查源代码；不确定时先查文档/测试/调用链，仍无法判断再一次性提问
 3. **工程质量优先**: 优先结构清晰、命名一致、可读、可测试、可维护的方案
-4. **精简优先**: 能用现有模块就不新建；必要时先做适度重构以降低复杂度与后续维护成本
+4. **精简优先**: 能用现有模块就不新建；必要时先做适度重构以降低复杂度与后续维护成本，尽量降低代码行数，不要每次都引入大量新代码。
 5. **纯净注释**: NEVER 在注释中使用 emoji，NEVER 添加"修复/优化"过程注释
 6. **架构优先**: 独立思考，勇于指出现有项目的问题和错误，不要顺着用户的思路走；无论是需求开发、缺陷修复还是性能调整，都先确认模块边界、状态契约与职责归属；跨层改动必须先梳理端到端数据流与状态生命周期，避免策略散落到多个节点造成隐性耦合
 7. **拒绝补丁**: 禁止以临时条件分支、硬编码或重复逻辑掩盖问题；必须先定位根因，并在正确层级进行系统性修复，必要时先做适度重构以降低复杂度与后续维护成本
@@ -56,7 +56,8 @@
 ## Coder4 Payload 迁移固定层（P2-01）
 
 ### §1 真理源路径
-- `_active_task.json`：`/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json`
+- `task-scoped _active_task.json`：`/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
+- `_active_task.index.json`（兼容入口，文件名仍为 `_active_task.json`）：`/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json`
 - `WORKFLOW_AUTO.md`：`/Users/jijingkun/.openclaw/workspace-dev/WORKFLOW_AUTO.md`
 - `VK_AGENT_PROMPTS.md`：`/Users/jijingkun/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md`
 - `task-runner-state.json`：`/Users/jijingkun/bojxAI/fastapi/.omc/state/task-runner-state.json`
@@ -67,7 +68,7 @@
 2. 禁止全量读取任务拆解目录；仅允许读取当前卡片相关文件与必要上下游依赖片段。
 3. 禁止空转；当无实质操作时必须输出阻塞原因、已检查对象和下一步。
 4. 禁止跳过 `scope_guard`；每轮分派前必须完成 `scope_guard` 校验并记录结果。
-5. `_active_task.json` 属于真理源，禁止手工改写；仅允许通过受控脚本更新。
+5. `task-scoped _active_task.json` 与根目录 `_active_task.json`（索引）均属于真理源，禁止手工改写；仅允许通过受控脚本更新。
 6. 禁止直接操作 VK API；状态变更仅允许经 `scripts/coder4_vk_sync.py` 或等价同步脚本。
 7. 其他卡片的 worktree 一律禁止修改；仅允许在当前 active card 对应 worktree 内执行变更。
 8. 单次执行必须受 `timeoutSeconds` 上限约束；超时后进入阻塞模板并回传证据。

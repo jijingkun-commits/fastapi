@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set docs/内部参考/任务拆解/_active_task.json from a split task directory."""
+"""Set task-scoped _active_task.json and active index file from a split task directory."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+TASK_ACTIVE_FILENAME = "_active_task.json"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -24,7 +27,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Write _active_task.json for coder automation scope lock."
+        description="Write task-scoped _active_task.json and active index file for coder automation scope lock."
     )
     parser.add_argument(
         "--task-split-dir",
@@ -60,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--active-task-path",
         default="docs/内部参考/任务拆解/_active_task.json",
-        help="Target active task json path relative to repo root",
+        help="Target active index json path relative to repo root",
     )
     return parser.parse_args()
 
@@ -120,10 +123,16 @@ def main() -> int:
         "updated_by": args.updated_by,
     }
 
-    active_task_path = repo_root / args.active_task_path
-    write_json(active_task_path, active_payload)
+    task_scoped_active_task_path = task_split_dir / TASK_ACTIVE_FILENAME
+    write_json(task_scoped_active_task_path, active_payload)
 
-    print(f"updated: {active_task_path}")
+    active_index_path = repo_root / args.active_task_path
+    active_index_payload = dict(active_payload)
+    active_index_payload["active_task_path"] = str(task_scoped_active_task_path.resolve())
+    write_json(active_index_path, active_index_payload)
+
+    print(f"updated task-scoped: {task_scoped_active_task_path}")
+    print(f"updated active-index: {active_index_path}")
     print(
         "scope:",
         f"project_id={active_payload['project_id']}",

@@ -83,6 +83,7 @@ class KernelContext:
     project_id: str
     task_key: str
     execution_mode: str
+    single_active_card: bool
     preflight_required: str
     preflight_ok: bool
     preflight_reason: str
@@ -92,6 +93,13 @@ class KernelContext:
     unscoped_tasks: list[dict[str, Any]]
     card_status_map: dict[str, str]
     card_task_map: dict[str, dict[str, Any]]
+    scope_guard_ok: bool
+    scope_guard_reason: str
+    scope_guard_details: list[dict[str, Any]]
+    main_repo_path: str
+    main_repo_clean: bool
+    main_repo_dirty_preview: list[str]
+    main_repo_error: str | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,6 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--active-task", default=DEFAULT_ACTIVE_TASK)
     parser.add_argument("--vk-api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--local-mode", action="store_true", default=False)
+    parser.add_argument("--sync-vk-in-local-mode", action="store_true", default=False)
     parser.add_argument("--state-file", default=DEFAULT_STATE_FILE)
     parser.add_argument("--attempts-dir", default=DEFAULT_ATTEMPTS_DIR)
     parser.add_argument("--task-ledger-file", default=DEFAULT_TASK_LEDGER_FILE)
@@ -998,6 +1007,80 @@ def resolve_state_file_path(active_task_path: Path, raw_state_file: str) -> Path
     return resolve_runtime_file_path(active_task_path, raw_state_file)
 
 
+def resolve_repo_root(active_task_path: Path) -> Path:
+    for ancestor in active_task_path.parents:
+        if (ancestor / ".git").exists():
+            return ancestor.resolve()
+    return Path.cwd().resolve()
+
+
+def inspect_repo_clean(repo_root: Path) -> tuple[bool, list[str], str | None]:
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        stdout = proc.stdout.strip()
+        detail = stderr or stdout or f"returncode={proc.returncode}"
+        return False, [], f"git_status_failed:{detail}"
+    dirty = [line.rstrip() for line in proc.stdout.splitlines() if line.strip()]
+    return len(dirty) == 0, dirty[:8], None
+
+
+def _task_preview(task: dict[str, Any]) -> dict[str, str]:
+    title = str(task.get("title") or "").replace("\n", " ")
+    return {
+        "task_id": str(task.get("id") or ""),
+        "status": normalize_status(task.get("status")),
+        "title": title[:120],
+    }
+
+
+def evaluate_scope_guard(
+    *,
+    scoped_tasks: list[dict[str, Any]],
+    unscoped_tasks: list[dict[str, Any]],
+    single_active_card: bool,
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    active_statuses = {"inprogress", "inreview"}
+    unscoped_active = [
+        task for task in unscoped_tasks if normalize_status(task.get("status")) in active_statuses
+    ]
+    if unscoped_active:
+        return (
+            False,
+            "scope_conflict_unscoped_active",
+            [
+                {
+                    "reason": "scope_conflict_unscoped_active",
+                    "active_count": len(unscoped_active),
+                    "tasks": [_task_preview(task) for task in unscoped_active[:6]],
+                }
+            ],
+        )
+
+    scoped_active = [
+        task for task in scoped_tasks if normalize_status(task.get("status")) in active_statuses
+    ]
+    if single_active_card and len(scoped_active) > 1:
+        return (
+            False,
+            "scope_conflict_multi_active_scoped",
+            [
+                {
+                    "reason": "scope_conflict_multi_active_scoped",
+                    "active_count": len(scoped_active),
+                    "tasks": [_task_preview(task) for task in scoped_active[:6]],
+                }
+            ],
+        )
+
+    return True, "scope_guard_passed", []
+
+
 def pick_task_for_card(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     def key_fn(t: dict[str, Any]) -> tuple[int, str]:
         st = normalize_status(t.get("status"))
@@ -1069,6 +1152,7 @@ def build_kernel_context(
     task_split_dir = str(active.get("task_split_dir") or "").strip()
     task_key = str(active.get("task_key") or "").strip()
     execution_mode = str(active.get("execution_mode") or "serial").strip().lower() or "serial"
+    single_active_card = bool(active.get("single_active_card", True))
     preflight_required = str(active.get("preflight_required") or "").strip() or "C00"
     if not task_split_dir or not task_key:
         raise ValueError("active task missing task_split_dir/task_key")
@@ -1089,6 +1173,9 @@ def build_kernel_context(
     unscoped: list[dict[str, Any]] = []
     card_status_map: dict[str, str] = {}
     card_task_map: dict[str, dict[str, Any]] = {}
+    scope_guard_ok = True
+    scope_guard_reason = "scope_guard_passed"
+    scope_guard_details: list[dict[str, Any]] = []
 
     if local_mode:
         if state_path is None:
@@ -1139,12 +1226,21 @@ def build_kernel_context(
             card_task_map[cid] = selected
             card_status_map[cid] = normalize_status(selected.get("status"))
 
+        scope_guard_ok, scope_guard_reason, scope_guard_details = evaluate_scope_guard(
+            scoped_tasks=scoped,
+            unscoped_tasks=unscoped,
+            single_active_card=single_active_card,
+        )
+
+    repo_root = resolve_repo_root(active_task_path)
+    main_repo_clean, main_repo_dirty_preview, main_repo_error = inspect_repo_clean(repo_root)
+
     preflight_ok = False
     preflight_reason = f"{preflight_required}_not_done"
     if preflight_required in card_status_map and card_status_map[preflight_required] == "done":
         preflight_ok = True
         preflight_reason = "preflight_card_done"
-    elif not local_mode:
+    else:
         source = str(active.get("status_source_of_truth") or "").strip()
         if source:
             source_path = Path(source)
@@ -1176,6 +1272,7 @@ def build_kernel_context(
         project_id=project_id,
         task_key=task_key,
         execution_mode=execution_mode,
+        single_active_card=single_active_card,
         preflight_required=preflight_required,
         preflight_ok=preflight_ok,
         preflight_reason=preflight_reason,
@@ -1185,6 +1282,13 @@ def build_kernel_context(
         unscoped_tasks=unscoped,
         card_status_map=card_status_map,
         card_task_map=card_task_map,
+        scope_guard_ok=scope_guard_ok,
+        scope_guard_reason=scope_guard_reason,
+        scope_guard_details=scope_guard_details,
+        main_repo_path=str(repo_root),
+        main_repo_clean=main_repo_clean,
+        main_repo_dirty_preview=main_repo_dirty_preview,
+        main_repo_error=main_repo_error,
     )
 
 
@@ -1202,6 +1306,21 @@ def deps_ready(card_id: str, ctx: KernelContext) -> tuple[bool, list[str]]:
 
 
 def decide_action(ctx: KernelContext) -> tuple[str, str | None, str | None, str | None, list[dict[str, Any]]]:
+    if not ctx.main_repo_clean:
+        detail: dict[str, Any] = {
+            "reason": "main_repo_dirty",
+            "repo_root": ctx.main_repo_path,
+            "dirty_preview": ctx.main_repo_dirty_preview,
+        }
+        if ctx.main_repo_error:
+            detail["error"] = ctx.main_repo_error
+        return ("preflight_blocked", None, None, None, [detail])
+
+    if not ctx.scope_guard_ok:
+        if ctx.scope_guard_details:
+            return ("preflight_blocked", None, None, None, ctx.scope_guard_details)
+        return ("preflight_blocked", None, None, None, [{"reason": ctx.scope_guard_reason}])
+
     if not ctx.preflight_ok:
         return ("preflight_blocked", None, None, None, [])
 
@@ -1282,6 +1401,7 @@ def apply_action(
     active_task_path: Path,
     local_mode: bool = False,
     state_path: Path | None = None,
+    sync_vk_in_local_mode: bool = False,
 ) -> dict[str, Any]:
     if action == "seed":
         if not target_card_id:
@@ -1301,15 +1421,25 @@ def apply_action(
                 action="seed",
                 action_result=f"CARD_SEEDED:{target_card_id}",
             )
-            vk_sync = _try_sync_vk(
-                active_task_path=active_task_path,
-                state_path=state_path,
-                vk_api_base=api_base,
-                project_id=ctx.project_id,
-                task_key=ctx.task_key,
-                card_id=target_card_id,
-                status="todo",
-            )
+            if sync_vk_in_local_mode:
+                vk_sync = _try_sync_vk(
+                    active_task_path=active_task_path,
+                    state_path=state_path,
+                    vk_api_base=api_base,
+                    project_id=ctx.project_id,
+                    task_key=ctx.task_key,
+                    card_id=target_card_id,
+                    status="todo",
+                )
+            else:
+                vk_sync = {
+                    "attempted": False,
+                    "ok": False,
+                    "disabled": True,
+                    "reason": "local_mode_vk_sync_disabled",
+                    "card_id": target_card_id,
+                    "status": "todo",
+                }
             return {
                 "performed": True,
                 "action": "seed",
@@ -1359,15 +1489,25 @@ def apply_action(
                 action="activate",
                 action_result=f"CARD_ACTIVATED:{target_card_id}",
             )
-            vk_sync = _try_sync_vk(
-                active_task_path=active_task_path,
-                state_path=state_path,
-                vk_api_base=api_base,
-                project_id=ctx.project_id,
-                task_key=ctx.task_key,
-                card_id=target_card_id,
-                status="inprogress",
-            )
+            if sync_vk_in_local_mode:
+                vk_sync = _try_sync_vk(
+                    active_task_path=active_task_path,
+                    state_path=state_path,
+                    vk_api_base=api_base,
+                    project_id=ctx.project_id,
+                    task_key=ctx.task_key,
+                    card_id=target_card_id,
+                    status="inprogress",
+                )
+            else:
+                vk_sync = {
+                    "attempted": False,
+                    "ok": False,
+                    "disabled": True,
+                    "reason": "local_mode_vk_sync_disabled",
+                    "card_id": target_card_id,
+                    "status": "inprogress",
+                }
             return {
                 "performed": True,
                 "action": "activate",
@@ -1510,12 +1650,24 @@ def main() -> int:
                         {
                             "project_id": ctx.project_id,
                             "execution_mode": ctx.execution_mode,
+                            "single_active_card": ctx.single_active_card,
                             "preflight_required": ctx.preflight_required,
                             "preflight_ok": ctx.preflight_ok,
                             "preflight_reason": ctx.preflight_reason,
                             "target_card_id": first_not_done,
                             "target_task_id": target_task_id,
                             "target_status": target_status,
+                            "scope_guard": {
+                                "ok": ctx.scope_guard_ok,
+                                "reason": ctx.scope_guard_reason,
+                                "details": ctx.scope_guard_details,
+                            },
+                            "main_repo_guard": {
+                                "ok": ctx.main_repo_clean,
+                                "repo_root": ctx.main_repo_path,
+                                "dirty_preview": ctx.main_repo_dirty_preview,
+                                "error": ctx.main_repo_error,
+                            },
                         }
                     )
                     attempt_result = _derive_attempt_result(
@@ -1565,6 +1717,7 @@ def main() -> int:
                     active_task_path=active_task_path,
                     local_mode=args.local_mode,
                     state_path=state_path,
+                    sync_vk_in_local_mode=args.sync_vk_in_local_mode,
                 )
 
             auto_wake = {
@@ -1620,6 +1773,7 @@ def main() -> int:
                 "project_id": ctx.project_id,
                 "task_key": ctx.task_key,
                 "execution_mode": ctx.execution_mode,
+                "single_active_card": ctx.single_active_card,
                 "preflight_required": ctx.preflight_required,
                 "preflight_ok": ctx.preflight_ok,
                 "preflight_reason": ctx.preflight_reason,
@@ -1638,6 +1792,17 @@ def main() -> int:
                 "target_status": target_status,
                 "card_status_map": ctx.card_status_map,
                 "blocked_details": blocked_details,
+                "scope_guard": {
+                    "ok": ctx.scope_guard_ok,
+                    "reason": ctx.scope_guard_reason,
+                    "details": ctx.scope_guard_details,
+                },
+                "main_repo_guard": {
+                    "ok": ctx.main_repo_clean,
+                    "repo_root": ctx.main_repo_path,
+                    "dirty_preview": ctx.main_repo_dirty_preview,
+                    "error": ctx.main_repo_error,
+                },
                 "applied": applied,
                 "auto_wake": auto_wake,
                 "run_lock": {

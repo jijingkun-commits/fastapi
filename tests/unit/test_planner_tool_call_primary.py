@@ -47,7 +47,7 @@ class _FakePlannerLLM:
 def test_tool_call_primary_builds_plan_from_tool_args(monkeypatch) -> None:
     """tool_call 主路径可用时，应优先采用 tool args 产出目标。"""
     monkeypatch.delenv("PLANNER_STRUCTURED_STRATEGY", raising=False)
-    monkeypatch.delenv("PLANNER_DISABLE_TOOL_CALL", raising=False)
+    monkeypatch.setenv("PLANNER_DISABLE_TOOL_CALL", "false")
     monkeypatch.setattr(
         graph,
         "get_llm_capabilities",
@@ -80,7 +80,7 @@ def test_tool_call_primary_builds_plan_from_tool_args(monkeypatch) -> None:
 def test_tool_call_primary_fallbacks_to_legacy_json_object(monkeypatch) -> None:
     """tool_call 失败后应自动降级到 json_object 路径。"""
     monkeypatch.delenv("PLANNER_STRUCTURED_STRATEGY", raising=False)
-    monkeypatch.delenv("PLANNER_DISABLE_TOOL_CALL", raising=False)
+    monkeypatch.setenv("PLANNER_DISABLE_TOOL_CALL", "false")
     monkeypatch.setattr(
         graph,
         "get_llm_capabilities",

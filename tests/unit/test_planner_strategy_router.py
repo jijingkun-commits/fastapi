@@ -3,8 +3,8 @@
 import app.ai.workflow.multi_agent_graph as graph
 
 
-def test_strategy_router_prefers_tool_call_when_capability_available(monkeypatch) -> None:
-    """auto 策略下，具备 tool_call 能力应走主路径。"""
+def test_strategy_router_defaults_to_legacy_json_object(monkeypatch) -> None:
+    """默认配置下应禁用 tool_call，直接走 json_object 主路径。"""
     monkeypatch.delenv("PLANNER_STRUCTURED_STRATEGY", raising=False)
     monkeypatch.delenv("PLANNER_DISABLE_TOOL_CALL", raising=False)
     monkeypatch.setattr(
@@ -15,15 +15,15 @@ def test_strategy_router_prefers_tool_call_when_capability_available(monkeypatch
 
     meta = graph._resolve_planner_structured_strategy(object())
 
-    assert meta["strategy"] == "tool_call_primary"
+    assert meta["strategy"] == "legacy_json_object"
     assert meta["supports_tool_call"] is True
-    assert meta["tool_call_disabled"] is False
+    assert meta["tool_call_disabled"] is True
 
 
 def test_strategy_router_forced_legacy_overrides_capability(monkeypatch) -> None:
     """显式指定 legacy_json_object 时应强制走 legacy。"""
     monkeypatch.setenv("PLANNER_STRUCTURED_STRATEGY", "legacy_json_object")
-    monkeypatch.delenv("PLANNER_DISABLE_TOOL_CALL", raising=False)
+    monkeypatch.setenv("PLANNER_DISABLE_TOOL_CALL", "false")
     monkeypatch.setattr(
         graph,
         "get_llm_capabilities",

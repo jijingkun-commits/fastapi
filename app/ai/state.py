@@ -142,6 +142,7 @@ class MultiAgentState(BaseAgentState, total=False):
     delivery_meta: Dict[str, Any]       # 交付元数据（排序/去重/时效统计）
     coverage_retry_count: int           # Coverage Gate 已触发的补齐轮次
     coverage_gate_route: str            # Coverage Gate 下一跳（supervisor/final_composer/postprocess）
+    coverage_partial_gap_allowed: bool  # 是否允许子任务缺口直接收口（A1 策略）
     route_decisions: List[Dict[str, Any]]  # Router 合同化路由决策快照
 
 

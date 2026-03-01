@@ -1,0 +1,617 @@
+{
+  "task_key": "PP-20260301-KB-RETRIEVAL-P2",
+  "task_split_dir": "2026-03-01_知识库检索P2分阶段治理",
+  "plan_title": "知识库检索P2分阶段治理串行拆解计划",
+  "generated_at": "2026-03-01",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "auto_done_policy": {
+    "implementation-card": "hard_gate",
+    "inspection/question-card": "policy_gate"
+  },
+  "automation_contract": {
+    "source_of_truth": "docs/内部参考/任务拆解/_active_task.json",
+    "required_fields": [
+      "project_id",
+      "task_split_dir",
+      "task_key",
+      "execution_mode",
+      "single_active_card",
+      "auto_done_policy",
+      "preflight_required"
+    ],
+    "scope_match_rule": [
+      "title_contains_[task_key]",
+      "labels_contains_task_key",
+      "card_key_prefix_task_key"
+    ]
+  },
+  "card_order": [
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C07",
+    "G01"
+  ],
+  "gate_contract": {
+    "mode": "as_cards",
+    "gate_ids": [
+      "G01"
+    ],
+    "depends_on": {
+      "G01": [
+        "C07"
+      ]
+    }
+  },
+  "preflight": {
+    "card_id": "C00",
+    "feature_ids": [
+      "C00-01"
+    ],
+    "required_done_gate": [
+      "planning_contract 与 vk_cards card_order/gate_contract 一致",
+      "Gate 卡片化完整且字段齐全",
+      "active_task 作用域三元组已绑定"
+    ],
+    "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-00_C00_预检门禁冻结.md"
+  },
+  "source_files": {
+    "requirements": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_requirements.md",
+    "implementation_plan": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md",
+    "parallel_plan": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C01_C01S0离线评测与基线冻结.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C02_C02S1检索契约修正.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C03_C03S2候选去重与证据卡片.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C04_C04S2编排预算协同.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C05_C05S3查询改写与融合重排.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C06_C06S4领域路由与过滤.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C07_C07S5灰度可观测与文档收口.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-G01_G01Gate统一质量门禁.md",
+      "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-00_C00_预检门禁冻结.md"
+    ]
+  },
+  "mapping_checks": {
+    "forward_check": "PASS",
+    "reverse_check": "PASS",
+    "orphan_features": [],
+    "duplicate_features": [],
+    "pr_mapping_check": "PASS",
+    "pr_mapping_errors": []
+  },
+  "cards": [
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C01",
+      "card_id": "C01",
+      "title": "C01 S0 离线评测与基线冻结 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-eval-baseline"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "depends_on": [],
+      "feature_ids": [
+        "P5-01"
+      ],
+      "task_ids": [
+        "T-09",
+        "T-10"
+      ],
+      "mechanism_summary": [
+        "建立 KB 固定样本集并生成可复现基线分数",
+        "输出 relevance 与 citation 指标供后续阶段对比",
+        "形成阶段闸门自动评测入口"
+      ],
+      "code_anchor_refs": [
+        "scripts/data/kb_offline_evaluation.py::evaluate_cases",
+        "tests/unit/test_kb_offline_evaluation.py::test_kb_offline_eval_summary"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python scripts/data/kb_offline_evaluation.py --dry-run",
+        "venv/bin/python -m pytest -q tests/unit/test_kb_offline_evaluation.py"
+      ],
+      "rollback_anchors": [
+        "暂停自动评测门禁，保留人工评审兜底"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "scripts/data/kb_offline_evaluation.py",
+        "tests/fixtures/kb_offline_eval_cases.json",
+        "tests/unit/test_kb_offline_evaluation.py"
+      ],
+      "done_gate": [
+        "离线样本集与评测脚本可运行"
+      ],
+      "check_cmd": [
+        "venv/bin/python scripts/data/kb_offline_evaluation.py --dry-run",
+        "venv/bin/python -m pytest -q tests/unit/test_kb_offline_evaluation.py"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C01_C01S0离线评测与基线冻结.md",
+      "pr_id": "PR-06",
+      "pr_branch": "codex/kb-retrieval-p2-pr-06",
+      "pr_depends_on": [],
+      "pr_subject": "S0 离线评测框架与样本基线"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C02",
+      "card_id": "C02",
+      "title": "C02 S1 检索契约修正 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-retrieval-contract"
+      ],
+      "hard_depends_on": [
+        "C01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01"
+      ],
+      "feature_ids": [
+        "P1-01",
+        "P1-02"
+      ],
+      "task_ids": [
+        "T-01",
+        "T-02"
+      ],
+      "mechanism_summary": [
+        "显式区分 page_size 与 top_k 语义并配置化",
+        "补齐超时与错误降级路径，避免检索失败外抛",
+        "保持 dataset 选择逻辑兼容"
+      ],
+      "code_anchor_refs": [
+        "app/ai/tools/ragflow_tool.py::_call_ragflow_retrieval",
+        "app/ai/tools/ragflow_tool.py::knowledge_search",
+        "app/core/config.py::RAGFLOW_*"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"payload or timeout\""
+      ],
+      "rollback_anchors": [
+        "关闭 RAGFLOW_PAGE_SIZE 配置并回退旧 payload",
+        "回退异常处理到当前稳定分支"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/tools/ragflow_tool.py",
+        "app/core/config.py",
+        "tests/unit/test_ragflow_tool.py"
+      ],
+      "done_gate": [
+        "参数契约修正完成且回归通过"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"payload or timeout\""
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C02_C02S1检索契约修正.md",
+      "pr_id": "PR-01",
+      "pr_branch": "codex/kb-retrieval-p2-pr-01",
+      "pr_depends_on": [],
+      "pr_subject": "S1 参数契约化与稳健性改造"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C03",
+      "card_id": "C03",
+      "title": "C03 S2 候选去重与证据卡片 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-candidate-cleanup"
+      ],
+      "hard_depends_on": [
+        "C02"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C02"
+      ],
+      "feature_ids": [
+        "P2-01",
+        "P2-02"
+      ],
+      "task_ids": [
+        "T-03",
+        "T-04"
+      ],
+      "mechanism_summary": [
+        "同文档候选限额与重复片段去重",
+        "结果组装改为证据卡片，降低上下文噪声",
+        "保持 KB 图片占位符协议兼容"
+      ],
+      "code_anchor_refs": [
+        "app/ai/tools/ragflow_tool.py::_dedup_and_cap_candidates",
+        "app/ai/tools/ragflow_tool.py::_format_retrieval_results"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"dedup or evidence\""
+      ],
+      "rollback_anchors": [
+        "关闭去重与文档限额开关",
+        "回退到旧 result_text 拼接逻辑"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/tools/ragflow_tool.py",
+        "tests/unit/test_ragflow_tool.py"
+      ],
+      "done_gate": [
+        "候选去重与文档限额生效"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"dedup or evidence\""
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C03_C03S2候选去重与证据卡片.md",
+      "pr_id": "PR-02",
+      "pr_branch": "codex/kb-retrieval-p2-pr-02",
+      "pr_depends_on": [
+        "PR-01"
+      ],
+      "pr_subject": "S2 候选去重与文档限额"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C04",
+      "card_id": "C04",
+      "title": "C04 S2 编排预算协同 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-context-budget"
+      ],
+      "hard_depends_on": [
+        "C03"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C03"
+      ],
+      "feature_ids": [
+        "P2-03"
+      ],
+      "task_ids": [
+        "T-05"
+      ],
+      "mechanism_summary": [
+        "工具结果压缩与检索输出长度协同",
+        "记录 truncation_flag 作为质量诊断字段",
+        "保证推理输入稳定且可观测"
+      ],
+      "code_anchor_refs": [
+        "app/ai/workflow/multi_agent_graph.py::_truncate_tool_message_text",
+        "app/ai/workflow/multi_agent_graph.py::_prepare_messages_for_supervisor_inference"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message"
+      ],
+      "rollback_anchors": [
+        "回退 SUPERVISOR_TOOL_MESSAGE 配置与压缩逻辑"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/workflow/multi_agent_graph.py",
+        "tests/unit/test_multi_agent_streaming_helpers.py"
+      ],
+      "done_gate": [
+        "编排层压缩协同回归通过"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C04_C04S2编排预算协同.md",
+      "pr_id": "PR-03",
+      "pr_branch": "codex/kb-retrieval-p2-pr-03",
+      "pr_depends_on": [
+        "PR-02"
+      ],
+      "pr_subject": "S2 编排层预算协同"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C05",
+      "card_id": "C05",
+      "title": "C05 S3 查询改写与融合重排 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-query-rewrite"
+      ],
+      "hard_depends_on": [
+        "C04"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C04"
+      ],
+      "feature_ids": [
+        "P3-01",
+        "P3-02"
+      ],
+      "task_ids": [
+        "T-06",
+        "T-07"
+      ],
+      "mechanism_summary": [
+        "原问主路 + 扩展路并行召回",
+        "多路候选融合排序并保留可解释分数",
+        "改写失败自动回退主路"
+      ],
+      "code_anchor_refs": [
+        "app/ai/tools/ragflow_tool.py::_build_retrieval_queries",
+        "app/ai/tools/ragflow_tool.py::_merge_and_rerank_candidates"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"rewrite or rerank\""
+      ],
+      "rollback_anchors": [
+        "关闭 query rewrite 开关，仅保留原问主路",
+        "回退到单路 similarity 排序"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/tools/ragflow_tool.py",
+        "tests/unit/test_ragflow_tool.py"
+      ],
+      "done_gate": [
+        "改写与多路融合可开关控制"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"rewrite or rerank\""
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C05_C05S3查询改写与融合重排.md",
+      "pr_id": "PR-04",
+      "pr_branch": "codex/kb-retrieval-p2-pr-04",
+      "pr_depends_on": [
+        "PR-03"
+      ],
+      "pr_subject": "S3 查询改写与多路召回融合"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C06",
+      "card_id": "C06",
+      "title": "C06 S4 领域路由与过滤 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-domain-routing"
+      ],
+      "hard_depends_on": [
+        "C05"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C05"
+      ],
+      "feature_ids": [
+        "P4-01"
+      ],
+      "task_ids": [
+        "T-08"
+      ],
+      "mechanism_summary": [
+        "根据 query 领域判定构建 metadata_condition",
+        "路由失败可回退全库检索路径",
+        "降低跨域误召回风险"
+      ],
+      "code_anchor_refs": [
+        "app/ai/tools/ragflow_tool.py::_build_metadata_condition"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k metadata"
+      ],
+      "rollback_anchors": [
+        "关闭领域路由与 metadata 过滤开关"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/tools/ragflow_tool.py",
+        "tests/unit/test_ragflow_tool.py"
+      ],
+      "done_gate": [
+        "领域路由过滤稳定"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k metadata"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C06_C06S4领域路由与过滤.md",
+      "pr_id": "PR-05",
+      "pr_branch": "codex/kb-retrieval-p2-pr-05",
+      "pr_depends_on": [
+        "PR-04"
+      ],
+      "pr_subject": "S4 领域路由与过滤"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-C07",
+      "card_id": "C07",
+      "title": "C07 S5 灰度可观测与文档收口 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-rollout-observability"
+      ],
+      "hard_depends_on": [
+        "C06"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C06"
+      ],
+      "feature_ids": [
+        "P5-02"
+      ],
+      "task_ids": [
+        "T-11",
+        "T-12"
+      ],
+      "mechanism_summary": [
+        "检索日志字段扩展并支持灰度指标追踪",
+        "补齐运行手册、文档与索引同步",
+        "形成放量与回滚流程证据"
+      ],
+      "code_anchor_refs": [
+        "app/ai/tools/ragflow_tool.py::_build_retrieval_log",
+        "app/ai/workflow/multi_agent_graph.py::_prepare_messages_for_supervisor_inference",
+        "docs/API文档/外部服务集成.md::RAG 参数章节"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log",
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "回退日志扩展并关闭灰度策略开关",
+        "回退文档索引变更"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/tools/ragflow_tool.py",
+        "app/ai/workflow/multi_agent_graph.py",
+        "docs/API文档/外部服务集成.md",
+        "docs/开发文档/快速入门/生产部署手册.md",
+        "docs/SUMMARY.md"
+      ],
+      "done_gate": [
+        "灰度监控与回滚手册就绪"
+      ],
+      "check_cmd": [
+        "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log",
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C07_C07S5灰度可观测与文档收口.md",
+      "pr_id": "PR-07",
+      "pr_branch": "codex/kb-retrieval-p2-pr-07",
+      "pr_depends_on": [
+        "PR-05",
+        "PR-06"
+      ],
+      "pr_subject": "S5 灰度可观测与运行闸门"
+    },
+    {
+      "id": "PP-20260301-KB-RETRIEVAL-P2::WS-G01",
+      "card_id": "G01",
+      "title": "G01 Gate 统一质量门禁 [PP-20260301-KB-RETRIEVAL-P2]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260301-KB-RETRIEVAL-P2",
+        "2026-03-01_知识库检索P2分阶段治理",
+        "serial",
+        "lane-gate-quality"
+      ],
+      "hard_depends_on": [
+        "C07"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C07"
+      ],
+      "feature_ids": [
+        "G-1"
+      ],
+      "task_ids": [],
+      "mechanism_summary": [
+        "统一放行标准：相关性@5 >= 80%，错误引用率 <= 5%",
+        "未达标阻断进入下游落卡与实施",
+        "输出阶段评审结论与回滚决议"
+      ],
+      "code_anchor_refs": [
+        "scripts/data/kb_offline_evaluation.py::evaluate_cases",
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md::planning_contract"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+      ],
+      "acceptance_checks": [
+        "venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate",
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "冻结放量并回退到上一稳定阶段配置"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "scripts/data/kb_offline_evaluation.py",
+        "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/preflight_status.json"
+      ],
+      "done_gate": [
+        "人工相关性@5 >= 80%",
+        "错误引用率 <= 5%"
+      ],
+      "check_cmd": [
+        "venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate",
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-G01_G01Gate统一质量门禁.md",
+      "pr_id": "PR-07",
+      "pr_branch": "codex/kb-retrieval-p2-pr-07",
+      "pr_depends_on": [
+        "PR-05",
+        "PR-06"
+      ],
+      "pr_subject": "Gate 质量门禁与放量决议"
+    }
+  ]
+}

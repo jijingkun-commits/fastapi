@@ -1,0 +1,50 @@
+{
+  "version": "v1",
+  "frozen_events": {
+    "done": {
+      "required": [
+        "thread_id"
+      ],
+      "optional": [
+        "message_id",
+        "final_content",
+        "meta",
+        "run_id"
+      ]
+    },
+    "result": {
+      "required": [
+        "data_type",
+        "data"
+      ],
+      "optional": [
+        "message",
+        "node"
+      ]
+    },
+    "interrupt": {
+      "required": [
+        "thread_id",
+        "interrupt_id",
+        "value"
+      ],
+      "optional": [
+        "reason",
+        "recoverable",
+        "suggested_action"
+      ]
+    },
+    "stopped": {
+      "required": [
+        "thread_id",
+        "run_id",
+        "reason"
+      ],
+      "optional": []
+    }
+  },
+  "compatibility": {
+    "strategy": "append_only_optional_fields",
+    "breaking_change_allowed": false
+  }
+}

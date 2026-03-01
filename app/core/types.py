@@ -2,7 +2,7 @@
 
 定义项目中通用的 TypedDict 和类型别名，确保类型安全和代码可读性。
 """
-from typing import TypedDict, Optional, Any
+from typing import TypedDict, Optional
 
 
 class ToolResult(TypedDict):
@@ -84,33 +84,3 @@ class ToolResultBuilder:
             "data_type": None,
             "error": error or message
         }
-
-
-def wrap_tool_result(result: Any) -> ToolResult:
-    """将任意工具返回值包装为 ToolResult。
-    
-    用于向后兼容：处理旧工具函数返回字符串的情况。
-    
-    Args:
-        result: 工具函数的返回值（可能是 str 或 ToolResult）
-        
-    Returns:
-        统一的 ToolResult 字典
-    """
-    # 已经是 ToolResult 格式
-    if isinstance(result, dict) and "success" in result:
-        return result
-    
-    # 字符串结果：根据前缀判断成功/失败
-    if isinstance(result, str):
-        is_error = result.startswith("❌") or "失败" in result or "错误" in result
-        return {
-            "success": not is_error,
-            "message": result,
-            "data": None,
-            "data_type": None,
-            "error": result if is_error else None
-        }
-    
-    # 其他类型：序列化为字符串
-    return ToolResultBuilder.success(str(result))

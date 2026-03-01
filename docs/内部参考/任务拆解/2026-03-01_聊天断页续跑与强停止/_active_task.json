@@ -1,0 +1,12 @@
+{
+  "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0",
+  "task_split_dir": "2026-03-01_聊天断页续跑与强停止",
+  "task_key": "PP-20260301-CHAT-RUN-STOP",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "auto_done_policy": "hard_gate",
+  "preflight_required": "C00",
+  "status_source_of_truth": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/preflight_status.json",
+  "updated_at": "2026-03-01T17:25:16+08:00",
+  "updated_by": "scripts/set_active_task.py"
+}

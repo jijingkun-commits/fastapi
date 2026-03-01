@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import uuid
 from importlib.util import module_from_spec, spec_from_file_location
@@ -31,7 +32,9 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> tuple[Path, Path, list[str], dict]:
-    (tmp_path / ".git").mkdir(parents=True)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scripts" / "set_active_task.py").write_text("# test stub\n", encoding="utf-8")
 
@@ -91,6 +94,9 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
         }
     _write_json(state_path, state_payload)
 
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init fixture"], cwd=tmp_path, check=True, capture_output=True)
+
     cards_by_id = {card["card_id"]: card for card in cards}
     return active_task_path, state_path, card_order, cards_by_id
 
@@ -118,8 +124,8 @@ def test_build_kernel_context_local_mode_skips_vk_task_fetch(monkeypatch, tmp_pa
     assert ctx.card_status_map["C02"] == "todo"
 
 
-def test_build_kernel_context_local_mode_ignores_status_source_of_truth(monkeypatch, tmp_path):
-    """local-mode 预检仅依赖本地状态，不应被状态来源文档放行。"""
+def test_build_kernel_context_local_mode_accepts_status_source_of_truth(monkeypatch, tmp_path):
+    """local-mode 下 preflight 允许由状态来源文档放行。"""
 
     module = _load_kernel_module()
     active_task_path, state_path, _, _ = _prepare_workspace(
@@ -139,6 +145,52 @@ def test_build_kernel_context_local_mode_ignores_status_source_of_truth(monkeypa
         source_path,
         {
             "preflight_required": "C01",
+            "passed": True,
+        },
+    )
+
+    active_payload = json.loads(active_task_path.read_text(encoding="utf-8"))
+    active_payload["status_source_of_truth"] = str(source_path)
+    _write_json(active_task_path, active_payload)
+
+    def _unexpected_list_tasks(*args, **kwargs):
+        raise AssertionError("local-mode 不应调用 list_tasks")
+
+    monkeypatch.setattr(module, "list_tasks", _unexpected_list_tasks)
+
+    ctx = module.build_kernel_context(
+        active_task_path,
+        "http://127.0.0.1:3001",
+        local_mode=True,
+        state_path=state_path,
+    )
+
+    assert ctx.preflight_ok is True
+    assert ctx.preflight_reason == "preflight_doc_passed_json"
+
+
+def test_build_kernel_context_local_mode_rejects_mismatched_source_task_key(monkeypatch, tmp_path):
+    """local-mode 下状态来源 task_key 不一致时不得放行。"""
+
+    module = _load_kernel_module()
+    active_task_path, state_path, _, _ = _prepare_workspace(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "card_order": ["C01", "C02", "C03"],
+            "card_status_map": {
+                "C02": "todo",
+            },
+        },
+    )
+
+    source_path = tmp_path / "preflight_source.json"
+    _write_json(
+        source_path,
+        {
+            "preflight_required": "C01",
+            "task_key": "PP-MISMATCH",
             "passed": True,
         },
     )
@@ -203,6 +255,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         project_id="",
         task_key=TASK_KEY,
         execution_mode="serial",
+        single_active_card=True,
         preflight_required="C01",
         preflight_ok=True,
         preflight_reason="preflight_card_done",
@@ -212,6 +265,13 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         unscoped_tasks=[],
         card_status_map={"C01": "done"},
         card_task_map={},
+        scope_guard_ok=True,
+        scope_guard_reason="scope_guard_passed",
+        scope_guard_details=[],
+        main_repo_path=str(tmp_path),
+        main_repo_clean=True,
+        main_repo_dirty_preview=[],
+        main_repo_error=None,
     )
 
     seed_result = module.apply_action(
@@ -225,7 +285,8 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         state_path=state_path,
     )
     assert seed_result["performed"] is True
-    assert seed_result["vk_sync"]["ok"] is True
+    assert seed_result["vk_sync"]["reason"] == "local_mode_vk_sync_disabled"
+    assert seed_result["vk_sync"]["attempted"] is False
 
     state_after_seed = json.loads(state_path.read_text(encoding="utf-8"))
     assert state_after_seed["card_status_map"]["C02"] == "todo"
@@ -245,7 +306,8 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         state_path=state_path,
     )
     assert activate_result["performed"] is True
-    assert activate_result["vk_sync"]["ok"] is True
+    assert activate_result["vk_sync"]["reason"] == "local_mode_vk_sync_disabled"
+    assert activate_result["vk_sync"]["attempted"] is False
 
     state_after_activate = json.loads(state_path.read_text(encoding="utf-8"))
     assert state_after_activate["card_status_map"]["C02"] == "inprogress"
@@ -253,7 +315,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
     assert state_after_activate["current_card"] == "C02"
     assert state_after_activate["last_action"] == "activate"
     assert state_after_activate["last_action_result"] == "CARD_ACTIVATED:C02"
-    assert sync_calls == [("C02", "todo"), ("C02", "inprogress")]
+    assert sync_calls == []
 
 
 def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_path, capsys):
@@ -291,6 +353,7 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
         idempotency_key="",
         idempotency_window_seconds=120,
         output="",
+        sync_vk_in_local_mode=False,
     )
     monkeypatch.setattr(module, "parse_args", lambda: args)
 
@@ -405,3 +468,72 @@ def test_build_kernel_context_non_local_rejects_mismatched_task_key(monkeypatch,
     ctx = module.build_kernel_context(active_task_path, "http://127.0.0.1:3001")
     assert ctx.preflight_ok is False
     assert ctx.preflight_reason == "C00_not_done"
+
+
+def test_build_kernel_context_non_local_flags_scope_conflict_unscoped_active(monkeypatch, tmp_path):
+    """非 local-mode 下存在其他 task_key 活跃卡片时必须触发 scope_guard 阻断。"""
+
+    module = _load_kernel_module()
+    active_task_path, _, _, _ = _prepare_workspace(tmp_path)
+
+    monkeypatch.setattr(
+        module,
+        "list_tasks",
+        lambda _api_base, _project_id: [
+            {
+                "id": "task-c01-scoped",
+                "title": f"C01 scoped [{TASK_KEY}]",
+                "description": f"card_id: C01\ntask_key: {TASK_KEY}\n",
+                "status": "done",
+                "updated_at": "2026-03-01T10:00:00+08:00",
+            },
+            {
+                "id": "task-c02-scoped",
+                "title": f"C02 scoped [{TASK_KEY}]",
+                "description": f"card_id: C02\ntask_key: {TASK_KEY}\n",
+                "status": "todo",
+                "updated_at": "2026-03-01T10:01:00+08:00",
+            },
+            {
+                "id": "task-other",
+                "title": "C01 other task",
+                "description": "card_id: C01\ntask_key: PP-OTHER\n",
+                "status": "inprogress",
+                "updated_at": "2026-03-01T10:02:00+08:00",
+            },
+        ],
+    )
+
+    ctx = module.build_kernel_context(active_task_path, "http://127.0.0.1:3001")
+    assert ctx.scope_guard_ok is False
+    assert ctx.scope_guard_reason == "scope_conflict_unscoped_active"
+
+    action, _, _, _, blocked_details = module.decide_action(ctx)
+    assert action == "preflight_blocked"
+    assert blocked_details
+    assert blocked_details[0]["reason"] == "scope_conflict_unscoped_active"
+
+
+def test_decide_action_blocks_when_main_repo_dirty(monkeypatch, tmp_path):
+    """主仓 dirty 时必须在 preflight 之前阻断。"""
+
+    module = _load_kernel_module()
+    active_task_path, _, _, _ = _prepare_workspace(tmp_path)
+
+    active_payload = json.loads(active_task_path.read_text(encoding="utf-8"))
+    active_payload["updated_by"] = "dirty-case"
+    _write_json(active_task_path, active_payload)
+
+    monkeypatch.setattr(
+        module,
+        "list_tasks",
+        lambda _api_base, _project_id: _build_scoped_board_tasks(TASK_KEY),
+    )
+
+    ctx = module.build_kernel_context(active_task_path, "http://127.0.0.1:3001")
+    assert ctx.main_repo_clean is False
+    assert ctx.main_repo_dirty_preview
+
+    action, _, _, _, blocked_details = module.decide_action(ctx)
+    assert action == "preflight_blocked"
+    assert blocked_details[0]["reason"] == "main_repo_dirty"

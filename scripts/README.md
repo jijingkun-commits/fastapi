@@ -108,9 +108,11 @@ python scripts/release_rollout_manager.py rollback --target all --reason "produc
 python scripts/codex_app_monitor.py --base-url http://127.0.0.1:8000/api/v1
 
 # 开发环境加 Codex 轻探针（/dev-tools/codex/exec）
+# 若接口受鉴权保护，传 Bearer Token（或设置 CODEX_APP_BEARER_TOKEN）
 python scripts/codex_app_monitor.py \
   --base-url http://127.0.0.1:8000/api/v1 \
   --check-codex \
+  --bearer-token "$CODEX_APP_BEARER_TOKEN" \
   --alert-threshold 2
 ```
 
@@ -120,6 +122,25 @@ python scripts/codex_app_monitor.py \
 ```bash
 */3 * * * * cd /Users/jijingkun/bojxAI/fastapi && scripts/cron/codex_app_monitor.sh >> logs/codex-monitor.log 2>&1
 ```
+
+### Codex 对话监督（长输出压缩 + 可续聊）
+
+```bash
+# 第 1 轮：返回 session_id + 精简结果，完整输出落盘
+python scripts/codex_turn_supervisor.py \
+  --workdir /Users/jijingkun/bojxAI/fastapi \
+  --prompt "先分析项目里的 health 监控现状" \
+  --sandbox read-only
+
+# 第 2 轮：带上 session_id 继续
+python scripts/codex_turn_supervisor.py \
+  --workdir /Users/jijingkun/bojxAI/fastapi \
+  --session-id <上一步返回的 session_id> \
+  --prompt "基于你刚才的分析，给出下一步改造清单" \
+  --sandbox read-only
+```
+
+脚本会把完整内容写入 `tmp/codex-supervisor/<session_id>/`，并在终端仅输出摘要 JSON，适合做“看结果 + 人工回复推进下一步”。
 
 ### Vibe Kanban 多 worktree
 

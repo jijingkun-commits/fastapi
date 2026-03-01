@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.core.config import ANALYTICS_SCHEMAS, RESULT_ENRICHMENT_RULE_TTL_SECONDS
 from app.db.session import get_db_context
@@ -272,12 +271,6 @@ def get_result_enrichment_rule_service() -> ResultEnrichmentRuleService:
     if _service_singleton is None:
         _service_singleton = ResultEnrichmentRuleService()
     return _service_singleton
-
-
-def get_result_enrichment_rule_service_from_db(db: Session) -> ResultEnrichmentRuleService:
-    """兼容 API 场景下的服务获取入口。"""
-    _ = db
-    return get_result_enrichment_rule_service()
 
 
 def _resolve_column(columns: List[str], candidates: Tuple[str, ...]) -> Optional[str]:

@@ -21,7 +21,7 @@ import uuid
 import time
 from typing import Any, Dict, Optional
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 
 def _generate_id(content: str, prefix: str = "", use_timestamp: bool = True) -> str:
@@ -111,58 +111,3 @@ def create_human_message(
     """
     msg_id = id or _generate_id(content, "human", use_timestamp=use_timestamp)
     return HumanMessage(content=content, id=msg_id, **kwargs)
-
-
-def create_system_message(
-    content: str,
-    *,
-    id: Optional[str] = None,
-    use_timestamp: bool = False,
-    **kwargs
-) -> SystemMessage:
-    """创建带唯一 ID 的系统消息。
-    
-    注意：系统消息通常是静态的（如 prompt 模板），默认不使用时间戳，
-    避免每次调用生成不同 ID。
-    
-    Args:
-        content: 消息内容
-        id: 可选，手动指定 ID
-        use_timestamp: 是否使用时间戳（默认 False）
-        **kwargs: 其他 SystemMessage 参数
-    
-    Returns:
-        SystemMessage 实例，保证 id 不为 None
-    """
-    msg_id = id or _generate_id(content, "sys", use_timestamp=use_timestamp)
-    return SystemMessage(content=content, id=msg_id, **kwargs)
-
-
-def create_tool_message(
-    content: str,
-    *,
-    tool_call_id: str,
-    name: Optional[str] = None,
-    id: Optional[str] = None,
-    **kwargs
-) -> ToolMessage:
-    """创建带唯一 ID 的工具消息。
-    
-    Args:
-        content: 工具返回内容
-        tool_call_id: 对应的 tool_call ID（必填）
-        name: 工具名称
-        id: 可选，手动指定消息 ID
-        **kwargs: 其他 ToolMessage 参数
-    
-    Returns:
-        ToolMessage 实例，保证 id 不为 None
-    """
-    msg_id = id or _generate_id(f"{tool_call_id}:{content[:50]}", "tool")
-    return ToolMessage(
-        content=content,
-        tool_call_id=tool_call_id,
-        name=name,
-        id=msg_id,
-        **kwargs
-    )

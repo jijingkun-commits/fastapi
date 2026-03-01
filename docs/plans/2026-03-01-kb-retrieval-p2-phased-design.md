@@ -7,6 +7,17 @@
 
 ---
 
+## 0. 设计审批记录
+
+```yaml
+design_approved: true
+approved_at: "2026-03-01 16:05 CST"
+approval_round: "round-1"
+approval_source: "对话确认（用户明确回复：同意）"
+```
+
+---
+
 ## 1. 背景与问题定位
 
 当前“知识库查询结果不理想”不是单点参数问题，而是检索链路存在叠加性瓶颈：

@@ -220,6 +220,17 @@ def list_threads(
     return chat_repo.get_threads_by_user(db, current_user.id, limit)
 
 
+@router.get("/threads/latest", response_model=Optional[ThreadOut])
+def get_latest_thread(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取当前用户最近更新的会话。"""
+
+    latest = chat_repo.get_latest_thread_by_user(db, current_user.id)
+    return latest
+
+
 @router.get("/threads/{thread_id}/messages", response_model=List[MessageOut])
 def get_thread_messages(
     thread_id: str,
@@ -447,4 +458,3 @@ def _log_disliked_sql_query(db: Session, message_id: int, user_id: int):
         
     except Exception as e:
         logger.warning("SQL 修正台记录失败（不影响反馈流程）: %s", e)
-

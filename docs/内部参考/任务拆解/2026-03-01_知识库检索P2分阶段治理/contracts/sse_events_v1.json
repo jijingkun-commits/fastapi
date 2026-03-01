@@ -1,0 +1,41 @@
+{
+  "version": "sse_events_v1",
+  "scope": "PP-20260301-KB-RETRIEVAL-P2",
+  "frozen_fields": {
+    "done": {
+      "required": [
+        "card_id",
+        "feature_ids",
+        "acceptance_checks"
+      ],
+      "optional": [
+        "summary",
+        "evidence_entry"
+      ]
+    },
+    "result": {
+      "required": [
+        "status",
+        "message"
+      ],
+      "optional": [
+        "metrics",
+        "artifacts"
+      ]
+    },
+    "interrupt": {
+      "required": [
+        "reason"
+      ],
+      "optional": [
+        "retryable"
+      ]
+    }
+  },
+  "task_mode_enum": [
+    "implementation-card",
+    "inspection-card",
+    "question-card"
+  ],
+  "updated_at": "2026-03-01T17:36:36+08:00"
+}

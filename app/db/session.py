@@ -42,10 +42,6 @@ analytics_engine = create_engine(
     echo=DB_ECHO,
 )
 
-# 分析库会话工厂
-AnalyticsSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=analytics_engine)
-
-
 def get_db():
     """FastAPI 依赖注入：提供数据库会话。
     
@@ -75,25 +71,6 @@ def get_db_context():
     适用场景：LangGraph 节点、Celery 任务、后台线程等。
     """
     db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def get_analytics_db():
-    """FastAPI 依赖注入：提供分析库会话 (Read-Only)。"""
-    db = AnalyticsSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@contextmanager
-def get_analytics_db_context():
-    """上下文管理器：获取分析库会话。"""
-    db = AnalyticsSessionLocal()
     try:
         yield db
     finally:

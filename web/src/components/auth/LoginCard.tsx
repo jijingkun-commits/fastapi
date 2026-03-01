@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { login } from "@/lib/backend";
+import { getLatestThread, login } from "@/lib/backend";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -34,8 +34,19 @@ export function LoginCard() {
         console.warn("写入令牌失败", e);
       }
       toast.success("登录成功");
-      // 登录成功后跳转到 /chat
-      router.push("/chat");
+
+      let targetUrl = "/chat";
+      try {
+        const latestThread = await getLatestThread();
+        const latestThreadId = latestThread?.thread_id?.trim();
+        if (latestThreadId) {
+          targetUrl = `/chat?threadId=${encodeURIComponent(latestThreadId)}`;
+        }
+      } catch (latestThreadError) {
+        console.warn("获取最近会话失败，回退到新会话", latestThreadError);
+      }
+
+      router.push(targetUrl);
     } catch (e: any) {
       toast.error(e?.message || "登录失败");
     } finally {

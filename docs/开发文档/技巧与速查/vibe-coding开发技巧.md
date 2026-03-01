@@ -12,7 +12,7 @@
    - 运行时镜像：`.claude/commands/*.md`（Claude Code）与 `~/.codex/prompts/*.md`（Codex）。
    - 触发方式：Claude Code / Cursor 用 `/jjk-xxx`；Codex 用 `/prompts:jjk-xxx`。
 2. 本文职责：保留命令百科、场景建议与链路示例，不替代权威命令文档。
-3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-02-27`，当前共 `28` 个命令文件。
+3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-03-01`，当前共 `24` 个命令文件。
 4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
 
 ## 1. Cursor Skills 使用指南
@@ -440,13 +440,14 @@ description: 命令的简短描述
 
 ### 7.7 并行与看板协作
 
-用于多 AI / 多 worktree 并行开发，核心链路为 `/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`。
+用于多 AI / 多 worktree 并行开发，核心链路为 `/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-cardrun -> /jjk-imp-ws`。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/jjk-vkplan` | 并行拆解入口 - 在 `/jjk-plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/jjk-vkplan` |
 | `/jjk-vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/jjk-vksync 2026-02-14_文档治理执行 check` |
 | `/jjk-vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/jjk-vktodo 2026-02-14_文档治理执行 move Doing` |
+| `/jjk-cardrun` | 串行执行调度 - 消费 `vk_cards.json` 按 `card_order` 单活卡推进并调度子代理 | `/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once` |
 | `/jjk-imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/jjk-imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
 
 ### 7.8 问题诊断（只分析不改码）
@@ -483,6 +484,7 @@ npx ai-agent-skills update --all    # 更新全部
 # 并行与看板 - 多 worktree 协作
 /jjk-vkplan        # 在 /jjk-plan 后执行并行拆解并产出 vk_cards.json
 /jjk-vktodo        # 批量建卡/推进，默认执行基线硬拦截
+/jjk-cardrun       # 按 card_order 串行推进，并由主控调度子代理执行当前卡
 /jjk-vksync        # 手动执行 G0 基线同步检查（check/apply）
 /jjk-imp-ws        # 按单个 WS 白名单执行实现与回填
 
@@ -525,13 +527,14 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（23 个）
+### 9.2 Commands（24 个）
 
 ```
 .cursor/commands/
 ├── jjk-api-docs.md        # 生成 API 文档
 ├── jjk-clarify.md         # 快速澄清需求（支持 deep 模式）
 ├── jjk-create-pr.md       # 创建 PR
+├── jjk-cardrun.md         # 串行卡片执行调度
 ├── jjk-debug.md           # 调试问题
 ├── jjk-deslop.md          # 清理 AI 冗余代码
 ├── jjk-doc-check.md       # 文档同步检查

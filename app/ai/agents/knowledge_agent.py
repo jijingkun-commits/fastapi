@@ -3,7 +3,6 @@
 专注于从 RAGFlow 知识库中检索企业文档和规范。
 """
 import logging
-from typing import Literal
 
 from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
@@ -63,23 +62,3 @@ def create_knowledge_agent(
     
     logger.info("知识库 Agent 创建完成，工具数量: %d", len(tools))
     return agent
-
-
-def get_knowledge_agent_info() -> dict:
-    """获取知识库 Agent 的状态信息。
-    
-    Returns:
-        包含 Agent 配置和状态的字典
-    """
-    from app.core import config
-    from app.ai.tools.ragflow_tool import is_ragflow_configured
-    
-    return {
-        "name": "knowledge_agent",
-        "description": "企业知识库检索专家",
-        "configured": is_ragflow_configured(),
-        "ragflow_url": config.RAGFLOW_API_URL,
-        "dataset_id": config.RAGFLOW_DATASET_ID if config.RAGFLOW_API_KEY else None,
-        "top_k": config.RAGFLOW_TOP_K,
-        "similarity_threshold": config.RAGFLOW_SIMILARITY_THRESHOLD,
-    }

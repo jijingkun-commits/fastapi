@@ -435,16 +435,7 @@ def emit_confirmation(
     message: str,
     node: str = ""
 ) -> None:
-    """发送确认请求事件。
-    
-    用于需要用户确认的操作（如创建、删除待办）。
-    
-    Args:
-        writer: LangGraph StreamWriter
-        operation: 待确认的操作详情
-        message: 确认提示消息
-        node: 来源节点名称
-    """
+    """发送确认请求事件。"""
     writer({
         "type": "confirmation",
         "data": {
@@ -531,13 +522,7 @@ def emit_error(writer: StreamWriter, message: str, node: str = "") -> None:
 
 
 def emit_done(writer: StreamWriter, thread_id: str = "", node: str = "") -> None:
-    """发送流结束事件。
-    
-    Args:
-        writer: LangGraph StreamWriter
-        thread_id: 对话线程 ID
-        node: 来源节点名称
-    """
+    """发送流结束事件。"""
     writer({
         "type": "done",
         "data": {"thread_id": thread_id},

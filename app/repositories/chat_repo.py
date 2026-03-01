@@ -238,6 +238,25 @@ def get_threads_by_user(
     ]
 
 
+def get_latest_thread_by_user(db: Session, user_id: int) -> Optional[dict]:
+    """获取用户最近更新的对话。
+
+    复用 get_threads_by_user 的排序语义，保证标题与时间字段一致。
+
+    Args:
+        db: 数据库会话
+        user_id: 用户 ID
+
+    Returns:
+        最近会话信息，无历史时返回 None
+    """
+
+    threads = get_threads_by_user(db, user_id=user_id, limit=1)
+    if not threads:
+        return None
+    return threads[0]
+
+
 def update_thread_title(
     db: Session,
     thread_id: str,
@@ -614,20 +633,6 @@ def save_feedback(
         db.rollback()
         logger.error("保存反馈失败: %s", e)
         raise e
-
-
-def get_feedback_by_message(db: Session, message_id: int, user_id: int) -> Optional[dict]:
-    """获取指定消息的反馈。"""
-    from sqlalchemy import text
-    try:
-        sql = text("SELECT * FROM t_chat_feedback WHERE message_id = :mid AND user_id = :uid")
-        row = db.execute(sql, {"mid": message_id, "uid": user_id}).mappings().first()
-        if row:
-            return dict(row)
-        return None
-    except Exception as e:
-        logger.error("获取反馈失败: %s", e)
-        return None
 
 
 def get_feedback_scores_batch(

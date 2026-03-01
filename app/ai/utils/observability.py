@@ -364,26 +364,3 @@ def get_observability_stats() -> Dict[str, Any]:
     if isinstance(tracer, LoggingTracer):
         return tracer.get_stats()
     return {}
-
-
-def log_session_summary():
-    """记录会话摘要。"""
-    stats = get_observability_stats()
-    if not stats:
-        return
-    
-    logger.info("=" * 50)
-    logger.info("Session Summary:")
-    logger.info(f"  LLM calls: {stats.get('llm_calls', 0)}")
-    logger.info(f"  Total tokens: {stats.get('total_tokens', 0)}")
-    logger.info(f"  SQL executions: {stats.get('sql_executions', 0)}")
-    logger.info(f"  SQL errors: {stats.get('sql_errors', 0)}")
-    logger.info(f"  Retrievals: {stats.get('retrievals', 0)}")
-    
-    nodes = stats.get("nodes", {})
-    if nodes:
-        logger.info("  Node stats:")
-        for name, data in nodes.items():
-            avg_ms = data["total_ms"] / data["count"] if data["count"] > 0 else 0
-            logger.info(f"    {name}: {data['count']} calls, avg {avg_ms:.2f}ms")
-    logger.info("=" * 50)

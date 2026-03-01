@@ -59,7 +59,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 3. 若存在 `implementation_readiness` 且 `implementation_ready=false`，必须输出 `VKPLAN_INPUT_NOT_READY` 并回退 `/jjk-plan`。
 4. 自动执行器场景必须拿到 `project_id`：
    - 显式参数优先；
-   - 否则尝试读取 `docs/内部参考/任务拆解/_active_task.json`；
+   - 否则尝试读取 `docs/内部参考/任务拆解/_active_task.json`（活跃索引）；
    - 仍缺失则 `FAIL_FAST` 输出 `VKPLAN_MISSING_PROJECT_ID`。
 5. `implementation_plan` 必须含 `task_to_pr_mapping`；缺失时 `FAIL_FAST` 输出 `VKPLAN_PR_MAPPING_MISSING`。
 
@@ -71,7 +71,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 
 1. 同主题主计划与历史拆解目录。
 2. `planning_contract` 的 `execution_mode/card_order/cards/gate_contract`。
-3. 现有 `_active_task.json` 是否与本轮主题冲突。
+3. 现有任务级 `_active_task.json`（`<task_split_dir>/_active_task.json`）与活跃索引是否与本轮主题冲突。
 
 ### 0.5) 大任务自动启用 Team（强制判定）
 
@@ -86,6 +86,13 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 
 1. **有 Team 能力时**：并行生成 WS 草案与卡片映射，Leader 汇总唯一产物。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
+
+### 0.6) Team 交叉质检约束（新增，轻量）
+
+1. Team 模式下必须启用抽检互审：至少抽检 `20%` 工作项（向上取整，最少 `1` 项）。
+2. 每个抽检项必须包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
+3. 抽检未通过的工作项不得推进到下一阶段，必须先复核并补齐证据。
+4. 阶段汇报至少包含：`结论`、`证据`、`剩余风险`。
 
 ### 1) 契约继承与校验（强制）
 
@@ -153,7 +160,12 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 
 `python3 scripts/set_active_task.py --task-split-dir <YYYY-MM-DD_主题> --project-id <project_id>`
 
-并回读校验 `docs/内部参考/任务拆解/_active_task.json`：
+并回读校验：
+
+1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/_active_task.json`
+2. `docs/内部参考/任务拆解/_active_task.json`（活跃索引）
+
+两者都必须满足：
 
 1. `task_key` 一致
 2. `task_split_dir` 一致
@@ -163,7 +175,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 
 ### 5) 下游衔接（强制）
 
-1. 推荐链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-imp-ws`
+1. 推荐链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-cardrun -> /jjk-imp-ws`
 2. 未通过本命令硬校验时，禁止进入 `/jjk-vktodo`。
 
 ---
@@ -171,7 +183,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 ## 禁止项（强制）
 
 1. 禁止在无 `planning_contract` 时生成 `vk_cards.json`。
-2. 禁止跳过 `_active_task.json` 写入与回读校验。
+2. 禁止跳过任务级 `_active_task.json` 与活跃索引 `_active_task.json` 的写入与回读校验。
 3. 禁止缺字段卡片“先落卡后补齐”。
 4. 禁止把 Gate 仅保留为文档描述而不实体化。
 5. 禁止在 `task_to_pr_mapping` 缺失时继续生成可执行卡片。

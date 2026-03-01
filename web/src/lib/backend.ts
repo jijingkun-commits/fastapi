@@ -180,7 +180,7 @@ export interface StreamCallbacks {
   /** 工具调用结束 */
   onToolEnd?: (name: string, output: unknown) => void;
   /** 流初始化（返回 thread_id） */
-  onInit?: (threadId: string) => void;
+  onInit?: (threadId: string, runId?: string) => void;
   /** 流结束 */
   onDone?: (threadId?: string, messageId?: number) => void;
   /** 错误 */
@@ -390,8 +390,9 @@ function dispatchSSEEvent(
     case "init": {
       const data = event.data as InitEventData;
       const threadId = toOptionalString(data?.thread_id);
+      const runId = toOptionalString(data?.run_id);
       if (threadId) {
-        onInit?.(threadId);
+        onInit?.(threadId, runId);
       }
       return;
     }
@@ -651,6 +652,41 @@ export function startLLMStream(
   };
 }
 
+export interface CancelRunResponse {
+  accepted: boolean;
+  run_id: string;
+  thread_id?: string | null;
+  status: string;
+  idempotent?: boolean;
+  reason?: string | null;
+}
+
+export async function cancelRun(
+  runId: string,
+  payload?: { reason?: string; cancel_mode?: "soft" | "hard" | string },
+): Promise<CancelRunResponse> {
+  const resolvedRunId = runId.trim();
+  if (!resolvedRunId) {
+    throw new Error("run_id 不能为空");
+  }
+
+  const r = await apiFetch(`/api/v1/chat/runs/${encodeURIComponent(resolvedRunId)}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reason: payload?.reason ?? "user_cancelled",
+      cancel_mode: payload?.cancel_mode ?? "hard",
+    }),
+  });
+
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: "取消运行失败" }));
+    throw new ApiError(err.detail || "取消运行失败", r.status);
+  }
+
+  return r.json();
+}
+
 /**
  * 恢复被中断的流程
  */
@@ -746,6 +782,15 @@ export interface ContentBlock {
 export async function getThreads(userId: number, limit = 50): Promise<ConversationThread[]> {
   const r = await apiFetch(`/api/v1/chat/threads?user_id=${userId}&limit=${limit}`);
   if (!r.ok) throw new Error("获取对话列表失败");
+  return r.json();
+}
+
+/**
+ * 获取当前用户最近会话（无历史返回 null）
+ */
+export async function getLatestThread(): Promise<ConversationThread | null> {
+  const r = await apiFetch(`/api/v1/chat/threads/latest`);
+  if (!r.ok) throw new Error("获取最近会话失败");
   return r.json();
 }
 

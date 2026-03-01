@@ -14,7 +14,7 @@ from app.core.config import ENABLE_USER_PREFERENCE_MEMORY, ENV
 from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.repositories import user_repo
-from app.schemas.user import UserCreate, UserListItem, UserListResponse, UserOut
+from app.schemas.user import UserCreate, UserListItem, UserListResponse
 from app.services.user_preference_memory_service import bootstrap_user_preferences
 
 
@@ -64,15 +64,6 @@ def authenticate(
     if not verify_password(password, user.password):
         return None
     return user
-
-
-def get_user_profile(db: Session, user_id: int) -> Optional[UserOut]:
-    """获取用户信息（对外暴露）。"""
-
-    user = user_repo.get_by_id(db, user_id)
-    if not user:
-        return None
-    return UserOut.model_validate(user)
 
 
 def list_users(

@@ -54,6 +54,52 @@ class TestThreadsAPI:
         
         app.dependency_overrides.clear()
 
+    def test_get_latest_thread_unauthorized(self):
+        """测试未认证时获取最近会话返回 401。"""
+        response = client.get("/api/v1/chat/threads/latest")
+        assert response.status_code == 401
+
+    def test_get_latest_thread_success(self):
+        """测试获取最近会话成功。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.get_latest_thread_by_user") as mock_get_latest:
+                mock_get_latest.return_value = {
+                    "thread_id": "thread-latest-1",
+                    "title": "最近会话",
+                    "created_at": "2026-03-01T17:00:00",
+                    "updated_at": "2026-03-01T17:05:00",
+                }
+                response = client.get("/api/v1/chat/threads/latest")
+                assert response.status_code == 200
+                assert response.json()["thread_id"] == "thread-latest-1"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_get_latest_thread_empty(self):
+        """测试用户无历史会话时返回 null。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        try:
+            with patch("app.repositories.chat_repo.get_latest_thread_by_user") as mock_get_latest:
+                mock_get_latest.return_value = None
+                response = client.get("/api/v1/chat/threads/latest")
+                assert response.status_code == 200
+                assert response.json() is None
+        finally:
+            app.dependency_overrides.clear()
+
 
 class TestMessagesAPI:
     """消息查询接口测试。"""

@@ -11,7 +11,7 @@
     # -> TodoParams(title="开会", due_date=datetime(...), reminder="准备PPT")
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Any
 from pydantic import BaseModel, Field
 
@@ -155,56 +155,3 @@ async def extract_chart_params(message: str, model_id: str = None) -> ChartParam
         # 降级：尝试推断类型
         chart_type = "circle" if "圆" in message else "line"
         return ChartParams(chart_type=chart_type)
-
-
-# ==================== 工具函数 ====================
-
-def parse_relative_time(text: str, base_time: datetime = None) -> Optional[datetime]:
-    """解析相对时间表达。
-    
-    支持: 明天、后天、下周一、下午3点、晚上8点等
-    
-    Args:
-        text: 时间文本
-        base_time: 基准时间，默认当前时间
-        
-    Returns:
-        解析后的 datetime，无法解析返回 None
-    """
-    if base_time is None:
-        base_time = datetime.now()
-    
-    result = base_time
-    
-    # 日期部分
-    if "明天" in text:
-        result = base_time + timedelta(days=1)
-    elif "后天" in text:
-        result = base_time + timedelta(days=2)
-    elif "下周" in text:
-        # 找到下一个周X
-        weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-        for char, wd in weekday_map.items():
-            if f"周{char}" in text:
-                days_ahead = wd - base_time.weekday()
-                if days_ahead <= 0:
-                    days_ahead += 7
-                result = base_time + timedelta(days=days_ahead)
-                break
-    
-    # 时间部分
-    import re
-    
-    time_match = re.search(r'(\d{1,2})[:：点](\d{0,2})', text)
-    if time_match:
-        hour = int(time_match.group(1))
-        minute = int(time_match.group(2)) if time_match.group(2) else 0
-        
-        # 处理上下午
-        if "下午" in text or "晚" in text:
-            if hour < 12:
-                hour += 12
-        
-        result = result.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    
-    return result if result != base_time else None

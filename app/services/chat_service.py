@@ -5,6 +5,7 @@
 - SSE 协议升级，支持 token/thinking/tool_start/tool_end 事件
 - 双写逻辑：LangGraph 自动写 PostgreSQL Checkpoint，业务数据写 PostgreSQL
 """
+import asyncio
 import json
 import logging
 from typing import Any, AsyncGenerator, Optional
@@ -754,6 +755,30 @@ class ChatService:
         cancelled_stream = False
         cancel_reason = "user_cancelled"
         cancel_after_token_count = 0
+        client_disconnected = False
+
+        def _clear_cancelled_task_state() -> None:
+            task = asyncio.current_task()
+            if task is None:
+                return
+            try:
+                while task.cancelling():
+                    task.uncancel()
+            except Exception:
+                return
+
+        def _mark_client_disconnected(stage: str) -> None:
+            nonlocal client_disconnected
+            if client_disconnected:
+                return
+            client_disconnected = True
+            _clear_cancelled_task_state()
+            logger.info(
+                "检测到 SSE 客户端断开，转为后台续跑: thread_id=%s, run_id=%s, stage=%s",
+                thread_id,
+                resolved_run_id,
+                stage,
+            )
         
         logger.info("开始流式处理: thread_id=%s, run_id=%s, prompt_len=%d, thinking=%s, model=%s", 
                     thread_id, resolved_run_id, len(prompt), enable_thinking, model_id or "默认")
@@ -848,7 +873,11 @@ class ChatService:
                 )
         
         # 发送初始化事件
-        yield self._format_sse("init", {"thread_id": thread_id, "run_id": resolved_run_id})
+        if not client_disconnected:
+            try:
+                yield self._format_sse("init", {"thread_id": thread_id, "run_id": resolved_run_id})
+            except asyncio.CancelledError:
+                _mark_client_disconnected("init")
         
         try:
             graph = await self.get_graph(enable_thinking=enable_thinking, model_id=model_id)
@@ -887,7 +916,11 @@ class ChatService:
                                     run_id=resolved_run_id,
                                     reason=cancel_reason,
                                 )
-                                yield self._format_sse("stopped", stopped_payload)
+                                if not client_disconnected:
+                                    try:
+                                        yield self._format_sse("stopped", stopped_payload)
+                                    except asyncio.CancelledError:
+                                        _mark_client_disconnected("stopped")
                                 run_control_service.mark_stopped_event_emitted(resolved_run_id)
 
                         continue
@@ -897,7 +930,11 @@ class ChatService:
                         content = event_data.get("content", "")
                         if content:
                             full_answer.append(content)
-                            yield self._format_sse("token", {"content": content, "node": chunk.get("node", "")})
+                            if not client_disconnected:
+                                try:
+                                    yield self._format_sse("token", {"content": content, "node": chunk.get("node", "")})
+                                except asyncio.CancelledError:
+                                    _mark_client_disconnected("token")
 
                     elif event_type == "thinking":
                         thinking_text = event_data.get("content", "")
@@ -905,7 +942,11 @@ class ChatService:
                             thinking_content = thinking_text
                         else:
                             thinking_content += thinking_text
-                        yield self._format_sse("thinking", {"content": thinking_text, "node": chunk.get("node", "")})
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse("thinking", {"content": thinking_text, "node": chunk.get("node", "")})
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("thinking")
 
                     elif event_type == "final_answer":
                         content = _normalize_message_content(event_data.get("content", ""))
@@ -914,14 +955,18 @@ class ChatService:
                             full_answer.clear()
                             full_answer.append(content)
                         final_meta = _normalize_final_answer_meta(event_data.get("meta", {}))
-                        yield self._format_sse(
-                            "final_answer",
-                            {
-                                "content": content,
-                                "meta": final_meta,
-                                "node": chunk.get("node", ""),
-                            },
-                        )
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse(
+                                    "final_answer",
+                                    {
+                                        "content": content,
+                                        "meta": final_meta,
+                                        "node": chunk.get("node", ""),
+                                    },
+                                )
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("final_answer")
 
                     elif event_type == "result":
                         # 结构化结果事件（待办列表、图片等）
@@ -932,28 +977,50 @@ class ChatService:
                             event_data,
                             node=chunk.get("node", ""),
                         )
-                        yield self._format_sse("result", result_payload)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse("result", result_payload)
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("result")
 
                     elif event_type == "plan_ready":
                         plan_payload = _normalize_plan_ready_event_payload(
                             event_data,
                             node=chunk.get("node", ""),
                         )
-                        yield self._format_sse("plan_ready", plan_payload)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse("plan_ready", plan_payload)
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("plan_ready")
 
                     elif event_type == "coverage_check":
                         coverage_payload = _normalize_coverage_check_event_payload(
                             event_data,
                             node=chunk.get("node", ""),
                         )
-                        yield self._format_sse("coverage_check", coverage_payload)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse("coverage_check", coverage_payload)
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("coverage_check")
 
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
-                        yield self._format_sse(event_type, event_data)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse(event_type, event_data)
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected(event_type)
 
                     else:
                         # 其他自定义事件直接转发
-                        yield self._format_sse(event_type, event_data)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse(event_type, event_data)
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected(f"custom:{event_type}")
+            except asyncio.CancelledError:
+                _mark_client_disconnected("astream")
             except Exception as e:
                 # 捕获 LangGraph 中断信号。GraphInterrupt 可能被抛出导致流中断，
                 # 但我们需要继续执行后面的 snapshot 检查逻辑来提取 interrupt 信息并返回给前端。
@@ -988,7 +1055,11 @@ class ChatService:
                                 thread_id=thread_id,
                                 interrupt_id=str(id(interrupt)),
                             )
-                            yield self._format_sse("interrupt", interrupt_payload)
+                            if not client_disconnected:
+                                try:
+                                    yield self._format_sse("interrupt", interrupt_payload)
+                                except asyncio.CancelledError:
+                                    _mark_client_disconnected("interrupt")
                         # 有 interrupt 时不发送 done，等待 resume
                         return
 
@@ -1017,7 +1088,11 @@ class ChatService:
                         "cancel_after_token_count": cancel_after_token_count,
                     },
                 )
-                yield self._format_sse("done", done_payload)
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse("done", done_payload)
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("done_stopped")
                 return
 
             # 4. 如果没有中断，检查是否需要补充发送最后一条消息（针对非流式 Agent 响应）
@@ -1046,7 +1121,11 @@ class ChatService:
 
                                 if not is_raw_json:
                                     logger.info("补充发送非流式响应: %s", content[:50])
-                                    yield self._format_sse("token", {"content": content})
+                                    if not client_disconnected:
+                                        try:
+                                            yield self._format_sse("token", {"content": content})
+                                        except asyncio.CancelledError:
+                                            _mark_client_disconnected("token_fallback")
                                     done_payload["final_content"] = content
                                 else:
                                     logger.warning("跳过原始JSON输出: %s", content[:100])
@@ -1069,7 +1148,11 @@ class ChatService:
                 with get_db_context() as db:
                     run_control_service.complete_run(resolved_run_id, db=db)
 
-            yield self._format_sse("done", done_payload)
+            if not client_disconnected:
+                try:
+                    yield self._format_sse("done", done_payload)
+                except asyncio.CancelledError:
+                    _mark_client_disconnected("done")
             
         except Exception as e:
             error_msg = str(e)
@@ -1101,17 +1184,29 @@ class ChatService:
                     },
                 )
 
-                yield self._format_sse(
-                    "status",
-                    {
-                        "message": "插件能力暂不可用，已自动降级到核心能力。",
-                        "node": "runtime_recovery",
-                    },
-                )
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse(
+                            "status",
+                            {
+                                "message": "插件能力暂不可用，已自动降级到核心能力。",
+                                "node": "runtime_recovery",
+                            },
+                        )
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("status_degraded")
                 if not full_answer:
-                    yield self._format_sse("token", {"content": plugin_degrade_message})
+                    if not client_disconnected:
+                        try:
+                            yield self._format_sse("token", {"content": plugin_degrade_message})
+                        except asyncio.CancelledError:
+                            _mark_client_disconnected("token_degraded")
                     done_payload["final_content"] = plugin_degrade_message
-                yield self._format_sse("done", done_payload)
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse("done", done_payload)
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("done_degraded")
                 return
 
             if run_control_enabled:
@@ -1140,18 +1235,30 @@ class ChatService:
                 logger.warning("内容审核拦截: %s", error_msg)
                 # 返回友好提示并正常结束对话
                 friendly_msg = "抱歉，您的请求内容或搜索结果触发了内容安全审核，无法继续处理。请尝试换一种方式提问。"
-                yield self._format_sse("token", {"content": friendly_msg})
-                yield self._format_sse(
-                    "done",
-                    _build_done_payload(
-                        thread_id=thread_id,
-                        run_id=resolved_run_id,
-                        message_id=self._get_latest_ai_message_id(thread_id),
-                    ),
-                )
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse("token", {"content": friendly_msg})
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("token_moderation")
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse(
+                            "done",
+                            _build_done_payload(
+                                thread_id=thread_id,
+                                run_id=resolved_run_id,
+                                message_id=self._get_latest_ai_message_id(thread_id),
+                            ),
+                        )
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("done_moderation")
             else:
                 logger.exception("流式处理错误: %s", e)
-                yield self._format_sse("error", {"message": error_msg})
+                if not client_disconnected:
+                    try:
+                        yield self._format_sse("error", {"message": error_msg})
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("error")
     
     def _format_sse(self, event_type: str, data: dict) -> bytes:
         """格式化 SSE 事件。"""

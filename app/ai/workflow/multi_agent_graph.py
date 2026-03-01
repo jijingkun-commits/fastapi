@@ -656,7 +656,7 @@ def _resolve_planner_structured_strategy(llm: Any) -> Dict[str, Any]:
     capabilities = get_llm_capabilities(llm)
     supports_tool_call = bool(capabilities.get("supports_tool_call", False))
     supports_structured_output = bool(capabilities.get("supports_structured_output", False))
-    tool_call_disabled = _is_feature_flag_enabled("PLANNER_DISABLE_TOOL_CALL", False)
+    tool_call_disabled = _is_feature_flag_enabled("PLANNER_DISABLE_TOOL_CALL", True)
 
     if tool_call_disabled:
         selected_strategy = "legacy_json_object"
@@ -853,7 +853,7 @@ def _infer_model_intent_plan_via_text_parse(state: MultiAgentState, llm: Any) ->
     if not user_text:
         return _build_model_primary_plan_from_parsed(_IntentPlanModel(goals=[]), user_text="")
 
-    if _is_feature_flag_enabled("PLANNER_DISABLE_TEXT_PARSE", False):
+    if _is_feature_flag_enabled("PLANNER_DISABLE_TEXT_PARSE", True):
         raise _PlannerModelInvokeError("planner_text_parse_disabled")
 
     if not hasattr(llm, "invoke"):
@@ -1438,12 +1438,25 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
     todo_structured = _extract_latest_structured_result(turn_messages, data_type="todo_list")
     data_structured = _extract_latest_structured_result(turn_messages, data_type="sql_result")
+    seen_supervisor_summaries: set[str] = set()
 
     for item in trace:
         target_agent = str(item.get("target_agent") or "")
         goal_id = str(item.get("goal_id") or "")
         result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=220)
         task_description = _normalize_tool_summary_text(item.get("task_description"), limit=120)
+        supervisor_excerpt = _normalize_tool_summary_text(item.get("supervisor_excerpt"), limit=220)
+
+        if supervisor_excerpt and supervisor_excerpt not in seen_supervisor_summaries:
+            seen_supervisor_summaries.add(supervisor_excerpt)
+            deliverables.append(
+                {
+                    "kind": "general.reply",
+                    "status": "success",
+                    "summary": supervisor_excerpt,
+                    "payload": {},
+                }
+            )
 
         if target_agent == AgentType.TODO:
             payload = dict((todo_structured or {}).get("data") or {})
@@ -2338,6 +2351,11 @@ def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: i
     return ""
 
 
+def _extract_supervisor_direct_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
+    """提取 Supervisor 在委派前可直接交付的文本摘要。"""
+    return _extract_latest_visible_ai_excerpt(messages, limit=limit)
+
+
 def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[str, str]]:
     """提取 Supervisor 直接工具（天气/知识库）结果，供最终汇总使用。"""
     findings: list[Dict[str, str]] = []
@@ -2414,6 +2432,10 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                     "goal_id": pending_handoff.get("goal_id"),
                     "task_description": pending_handoff.get("task_description"),
                     "result_excerpt": _extract_latest_visible_ai_excerpt(turn_messages),
+                    "supervisor_excerpt": _normalize_tool_summary_text(
+                        pending_handoff.get("supervisor_excerpt"),
+                        limit=220,
+                    ),
                 }
             )
 
@@ -2556,21 +2578,68 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
     }
 
 
+def _is_partial_gap_delivery_allowed(
+    *,
+    intent_plan: Optional[Dict[str, Any]],
+    coverage_report: Dict[str, Any],
+) -> bool:
+    """判定是否允许“主问题完成 + 子任务缺口”直接收口输出。"""
+    if not isinstance(intent_plan, dict):
+        return False
+
+    missing_goals = list(coverage_report.get("missing_goals") or [])
+    if not missing_goals:
+        return False
+
+    goal_index: Dict[str, Dict[str, Any]] = {
+        str(goal.get("goal_id") or ""): goal
+        for goal in list(intent_plan.get("goals") or [])
+        if isinstance(goal, dict) and str(goal.get("goal_id") or "")
+    }
+    if not goal_index:
+        return False
+
+    for item in missing_goals:
+        goal_id = str(item.get("goal_id") or "")
+        if not goal_id:
+            return False
+        goal = goal_index.get(goal_id)
+        if not isinstance(goal, dict):
+            return False
+
+        goal_kind = str(goal.get("kind") or "general.reply")
+        allowed_agents = _normalize_goal_allowed_agents(goal.get("allowed_agents"), goal_kind)
+        if not allowed_agents:
+            return False
+
+    return True
+
+
 def _resolve_coverage_gate_route(
     *,
     state: MultiAgentState,
     coverage_report: Dict[str, Any],
+    intent_plan: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """决定 coverage_gate 下一跳与补齐轮次。"""
+    previous_retry = _parse_non_negative_int(state.get("coverage_retry_count"), default=0)
     pass_flag = bool(coverage_report.get("pass"))
     if pass_flag or not _is_coverage_gate_enforced():
         return {
             "route": "final_composer",
             "coverage_retry_count": 0,
             "retry_exhausted": False,
+            "partial_gap_allowed": False,
         }
 
-    previous_retry = _parse_non_negative_int(state.get("coverage_retry_count"), default=0)
+    if _is_partial_gap_delivery_allowed(intent_plan=intent_plan, coverage_report=coverage_report):
+        return {
+            "route": "final_composer",
+            "coverage_retry_count": previous_retry,
+            "retry_exhausted": False,
+            "partial_gap_allowed": True,
+        }
+
     coverage_retry_count = previous_retry + 1
     max_retries = _resolve_coverage_gate_max_retries()
     retry_exhausted = coverage_retry_count > max_retries
@@ -2579,6 +2648,7 @@ def _resolve_coverage_gate_route(
         "coverage_retry_count": coverage_retry_count,
         "retry_exhausted": retry_exhausted,
         "max_retries": max_retries,
+        "partial_gap_allowed": False,
     }
 
 
@@ -2994,7 +3064,10 @@ def _dispatch_values_mode_chunk(
                     ctx.node_name,
                 )
             else:
-                first_handoff = guarded_batch[0]
+                supervisor_excerpt = _extract_supervisor_direct_excerpt(delta_messages_for_scan)
+                first_handoff = dict(guarded_batch[0])
+                if supervisor_excerpt:
+                    first_handoff["supervisor_excerpt"] = supervisor_excerpt
                 remaining_handoffs = guarded_batch[1:]
                 target_agent = str(first_handoff.get("target_agent") or "unknown")
                 existing_decisions = final_state.get("route_decisions")
@@ -3867,6 +3940,7 @@ async def create_multi_agent_graph(
             "delivery_meta": {},
             "coverage_retry_count": 0,
             "coverage_gate_route": "final_composer",
+            "coverage_partial_gap_allowed": False,
             "route_decisions": [],
 
             # === 稳态恢复观测 ===
@@ -3936,6 +4010,7 @@ async def create_multi_agent_graph(
             "intent_mode": planner_mode,
             "coverage_retry_count": 0,
             "coverage_gate_route": "final_composer",
+            "coverage_partial_gap_allowed": False,
             "route_decisions": [],
             "delivery_meta": delivery_meta,
         }
@@ -4003,8 +4078,13 @@ async def create_multi_agent_graph(
         deliverables = _build_delivery_artifacts(state)
         raw_coverage_report = _compute_coverage_report(intent_plan, deliverables)
         coverage_report, coverage_valid, coverage_error = validate_coverage_report_contract(raw_coverage_report)
-        route_state = _resolve_coverage_gate_route(state=state, coverage_report=coverage_report)
+        route_state = _resolve_coverage_gate_route(
+            state=state,
+            coverage_report=coverage_report,
+            intent_plan=intent_plan,
+        )
         route = str(route_state.get("route") or "final_composer")
+        partial_gap_allowed = bool(route_state.get("partial_gap_allowed"))
         missing_goals = list(coverage_report.get("missing_goals") or [])
         missing_goal_ids = [str(item.get("goal_id") or "") for item in missing_goals]
         missing_goal_titles = [
@@ -4014,9 +4094,12 @@ async def create_multi_agent_graph(
 
         writer = get_stream_writer()
         if route == "final_composer":
+            status_message = "已完成问题覆盖检查，正在整理最终答复。"
+            if missing_goals and partial_gap_allowed:
+                status_message = "检测到专家子任务缺口，已按部分交付策略整理当前可用答复。"
             emit_status(
                 writer,
-                message="已完成问题覆盖检查，正在整理最终答复。",
+                message=status_message,
                 node="coverage_gate",
             )
         elif route == "supervisor":
@@ -4047,6 +4130,7 @@ async def create_multi_agent_graph(
             "pending_goal_titles": missing_goal_titles,
             "coverage_retry_count": coverage_retry_count,
             "coverage_retry_exhausted": bool(route_state.get("retry_exhausted")),
+            "coverage_partial_gap_allowed": partial_gap_allowed,
         }
 
         if route == "supervisor":
@@ -4057,6 +4141,7 @@ async def create_multi_agent_graph(
                 "delivery_meta": delivery_meta,
                 "coverage_retry_count": coverage_retry_count,
                 "coverage_gate_route": "supervisor",
+                "coverage_partial_gap_allowed": False,
                 "evaluation": "continue",
                 "evaluation_route": "supervisor",
                 "pending_handoff": None,
@@ -4085,6 +4170,7 @@ async def create_multi_agent_graph(
                 "delivery_meta": delivery_meta,
                 "coverage_retry_count": coverage_retry_count,
                 "coverage_gate_route": "postprocess",
+                "coverage_partial_gap_allowed": False,
                 "evaluation": "complete",
                 "evaluation_route": "postprocess",
             }
@@ -4096,6 +4182,7 @@ async def create_multi_agent_graph(
             "delivery_meta": delivery_meta,
             "coverage_retry_count": coverage_retry_count,
             "coverage_gate_route": "final_composer",
+            "coverage_partial_gap_allowed": partial_gap_allowed,
         }
 
     def _final_composer_node(state: MultiAgentState) -> dict:
@@ -4106,7 +4193,12 @@ async def create_multi_agent_graph(
         intent_plan = _ensure_intent_plan_covers_runtime(state)
         deliverables = list(state.get("deliverables") or _build_delivery_artifacts(state))
         coverage_report = dict(state.get("coverage_report") or _compute_coverage_report(intent_plan, deliverables))
-        if _is_coverage_gate_enforced() and not bool(coverage_report.get("pass")):
+        delivery_meta = dict(state.get("delivery_meta") or {})
+        partial_gap_allowed = bool(
+            state.get("coverage_partial_gap_allowed")
+            or delivery_meta.get("coverage_partial_gap_allowed")
+        )
+        if _is_coverage_gate_enforced() and not bool(coverage_report.get("pass")) and not partial_gap_allowed:
             blocked_answer = _render_coverage_blocked_message(intent_plan, coverage_report)
             writer = get_stream_writer()
             emit_status(writer, message="覆盖门禁未通过，已阻止最终结论输出。", node="final_composer")
@@ -4123,7 +4215,7 @@ async def create_multi_agent_graph(
                 "coverage_report": coverage_report,
                 "final_answer": blocked_answer,
                 "delivery_meta": {
-                    **dict(state.get("delivery_meta") or {}),
+                    **delivery_meta,
                     "coverage_pass": False,
                     "missing_goal_count": len(coverage_report.get("missing_goals") or []),
                     "composer_guard_blocked": True,
@@ -4135,7 +4227,10 @@ async def create_multi_agent_graph(
         final_answer = _render_final_answer(intent_plan, coverage_report)
 
         writer = get_stream_writer()
-        emit_status(writer, message="结论已生成，正在返回最终答复。", node="final_composer")
+        status_message = "结论已生成，正在返回最终答复。"
+        if partial_gap_allowed and not bool(coverage_report.get("pass")):
+            status_message = "主问题已完成，专家子任务存在缺口，正在返回当前可用答复。"
+        emit_status(writer, message=status_message, node="final_composer")
         if _is_sse_delivery_events_v2_enabled():
             goal_count_initial = len(intent_plan.get("goals") or [])
             missing_goal_count = len(coverage_report.get("missing_goals") or [])
@@ -4166,9 +4261,10 @@ async def create_multi_agent_graph(
             "coverage_report": coverage_report,
             "final_answer": final_answer,
             "delivery_meta": {
-                **dict(state.get("delivery_meta") or {}),
+                **delivery_meta,
                 "coverage_pass": bool(coverage_report.get("pass")),
                 "missing_goal_count": len(coverage_report.get("missing_goals") or []),
+                "coverage_partial_gap_allowed": partial_gap_allowed,
             },
             "coverage_gate_route": "final_composer",
             "evaluation": "complete",

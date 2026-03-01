@@ -664,6 +664,120 @@ class TestTodoSupplementConvergence:
         assert result.get("clarify_fsm_state") == "done"
 
 
+class TestTodoCompoundSingleGoalRecognition:
+    """单目标复合描述识别回归。"""
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_compound_single_goal_should_promote_to_need_confirm(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """目标+必要动作表达应归并为单待办确认，而不是二选一澄清。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"create","action_state":"need_clarify",'
+            '"response_message":"你这句话里包含了两件事（回老家过清明、订高铁票），我一次只能帮你记录一个待办。",'
+            '"extracted_info":{"title":"回老家过清明","description":"订高铁票"},'
+            '"missing_info":["todo_target","todo_action"]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="帮我记录一下，我下周要去一趟老家，过清明，到时候还要定高铁票")],
+            "user_id": 1,
+            "pending_operation": None,
+            "pending_clarifications": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "response_message": None,
+            "clarify_fsm_state": "idle",
+            "clarify_round": 0,
+        }
+
+        result = analyze_intent(state)
+
+        pending = result.get("pending_operation", {})
+        assert pending.get("action") == "create"
+        assert pending.get("needs_clarification") is False
+        assert "确认" in str(result.get("response_message") or "")
+
+        pending_data = pending.get("data") or {}
+        assert "回老家过清明" in str(pending_data.get("title") or "")
+        assert "订高铁票" in str(pending_data.get("description") or "")
+
+    @patch(
+        "app.ai.workflow.todo_graph.parse_time_info",
+        side_effect=lambda info, constraints=None: (info, constraints),
+    )
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_single_todo_preference_should_stop_repeat_clarify(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """用户明确“一个待办”时，应从澄清态收敛到确认态。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = (
+            '{"intent":"create","action_state":"need_clarify",'
+            '"response_message":"好的，我一次只能先记录一个待办。你要记录哪一个？",'
+            '"extracted_info":{},'
+            '"missing_info":["todo_target","todo_action"]}'
+        )
+        mock_get_llm.return_value = mock_llm
+
+        state = {
+            "messages": [HumanMessage(content="先就帮我记录一下。一个待办")],
+            "user_id": 1,
+            "pending_operation": {
+                "action": "create",
+                "data": {"title": "回老家过清明", "description": "包含订高铁票"},
+                "needs_clarification": True,
+            },
+            "pending_clarifications": ["目标待办", "操作动作"],
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": {"title": "回老家过清明"},
+            "response_message": None,
+            "clarify_fsm_state": "asked_target",
+            "clarify_round": 1,
+        }
+
+        result = analyze_intent(state)
+
+        pending = result.get("pending_operation", {})
+        assert pending.get("action") == "create"
+        assert pending.get("needs_clarification") is False
+        assert result.get("clarify_fsm_state") == "done"
+        assert result.get("clarify_round") == 0
+        assert "确认" in str(result.get("response_message") or "")
+
+
 class TestTodoWorkflowStateSemantics:
     """WS-01 状态字段语义收敛回归。"""
 

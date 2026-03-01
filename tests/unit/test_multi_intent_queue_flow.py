@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.ai.contracts.delivery_contract_validators import validate_coverage_report_contract
 from app.ai.state import AgentType
 from app.ai.workflow.multi_agent_graph import (
+    _build_delivery_artifacts,
     _build_coverage_clarification_questions,
     _build_multi_intent_summary_content,
     _compute_coverage_report,
@@ -191,6 +192,28 @@ def test_build_multi_intent_summary_content_contains_direct_and_expert_results()
     assert "handoff" not in summary.lower()
 
 
+def test_build_delivery_artifacts_includes_supervisor_excerpt_when_handoff_exists() -> None:
+    """存在 handoff 时，仍应保留 Supervisor 已完成的可见回答摘要。"""
+    state = {
+        "messages": [HumanMessage(content="先回答预算，再查待办")],
+        "handoff_execution_trace": [
+            {
+                "goal_id": "GOAL-02",
+                "target_agent": AgentType.TODO,
+                "task_description": "查询待办",
+                "supervisor_excerpt": "预算控制建议：先核对本月支出上限。",
+                "result_excerpt": "查到 1 条待办",
+            }
+        ],
+    }
+
+    deliverables = _build_delivery_artifacts(state)
+    general_deliverables = [item for item in deliverables if item.get("kind") == "general.reply"]
+
+    assert general_deliverables
+    assert "预算控制建议" in str(general_deliverables[0].get("summary") or "")
+
+
 def test_build_multi_intent_summary_content_respects_user_question_order() -> None:
     """最终汇总应优先按用户提问顺序组织答案，而不是执行顺序。"""
     state = {
@@ -239,6 +262,41 @@ def test_resolve_coverage_gate_route_returns_supervisor_when_missing_goals() -> 
     assert route["route"] == "supervisor"
     assert route["coverage_retry_count"] == 1
     assert route["retry_exhausted"] is False
+
+
+def test_resolve_coverage_gate_route_allows_partial_gap_for_subagent_only_missing() -> None:
+    """仅专家目标缺失时，应允许直接进入 final_composer（A1 策略）。"""
+    route = _resolve_coverage_gate_route(
+        state={"coverage_retry_count": 0},
+        intent_plan={
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                    "allowed_agents": [],
+                },
+                {
+                    "goal_id": "GOAL-02",
+                    "order": 2,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                    "allowed_agents": [AgentType.TODO],
+                },
+            ]
+        },
+        coverage_report={
+            "pass": False,
+            "missing_goals": [{"goal_id": "GOAL-02", "title": "待办事项", "reason": "missing_deliverable"}],
+        },
+    )
+
+    assert route["route"] == "final_composer"
+    assert route["partial_gap_allowed"] is True
+    assert route["coverage_retry_count"] == 0
 
 
 def test_resolve_coverage_gate_route_enters_postprocess_after_retry_exhausted(monkeypatch) -> None:

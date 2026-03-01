@@ -7,13 +7,14 @@
 ```text
 docs/内部参考/任务拆解/
 ├── README.md
-├── _active_task.json
+├── _active_task.json              # 当前活跃任务索引（兼容入口）
 ├── _templates/
 │   ├── active_task_template.json
 │   ├── parallel_plan_template.md
 │   ├── workstream_template.md
 │   └── merge_checklist_template.md
 └── <YYYY-MM-DD_主题>/
+    ├── _active_task.json          # 该任务的作用域真理源
     ├── parallel_plan.md
     ├── workstreams/
     │   ├── WS-00_*.md
@@ -27,7 +28,9 @@ docs/内部参考/任务拆解/
 1. 先执行 `/jjk-plan`（或并行场景用 `/jjk-vkplan`），确认需求与架构边界。
 2. 再执行 `/jjk-vkplan`，基于模板输出 `WS-00 + WS-N` 并行工作包。
 3. 执行 `/jjk-vktodo` 读取 `vk_cards.json` 批量落卡（卡片自动带 `task_key` 前缀）。
-4. 成功落卡后更新 `_active_task.json`，将当前自动执行作用域指向本次 `task_key`。
+4. 成功落卡后执行 `set_active_task.py`，会同时写入：
+   - `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`（任务级真理源）
+   - `docs/内部参考/任务拆解/_active_task.json`（当前活跃索引）
 5. 每个工作包按 `/jjk-imp-ws` 独立实施。
 6. 运行态规则、门禁与排障请参考 `docs/开发文档/工作流/Coder4自动执行总控手册.md`。
 
@@ -36,7 +39,7 @@ docs/内部参考/任务拆解/
 当目标是让 OpenClaw coder4 自动执行时，推荐按以下最短链路推进：
 
 1. `/jjk-plan -p -h`：产出 `<topic>_requirements.md` + `<topic>_implementation_plan.md`（含 `planning_contract`）。
-2. `/jjk-vkplan`：产出 `parallel_plan.md`、`WS-*.md`、`vk_cards.json`、`_active_task.json`。
+2. `/jjk-vkplan`：产出 `parallel_plan.md`、`WS-*.md`、`vk_cards.json`。
 3. `/jjk-vktodo <task_split_dir>`：把 `vk_cards.json` 落到真实看板卡片。
 4. `python3 scripts/set_active_task.py --task-split-dir <dir> --project-id <id>`：覆盖写入自动执行作用域。
 5. 启动 coder4 自动任务（或 `cron run` 调试）。
@@ -52,10 +55,13 @@ docs/内部参考/任务拆解/
 
 ## 自动执行真理源（必填）
 
-`_active_task.json` 是自动执行器的唯一作用域真理源，用于避免误处理其他看板任务。
+`_active_task.json` 采用“任务级真理源 + 根目录索引”双层结构：
+
+- 任务级真理源：`docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
+- 根目录索引（兼容入口）：`docs/内部参考/任务拆解/_active_task.json`
 
 - 必填字段：`project_id/task_split_dir/task_key/execution_mode/single_active_card/auto_done_policy/preflight_required`
-- 一次只允许一个 active task，切换任务时必须覆盖该文件。
+- 一次只允许一个 active 索引；但每个任务目录都保留自己的 `_active_task.json`，避免跨任务覆盖丢失。
 - `task_key` 必须与对应 `vk_cards.json` 顶层 `task_key` 一致。
 
 推荐使用脚本更新（避免手改）：
@@ -68,7 +74,7 @@ python3 scripts/set_active_task.py \
 
 ## 作用域匹配规则（scope）
 
-自动执行器只处理当前 `_active_task.json.task_key` 作用域内卡片，匹配规则如下：
+自动执行器只处理“当前活跃索引 `_active_task.json` 指向的 task_key”作用域内卡片，匹配规则如下：
 
 1. `title` 含 `[task_key]`
 2. 或 `labels` 含 `task_key`

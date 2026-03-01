@@ -60,14 +60,6 @@ def normalize_session_frame(frame: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return normalized
 
 
-def has_effective_frame_context(frame: Optional[Dict[str, Any]]) -> bool:
-    normalized = normalize_session_frame(frame)
-    for value in normalized.values():
-        if not _is_empty(value):
-            return True
-    return False
-
-
 def reduce_session_frame(
     current_frame: Optional[Dict[str, Any]],
     handoff_frame: Optional[Dict[str, Any]],

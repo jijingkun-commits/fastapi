@@ -11,7 +11,11 @@
 
 * [站内通知中心设计（2026-03-01）](plans/2026-03-01-in-app-notification-center-design.md)
 * [用户个性化永久记忆与管理能力需求方案（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-design.md)
+* [会话续聊能力设计（2026-03-01）](plans/2026-03-01-chat-session-continuation-design.md)
 * [知识库检索 P2 分阶段治理方案（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-phased-design.md)
+* [知识库检索 P2 详细报告检查清单（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-detailed-report-checklist.md)
+* [用户个性化永久记忆实施检查清单（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-implementation-checklist.md)
+* [用户 Skill 严格用户源治理设计（2026-03-01）](plans/2026-03-01-user-skill-strict-runtime-design.md)
 
 ---
 
@@ -194,6 +198,8 @@
 * [实施方案（文档化永久记忆，两表）](内部参考/迭代需求/文档化永久记忆_implementation_plan.md)
 * [需求基线（文档记忆混合检索）](内部参考/迭代需求/文档记忆混合检索_requirements.md)
 * [实施方案（文档记忆混合检索，FTS+向量）](内部参考/迭代需求/文档记忆混合检索_implementation_plan.md)
+* [需求基线（知识库检索P2分阶段治理）](内部参考/迭代需求/知识库检索P2分阶段治理_requirements.md)
+* [实施方案（知识库检索P2分阶段治理）](内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md)
 * [需求基线（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md)
 * [实施方案（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md)
 * [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
@@ -222,11 +228,21 @@
 * [设计方案（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发设计方案.md)
 * [全量打钩板清单（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md)
 * [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
+* [问题修复卡（待办单目标复合描述识别，2026-03-01）](内部参考/迭代需求/fix_plan_todo_compound_clarify_loop_20260301.md)
 * [问题修复卡（管理员 dept_code 拒绝，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
 * [问题修复卡（问数查询结果展示，2026-02-25）](内部参考/迭代需求/fix_plan_data_query_display_20260225.md)
 * [问题修复卡（问数权限/CTE/占位符/SSE字段，2026-02-26）](内部参考/迭代需求/fix_plan_cte_permission_reject_20260226.md)
+* [需求基线（待办单目标复合描述识别）](内部参考/迭代需求/待办单目标复合描述识别_requirements.md)
+* [实施方案（待办单目标复合描述识别）](内部参考/迭代需求/待办单目标复合描述识别_implementation_plan.md)
 * [需求基线（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_requirements.md)
 * [实施方案（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_implementation_plan.md)
+* [需求基线（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_requirements.md)
+* [实施方案（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md)
+* [需求基线（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_requirements.md)
+* [实施方案（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md)
+* [调试报告（stopped_event 导入契约，2026-03-01）](内部参考/迭代需求/debug_report_stopped_event_import_contract_20260301.md)
+* [需求基线（用户 Skill 严格用户源治理）](内部参考/迭代需求/用户Skill严格用户源治理_requirements.md)
+* [实施方案（用户 Skill 严格用户源治理）](内部参考/迭代需求/用户Skill严格用户源治理_implementation_plan.md)
 
 ### 任务拆解
 
@@ -264,6 +280,14 @@
 #### 当前并行拆解（2026-03-01 用户个性化永久记忆与管理能力）
 
 * [并行总计划](内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md)
+
+#### 当前并行拆解（2026-03-01 聊天断页续跑与强停止）
+
+* [并行总计划](内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md)
+
+#### 当前并行拆解（2026-03-01 知识库检索P2分阶段治理）
+
+* [并行总计划](内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/parallel_plan.md)
 
 ---
 

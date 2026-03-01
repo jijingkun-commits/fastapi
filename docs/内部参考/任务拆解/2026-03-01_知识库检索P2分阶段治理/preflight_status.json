@@ -1,0 +1,20 @@
+{
+  "preflight_required": "C00",
+  "card_id": "C00",
+  "task_key": "PP-20260301-KB-RETRIEVAL-P2",
+  "passed": true,
+  "status": "ready",
+  "allow_enter": "C01/P5-01",
+  "checked_at": "2026-03-01",
+  "updated_at": "2026-03-01T17:36:36+08:00",
+  "required_done_gate": [
+    "planning_contract 与 vk_cards card_order/gate_contract 一致",
+    "Gate 卡片化完整且字段齐全",
+    "active_task 作用域三元组已绑定"
+  ],
+  "evidence": [
+    "implementation_plan planning_contract 已继承",
+    "vk_cards 字段完整且通过 feature/pr 映射检查",
+    "进入 C01 前已冻结 task_key 与 preflight_required"
+  ]
+}

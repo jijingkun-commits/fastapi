@@ -98,19 +98,3 @@ def enrich_prompt(base_prompt: str, tool_name: str) -> str:
         return f"{base_prompt}\n\n## 详细指南\n\n{ref_content}"
     
     return base_prompt
-
-
-def list_available_references() -> list[str]:
-    """列出所有可用的参考文档。"""
-    if not REFERENCES_DIR.exists():
-        return []
-    
-    return [
-        f.stem for f in REFERENCES_DIR.glob("*.md")
-    ]
-
-
-def clear_reference_cache():
-    """清除参考文档缓存。"""
-    load_reference.cache_clear()
-    logger.info("参考文档缓存已清除")

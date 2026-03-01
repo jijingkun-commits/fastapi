@@ -1,0 +1,1 @@
+请将 /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/vk_cards.json 导入看板，project_id 来自 _active_task.json，按 card_order 串行执行。

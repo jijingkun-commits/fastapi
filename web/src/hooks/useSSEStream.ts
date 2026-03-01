@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 
 import {
+    cancelRun,
+    getLatestThread,
     startLLMStream,
     getThreadMessages,
     startResumeStream,
@@ -171,6 +173,9 @@ export function useSSEStream(): StreamContextValue {
 
     const stopRef = useRef<(() => void) | null>(null);
     const currentAiIdRef = useRef<string | null>(null);
+    const activeRunIdRef = useRef<string | null>(null);
+    const stopInFlightRef = useRef(false);
+    const latestThreadResolvedRef = useRef(false);
     const isStreamingRef = useRef<boolean>(false);
 
     const [threadId, setThreadId] = useQueryState("threadId");
@@ -301,9 +306,33 @@ export function useSSEStream(): StreamContextValue {
         setIsLoading(false);
         stopRef.current = null;
         currentAiIdRef.current = null;
+        activeRunIdRef.current = null;
         isStreamingRef.current = false;
         refreshThreads();
     }, [bindMessageIdToAiMessage, refreshThreads]);
+
+    const resolveLatestThread = useCallback(async (): Promise<boolean> => {
+        if (latestThreadResolvedRef.current) {
+            return false;
+        }
+        latestThreadResolvedRef.current = true;
+
+        try {
+            const latestThread = await getLatestThread();
+            const latestThreadId = latestThread?.thread_id?.trim();
+            if (!latestThreadId) {
+                return false;
+            }
+            setThreadId(latestThreadId);
+            return true;
+        } catch (err) {
+            console.warn("加载最近会话失败:", err);
+            toast.error("加载最近会话失败", {
+                description: "已进入新会话，可继续输入。",
+            });
+            return false;
+        }
+    }, [setThreadId]);
 
     const handleStructuredResultEvent = useCallback((aiId: string, data: ResultEventData, isResume: boolean) => {
         const imageUrl = getImageUrlFromResult(data);
@@ -349,12 +378,25 @@ export function useSSEStream(): StreamContextValue {
 
     useEffect(() => {
         if (isStreamingRef.current) return;
-        if (threadId) {
-            loadThreadMessages(threadId);
-        } else {
-            setMessages([]);
-        }
-    }, [threadId, loadThreadMessages]);
+        let cancelled = false;
+
+        const run = async () => {
+            if (threadId) {
+                await loadThreadMessages(threadId);
+                return;
+            }
+
+            const switchedToLatest = await resolveLatestThread();
+            if (!cancelled && !switchedToLatest) {
+                setMessages([]);
+            }
+        };
+
+        void run();
+        return () => {
+            cancelled = true;
+        };
+    }, [threadId, loadThreadMessages, resolveLatestThread]);
 
     /**
      * 获取消息元数据
@@ -373,10 +415,65 @@ export function useSSEStream(): StreamContextValue {
      * 停止生成
      */
     const stop = useCallback(() => {
-        stopRef.current?.();
-        stopRef.current = null;
-        currentAiIdRef.current = null;
-        setIsLoading(false);
+        if (stopInFlightRef.current) {
+            return;
+        }
+
+        const localAbort = () => {
+            stopRef.current?.();
+            stopRef.current = null;
+            currentAiIdRef.current = null;
+            activeRunIdRef.current = null;
+            setCurrentStatus(null);
+            setIsLoading(false);
+            isStreamingRef.current = false;
+        };
+
+        const runId = activeRunIdRef.current;
+        if (!runId) {
+            toast.warning("当前会话未分配 run_id，已本地停止", {
+                description: "服务端任务可能仍在后台执行。",
+            });
+            localAbort();
+            return;
+        }
+
+        stopInFlightRef.current = true;
+        void (async () => {
+            try {
+                let lastError: unknown = null;
+                for (let attempt = 1; attempt <= 2; attempt += 1) {
+                    try {
+                        const result = await cancelRun(runId, {
+                            reason: "user_cancelled",
+                            cancel_mode: "hard",
+                        });
+
+                        const runControlDisabled = result.status === "disabled" || result.reason === "run_control_disabled";
+                        if (runControlDisabled) {
+                            toast.warning("当前环境未开启强停止，已本地停止", {
+                                description: "服务端任务可能仍在后台执行。",
+                            });
+                        } else {
+                            toast.success("已停止本轮任务");
+                        }
+                        localAbort();
+                        return;
+                    } catch (err) {
+                        lastError = err;
+                        if (attempt < 2) {
+                            continue;
+                        }
+                    }
+                }
+
+                console.error("取消 run 失败:", lastError);
+                toast.error("停止失败，任务可能仍在后台执行");
+                localAbort();
+            } finally {
+                stopInFlightRef.current = false;
+            }
+        })();
     }, []);
 
     /**
@@ -434,6 +531,7 @@ export function useSSEStream(): StreamContextValue {
 
             const aiId = uuidv4();
             currentAiIdRef.current = aiId;
+            activeRunIdRef.current = null;
             setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
             setCurrentStatus(null);
             setIsLoading(true);
@@ -461,7 +559,10 @@ export function useSSEStream(): StreamContextValue {
                     onToolEnd: (name: string, output: unknown) => {
                         console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                     },
-                    onInit: (id: string) => setThreadId(id),
+                    onInit: (id: string, runId?: string) => {
+                        setThreadId(id);
+                        activeRunIdRef.current = runId ?? null;
+                    },
                     onDone: (_tid?: string, messageId?: number) => {
                         completeStreamLifecycle(aiId, messageId);
                         if (messageId) {
@@ -471,6 +572,7 @@ export function useSSEStream(): StreamContextValue {
                     onError: (message: string) => {
                         setError(new Error(message));
                         toast.error("请求失败", { description: message });
+                        activeRunIdRef.current = null;
                     },
                     // 处理结构化结果事件（待办列表等）
                     // 图片完全依赖 LLM 在回复中保留 Markdown 语法
@@ -498,6 +600,7 @@ export function useSSEStream(): StreamContextValue {
                         setInterrupt(data);
                         setIsLoading(false);
                         stopRef.current = null;
+                        activeRunIdRef.current = null;
                         isStreamingRef.current = false;
                     },
                     // 处理知识库图片映射事件
@@ -526,6 +629,7 @@ export function useSSEStream(): StreamContextValue {
                 setIsLoading(false);
                 stopRef.current = null;
                 currentAiIdRef.current = null;
+                activeRunIdRef.current = null;
                 isStreamingRef.current = false;
             });
         } catch (e) {

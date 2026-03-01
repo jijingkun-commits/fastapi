@@ -10,11 +10,6 @@ def get_all_configs(db: Session) -> List[SystemConfig]:
     return db.query(SystemConfig).all()
 
 
-def get_configs_by_category(db: Session, category: str) -> List[SystemConfig]:
-    """按分类获取配置项。"""
-    return db.query(SystemConfig).filter(SystemConfig.category == category).all()
-
-
 def get_config_by_key(db: Session, key: str) -> Optional[SystemConfig]:
     """根据 key 获取单个配置。"""
     return db.query(SystemConfig).filter(SystemConfig.config_key == key).first()

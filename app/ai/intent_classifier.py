@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from typing import Literal, Optional
+from typing import Literal
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -84,24 +84,10 @@ async def classify_intent(message: str, model_id: str = None) -> IntentResult:
             logger.info("意图识别为联网搜索: message=%s", message[:100] if message else "(空)")
         
         return result
-        
+
     except json.JSONDecodeError as e:
         logger.warning("意图分类 JSON 解析失败: %s, 原始内容: %s", e, content[:100])
         return IntentResult(intent="unknown", confidence=0.5, route_to="supervisor")
     except Exception as e:
         logger.warning("意图分类失败: %s", e)
-        return IntentResult(intent="unknown", confidence=0.5, route_to="supervisor")
-
-
-def classify_intent_sync(message: str, model_id: str = None) -> IntentResult:
-    """同步版本的意图分类（用于非异步上下文）。"""
-    import asyncio
-    
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 如果已在异步上下文中，使用 nest_asyncio 或返回默认值
-            return IntentResult(intent="unknown", confidence=0.5, route_to="supervisor")
-        return loop.run_until_complete(classify_intent(message, model_id))
-    except Exception:
         return IntentResult(intent="unknown", confidence=0.5, route_to="supervisor")

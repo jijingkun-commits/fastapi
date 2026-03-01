@@ -19,18 +19,3 @@ MARKDOWN_IMAGE_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 
 # 匹配完整的 Markdown 图片标签
 MARKDOWN_IMAGE_FULL_PATTERN = re.compile(r'!\[[^\]]*\]\([^)]+\)')
-
-
-from typing import Optional
-
-def extract_url_from_image_tag(image_tag: str) -> Optional[str]:
-    """从 Markdown 图片标签中提取 URL。
-    
-    Args:
-        image_tag: Markdown 图片标签，如 '![desc](http://...)'
-        
-    Returns:
-        URL 字符串，如果提取失败则返回 None
-    """
-    match = MARKDOWN_IMAGE_PATTERN.search(image_tag)
-    return match.group(1) if match else None
