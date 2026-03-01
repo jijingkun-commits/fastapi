@@ -1,0 +1,7 @@
+# <!-- AUTO-GENERATED: jjk-skill-mirror -->
+policy:
+  allow_implicit_invocation: false
+interface:
+  display_name: "jjk-cardrun"
+  short_description: "串行卡片执行入口（消费 /jjk-vkplan 产物）：主控调度 + 子代理逐卡执行 + done_gate 验证"
+  default_prompt: "$jjk-cardrun"
