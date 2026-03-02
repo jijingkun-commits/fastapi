@@ -37,6 +37,7 @@ from app.core.config import (
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
+from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
 from app.db.session import get_db_context
 from app.repositories import chat_repo
 from app.services.document_memory_service import (
@@ -1031,7 +1032,34 @@ class ChatService:
 
             
             # 流结束后检查是否有 interrupt
-            snapshot = await graph.aget_state(config)
+            snapshot = None
+            if client_disconnected:
+                logger.info(
+                    "SSE 已断开，跳过状态回读: thread_id=%s, run_id=%s",
+                    thread_id,
+                    resolved_run_id,
+                )
+            elif cancelled_stream:
+                logger.info(
+                    "run 已取消，跳过状态回读: thread_id=%s, run_id=%s",
+                    thread_id,
+                    resolved_run_id,
+                )
+            else:
+                try:
+                    snapshot = await graph.aget_state(config)
+                except Exception as snapshot_error:
+                    if is_checkpointer_busy_error(snapshot_error):
+                        logger.warning(
+                            "状态回读命中 checkpointer busy，降级跳过: thread_id=%s, run_id=%s, error=%s",
+                            thread_id,
+                            resolved_run_id,
+                            snapshot_error,
+                        )
+                        snapshot = None
+                    else:
+                        raise
+
             if (not cancelled_stream) and snapshot and snapshot.tasks:
                 for task in snapshot.tasks:
                     if task.interrupts:
@@ -1155,11 +1183,21 @@ class ChatService:
                     _mark_client_disconnected("done")
             
         except Exception as e:
-            error_msg = str(e)
+            raw_error_msg = str(e)
+            display_error_msg = raw_error_msg
+            busy_error = is_checkpointer_busy_error(e)
+            if busy_error:
+                display_error_msg = "会话状态正在收口，请稍后重试。"
+                logger.warning(
+                    "流式处理命中 checkpointer busy: thread_id=%s, run_id=%s, error=%s",
+                    thread_id,
+                    resolved_run_id,
+                    raw_error_msg,
+                )
 
-            plugin_degrade_message = degrade_on_plugin_failure(error_msg)
+            plugin_degrade_message = degrade_on_plugin_failure(raw_error_msg)
             if plugin_degrade_message:
-                logger.warning("检测到插件链路异常，已启用核心能力降级: %s", error_msg)
+                logger.warning("检测到插件链路异常，已启用核心能力降级: %s", raw_error_msg)
                 ai_content = "".join(full_answer) if full_answer else plugin_degrade_message
                 self._save_conversation_fallback(
                     thread_id=thread_id,
@@ -1218,10 +1256,10 @@ class ChatService:
                             db=db,
                         )
                     else:
-                        run_control_service.fail_run(resolved_run_id, error_message=error_msg, db=db)
+                        run_control_service.fail_run(resolved_run_id, error_message=raw_error_msg, db=db)
 
             # 保存错误消息到数据库（确保对话历史不丢失）
-            ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
+            ai_content = "".join(full_answer) if full_answer else f"[System Error: {display_error_msg}]"
             self._save_conversation_fallback(
                 thread_id=thread_id,
                 user_id=user_id,
@@ -1231,8 +1269,8 @@ class ChatService:
             )
             
             # 检查是否为内容审核错误
-            if "inappropriate content" in error_msg.lower() or "内容违规" in error_msg:
-                logger.warning("内容审核拦截: %s", error_msg)
+            if "inappropriate content" in raw_error_msg.lower() or "内容违规" in raw_error_msg:
+                logger.warning("内容审核拦截: %s", raw_error_msg)
                 # 返回友好提示并正常结束对话
                 friendly_msg = "抱歉，您的请求内容或搜索结果触发了内容安全审核，无法继续处理。请尝试换一种方式提问。"
                 if not client_disconnected:
@@ -1253,10 +1291,11 @@ class ChatService:
                     except asyncio.CancelledError:
                         _mark_client_disconnected("done_moderation")
             else:
-                logger.exception("流式处理错误: %s", e)
+                if not busy_error:
+                    logger.exception("流式处理错误: %s", e)
                 if not client_disconnected:
                     try:
-                        yield self._format_sse("error", {"message": error_msg})
+                        yield self._format_sse("error", {"message": display_error_msg})
                     except asyncio.CancelledError:
                         _mark_client_disconnected("error")
     
@@ -1467,7 +1506,6 @@ async def sse_resume_stream(
     
     try:
         # 1. 动态检测 Graph 类型和参数
-        from app.db.postgres_checkpoint import get_checkpointer
         cp = await get_checkpointer()
         snapshot = await cp.aget(config)
         
@@ -1583,7 +1621,23 @@ async def sse_resume_stream(
                 raise e
         
         # 检查是否还有 interrupt
-        snapshot = await graph.aget_state(config)
+        snapshot = None
+        if cancelled_stream:
+            logger.info("resume run 已取消，跳过状态回读: thread_id=%s, run_id=%s", thread_id, resolved_run_id)
+        else:
+            try:
+                snapshot = await graph.aget_state(config)
+            except Exception as snapshot_error:
+                if is_checkpointer_busy_error(snapshot_error):
+                    logger.warning(
+                        "resume 状态回读命中 checkpointer busy，降级跳过: thread_id=%s, run_id=%s, error=%s",
+                        thread_id,
+                        resolved_run_id,
+                        snapshot_error,
+                    )
+                    snapshot = None
+                else:
+                    raise
         if (not cancelled_stream) and snapshot and snapshot.tasks:
             for task in snapshot.tasks:
                 if task.interrupts:
@@ -1646,8 +1700,19 @@ async def sse_resume_stream(
         yield format_sse("done", done_payload)
         
     except Exception as e:
-        error_msg = str(e)
-        logger.exception("恢复流程错误: %s", e)
+        raw_error_msg = str(e)
+        display_error_msg = raw_error_msg
+        busy_error = is_checkpointer_busy_error(e)
+        if busy_error:
+            display_error_msg = "会话状态正在收口，请稍后重试。"
+            logger.warning(
+                "恢复流程命中 checkpointer busy: thread_id=%s, run_id=%s, error=%s",
+                thread_id,
+                resolved_run_id,
+                raw_error_msg,
+            )
+        else:
+            logger.exception("恢复流程错误: %s", e)
 
         if run_control_service.is_enabled() and resolved_run_id:
             with get_db_context() as db:
@@ -1658,11 +1723,11 @@ async def sse_resume_stream(
                         db=db,
                     )
                 else:
-                    run_control_service.fail_run(resolved_run_id, error_message=error_msg, db=db)
+                    run_control_service.fail_run(resolved_run_id, error_message=raw_error_msg, db=db)
 
         # 保存错误消息到数据库（确保对话历史不丢失）
         # 注意：resume 场景不需要保存 human 消息，只保存 AI 错误响应
-        ai_content = "".join(full_answer) if full_answer else f"[System Error: {error_msg}]"
+        ai_content = "".join(full_answer) if full_answer else f"[System Error: {display_error_msg}]"
         svc._save_conversation_fallback(
             thread_id=thread_id,
             user_id=user_id,
@@ -1671,4 +1736,4 @@ async def sse_resume_stream(
             scenario="ResumeException",
         )
         
-        yield format_sse("error", {"message": error_msg})
+        yield format_sse("error", {"message": display_error_msg})

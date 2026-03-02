@@ -79,6 +79,10 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 2. 用户若在当前轮未明确“执行/落地/开始实现”，必须停在规划输出，不进入实施链路。
 3. 若用户仅回复“好的/继续”等弱确认词，输出标记 `PLAN_EXECUTION_INTENT_REQUIRED`，并给出下一步可选命令。
 4. 仅当用户显式要求进入执行链时，才允许把 `next_step` 指向 `$jjk-vkplan` 或 `$jjk-imp`。
+5. 用户显式要求进入执行链时，必须在 `<topic>_implementation_plan.md` 写入 `execution_contract`，否则不得进入实施命令。
+6. 用户未显式指定执行风格时，默认按模式继承：
+   - `core -> delivery_mode=one_shot + execution_unit=all_tasks + commit_policy=single_commit`
+   - `parallel -> delivery_mode=staged + execution_unit=per_pr + commit_policy=per_pr`
 
 ### 0.5) 大任务自动启用 Team（强制判定）
 
@@ -135,6 +139,7 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
    - `implementation_ready: true|false`
    - `blocked_by: []`
    - `next_step: $jjk-imp | $jjk-vkplan | $jjk-plan`
+   - `execution_contract_ready: true|false`
 
 ### 参数写法（新增）
 
@@ -411,6 +416,31 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 10. `gate_ids` 与 `card_order` 不一致时，计划状态必须标注 `BLOCKED`，不得进入 `$jjk-vkplan`。
 11. `task_to_pr_mapping` 缺失或不完整时，计划状态必须标注 `BLOCKED`，不得进入 `$jjk-vkplan` 与 `$jjk-create-pr`。
 
+### 2.B1 交付执行契约（新增，必填）
+
+`<topic>_implementation_plan.md` 必须提供 `execution_contract` YAML，供 `$jjk-imp` 与 `$jjk-vkplan` 统一消费，避免“为什么停下”口径不一致。
+
+最小必备字段：
+
+1. `delivery_mode`：`one_shot | staged`
+2. `execution_unit`：`all_tasks | per_pr | per_task`
+3. `commit_policy`：`single_commit | per_pr`
+4. `stop_boundary`：`none | per_pr | per_task`
+5. `stop_on_blocked`：`true | false`（默认 `true`）
+
+默认继承规则（未显式声明时）：
+
+1. `core` 模式：`one_shot + all_tasks + single_commit + stop_boundary=none`
+2. `parallel` 模式：`staged + per_pr + per_pr + stop_boundary=per_pr`
+3. 若用户显式要求“按 task 停”，允许 `execution_unit=per_task`，但必须在计划中写明理由与风险。
+
+硬约束：
+
+1. `execution_contract` 缺失时，必须标记 `EXECUTION_CONTRACT_MISSING`，并将 `implementation_ready` 置为 `false`。
+2. `delivery_mode=one_shot` 时，`stop_boundary` 只能是 `none`。
+3. `delivery_mode=staged` 时，`stop_boundary` 必须与 `execution_unit` 对齐（`per_pr` 或 `per_task`）。
+4. `commit_policy=single_commit` 仅允许与 `delivery_mode=one_shot` 组合。
+
 ### 2.C Gate 卡片化契约（强制，自动执行场景）
 
 当任务目标是“自动跑完全链路”（尤其包含 `G-1~G-4`）时，`<topic>_implementation_plan.md` 必须满足：
@@ -479,6 +509,7 @@ Gate 样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_
 1. `$jjk-plan` 负责“需求与架构正确性”。
 2. `$jjk-vkplan` 负责“并行拆包与可执行边界”。
 3. 当走 `core` 模式时，可直接 `$jjk-imp`；当走 `parallel` 模式时，推荐 `$jjk-vkplan -> $jjk-vktodo -> $jjk-imp-ws`。
+4. `core` 模式默认“一次性到 all_done”（除阻塞外不在阶段边界停），`parallel` 模式默认“按 PR 阶段停”。
 
 ## 4. 信息不丢失要求（新增）
 

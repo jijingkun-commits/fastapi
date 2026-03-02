@@ -7,6 +7,7 @@
 - 混合检索调试
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.ai.utils.embedding_util import get_embedding
 from app.db.session import get_db
 from app.models.agent_skill import AgentSkill, AgentSkillVersion, UserSkillBinding
+from app.repositories import config_repo
+from app.services.skill_bootstrap_service import load_bootstrap_template_from_config, normalize_bootstrap_template
 from app.services.skill_service import SkillService
 
 logger = logging.getLogger(__name__)
@@ -170,6 +173,26 @@ class SearchResultItem(BaseModel):
     trigger_hit: float
     effective_version: Optional[str] = None
     binding_status: Optional[str] = None
+
+
+class BootstrapTemplateUpdateRequest(BaseModel):
+    """统一模板更新请求。"""
+
+    default_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    skills: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class BootstrapTemplateResponse(BaseModel):
+    """统一模板响应。"""
+
+    default_version: str
+    skills: List[Dict[str, Any]]
+
+
+class SyncTemplateRequest(BaseModel):
+    """模板同步请求。"""
+
+    overwrite_existing: bool = False
 
 
 @router.get("/skills", response_model=List[SkillResponse])
@@ -393,6 +416,113 @@ def list_skill_bindings(
         raise HTTPException(status_code=409, detail=str(exc))
 
     return [SkillBindingItem(**item) for item in bindings]
+
+
+@router.get("/bootstrap-template", response_model=BootstrapTemplateResponse)
+def get_bootstrap_template():
+    """读取统一用户 Skill 初始化模板。"""
+
+    payload = normalize_bootstrap_template(load_bootstrap_template_from_config())
+    return BootstrapTemplateResponse(
+        default_version=str(payload.get("default_version") or SkillService.DEFAULT_VERSION),
+        skills=list(payload.get("skills") or []),
+    )
+
+
+@router.put("/bootstrap-template", response_model=BootstrapTemplateResponse)
+def update_bootstrap_template(request: BootstrapTemplateUpdateRequest, db: Session = Depends(get_db)):
+    """更新统一用户 Skill 初始化模板。"""
+
+    normalized = normalize_bootstrap_template(request.model_dump())
+    config_repo.upsert_config(
+        db=db,
+        key=SkillService.USER_BOOTSTRAP_TEMPLATE_KEY,
+        value=json.dumps(normalized, ensure_ascii=False),
+        value_type="json",
+        category="skill",
+        description="用户 Skill 初始化模板（默认版本 + 技能列表）",
+    )
+    db.commit()
+
+    logger.info(
+        "技能模板更新: default_version=%s count=%d",
+        normalized.get("default_version"),
+        len(normalized.get("skills") or []),
+    )
+    return BootstrapTemplateResponse(
+        default_version=str(normalized.get("default_version") or SkillService.DEFAULT_VERSION),
+        skills=list(normalized.get("skills") or []),
+    )
+
+
+@router.post("/users/{user_id}/sync-template")
+def sync_user_template(
+    user_id: int,
+    request: SyncTemplateRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """对指定用户执行模板对齐（默认仅补齐缺失绑定）。"""
+
+    normalized_request = request or SyncTemplateRequest()
+    template = normalize_bootstrap_template(load_bootstrap_template_from_config())
+    skills = list(template.get("skills") or [])
+    if not skills:
+        return {
+            "user_id": user_id,
+            "total": 0,
+            "synced_count": 0,
+            "skipped_count": 0,
+            "failed_count": 0,
+            "overwrite_existing": normalized_request.overwrite_existing,
+        }
+
+    try:
+        existing_bindings = SkillService.list_user_skill_bindings(db=db, user_id=user_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    existing_skill_ids = {
+        str(item.get("skill_id") or "").strip()
+        for item in existing_bindings
+        if str(item.get("skill_id") or "").strip()
+    }
+
+    synced_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for item in skills:
+        skill_id = str(item.get("skill_id") or "").strip()
+        if not skill_id:
+            skipped_count += 1
+            continue
+
+        if not normalized_request.overwrite_existing and skill_id in existing_skill_ids:
+            skipped_count += 1
+            continue
+
+        try:
+            SkillService.bind_user_skill(
+                db=db,
+                user_id=user_id,
+                skill_id=skill_id,
+                version=str(item.get("version") or template.get("default_version") or SkillService.DEFAULT_VERSION),
+                is_enabled=bool(item.get("enabled", True)),
+                priority_override=item.get("priority_override"),
+                config_override=dict(item.get("config_override") or {}),
+            )
+            synced_count += 1
+        except (ValueError, RuntimeError) as exc:
+            failed_count += 1
+            logger.warning("模板同步失败 user_id=%s skill_id=%s error=%s", user_id, skill_id, exc)
+
+    return {
+        "user_id": user_id,
+        "total": len(skills),
+        "synced_count": synced_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "overwrite_existing": normalized_request.overwrite_existing,
+    }
 
 
 @router.post("/bindings")

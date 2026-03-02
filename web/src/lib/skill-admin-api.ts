@@ -65,6 +65,28 @@ export interface SkillPageParams extends SkillListParams {
   limit?: number;
 }
 
+export interface BootstrapTemplateSkill {
+  skill_id: string;
+  version: string;
+  enabled: boolean;
+  priority_override: number | null;
+  config_override: Record<string, unknown>;
+}
+
+export interface BootstrapTemplate {
+  default_version: string;
+  skills: BootstrapTemplateSkill[];
+}
+
+export interface SyncTemplateResult {
+  user_id: number;
+  total: number;
+  synced_count: number;
+  skipped_count: number;
+  failed_count: number;
+  overwrite_existing: boolean;
+}
+
 // ==================== API ====================
 
 export async function getSkills(params?: SkillPageParams): Promise<Skill[]> {
@@ -174,5 +196,34 @@ export async function searchSkills(
   });
   const response = await apiFetch(`${API_BASE}/search?${params}`);
   if (!response.ok) throw new Error('搜索技能失败');
+  return response.json();
+}
+
+export async function getBootstrapTemplate(): Promise<BootstrapTemplate> {
+  const response = await apiFetch(`${API_BASE}/bootstrap-template`);
+  if (!response.ok) throw new Error('获取模板失败');
+  return response.json();
+}
+
+export async function updateBootstrapTemplate(template: BootstrapTemplate): Promise<BootstrapTemplate> {
+  const response = await apiFetch(`${API_BASE}/bootstrap-template`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(template),
+  });
+  if (!response.ok) throw new Error('更新模板失败');
+  return response.json();
+}
+
+export async function syncUserBootstrapTemplate(
+  userId: number,
+  overwriteExisting: boolean = false,
+): Promise<SyncTemplateResult> {
+  const response = await apiFetch(`${API_BASE}/users/${userId}/sync-template`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ overwrite_existing: overwriteExisting }),
+  });
+  if (!response.ok) throw new Error('模板同步失败');
   return response.json();
 }

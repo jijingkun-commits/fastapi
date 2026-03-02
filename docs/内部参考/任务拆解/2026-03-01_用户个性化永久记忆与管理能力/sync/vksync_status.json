@@ -1,0 +1,28 @@
+{
+  "task_split_dir": "2026-03-01_用户个性化永久记忆与管理能力",
+  "mode": "check",
+  "allow_not_ready": false,
+  "g0_baseline_commit": "21f9b2b3621220d3abfe87e257e73c53824f9456",
+  "baseline_source": "master_head_fallback",
+  "flags": [
+    "VKSYNC_BASELINE_COMMIT_FALLBACK"
+  ],
+  "ready_worktrees": [
+    {
+      "path": "/Users/jijingkun/bojxAI/fastapi",
+      "head": "21f9b2b3621220d3abfe87e257e73c53824f9456",
+      "branch": "refs/heads/master"
+    },
+    {
+      "path": "/Users/jijingkun/.codex/worktrees/21c6/fastapi",
+      "head": "21f9b2b3621220d3abfe87e257e73c53824f9456",
+      "branch": "detached"
+    }
+  ],
+  "not_ready_worktrees": [],
+  "ready_count": 2,
+  "not_ready_count": 0,
+  "final_gate": "PASS",
+  "checked_at": "2026-03-02T16:36:18+08:00",
+  "next_step": "proceed_vktodo_create"
+}

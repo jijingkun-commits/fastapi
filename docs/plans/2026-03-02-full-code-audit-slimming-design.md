@@ -143,9 +143,8 @@ E --> G["不通过 -> 回滚/补证据后重试"]
 
 ---
 
-## 6. 审批记录（待审批）
+## 6. 审批记录
 
-- design_approved: false
-- approved_at: pending
-- approved_round: pending
-
+- design_approved: true
+- approved_at: 2026-03-02 16:40 CST
+- approved_round: round-2（用户以 `$jjk-plan` 指令确认进入正式规划）

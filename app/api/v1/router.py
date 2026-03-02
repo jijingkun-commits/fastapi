@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.user import router as user_router
+from app.api.v1.endpoints.user_skill_api import router as user_skill_router
 from app.api.v1.endpoints.chat_api import router as chat_router
 from app.api.v1.endpoints.assets_api import router as assets_router
 from app.api.deps import get_current_user, get_admin_user
@@ -24,6 +25,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(user_router)
+api_router.include_router(user_skill_router, dependencies=[Depends(get_current_user)])
 api_router.include_router(chat_router, dependencies=[Depends(get_current_user)])
 # 资产路由：权限校验在 API 内部处理（支持可选登录）
 api_router.include_router(assets_router)
@@ -65,5 +67,4 @@ api_router.include_router(dev_codex_router, dependencies=[Depends(get_admin_user
 # 文档记忆运维路由：仅管理员
 from app.api.v1.endpoints.memory_admin_api import router as memory_admin_router
 api_router.include_router(memory_admin_router, dependencies=[Depends(get_admin_user)])
-
 

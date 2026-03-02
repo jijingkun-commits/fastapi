@@ -429,7 +429,7 @@ implementation_readiness:
 
 ---
 
-## 12. execution_log（`$jjk-imp` / PR-01）
+## 12. execution_log（`$jjk-imp`）
 
 ```yaml
 execution_log:
@@ -470,27 +470,88 @@ execution_log:
       - venv/bin/python -m pytest tests/unit/test_user_service_skill_bootstrap.py -q
     result: PASS
     rollback_point: 关闭 create_user 中 skill bootstrap 调用
+
+  - task_id: T-03
+    feature_id: P1-02
+    pr_id: PR-02
+    file_paths:
+      - app/services/skill_service.py
+      - tests/unit/test_skill_service.py
+    symbols:
+      - _get_runtime_source_mode
+      - _fetch_vector_candidates
+      - _fetch_lexical_candidates
+      - _build_retrieval_log
+    change_type: modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_service.py -k strict_user -q
+    result: PASS
+    rollback_point: skill.runtime_source_mode=compat
+
+  - task_id: T-04
+    feature_id: P1-03
+    pr_id: PR-03
+    file_paths:
+      - app/api/v1/endpoints/user_skill_api.py
+      - app/api/v1/router.py
+      - app/schemas/user_skill.py
+      - tests/api/test_user_skill_api.py
+      - docs/API文档/接口文档.md
+    symbols:
+      - list_current_user_skills
+      - patch_current_user_skill
+      - reset_current_user_skill
+    change_type: add_modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/api/test_user_skill_api.py -q
+    result: PASS
+    rollback_point: 下线 /user-skills 路由
+
+  - task_id: T-05
+    feature_id: P1-04
+    pr_id: PR-03
+    file_paths:
+      - app/api/v1/endpoints/skill_admin_api.py
+      - web/src/lib/skill-admin-api.ts
+      - web/src/components/admin/SkillAdminPanel.tsx
+      - tests/api/test_skill_admin_api.py
+      - docs/API文档/接口文档.md
+    symbols:
+      - get_bootstrap_template
+      - update_bootstrap_template
+      - sync_user_template
+    change_type: modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/api/test_skill_admin_api.py -k template -q
+    result: PASS
+    rollback_point: 模板接口改回只读
+
+  - task_id: T-06
+    feature_id: P1-05
+    pr_id: PR-04
+    file_paths:
+      - app/services/skill_service.py
+      - tests/unit/test_skill_retrieval_log.py
+      - docs/内部参考/迭代需求/用户Skill严格用户源治理_implementation_plan.md
+      - docs/SUMMARY.md
+    symbols:
+      - _build_retrieval_log
+      - _search_skills_internal
+    change_type: modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_retrieval_log.py -q
+      - python3 scripts/docs_guard.py --strict
+    result: PASS
+    rollback_point: 关闭 strict_user 并恢复 compat
 ```
 
-## 13. blocked_items（待后续卡片）
+## 13. blocked_items（执行后）
 
 ```yaml
-blocked_items:
-  - task_id: T-03
-    reason: 本轮仅执行 PR-01（T-01/T-02），strict_user 运行模式收敛尚未进入实现窗口
-    required_action: 下一轮按 card C02 执行 T-03
-  - task_id: T-04
-    reason: 用户自维护 API 依赖 strict_user 检索路径稳定后再接入
-    required_action: 等待 T-03 完成后进入 card C03
-  - task_id: T-05
-    reason: 管理端模板治理 API/UI 未在本轮范围
-    required_action: 进入 card C04 时实施
-  - task_id: T-06
-    reason: 可观测收口与 docs_guard 全链路验收属于 PR-04
-    required_action: 最后一轮执行并联动 G01 Gate
+blocked_items: []
 ```
 
-## 14. pr_ready_manifest（PR-01）
+## 14. pr_ready_manifest（PR-01 ~ PR-04）
 
 ```yaml
 pr_ready_manifest:
@@ -519,4 +580,53 @@ pr_ready_manifest:
     acceptance_cmds:
       - venv/bin/python -m pytest tests/unit/test_user_service_skill_bootstrap.py -q
     rollback_point: 关闭 create_user 中 skill bootstrap 调用
+
+  - task_id: T-03
+    pr_id: PR-02
+    card_id: C02
+    changed_files:
+      - app/services/skill_service.py
+      - tests/unit/test_skill_service.py
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_service.py -k strict_user -q
+    rollback_point: skill.runtime_source_mode=compat
+
+  - task_id: T-04
+    pr_id: PR-03
+    card_id: C03
+    changed_files:
+      - app/api/v1/endpoints/user_skill_api.py
+      - app/api/v1/router.py
+      - app/schemas/user_skill.py
+      - tests/api/test_user_skill_api.py
+      - docs/API文档/接口文档.md
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/api/test_user_skill_api.py -q
+    rollback_point: 下线用户技能路由
+
+  - task_id: T-05
+    pr_id: PR-03
+    card_id: C04
+    changed_files:
+      - app/api/v1/endpoints/skill_admin_api.py
+      - web/src/lib/skill-admin-api.ts
+      - web/src/components/admin/SkillAdminPanel.tsx
+      - tests/api/test_skill_admin_api.py
+      - docs/API文档/接口文档.md
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/api/test_skill_admin_api.py -k template -q
+    rollback_point: 模板编辑能力降级只读
+
+  - task_id: T-06
+    pr_id: PR-04
+    card_id: C04
+    changed_files:
+      - app/services/skill_service.py
+      - tests/unit/test_skill_retrieval_log.py
+      - docs/内部参考/迭代需求/用户Skill严格用户源治理_implementation_plan.md
+      - docs/SUMMARY.md
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_retrieval_log.py -q
+      - python3 scripts/docs_guard.py --strict
+    rollback_point: 关闭 strict_user 并恢复 compat
 ```

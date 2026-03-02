@@ -7,6 +7,6 @@
   "auto_done_policy": "hard_gate",
   "preflight_required": "C00",
   "status_source_of_truth": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/preflight_status.json",
-  "updated_at": "2026-03-01T16:30:49+08:00",
+  "updated_at": "2026-03-02T16:36:57+08:00",
   "updated_by": "scripts/set_active_task.py"
 }

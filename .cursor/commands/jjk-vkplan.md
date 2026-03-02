@@ -107,6 +107,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 7. `cards[].acceptance_checks`
 8. `gate_contract`（如存在）
 9. `task_to_pr_mapping`
+10. `execution_contract`（如存在）
 
 硬约束：
 
@@ -114,6 +115,12 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 2. 禁止弱化硬依赖 `depends_on`。
 3. `execution_mode=serial` 时必须保持“单活卡推进”语义。
 4. 每个实现卡必须能映射到唯一 `pr_id`，禁止“卡片存在但无 PR 归属”。
+5. 若 `execution_contract` 缺失，默认补齐：
+   - `delivery_mode=staged`
+   - `execution_unit=per_pr`
+   - `commit_policy=per_pr`
+   并输出标记 `VKPLAN_EXECUTION_CONTRACT_DEFAULTED`。
+6. `delivery_mode=staged` 时，阶段边界停顿属于预期完成态，不得按“异常中断”处理。
 
 ### 2) 产物生成（强制）
 
@@ -133,6 +140,8 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
    - `pr_branch`
    - `pr_depends_on`
    - `pr_subject`
+5. `parallel_plan.md` 与 `vk_cards.json` 必须显式写入 `execution_contract`（继承或默认补齐后的最终值）。
+6. 当 `delivery_mode=staged` 时，`parallel_plan.md` 必须写明 `stage_boundary_is_expected=true`。
 
 ### 3) Gate 卡片化与映射闭环（强制）
 
@@ -177,6 +186,7 @@ description: 并行拆解入口（消费 /jjk-plan 产物）：生成 WS 拆解�
 
 1. 推荐链路：`/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-cardrun -> /jjk-imp-ws`
 2. 未通过本命令硬校验时，禁止进入 `/jjk-vktodo`。
+3. 若本轮停在阶段边界，必须输出 `VKPLAN_STAGE_BOUNDARY_EXPECTED` 并附当前 `pr_id/card_id`。
 
 ---
 

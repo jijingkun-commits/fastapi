@@ -101,21 +101,33 @@ description: 代码实现入口（结合 TDD + 完成前校验）：按计划执
 1. 若 `implementation_plan` 存在 `implementation_readiness` 且 `implementation_ready=false`，必须输出 `IMPLEMENTATION_NOT_READY` 并回退 `/jjk-plan`。
 2. 若缺少工单级拆解（如 `task_id/file_paths/symbols/acceptance_cmds`），必须输出 `IMP_INPUT_TOO_COARSE` 并回退 `/jjk-plan`。
 3. 仅有 `requirements` 而无可执行 HOW 时，不得直接进入编码。
+4. `implementation_plan` 必须包含 `execution_contract`；缺失时输出 `IMP_EXECUTION_CONTRACT_MISSING` 并回退 `/jjk-plan` 补齐。
 
-### 2) 任务级执行（强制）
+### 2) 执行粒度与停顿边界（强制）
 
-每次只执行明确任务单元（`task_id` 或 `feature_id`），并记录：
+先读取 `execution_contract.delivery_mode/execution_unit/commit_policy/stop_boundary`，再执行任务：
 
-1. 目标文件（`file_paths`）
-2. 代码锚点（`symbols`）
-3. 改动类型（`change_type`）
-4. 验收命令（`acceptance_cmds`）
-5. 回滚点（`rollback_point`）
+1. `delivery_mode=one_shot`：连续执行全部待办任务，直到 `all_done` 或命中阻塞；不得在 PR/任务边界主动停下。
+2. `delivery_mode=staged`：按 `execution_unit` 停下：
+   - `per_pr`：完成当前 `pr_id` 下所有 `task_id` 后停下；
+   - `per_task`：完成当前 `task_id` 后停下。
+3. `commit_policy=single_commit`：仅在所有任务完成后统一提交。
+4. `commit_policy=per_pr`：每个 `pr_id` 完成后提交，不得跨 PR 合并提交。
+5. 每次停下时必须输出：
+   - `IMP_STOP_REASON=all_done|stage_boundary|blocked|manual`
+   - `IMP_STOP_CONTEXT=<pr_id|task_id|blocker>`
+6. 无论何种模式，执行记录都必须包含：
+   - `file_paths`
+   - `symbols`
+   - `change_type`
+   - `acceptance_cmds`
+   - `rollback_point`
 
 禁止项：
 
-1. 禁止跨任务“顺手改”未授权范围。
-2. 禁止跳过失败任务继续宣称“整体完成”。
+1. 禁止与 `execution_contract` 不一致的提前收口或越界推进。
+2. 禁止跨任务“顺手改”未授权范围。
+3. 禁止跳过失败任务继续宣称“整体完成”。
 
 ### 3) 测试与验证策略（强制）
 

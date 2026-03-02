@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pytest
+
 from app.models.agent_skill import AgentSkillVersion, UserSkillBinding
 from app.repositories import config_repo
 from app.services.skill_service import SkillService
@@ -327,6 +329,8 @@ def test_build_retrieval_log_should_include_trace_fields() -> None:
         trace_id="trace-skill-001",
         user_id=101,
         retrieval_mode="hybrid",
+        runtime_source_mode="compat",
+        strict_user_mode=False,
         scope="data",
         top_k=2,
         base_threshold=0.4,
@@ -417,6 +421,93 @@ def test_search_skills_debug_should_backfill_retrieval_log(monkeypatch) -> None:
     assert len(retrieval_log["query_hash"]) == 16
     assert retrieval_log["selected_skill_ids"] == ["data-loan"]
 
+
+class _RuntimeExecuteSession:
+    """用于检索路径测试的最小 Session。"""
+
+    def __init__(self, rows: Optional[List[Any]] = None, error: Exception | None = None):
+        self._rows = rows or []
+        self._error = error
+
+    def execute(self, statement, params=None):  # noqa: ANN001
+        _ = statement, params
+        if self._error is not None:
+            raise self._error
+        return list(self._rows)
+
+
+def test_skill_retrieval_strict_user_vector_should_not_fallback_legacy_when_empty(monkeypatch) -> None:  # noqa: ANN001
+    """strict_user 模式命中空结果时不应回退 legacy 向量召回。"""
+
+    db = _RuntimeExecuteSession(rows=[])
+    legacy_called = {"value": False}
+
+    monkeypatch.setattr(
+        SkillService,
+        "_build_runtime_source_sql",
+        classmethod(lambda cls, user_id: ("SELECT 1", {"binding_user_id": user_id or -1})),
+    )
+    monkeypatch.setattr(SkillService, "_is_versioning_runtime_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        SkillService,
+        "_is_strict_user_runtime_enabled",
+        classmethod(lambda cls: True),
+        raising=False,
+    )
+
+    def _legacy(cls, db, query_embedding, limit):  # noqa: ANN001
+        _ = cls, db, query_embedding, limit
+        legacy_called["value"] = True
+        return [{"skill_id": "legacy"}]
+
+    monkeypatch.setattr(SkillService, "_fetch_vector_candidates_legacy", classmethod(_legacy))
+
+    candidates = SkillService._fetch_vector_candidates(
+        db=db,
+        query_embedding=[0.01, 0.02],
+        limit=3,
+        user_id=101,
+    )
+
+    assert candidates == []
+    assert legacy_called["value"] is False
+
+
+def test_skill_retrieval_strict_user_lexical_should_raise_without_legacy_fallback(monkeypatch) -> None:  # noqa: ANN001
+    """strict_user 模式下 runtime SQL 异常应直接抛出，不回退 legacy 关键词召回。"""
+
+    db = _RuntimeExecuteSession(error=RuntimeError("runtime sql failed"))
+    legacy_called = {"value": False}
+
+    monkeypatch.setattr(
+        SkillService,
+        "_build_runtime_source_sql",
+        classmethod(lambda cls, user_id: ("SELECT 1", {"binding_user_id": user_id or -1})),
+    )
+    monkeypatch.setattr(SkillService, "_is_versioning_runtime_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        SkillService,
+        "_is_strict_user_runtime_enabled",
+        classmethod(lambda cls: True),
+        raising=False,
+    )
+
+    def _legacy(cls, db, query, limit):  # noqa: ANN001
+        _ = cls, db, query, limit
+        legacy_called["value"] = True
+        return [{"skill_id": "legacy"}]
+
+    monkeypatch.setattr(SkillService, "_fetch_lexical_candidates_legacy", classmethod(_legacy))
+
+    with pytest.raises(RuntimeError, match="runtime sql failed"):
+        SkillService._fetch_lexical_candidates(
+            db=db,
+            query="贷款余额",
+            limit=3,
+            user_id=101,
+        )
+
+    assert legacy_called["value"] is False
 
 
 class _FakeSkill:

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -28,17 +29,130 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  getBootstrapTemplate,
   getAllSkills,
   getSkillDetail,
   getVectorStatus,
   regenerateEmbeddings,
   regenerateSingleSkill,
   searchSkills,
+  syncUserBootstrapTemplate,
+  updateBootstrapTemplate,
+  type BootstrapTemplate,
+  type BootstrapTemplateSkill,
   type SearchResult,
   type Skill,
   type SkillDetail,
+  type SyncTemplateResult,
   type VectorStatus,
 } from "@/lib/skill-admin-api";
+
+interface BootstrapTemplateDraftItem {
+  row_id: string;
+  skill_id: string;
+  version: string;
+  enabled: boolean;
+  priority_override: string;
+  config_override_text: string;
+}
+
+let bootstrapTemplateDraftRowSeq = 0;
+
+function nextBootstrapTemplateDraftRowId(): string {
+  bootstrapTemplateDraftRowSeq += 1;
+  return `skill-template-row-${bootstrapTemplateDraftRowSeq}`;
+}
+
+function createBootstrapTemplateDraftItem(
+  skill?: Partial<BootstrapTemplateSkill>,
+): BootstrapTemplateDraftItem {
+  const normalizedConfig = skill?.config_override ?? {};
+  const normalizedConfigText =
+    typeof normalizedConfig === "object" && normalizedConfig !== null
+      ? JSON.stringify(normalizedConfig)
+      : "{}";
+
+  return {
+    row_id: nextBootstrapTemplateDraftRowId(),
+    skill_id: String(skill?.skill_id ?? ""),
+    version: String(skill?.version ?? ""),
+    enabled: Boolean(skill?.enabled ?? true),
+    priority_override:
+      skill?.priority_override === null || skill?.priority_override === undefined
+        ? ""
+        : String(skill.priority_override),
+    config_override_text: normalizedConfigText || "{}",
+  };
+}
+
+function buildBootstrapTemplateDraft(template: BootstrapTemplate): {
+  defaultVersion: string;
+  items: BootstrapTemplateDraftItem[];
+} {
+  const defaultVersion = String(template.default_version || "v1").trim() || "v1";
+  return {
+    defaultVersion,
+    items: (template.skills || []).map((skill) => createBootstrapTemplateDraftItem(skill)),
+  };
+}
+
+function buildBootstrapTemplatePayloadForSave(
+  defaultVersionRaw: string,
+  items: BootstrapTemplateDraftItem[],
+): BootstrapTemplate {
+  const defaultVersion = defaultVersionRaw.trim() || "v1";
+  const dedupedSkills = new Map<string, BootstrapTemplateSkill>();
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const rowNo = index + 1;
+    const skillId = item.skill_id.trim();
+    if (!skillId) {
+      continue;
+    }
+
+    const version = item.version.trim() || defaultVersion;
+    const priorityText = item.priority_override.trim();
+    let priorityOverride: number | null = null;
+    if (priorityText.length > 0) {
+      const parsed = Number.parseInt(priorityText, 10);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10000) {
+        throw new Error(`第 ${rowNo} 行 priority_override 非法，需为 0~10000 的整数`);
+      }
+      priorityOverride = parsed;
+    }
+
+    const configText = item.config_override_text.trim();
+    let configOverride: Record<string, unknown> = {};
+    if (configText.length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(configText);
+      } catch {
+        throw new Error(`第 ${rowNo} 行 config_override 不是合法 JSON`);
+      }
+
+      if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+        throw new Error(`第 ${rowNo} 行 config_override 必须是 JSON 对象`);
+      }
+
+      configOverride = parsed as Record<string, unknown>;
+    }
+
+    dedupedSkills.set(skillId, {
+      skill_id: skillId,
+      version,
+      enabled: item.enabled,
+      priority_override: priorityOverride,
+      config_override: configOverride,
+    });
+  }
+
+  return {
+    default_version: defaultVersion,
+    skills: Array.from(dedupedSkills.values()),
+  };
+}
 
 function getErrorMessage(error: unknown, fallback = "操作失败"): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -65,6 +179,14 @@ export function SkillAdminPanel() {
   const [searching, setSearching] = useState(false);
 
   const [regenerating, setRegenerating] = useState(false);
+  const [templateDefaultVersion, setTemplateDefaultVersion] = useState("v1");
+  const [templateItems, setTemplateItems] = useState<BootstrapTemplateDraftItem[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateCatalogLoading, setTemplateCatalogLoading] = useState(false);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [syncUserId, setSyncUserId] = useState("");
+  const [syncingTemplate, setSyncingTemplate] = useState(false);
+  const [lastSyncResult, setLastSyncResult] = useState<SyncTemplateResult | null>(null);
 
   const hasInitializedRef = useRef(false);
   const requestIdRef = useRef(0);
@@ -126,6 +248,28 @@ export function SkillAdminPanel() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const applyTemplateToDraft = useCallback((template: BootstrapTemplate) => {
+    const draft = buildBootstrapTemplateDraft(template);
+    setTemplateDefaultVersion(draft.defaultVersion);
+    setTemplateItems(draft.items);
+  }, []);
+
+  const loadBootstrapTemplate = useCallback(async () => {
+    setTemplateLoading(true);
+    try {
+      const template = await getBootstrapTemplate();
+      applyTemplateToDraft(template);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "加载模板失败"));
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, [applyTemplateToDraft]);
+
+  useEffect(() => {
+    void loadBootstrapTemplate();
+  }, [loadBootstrapTemplate]);
 
   const handleApplySearch = () => {
     const normalized = searchInput.trim();
@@ -194,6 +338,94 @@ export function SkillAdminPanel() {
       toast.error(getErrorMessage(error, "搜索技能失败"));
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleAddTemplateSkill = () => {
+    setTemplateItems((prev) => [...prev, createBootstrapTemplateDraftItem()]);
+  };
+
+  const handleTemplateSkillChange = (
+    rowId: string,
+    patch: Partial<Omit<BootstrapTemplateDraftItem, "row_id">>,
+  ) => {
+    setTemplateItems((prev) =>
+      prev.map((item) => (item.row_id === rowId ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const handleRemoveTemplateSkill = (rowId: string) => {
+    setTemplateItems((prev) => prev.filter((item) => item.row_id !== rowId));
+  };
+
+  const handleHydrateTemplateFromSkillCatalog = async () => {
+    if (
+      templateItems.length > 0 &&
+      !confirm("将使用当前技能库重建模板清单，未保存的编辑会丢失，确认继续吗？")
+    ) {
+      return;
+    }
+
+    setTemplateCatalogLoading(true);
+    try {
+      const catalog = await getAllSkills();
+      const fallbackVersion = templateDefaultVersion.trim() || "v1";
+      setTemplateItems(
+        catalog.map((skill) =>
+          createBootstrapTemplateDraftItem({
+            skill_id: skill.skill_id,
+            version: fallbackVersion,
+            enabled: true,
+            priority_override: null,
+            config_override: {},
+          }),
+        ),
+      );
+      toast.success(`已按当前技能库重建模板，共 ${catalog.length} 条`);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "按技能库重建模板失败"));
+    } finally {
+      setTemplateCatalogLoading(false);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    let parsedTemplate: BootstrapTemplate;
+    try {
+      parsedTemplate = buildBootstrapTemplatePayloadForSave(templateDefaultVersion, templateItems);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "模板内容不合法"));
+      return;
+    }
+
+    setTemplateSaving(true);
+    try {
+      const updatedTemplate = await updateBootstrapTemplate(parsedTemplate);
+      applyTemplateToDraft(updatedTemplate);
+      toast.success("模板已保存");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "保存模板失败"));
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
+  const handleSyncTemplateToUser = async () => {
+    const parsedUserId = Number.parseInt(syncUserId.trim(), 10);
+    if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
+      toast.error("请输入有效用户 ID");
+      return;
+    }
+
+    setSyncingTemplate(true);
+    try {
+      const result = await syncUserBootstrapTemplate(parsedUserId);
+      setLastSyncResult(result);
+      toast.success(`模板同步完成：成功 ${result.synced_count}，跳过 ${result.skipped_count}`);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "同步模板失败"));
+    } finally {
+      setSyncingTemplate(false);
     }
   };
 
@@ -283,6 +515,9 @@ export function SkillAdminPanel() {
         <TabsList className="h-8 p-0.5">
           <TabsTrigger value="list" className="h-7 px-2.5 text-xs">
             技能列表
+          </TabsTrigger>
+          <TabsTrigger value="template" className="h-7 px-2.5 text-xs">
+            模板治理
           </TabsTrigger>
           <TabsTrigger value="search" className="h-7 px-2.5 text-xs">
             搜索测试
@@ -389,6 +624,186 @@ export function SkillAdminPanel() {
                   ))}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="template" className="mt-0">
+          <Card className="py-4">
+            <CardHeader className="px-4 pb-2">
+              <CardTitle className="text-base">统一模板治理</CardTitle>
+              <CardDescription className="text-xs">
+                编辑 `skill.user_bootstrap_template`，并按需同步到指定用户
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 px-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">默认版本</p>
+                  <Input
+                    className="h-9 w-[160px] font-mono text-sm"
+                    value={templateDefaultVersion}
+                    onChange={(event) => setTemplateDefaultVersion(event.target.value)}
+                    placeholder="如: v1"
+                  />
+                </div>
+                <p className="pb-1 text-xs text-muted-foreground">
+                  模板技能数：{templateItems.length}（空 skill_id 行在保存时会自动忽略）
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadBootstrapTemplate()}
+                  disabled={templateLoading}
+                >
+                  {templateLoading ? "读取中..." : "重新读取模板"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleAddTemplateSkill}>
+                  新增一行
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleHydrateTemplateFromSkillCatalog()}
+                  disabled={templateCatalogLoading}
+                >
+                  {templateCatalogLoading ? "重建中..." : "按当前技能库重建"}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void handleSaveTemplate()}
+                  disabled={templateSaving || templateLoading || templateCatalogLoading}
+                >
+                  {templateSaving ? "保存中..." : "保存模板"}
+                </Button>
+              </div>
+
+              <div className="rounded border border-border/60">
+                <div className="max-h-[380px] overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="h-9 px-3 text-xs">Skill ID</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">版本</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">启用</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">优先级</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">config_override(JSON)</TableHead>
+                        <TableHead className="h-9 px-3 text-xs text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {templateItems.length > 0 ? (
+                        templateItems.map((item) => (
+                          <TableRow key={item.row_id}>
+                            <TableCell className="px-3 py-2.5 align-top">
+                              <Input
+                                className="h-8 min-w-[220px] font-mono text-xs"
+                                list="skill-template-skill-id-options"
+                                value={item.skill_id}
+                                onChange={(event) =>
+                                  handleTemplateSkillChange(item.row_id, { skill_id: event.target.value })
+                                }
+                                placeholder="例如: sql-expert"
+                              />
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 align-top">
+                              <Input
+                                className="h-8 w-[120px] font-mono text-xs"
+                                value={item.version}
+                                onChange={(event) =>
+                                  handleTemplateSkillChange(item.row_id, { version: event.target.value })
+                                }
+                                placeholder={templateDefaultVersion || "v1"}
+                              />
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 align-top">
+                              <div className="flex h-8 items-center">
+                                <Switch
+                                  checked={item.enabled}
+                                  onCheckedChange={(checked) =>
+                                    handleTemplateSkillChange(item.row_id, { enabled: checked })
+                                  }
+                                />
+                              </div>
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 align-top">
+                              <Input
+                                className="h-8 w-[110px] font-mono text-xs"
+                                type="number"
+                                value={item.priority_override}
+                                onChange={(event) =>
+                                  handleTemplateSkillChange(item.row_id, {
+                                    priority_override: event.target.value,
+                                  })
+                                }
+                                placeholder="默认"
+                              />
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 align-top">
+                              <Input
+                                className="h-8 min-w-[240px] font-mono text-xs"
+                                value={item.config_override_text}
+                                onChange={(event) =>
+                                  handleTemplateSkillChange(item.row_id, {
+                                    config_override_text: event.target.value,
+                                  })
+                                }
+                                placeholder='例如: {"scope":"data"}'
+                              />
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 align-top text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-xs text-red-600 hover:text-red-700"
+                                onClick={() => handleRemoveTemplateSkill(item.row_id)}
+                              >
+                                删除
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={6} className="px-3 py-6 text-center text-xs text-muted-foreground">
+                            当前模板暂无技能，点击“新增一行”或“按当前技能库重建”开始编辑
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <datalist id="skill-template-skill-id-options">
+                {skills.map((skill) => (
+                  <option key={skill.skill_id} value={skill.skill_id} />
+                ))}
+              </datalist>
+
+              <div className="rounded border border-border/60 p-3">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">同步模板到指定用户</p>
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    className="h-9 w-[180px] text-sm"
+                    placeholder="用户 ID"
+                    value={syncUserId}
+                    onChange={(event) => setSyncUserId(event.target.value)}
+                  />
+                  <Button size="sm" onClick={() => void handleSyncTemplateToUser()} disabled={syncingTemplate}>
+                    {syncingTemplate ? "同步中..." : "同步到该用户"}
+                  </Button>
+                </div>
+                {lastSyncResult ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    最近一次同步：user_id={lastSyncResult.user_id}，总计 {lastSyncResult.total}，成功{" "}
+                    {lastSyncResult.synced_count}，跳过 {lastSyncResult.skipped_count}，失败 {lastSyncResult.failed_count}
+                  </p>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

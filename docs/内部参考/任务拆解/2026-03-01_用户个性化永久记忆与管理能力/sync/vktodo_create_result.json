@@ -1,0 +1,58 @@
+{
+  "project_id": "2ea99dcaa11143bbae73f836bafe0fb0",
+  "project_name": "fastapi",
+  "task_key": "PP-20260301-USER-MEMORY-ADMIN",
+  "created_count": 7,
+  "skipped_count": 0,
+  "created": [
+    {
+      "id": "731d749548564d52b80419a6a93735f0",
+      "title": "C01 P1 查询能力（列表/详情/chunks） [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "inprogress",
+      "card_id": "C01"
+    },
+    {
+      "id": "4747366596f547a48f8b30f293b53213",
+      "title": "C02 P2 管理动作（调试/归档/删除） [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "C02"
+    },
+    {
+      "id": "37f4658eb4d74161aa7b238f41668bc6",
+      "title": "C03 P3 管理审计落库 [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "C03"
+    },
+    {
+      "id": "544504a4f59c40b78ba18fe16da9461e",
+      "title": "C04 P4 向量状态看板增强 [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "C04"
+    },
+    {
+      "id": "7d865ced92a645b8a40cb7d72aba501d",
+      "title": "C05 P5 管理后台页面（列表+详情+操作） [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "C05"
+    },
+    {
+      "id": "5dcbbbb80ebf481f8726ea9318294ed3",
+      "title": "C06 P6 配置、迁移、文档与测试收口 [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "C06"
+    },
+    {
+      "id": "e582a1374e8e4f268d53405417073217",
+      "title": "G01 Gate 全链路验收门禁 [PP-20260301-USER-MEMORY-ADMIN]",
+      "status": "todo",
+      "card_id": "G01"
+    }
+  ],
+  "skipped": [],
+  "before_status_counts": {},
+  "after_status_counts": {
+    "inprogress": 1,
+    "todo": 6
+  },
+  "executed_at": "2026-03-02T16:43:30+08:00"
+}

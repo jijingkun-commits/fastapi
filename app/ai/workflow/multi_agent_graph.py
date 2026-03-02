@@ -33,7 +33,7 @@ from app.ai.scene_registry import (
     SCENE_KEY_INTENT_CLASSIFIER,
     SCENE_KEY_MULTI_AGENT_SUPERVISOR,
 )
-from app.db.postgres_checkpoint import get_checkpointer
+from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
 
 # 自定义事件工具
 from langgraph.config import get_stream_writer
@@ -96,6 +96,13 @@ async def cancel_checkpoint(thread_id: str, run_id: Optional[str] = None) -> boo
         logger.debug("cancel_checkpoint: thread_id=%s, run_id=%s, has_snapshot=%s", thread_id, run_id, True)
         return True
     except Exception as exc:
+        if is_checkpointer_busy_error(exc):
+            logger.warning(
+                "cancel_checkpoint 命中 checkpointer busy，已降级跳过: thread_id=%s, run_id=%s, error=%s",
+                thread_id,
+                run_id,
+                exc,
+            )
         logger.debug("cancel_checkpoint 失败，已降级忽略: thread_id=%s, run_id=%s, error=%s", thread_id, run_id, exc)
         return False
 

@@ -69,6 +69,12 @@ class SkillService:
         BINDING_STATUS_DISABLED,
         BINDING_STATUS_ROLLBACKED,
     }
+    RUNTIME_SOURCE_MODE_COMPAT = "compat"
+    RUNTIME_SOURCE_MODE_STRICT_USER = "strict_user"
+    VALID_RUNTIME_SOURCE_MODES = {
+        RUNTIME_SOURCE_MODE_COMPAT,
+        RUNTIME_SOURCE_MODE_STRICT_USER,
+    }
     USER_BOOTSTRAP_TEMPLATE_KEY = "skill.user_bootstrap_template"
     USER_BOOTSTRAP_TEMPLATE_DEFAULT = {
         "default_version": DEFAULT_VERSION,
@@ -146,6 +152,25 @@ class SkillService:
         """运行时是否启用版本化检索路径。"""
 
         return cls._is_skill_versioning_enabled()
+
+    @classmethod
+    def _get_runtime_source_mode(cls) -> str:
+        """读取并标准化 Skill 运行时来源模式。"""
+
+        if not cls._is_versioning_runtime_enabled():
+            return cls.RUNTIME_SOURCE_MODE_COMPAT
+
+        raw_value = ConfigResolver.get_string("skill.runtime_source_mode", cls.RUNTIME_SOURCE_MODE_COMPAT)
+        normalized = str(raw_value or "").strip().lower()
+        if normalized in cls.VALID_RUNTIME_SOURCE_MODES:
+            return normalized
+        return cls.RUNTIME_SOURCE_MODE_COMPAT
+
+    @classmethod
+    def _is_strict_user_runtime_enabled(cls) -> bool:
+        """判断是否启用 strict_user 运行模式。"""
+
+        return cls._get_runtime_source_mode() == cls.RUNTIME_SOURCE_MODE_STRICT_USER
 
     @staticmethod
     def _normalize_binding_status(raw_value: Any, default: str = BINDING_STATUS_ENABLED) -> str:
@@ -1650,6 +1675,8 @@ class SkillService:
         """召回向量候选。"""
 
         source_sql, base_params = cls._build_runtime_source_sql(user_id)
+        strict_user_mode = cls._is_strict_user_runtime_enabled()
+        runtime_source_mode = cls._get_runtime_source_mode()
 
         sql = text(
             f"""
@@ -1687,7 +1714,18 @@ class SkillService:
             rows = db.execute(sql, params)
         except Exception as exc:  # pragma: no cover - 兼容路径
             if cls._is_versioning_runtime_enabled():
-                logger.warning("技能检索: 版本化向量召回失败，回退兼容表 - %s", exc)
+                if strict_user_mode:
+                    logger.warning(
+                        "技能检索: runtime_source_mode=%s 版本化向量召回失败，不允许 legacy 回退 - %s",
+                        runtime_source_mode,
+                        exc,
+                    )
+                    raise
+                logger.warning(
+                    "技能检索: runtime_source_mode=%s 版本化向量召回失败，回退兼容表 - %s",
+                    runtime_source_mode,
+                    exc,
+                )
                 return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
             raise
 
@@ -1703,7 +1741,7 @@ class SkillService:
             )
             candidates.append(candidate)
 
-        if not candidates and cls._is_versioning_runtime_enabled():
+        if not candidates and cls._is_versioning_runtime_enabled() and not strict_user_mode:
             return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
 
         return candidates
@@ -1719,6 +1757,8 @@ class SkillService:
         """召回关键词候选。"""
 
         source_sql, base_params = cls._build_runtime_source_sql(user_id)
+        strict_user_mode = cls._is_strict_user_runtime_enabled()
+        runtime_source_mode = cls._get_runtime_source_mode()
 
         sql = text(
             f"""
@@ -1775,7 +1815,18 @@ class SkillService:
             rows = db.execute(sql, params)
         except Exception as exc:  # pragma: no cover - 兼容路径
             if cls._is_versioning_runtime_enabled():
-                logger.warning("技能检索: 版本化关键词召回失败，回退兼容表 - %s", exc)
+                if strict_user_mode:
+                    logger.warning(
+                        "技能检索: runtime_source_mode=%s 版本化关键词召回失败，不允许 legacy 回退 - %s",
+                        runtime_source_mode,
+                        exc,
+                    )
+                    raise
+                logger.warning(
+                    "技能检索: runtime_source_mode=%s 版本化关键词召回失败，回退兼容表 - %s",
+                    runtime_source_mode,
+                    exc,
+                )
                 return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
             raise
 
@@ -1791,7 +1842,7 @@ class SkillService:
             )
             candidates.append(candidate)
 
-        if not candidates and cls._is_versioning_runtime_enabled():
+        if not candidates and cls._is_versioning_runtime_enabled() and not strict_user_mode:
             return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
 
         return candidates
@@ -1940,6 +1991,8 @@ class SkillService:
         trace_id: Optional[str],
         user_id: Optional[int],
         retrieval_mode: str,
+        runtime_source_mode: str,
+        strict_user_mode: bool,
         scope: str,
         top_k: int,
         base_threshold: float,
@@ -1960,6 +2013,8 @@ class SkillService:
             "query_hash": cls._compute_query_hash(query),
             "query_length": len(query.strip()),
             "mode": retrieval_mode,
+            "runtime_source_mode": runtime_source_mode,
+            "strict_user_mode": bool(strict_user_mode),
             "scope": scope,
             "top_k": top_k,
             "threshold": round(base_threshold, 4),
@@ -1988,6 +2043,9 @@ class SkillService:
     ) -> Tuple[List[AgentSkill], Dict[str, Any]]:
         """统一检索入口，返回技能列表和调试信息。"""
 
+        runtime_source_mode = cls._get_runtime_source_mode()
+        strict_user_mode = runtime_source_mode == cls.RUNTIME_SOURCE_MODE_STRICT_USER
+
         if not query.strip():
             retrieval_log = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1997,6 +2055,8 @@ class SkillService:
                 "query_hash": cls._compute_query_hash(query),
                 "query_length": 0,
                 "mode": "none",
+                "runtime_source_mode": runtime_source_mode,
+                "strict_user_mode": strict_user_mode,
                 "scope": scope,
                 "top_k": max(1, top_k),
                 "threshold": None,
@@ -2047,7 +2107,11 @@ class SkillService:
                         user_id=user_id,
                     )
                 except Exception as exc:  # pragma: no cover - 数据库检索异常
-                    logger.warning("技能检索: 向量召回失败，降级关键词检索 - %s", exc)
+                    logger.warning(
+                        "技能检索: runtime_source_mode=%s 向量召回失败，降级关键词检索 - %s",
+                        runtime_source_mode,
+                        exc,
+                    )
                     vector_candidates = []
             elif retrieval_mode == "vector":
                 logger.warning("技能检索: vector 模式下 embedding 不可用，回退到 hybrid")
@@ -2062,7 +2126,11 @@ class SkillService:
                         user_id=user_id,
                     )
                 except Exception as exc:  # pragma: no cover - 数据库检索异常
-                    logger.warning("技能检索: 关键词召回失败 - %s", exc)
+                    logger.warning(
+                        "技能检索: runtime_source_mode=%s 关键词召回失败 - %s",
+                        runtime_source_mode,
+                        exc,
+                    )
                     lexical_candidates = []
 
         merged = cls._merge_candidates(vector_candidates, lexical_candidates, mode=retrieval_mode)
@@ -2113,6 +2181,8 @@ class SkillService:
             trace_id=trace_id,
             user_id=user_id,
             retrieval_mode=retrieval_mode,
+            runtime_source_mode=runtime_source_mode,
+            strict_user_mode=strict_user_mode,
             scope=scope,
             top_k=final_top_k,
             base_threshold=base_threshold,
@@ -2127,6 +2197,8 @@ class SkillService:
         debug_info = {
             "query": query,
             "mode": retrieval_mode,
+            "runtime_source_mode": runtime_source_mode,
+            "strict_user_mode": strict_user_mode,
             "scope": scope,
             "user_id": user_id,
             "threshold": base_threshold,
@@ -2181,8 +2253,10 @@ class SkillService:
             ]
         )
         logger.info(
-            "技能检索: mode=%s, scope=%s, 阈值=%.3f/%.3f, 候选=[%s], 入选=%s, 淘汰=%s",
+            "技能检索: mode=%s, runtime_source_mode=%s, strict_user=%s, scope=%s, 阈值=%.3f/%.3f, 候选=[%s], 入选=%s, 淘汰=%s",
             retrieval_mode,
+            runtime_source_mode,
+            strict_user_mode,
             scope,
             base_threshold,
             effective_threshold,
@@ -2303,6 +2377,9 @@ class SkillService:
 
         retrieval_log = debug.get("retrieval_log")
         if not isinstance(retrieval_log, dict):
+            runtime_source_mode = str(
+                debug.get("runtime_source_mode") or cls._get_runtime_source_mode()
+            )
             retrieval_log = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "thread_id": cls._normalize_trace_key(thread_id),
@@ -2311,6 +2388,12 @@ class SkillService:
                 "query_hash": cls._compute_query_hash(query),
                 "query_length": len(query.strip()),
                 "mode": str(debug.get("mode") or "unknown"),
+                "runtime_source_mode": runtime_source_mode,
+                "strict_user_mode": bool(
+                    debug.get("strict_user_mode")
+                    if debug.get("strict_user_mode") is not None
+                    else runtime_source_mode == cls.RUNTIME_SOURCE_MODE_STRICT_USER
+                ),
                 "scope": str(debug.get("scope") or scope),
                 "top_k": top_k,
                 "threshold": debug.get("threshold"),

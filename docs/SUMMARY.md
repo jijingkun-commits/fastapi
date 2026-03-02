@@ -16,6 +16,10 @@
 * [知识库检索 P2 详细报告检查清单（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-detailed-report-checklist.md)
 * [用户个性化永久记忆实施检查清单（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-implementation-checklist.md)
 * [用户 Skill 严格用户源治理设计（2026-03-01）](plans/2026-03-01-user-skill-strict-runtime-design.md)
+* [聊天多会话并发（方案 B）设计说明（2026-03-01）](plans/2026-03-01-chat-multi-session-concurrency-design.md)
+* [全量代码检查与精简治理（方案 C）设计说明（2026-03-02）](plans/2026-03-02-full-code-audit-slimming-design.md)
+* [聊天停止后并发占用稳定性修复设计（2026-03-02）](plans/2026-03-02-chat-stop-checkpointer-stability-design.md)
+* [Supervisor 移除 Planner 重构设计（2026-03-02）](plans/2026-03-02-supervisor-refactor-remove-planner.md)
 
 ---
 
@@ -204,6 +208,8 @@
 * [实施方案（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md)
 * [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
 * [实施方案（全面代码审查整改，非安全范围路线）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
+* [需求基线（全量代码检查与精简治理）](内部参考/迭代需求/全量代码检查与精简治理_requirements.md)
+* [实施方案（全量代码检查与精简治理）](内部参考/迭代需求/全量代码检查与精简治理_implementation_plan.md)
 * [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
 * [需求基线（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_requirements.md)
 * [实施方案（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md)
@@ -238,6 +244,8 @@
 * [实施方案（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_implementation_plan.md)
 * [需求基线（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_requirements.md)
 * [实施方案（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md)
+* [需求基线（聊天停止后并发占用稳定性修复）](内部参考/迭代需求/聊天停止后并发占用稳定性修复_requirements.md)
+* [实施方案（聊天停止后并发占用稳定性修复）](内部参考/迭代需求/聊天停止后并发占用稳定性修复_implementation_plan.md)
 * [需求基线（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_requirements.md)
 * [实施方案（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md)
 * [调试报告（stopped_event 导入契约，2026-03-01）](内部参考/迭代需求/debug_report_stopped_event_import_contract_20260301.md)
