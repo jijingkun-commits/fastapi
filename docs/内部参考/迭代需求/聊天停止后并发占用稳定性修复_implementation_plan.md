@@ -325,3 +325,96 @@ implementation_readiness:
    缓解：仅在断连/取消态触发，正常态保留原行为。
 3. 风险：回归覆盖不足导致隐性回归。  
    缓解：将 stop/disconnect/resume 三条链路纳入必测命令。
+
+## 12. 实施回填（$jjk-imp）
+
+### 12.1 任务完成记录
+
+1. T-01（P0-01）  
+   - changed_files:
+     - `app/services/chat_service.py`
+     - `tests/unit/test_chat_service_disconnect_continue.py`
+   - acceptance_cmds:
+     - `venv/bin/python -m pytest tests/unit/test_chat_service_disconnect_continue.py tests/unit/test_chat_service_cancel_stream.py -q`
+   - result: passed
+
+2. T-02（P1-01）  
+   - changed_files:
+     - `app/db/postgres_checkpoint.py`
+     - `app/main.py`
+     - `tests/unit/test_postgres_checkpointer_pooling.py`
+   - acceptance_cmds:
+     - `venv/bin/python -m pytest tests/unit/test_chat_service_resume_after_cancel.py tests/unit/test_chat_stop_cancel_semantics.py -q`
+   - result: passed
+
+3. T-03（P1-02）  
+   - changed_files:
+     - `app/ai/workflow/multi_agent_graph.py`
+   - acceptance_cmds:
+     - `venv/bin/python -m pytest tests/unit/test_chat_stop_cancel_semantics.py -q`
+   - result: passed
+
+4. T-04（P1-03）  
+   - changed_files:
+     - `app/services/chat_service.py`
+     - `tests/unit/test_chat_service_done_payload.py`
+   - acceptance_cmds:
+     - `venv/bin/python -m pytest tests/unit/test_events_contract.py tests/unit/test_chat_service_done_payload.py -q`
+   - result: passed
+
+### 12.2 一次性回归证据
+
+- command:
+  `./venv/bin/python -m pytest tests/unit/test_postgres_checkpointer_pooling.py tests/unit/test_chat_service_disconnect_continue.py tests/unit/test_chat_service_cancel_stream.py tests/unit/test_chat_service_resume_after_cancel.py tests/unit/test_chat_stop_cancel_semantics.py tests/unit/test_events_contract.py tests/unit/test_chat_service_done_payload.py -q`
+- result: `19 passed`
+
+### 12.3 文档门禁状态
+
+- command: `python3 scripts/docs_guard.py --strict`
+- result: blocked（`summary_missing_doc docs/plans/2026-03-02-supervisor-refactor-remove-planner-design.md`）
+- note: 属于独立文档收录问题，不影响本次代码修复链路。
+
+### 12.4 pr_ready_manifest
+
+```yaml
+pr_ready_manifest:
+  - task_id: T-01
+    pr_id: PR-01
+    card_id: C01
+    changed_files:
+      - app/services/chat_service.py
+      - tests/unit/test_chat_service_disconnect_continue.py
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_chat_service_disconnect_continue.py tests/unit/test_chat_service_cancel_stream.py -q
+    rollback_point: 回退 chat_service 收口守卫逻辑
+
+  - task_id: T-02
+    pr_id: PR-02
+    card_id: C02
+    changed_files:
+      - app/db/postgres_checkpoint.py
+      - app/main.py
+      - tests/unit/test_postgres_checkpointer_pooling.py
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_chat_service_resume_after_cancel.py tests/unit/test_chat_stop_cancel_semantics.py -q
+    rollback_point: 回退 postgres_checkpoint 单连接实现
+
+  - task_id: T-03
+    pr_id: PR-02
+    card_id: C02
+    changed_files:
+      - app/ai/workflow/multi_agent_graph.py
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_chat_stop_cancel_semantics.py -q
+    rollback_point: 回退 cancel_checkpoint busy 降级分支
+
+  - task_id: T-04
+    pr_id: PR-03
+    card_id: C03
+    changed_files:
+      - app/services/chat_service.py
+      - tests/unit/test_chat_service_done_payload.py
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_events_contract.py tests/unit/test_chat_service_done_payload.py -q
+    rollback_point: 回退错误分类文案与日志分支
+```
