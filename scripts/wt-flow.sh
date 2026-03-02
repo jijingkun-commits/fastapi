@@ -20,7 +20,24 @@ WT_BASE="${REPO_ROOT}/.worktrees"
 STATE_FILE="${REPO_ROOT}/.omc/state/wt-flow-state.json"
 ACTIVE_TASK_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/_active_task.json"
 DEFAULT_STATE_DIR="${REPO_ROOT}/.omc/state"
-ALLOWED_PREFIXES=("bash" "python" "python3" "pytest" "ruff" "grep" "cat" "jq" "wc" "test" "diff")
+ALLOWED_PREFIXES=(
+  "bash"
+  "python"
+  "python3"
+  "pytest"
+  "ruff"
+  "grep"
+  "cat"
+  "jq"
+  "wc"
+  "test"
+  "diff"
+  "venv/bin/python"
+  "venv/bin/alembic"
+  "${REPO_ROOT}/venv/bin/python"
+  "${REPO_ROOT}/venv/bin/alembic"
+  "npm"
+)
 
 WT_FLOW_PARSE_STATE_DIR=""
 WT_FLOW_PARSE_REMAINING=()
@@ -189,6 +206,59 @@ _extract_prefix() {
   local check="$1"
   check="${check#"${check%%[![:space:]]*}"}"
   check="${check%%[[:space:]]*}"
+  echo "$check"
+}
+
+_extract_effective_prefix() {
+  local check="$1"
+  check="${check#"${check%%[![:space:]]*}"}"
+
+  if [[ "$check" =~ ^cd[[:space:]]+([^&;]+)[[:space:]]*\&\&[[:space:]]*(.+)$ ]]; then
+    _extract_effective_prefix "${BASH_REMATCH[2]}"
+    return
+  fi
+
+  _extract_prefix "$check"
+}
+
+_trim_spaces() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  echo "$value"
+}
+
+_normalize_check_for_worktree() {
+  local check="$1" worktree_path="$2"
+  local trimmed target rest rel
+  trimmed="$(_trim_spaces "$check")"
+
+  if [[ "$trimmed" =~ ^cd[[:space:]]+([^&;]+)[[:space:]]*\&\&[[:space:]]*(.+)$ ]]; then
+    target="$(_trim_spaces "${BASH_REMATCH[1]}")"
+    rest="$(_trim_spaces "${BASH_REMATCH[2]}")"
+    target="${target#\"}"
+    target="${target%\"}"
+    target="${target#\'}"
+    target="${target%\'}"
+
+    if [[ "$target" == "$REPO_ROOT" || "$target" == "$worktree_path" ]]; then
+      echo "$rest"
+      return
+    fi
+
+    if [[ "$target" == "$REPO_ROOT/"* ]]; then
+      rel="${target#"$REPO_ROOT/"}"
+      echo "cd ${rel} && ${rest}"
+      return
+    fi
+
+    if [[ "$target" == "$worktree_path/"* ]]; then
+      rel="${target#"$worktree_path/"}"
+      echo "cd ${rel} && ${rest}"
+      return
+    fi
+  fi
+
   echo "$check"
 }
 
@@ -544,19 +614,23 @@ cmd_verify() {
   local all_passed=true
   local checks_count=0
   local evidence_json=""
-  local check prefix output rc item
+  local check normalized_check run_check prefix output rc item
 
   while IFS= read -r check; do
     [[ -z "$check" ]] && continue
     checks_count=$((checks_count + 1))
 
-    prefix="$(_extract_prefix "$check")"
+    normalized_check="$(_normalize_check_for_worktree "$check" "$worktree_path")"
+    run_check="$(printf '%s' "$normalized_check" | sed "s#venv/bin/#${REPO_ROOT}/venv/bin/#g")"
+    prefix="$(_extract_effective_prefix "$run_check")"
     if [[ -z "$prefix" ]] || ! _is_allowed_prefix "$prefix"; then
-      _err "BLOCKED: 命令前缀不在白名单中: ${check}"
+      _err "BLOCKED: 命令前缀不在白名单中: ${run_check}"
       item="$(jq -n \
         --arg check "$check" \
+        --arg normalized_check "$normalized_check" \
+        --arg run_check "$run_check" \
         --arg prefix "$prefix" \
-        '{check: $check, prefix: $prefix, result: "blocked_not_allowed"}')"
+        '{check: $check, normalized_check: $normalized_check, run_check: $run_check, prefix: $prefix, result: "blocked_not_allowed"}')"
       if [[ -n "$evidence_json" ]]; then
         evidence_json="${evidence_json},${item}"
       else
@@ -566,27 +640,31 @@ cmd_verify() {
       continue
     fi
 
-    _log "执行检查: ${check}"
+    _log "执行检查: ${run_check}"
     set +e
-    output="$(cd "$worktree_path" && bash -lc "set -euo pipefail; $check" 2>&1)"
+    output="$(cd "$worktree_path" && bash -lc "set -euo pipefail; $run_check" 2>&1)"
     rc=$?
     set -e
 
     if [[ "$rc" -eq 0 ]]; then
       item="$(jq -n \
         --arg check "$check" \
+        --arg normalized_check "$normalized_check" \
+        --arg run_check "$run_check" \
         --arg prefix "$prefix" \
         --arg output "$output" \
-        '{check: $check, prefix: $prefix, result: "pass", output: $output}')"
+        '{check: $check, normalized_check: $normalized_check, run_check: $run_check, prefix: $prefix, result: "pass", output: $output}')"
     else
-      _err "检查失败(${rc}): ${check}"
+      _err "检查失败(${rc}): ${run_check}"
       _err "$output"
       item="$(jq -n \
         --arg check "$check" \
+        --arg normalized_check "$normalized_check" \
+        --arg run_check "$run_check" \
         --arg prefix "$prefix" \
         --arg output "$output" \
         --argjson exit_code "$rc" \
-        '{check: $check, prefix: $prefix, result: "fail", exit_code: $exit_code, output: $output}')"
+        '{check: $check, normalized_check: $normalized_check, run_check: $run_check, prefix: $prefix, result: "fail", exit_code: $exit_code, output: $output}')"
       all_passed=false
     fi
 
