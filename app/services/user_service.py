@@ -15,6 +15,7 @@ from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.repositories import user_repo
 from app.schemas.user import UserCreate, UserListItem, UserListResponse
+from app.services.skill_bootstrap_service import bootstrap_user_skills
 from app.services.user_preference_memory_service import bootstrap_user_preferences
 
 
@@ -37,6 +38,19 @@ def _is_user_preference_memory_enabled() -> bool:
     if env_value is None:
         return bool(resolved)
     return env_value.strip().lower() in _TRUE_VALUES
+
+
+def _is_user_skill_bootstrap_enabled() -> bool:
+    """读取用户 Skill 初始化总开关，依赖版本治理与用户绑定开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        versioning_enabled = ConfigResolver.get_bool("feature.enable_skill_versioning", False)
+        binding_enabled = ConfigResolver.get_bool("feature.enable_user_skill_binding", False)
+        return bool(versioning_enabled and binding_enabled)
+    except Exception:
+        return False
 
 
 def authenticate(
@@ -112,6 +126,17 @@ def create_user(db: Session, data: UserCreate) -> Tuple[Optional[UserListItem], 
             if callable(rollback):
                 rollback()
             logger.warning("新用户偏好记忆模板初始化失败，已降级: user_id=%s, error=%s", user.id, memory_error)
+
+    if _is_user_skill_bootstrap_enabled():
+        try:
+            seeded_skill_count = bootstrap_user_skills(db, user_id=user.id)
+            if seeded_skill_count:
+                logger.info("新用户 Skill 模板初始化完成: user_id=%s, count=%d", user.id, seeded_skill_count)
+        except Exception as skill_error:
+            rollback = getattr(db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            logger.warning("新用户 Skill 模板初始化失败，已降级: user_id=%s, error=%s", user.id, skill_error)
 
     return UserListItem.model_validate(user), None
 

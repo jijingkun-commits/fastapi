@@ -427,3 +427,96 @@ implementation_readiness:
 
 当前文档为 `plan-only` 产物，不自动进入实施链；是否执行由后续显式命令决定。
 
+---
+
+## 12. execution_log（`$jjk-imp` / PR-01）
+
+```yaml
+execution_log:
+  - task_id: T-01
+    feature_id: P0-01
+    pr_id: PR-01
+    file_paths:
+      - app/services/skill_service.py
+      - scripts/data/import_skills.py
+      - app/core/config_contract.py
+      - tests/unit/test_skill_service.py
+      - docs/开发文档/快速入门/配置说明.md
+    symbols:
+      - import_all_skills
+      - _build_user_bootstrap_template
+      - _ensure_user_bootstrap_template_config
+    change_type: modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_service.py -k version -q
+    result: PASS
+    rollback_point: feature.enable_skill_versioning=false
+
+  - task_id: T-02
+    feature_id: P1-01
+    pr_id: PR-01
+    file_paths:
+      - app/services/user_service.py
+      - app/services/skill_bootstrap_service.py
+      - app/core/config_contract.py
+      - tests/unit/test_user_service_skill_bootstrap.py
+      - docs/开发文档/快速入门/配置说明.md
+    symbols:
+      - create_user
+      - bootstrap_user_skills
+      - get_json_dict
+    change_type: add_modify
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_user_service_skill_bootstrap.py -q
+    result: PASS
+    rollback_point: 关闭 create_user 中 skill bootstrap 调用
+```
+
+## 13. blocked_items（待后续卡片）
+
+```yaml
+blocked_items:
+  - task_id: T-03
+    reason: 本轮仅执行 PR-01（T-01/T-02），strict_user 运行模式收敛尚未进入实现窗口
+    required_action: 下一轮按 card C02 执行 T-03
+  - task_id: T-04
+    reason: 用户自维护 API 依赖 strict_user 检索路径稳定后再接入
+    required_action: 等待 T-03 完成后进入 card C03
+  - task_id: T-05
+    reason: 管理端模板治理 API/UI 未在本轮范围
+    required_action: 进入 card C04 时实施
+  - task_id: T-06
+    reason: 可观测收口与 docs_guard 全链路验收属于 PR-04
+    required_action: 最后一轮执行并联动 G01 Gate
+```
+
+## 14. pr_ready_manifest（PR-01）
+
+```yaml
+pr_ready_manifest:
+  - task_id: T-01
+    pr_id: PR-01
+    card_id: C01
+    changed_files:
+      - app/services/skill_service.py
+      - scripts/data/import_skills.py
+      - app/core/config_contract.py
+      - tests/unit/test_skill_service.py
+      - docs/开发文档/快速入门/配置说明.md
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_skill_service.py -k version -q
+    rollback_point: feature.enable_skill_versioning=false
+
+  - task_id: T-02
+    pr_id: PR-01
+    card_id: C01
+    changed_files:
+      - app/services/user_service.py
+      - app/services/skill_bootstrap_service.py
+      - app/core/config_contract.py
+      - tests/unit/test_user_service_skill_bootstrap.py
+      - docs/开发文档/快速入门/配置说明.md
+    acceptance_cmds:
+      - venv/bin/python -m pytest tests/unit/test_user_service_skill_bootstrap.py -q
+    rollback_point: 关闭 create_user 中 skill bootstrap 调用
+```

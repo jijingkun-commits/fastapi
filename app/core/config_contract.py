@@ -249,6 +249,20 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         env_key="ENABLE_USER_SKILL_BINDING",
         aliases=("skill.enable_user_binding",),
     ),
+    "skill.runtime_source_mode": ConfigSpec(
+        key="skill.runtime_source_mode",
+        source="db-dynamic",
+        value_type="string",
+        default="compat",
+        aliases=("skill.source_mode",),
+    ),
+    "skill.user_bootstrap_template": ConfigSpec(
+        key="skill.user_bootstrap_template",
+        source="db-dynamic",
+        value_type="json",
+        default={"default_version": "v1", "skills": []},
+        aliases=("skill.bootstrap_template",),
+    ),
     "feature.enable_user_preference_memory": ConfigSpec(
         key="feature.enable_user_preference_memory",
         source="db-dynamic",

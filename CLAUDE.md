@@ -55,28 +55,6 @@
 - 涉及多个方案时，使用 Markdown 表格，列：方案 | 优点 | 缺点 | 成本 | 推荐度
 - 涉及流程、架构、调用链时，选择直观的展示方式
 
-## Coder4 Payload 迁移固定层（P2-01）
-
-### §1 真理源路径
-- `task-scoped _active_task.json`：`/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
-- `_active_task.index.json`（兼容入口，文件名仍为 `_active_task.json`）：`/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json`
-- `WORKFLOW_AUTO.md`：`/Users/jijingkun/.openclaw/workspace-dev/WORKFLOW_AUTO.md`
-- `VK_AGENT_PROMPTS.md`：`/Users/jijingkun/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md`
-- `task-runner-state.json`：`/Users/jijingkun/bojxAI/fastapi/.omc/state/task-runner-state.json`
-- `task-ledger.jsonl`：`/Users/jijingkun/bojxAI/fastapi/.omc/state/task-ledger.jsonl`
-
-### §2 硬约束
-1. 禁止 `manual-db-fallback` 作为常规执行路径；仅允许 MCP -> UI -> DB fallback，且必须显式对外声明渠道。
-2. 禁止全量读取任务拆解目录；仅允许读取当前卡片相关文件与必要上下游依赖片段。
-3. 禁止空转；当无实质操作时必须输出阻塞原因、已检查对象和下一步。
-4. 禁止跳过 `scope_guard`；每轮分派前必须完成 `scope_guard` 校验并记录结果。
-5. `task-scoped _active_task.json` 与根目录 `_active_task.json`（索引）均属于真理源，禁止手工改写；仅允许通过受控脚本更新。
-6. 禁止直接操作 VK API；状态变更仅允许经 `scripts/coder4_vk_sync.py` 或等价同步脚本。
-7. 其他卡片的 worktree 一律禁止修改；仅允许在当前 active card 对应 worktree 内执行变更。
-8. 单次执行必须受 `timeoutSeconds` 上限约束；超时后进入阻塞模板并回传证据。
-9. 用户可见输出必须遵循三行格式：`结论`、`当前动作`、`证据`。
-10. heartbeat 过程中的破坏性 git 操作禁止执行（如 `git reset --hard`、`git checkout --`、强推）。
-
 ## 端口
 - 前端：3000
 - 后端：8000

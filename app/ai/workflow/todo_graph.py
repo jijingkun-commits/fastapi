@@ -106,6 +106,48 @@ SUPPLEMENT_ACTION_HINTS = (
     "补充", "添加", "加上", "写入", "写到", "备注", "描述", "追加"
 )
 
+SINGLE_GOAL_SUBORDINATE_HINTS = (
+    "到时候还要",
+    "还要",
+    "还得",
+    "顺便",
+    "记得",
+    "别忘了",
+    "必须",
+)
+
+SINGLE_TODO_PREFERENCE_HINTS = (
+    "一个待办",
+    "就一个待办",
+    "先记一个",
+    "先记录一个",
+    "先就帮我记录",
+    "先帮我记录一下",
+    "先帮我记一下",
+)
+
+EXPLICIT_MULTI_TODO_HINTS = (
+    "两个待办",
+    "两件待办",
+    "分开记",
+    "拆成两个",
+    "分别记",
+    "各记一个",
+    "分别创建",
+)
+
+SINGLE_GOAL_DETAIL_FIELDS = (
+    "description",
+    "progress_notes",
+    "time",
+    "due_date",
+    "start_time",
+    "location",
+    "category",
+    "priority",
+    "tags",
+)
+
 MISSING_SLOT_TODO_TARGET = "todo_target"
 MISSING_SLOT_TIME_RANGE = "time_range"
 MISSING_SLOT_TODO_ACTION = "todo_action"
@@ -313,6 +355,87 @@ def _contains_todo_target_missing(missing_slots: List[str]) -> bool:
         if _canonicalize_missing_slot(item) == MISSING_SLOT_TODO_TARGET:
             return True
     return False
+
+
+def _contains_any_phrase(message: str, phrases: Tuple[str, ...]) -> bool:
+    """判断文本是否包含任一短语。"""
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    return any(str(phrase or "").strip().lower() in normalized for phrase in phrases)
+
+
+def _has_explicit_multi_todo_split_intent(message: str) -> bool:
+    """识别用户是否明确要求拆分为多个待办。"""
+    return _contains_any_phrase(message, EXPLICIT_MULTI_TODO_HINTS)
+
+
+def _is_single_goal_compound_message(
+    message: str,
+    extracted_info: Dict,
+    missing_slots: List[str],
+) -> bool:
+    """判断当前输入是否是“单目标 + 从属子动作”的复合表达。"""
+    if not isinstance(extracted_info, dict):
+        return False
+
+    if _has_explicit_multi_todo_split_intent(message):
+        return False
+
+    title = str(extracted_info.get("title") or extracted_info.get("resolved_title") or "").strip()
+    if not title:
+        return False
+
+    has_detail = any(
+        extracted_info.get(field) not in (None, "", [], {})
+        for field in SINGLE_GOAL_DETAIL_FIELDS
+    )
+    if not has_detail:
+        return False
+
+    slots = set(missing_slots or [])
+    if not slots.intersection({MISSING_SLOT_TODO_TARGET, MISSING_SLOT_TODO_ACTION}):
+        return False
+
+    return _contains_any_phrase(message, SINGLE_GOAL_SUBORDINATE_HINTS)
+
+
+def _is_single_todo_preference(message: str, pending_operation: Optional[Dict]) -> bool:
+    """判断用户是否在澄清轮明确表达“先保留一个待办”。"""
+    if not isinstance(pending_operation, dict):
+        return False
+
+    if str(pending_operation.get("action") or "").strip() != "create":
+        return False
+
+    if _has_explicit_multi_todo_split_intent(message):
+        return False
+
+    return _contains_any_phrase(message, SINGLE_TODO_PREFERENCE_HINTS)
+
+
+def _build_single_goal_confirmation_message(data: Dict[str, Any]) -> str:
+    """构建单目标确认文案。"""
+    canonical_data = canonicalize_extracted_info(data or {})
+    title = str(canonical_data.get("title") or canonical_data.get("resolved_title") or "").strip() or "这个待办"
+
+    details: List[str] = []
+    description = str(canonical_data.get("description") or "").strip()
+    if description:
+        details.append(f"补充说明：{description}")
+
+    due_value = str(canonical_data.get("due_date") or canonical_data.get("time") or "").strip()
+    if due_value:
+        details.append(f"时间：{due_value}")
+
+    location = str(canonical_data.get("location") or "").strip()
+    if location:
+        details.append(f"地点：{location}")
+
+    if details:
+        detail_text = "；".join(details)
+        return f"我理解您想记录一个待办：{title}（{detail_text}）。请确认是否按这个待办创建？"
+    return f"我理解您想记录一个待办：{title}。请确认是否按这个待办创建？"
 
 
 # ==================== 状态定义 ====================
@@ -999,6 +1122,24 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
         missing_info = [_missing_slot_to_display_text(slot) for slot in missing_slots]
         analysis_dict["missing_info"] = missing_info
 
+        if (
+            action_state == "need_clarify"
+            and intent in {"create", "clarify", "chat"}
+            and _is_single_goal_compound_message(
+                message=last_human_msg,
+                extracted_info=extracted_info,
+                missing_slots=missing_slots,
+            )
+        ):
+            intent = "create"
+            analysis_dict["intent"] = "create"
+            action_state = "need_confirm"
+            missing_slots = []
+            missing_info = []
+            analysis_dict["missing_info"] = []
+            response_message = _build_single_goal_confirmation_message(extracted_info)
+            logger.info("单目标复合表达收敛: 自动从 need_clarify 提升为 need_confirm")
+
         # Step 7.1: 会话意图内核（TurnAct + SessionFrame）
         baseline_state_frame = {
             "todo_action": str((pending_op or {}).get("action") or "").strip(),
@@ -1108,6 +1249,26 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
                     response_message = "已根据您的补充更新待办草稿，确认创建吗？"
 
                 logger.info("补充轮恢复: 命中最近取消的创建草稿，自动转为 create/need_confirm")
+
+        if action_state == "need_clarify" and _is_single_todo_preference(last_human_msg, pending_op):
+            pending_data = (pending_op or {}).get("data") if isinstance((pending_op or {}).get("data"), dict) else {}
+            merged_confirm_data = dict(pending_data or {})
+            for key, value in (extracted_info or {}).items():
+                if value in (None, "", [], {}):
+                    continue
+                merged_confirm_data[key] = value
+
+            extracted_info = canonicalize_extracted_info(merged_confirm_data)
+            session_frame["todo_action"] = "create"
+            session_frame["todo_fields"] = extracted_info
+            intent = "create"
+            analysis_dict["intent"] = "create"
+            action_state = "need_confirm"
+            missing_slots = []
+            missing_info = []
+            analysis_dict["missing_info"] = []
+            response_message = _build_single_goal_confirmation_message(extracted_info)
+            logger.info("单待办偏好收敛: 自动从 need_clarify 提升为 need_confirm")
 
         clarify_slots = _map_missing_info_to_slots(missing_slots)
         previous_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
@@ -1274,7 +1435,7 @@ def ask_confirmation(state: TodoAgentState) -> Dict:
 {f'- 📄 待办内容：{description}' if description else ''}
 
 直接说"确认"即可创建。
-如需补充，请直接告诉我要修改的内容（例如：再加上“需要带纸和笔”）；
+如需补充，请直接告诉我要修改的内容；
 如需放弃，请回复"取消"。
 """
     

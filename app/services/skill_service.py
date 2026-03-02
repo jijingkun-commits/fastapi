@@ -17,6 +17,7 @@ from app.ai.utils.embedding_util import get_embedding
 from app.core.config import SKILL_SIMILARITY_THRESHOLD
 from app.db.session import get_db_context
 from app.models.agent_skill import AgentSkill, AgentSkillDefinition, AgentSkillVersion, UserSkillBinding
+from app.repositories import config_repo
 from app.services.config_resolver import ConfigResolver
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,11 @@ class SkillService:
         BINDING_STATUS_ENABLED,
         BINDING_STATUS_DISABLED,
         BINDING_STATUS_ROLLBACKED,
+    }
+    USER_BOOTSTRAP_TEMPLATE_KEY = "skill.user_bootstrap_template"
+    USER_BOOTSTRAP_TEMPLATE_DEFAULT = {
+        "default_version": DEFAULT_VERSION,
+        "skills": [],
     }
 
     @staticmethod
@@ -611,6 +617,95 @@ class SkillService:
             version_record.published_at = datetime.now(timezone.utc)
 
     @classmethod
+    def _build_user_bootstrap_template(cls, db: Session) -> Dict[str, Any]:
+        """按已发布版本构建用户初始化模板。"""
+
+        default_version = cls.DEFAULT_VERSION
+        template_items: List[Dict[str, Any]] = []
+
+        version_records = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.status == cls.VERSION_STATUS_PUBLISHED)
+        ).scalars().all()
+
+        if version_records:
+            picked_versions: Dict[str, AgentSkillVersion] = {}
+            for record in sorted(version_records, key=cls._version_sort_key, reverse=True):
+                if record.skill_id in picked_versions:
+                    continue
+                picked_versions[record.skill_id] = record
+
+            for skill_id in sorted(picked_versions):
+                record = picked_versions[skill_id]
+                item: Dict[str, Any] = {
+                    "skill_id": record.skill_id,
+                    "version": record.version or default_version,
+                    "enabled": bool(record.is_enabled),
+                    "priority_override": int(record.priority or cls.DEFAULT_PRIORITY),
+                }
+                config_override: Dict[str, Any] = {}
+                if record.scope and record.scope != cls.DEFAULT_SCOPE:
+                    config_override["scope"] = record.scope
+                if record.trigger_phrases:
+                    config_override["trigger_phrases"] = list(record.trigger_phrases)
+                if record.conflicts_with:
+                    config_override["conflicts_with"] = list(record.conflicts_with)
+                if config_override:
+                    item["config_override"] = config_override
+                template_items.append(item)
+        else:
+            legacy_records = db.execute(
+                select(AgentSkill).where(AgentSkill.is_enabled.is_(True))
+            ).scalars().all()
+            legacy_records.sort(key=lambda item: (int(item.priority or cls.DEFAULT_PRIORITY), str(item.skill_id)))
+
+            for legacy in legacy_records:
+                item = {
+                    "skill_id": legacy.skill_id,
+                    "version": default_version,
+                    "enabled": bool(legacy.is_enabled),
+                    "priority_override": int(legacy.priority or cls.DEFAULT_PRIORITY),
+                }
+                config_override: Dict[str, Any] = {}
+                if legacy.scope and legacy.scope != cls.DEFAULT_SCOPE:
+                    config_override["scope"] = legacy.scope
+                if legacy.trigger_phrases:
+                    config_override["trigger_phrases"] = list(legacy.trigger_phrases)
+                if legacy.conflicts_with:
+                    config_override["conflicts_with"] = list(legacy.conflicts_with)
+                if config_override:
+                    item["config_override"] = config_override
+                template_items.append(item)
+
+        return {
+            "default_version": default_version,
+            "skills": template_items,
+        }
+
+    @classmethod
+    def _ensure_user_bootstrap_template_config(cls, db: Session, force: bool = False) -> bool:
+        """确保用户 Skill 初始化模板配置存在。"""
+
+        existing = config_repo.get_config_by_key(db, cls.USER_BOOTSTRAP_TEMPLATE_KEY)
+        if existing is not None and not force:
+            return False
+
+        template_payload = cls._build_user_bootstrap_template(db)
+        if not template_payload.get("skills"):
+            logger.warning("技能模板初始化配置未写入：未发现可用技能记录")
+            return False
+
+        config_repo.upsert_config(
+            db=db,
+            key=cls.USER_BOOTSTRAP_TEMPLATE_KEY,
+            value=json.dumps(template_payload, ensure_ascii=False),
+            value_type="json",
+            category="skill",
+            description="用户 Skill 初始化模板（默认版本 + 技能列表）",
+        )
+        db.commit()
+        return True
+
+    @classmethod
     def import_skill(cls, skill_path: Path, db: Session, force: bool = False) -> bool:
         """导入单个技能到数据库。"""
 
@@ -724,6 +819,11 @@ class SkillService:
                         skill_path,
                         exc,
                     )
+
+            if cls._is_skill_versioning_enabled():
+                template_updated = cls._ensure_user_bootstrap_template_config(db, force=force)
+                if template_updated:
+                    logger.info("用户 Skill 初始化模板已同步到系统配置")
 
         logger.info(
             "技能导入完成: 总数=%d, 更新=%d, 跳过=%d, 失败=%d",

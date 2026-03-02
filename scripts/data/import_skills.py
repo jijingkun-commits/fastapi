@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.db.session import get_db_context
+from app.repositories import config_repo
 from app.services.llm_config_service import LLMConfigService
 from app.services.skill_service import SkillService
 
@@ -84,7 +85,15 @@ def main():
     # 导入技能
     logger.info(f"开始导入技能，源目录: {skills_dir}, 强制更新: {args.force}, 过滤: {whitelist}")
     count = SkillService.import_all_skills(skills_dir, force=args.force, whitelist=whitelist)
-    
+
+    with get_db_context() as db:
+        template_config = config_repo.get_config_by_key(db, SkillService.USER_BOOTSTRAP_TEMPLATE_KEY)
+
+    if template_config is not None:
+        logger.info("用户 Skill 初始化模板已就绪: key=%s", SkillService.USER_BOOTSTRAP_TEMPLATE_KEY)
+    else:
+        logger.warning("用户 Skill 初始化模板未写入: key=%s", SkillService.USER_BOOTSTRAP_TEMPLATE_KEY)
+
     logger.info(f"导入完成，共处理 {count} 个技能")
 
 

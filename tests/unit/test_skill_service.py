@@ -1,9 +1,11 @@
 """SkillService 单元测试（中文注释）。"""
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.models.agent_skill import AgentSkillVersion, UserSkillBinding
+from app.repositories import config_repo
 from app.services.skill_service import SkillService
 
 
@@ -670,6 +672,93 @@ def test_skill_version_publish_should_switch_active_version(monkeypatch) -> None
     assert version_v1.status == SkillService.VERSION_STATUS_ROLLBACKED
     assert version_v2.status == SkillService.VERSION_STATUS_PUBLISHED
     assert session.commit_count == 1
+
+
+def test_skill_version_import_all_should_ensure_bootstrap_template(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    """版本治理开启后，批量导入应触发用户模板配置兜底。"""
+
+    _build_skill_file(
+        tmp_path,
+        "sql-expert",
+        """---
+name: SQL Expert
+description: SQL 检索
+---
+
+# SQL Expert
+""",
+    )
+
+    session = _FakeSession(records={})
+    template_calls: List[Any] = []
+
+    class _ContextManager:
+        def __enter__(self):  # noqa: ANN001
+            return session
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: _ContextManager())
+    monkeypatch.setattr(SkillService, "import_skill", classmethod(lambda cls, p, d, f: True))
+    monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        SkillService,
+        "_ensure_user_bootstrap_template_config",
+        classmethod(lambda cls, db, force=False: template_calls.append(db) or False),
+    )
+
+    updated = SkillService.import_all_skills(tmp_path, force=True)
+
+    assert updated == 1
+    assert template_calls == [session]
+
+
+def test_skill_version_template_config_should_upsert_when_missing(monkeypatch) -> None:  # noqa: ANN001
+    """模板配置缺失时应写入默认模板 JSON。"""
+
+    payload = {
+        "default_version": "v1",
+        "skills": [
+            {
+                "skill_id": "sql-expert",
+                "version": "v2",
+                "enabled": True,
+                "priority_override": 100,
+            }
+        ],
+    }
+    upsert_calls: List[Dict[str, Any]] = []
+
+    monkeypatch.setattr(config_repo, "get_config_by_key", lambda db, key: None)
+    monkeypatch.setattr(
+        SkillService,
+        "_build_user_bootstrap_template",
+        classmethod(lambda cls, db: payload),
+    )
+
+    def _fake_upsert(db, key, value, value_type="string", category=None, description=None):  # noqa: ANN001
+        upsert_calls.append(
+            {
+                "key": key,
+                "value": value,
+                "value_type": value_type,
+                "category": category,
+                "description": description,
+            }
+        )
+        return object()
+
+    monkeypatch.setattr(config_repo, "upsert_config", _fake_upsert)
+    db = type("_CommitDB", (), {"commit": lambda self: None})()
+
+    updated = SkillService._ensure_user_bootstrap_template_config(db=db)
+
+    assert updated is True
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["key"] == SkillService.USER_BOOTSTRAP_TEMPLATE_KEY
+    assert upsert_calls[0]["value_type"] == "json"
+    assert json.loads(upsert_calls[0]["value"]) == payload
 
 
 def test_skill_binding_bind_user_skill_should_create_binding(monkeypatch) -> None:  # noqa: ANN001
