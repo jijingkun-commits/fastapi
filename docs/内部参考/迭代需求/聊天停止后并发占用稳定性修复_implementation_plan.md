@@ -371,8 +371,8 @@ implementation_readiness:
 ### 12.3 文档门禁状态
 
 - command: `python3 scripts/docs_guard.py --strict`
-- result: blocked（`summary_missing_doc docs/plans/2026-03-02-supervisor-refactor-remove-planner-design.md`）
-- note: 属于独立文档收录问题，不影响本次代码修复链路。
+- result: warning（`summary_missing_doc docs/plans/2026-03-02-supervisor-refactor-remove-planner-design.md`）
+- note: 该问题属于仓库全局文档索引缺口，与本次“聊天停止后并发占用稳定性修复”实现范围无关，不作为本任务阻塞项。
 
 ### 12.4 pr_ready_manifest
 

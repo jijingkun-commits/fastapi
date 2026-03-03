@@ -255,8 +255,9 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 当 `$jjk-plan` 新增或重命名 `docs/内部参考/迭代需求/*_requirements.md` 或 `*_implementation_plan.md` 时，必须同步更新：
 
 1. `docs/SUMMARY.md` 的“内部参考 -> 迭代需求”条目（新增可点击链接）。
-2. 若已有同名条目，必须校验标题与路径一致，不允许悬挂旧链接。
-3. 在 `$jjk-plan` 结束前执行 `python3 scripts/docs_guard.py --strict`；若命中 `summary_missing_doc`，本轮计划视为未完成。
+2. `docs/内部参考/任务拆解/**` 目录不进入 `docs/SUMMARY.md`；任务态入口以 `_active_task.json` 与任务目录 `README.md` 为准。
+3. 若已有同名条目，必须校验标题与路径一致，不允许悬挂旧链接。
+4. 在 `$jjk-plan` 结束前执行 `python3 scripts/docs_guard.py --strict`；若命中 `summary_missing_doc`（排除 `内部参考/任务拆解/**`），本轮计划视为未完成。
 
 **必须包含**:
 1. **用户故事**: 谁？在什么场景？想要做什么？为什么？

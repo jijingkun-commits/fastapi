@@ -7,22 +7,6 @@
 
 ---
 
-## 方案草案
-
-* [站内通知中心设计（2026-03-01）](plans/2026-03-01-in-app-notification-center-design.md)
-* [用户个性化永久记忆与管理能力需求方案（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-design.md)
-* [会话续聊能力设计（2026-03-01）](plans/2026-03-01-chat-session-continuation-design.md)
-* [知识库检索 P2 分阶段治理方案（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-phased-design.md)
-* [知识库检索 P2 详细报告检查清单（2026-03-01）](plans/2026-03-01-kb-retrieval-p2-detailed-report-checklist.md)
-* [用户个性化永久记忆实施检查清单（2026-03-01）](plans/2026-03-01-user-personalized-memory-management-implementation-checklist.md)
-* [用户 Skill 严格用户源治理设计（2026-03-01）](plans/2026-03-01-user-skill-strict-runtime-design.md)
-* [聊天多会话并发（方案 B）设计说明（2026-03-01）](plans/2026-03-01-chat-multi-session-concurrency-design.md)
-* [全量代码检查与精简治理（方案 C）设计说明（2026-03-02）](plans/2026-03-02-full-code-audit-slimming-design.md)
-* [聊天停止后并发占用稳定性修复设计（2026-03-02）](plans/2026-03-02-chat-stop-checkpointer-stability-design.md)
-* [Supervisor 移除 Planner 重构设计（2026-03-02）](plans/2026-03-02-supervisor-refactor-remove-planner.md)
-
----
-
 ## 工程规范
 
 * [Bugfix 最小变更规范](工程规范/bugfix-minimal-change.md)
@@ -118,23 +102,12 @@
 
 #### 主报告（长期入口）
 
+* [测试报告目录说明](开发文档/测试管理/测试报告/README.md)
 * [待办助手测试报告](开发文档/测试管理/测试报告/待办助手测试报告.md)
 * [对话同步测试报告](开发文档/测试管理/测试报告/对话同步测试报告_20260130_功能验证.md)
 * [用户管理测试报告](开发文档/测试管理/测试报告/用户管理测试报告_20260203_自动化回归.md)
 * [统一管理后台测试报告](开发文档/测试管理/测试报告/统一管理后台测试报告.md)
 * [问数引擎测试报告](开发文档/测试管理/测试报告/问数引擎测试报告_2026-02-05_全量验证.md)
-
-#### 历史归档（按时间/场景）
-
-* [测试报告目录说明](开发文档/测试管理/测试报告/README.md)
-* [待办助手测试报告（2026-01-29 归档）](开发文档/测试管理/测试报告/待办助手测试报告_20260129_archive.md)
-* [待办助手测试报告（2026-02-07 一致性修复）](开发文档/测试管理/测试报告/待办助手测试报告_20260207_一致性修复.md)
-* [用户管理测试报告（2026-02-03 归档）](开发文档/测试管理/测试报告/用户管理测试报告_2026-02-03_全量执行.md)
-* [问数引擎测试报告（2026-02-05 回归）](开发文档/测试管理/测试报告/问数引擎测试报告_2026-02-05_回归.md)
-* [统一管理后台测试报告（2026-02-11 前端重构回归）](开发文档/测试管理/测试报告/统一管理后台测试报告_2026-02-11_前端重构回归.md)
-* [对话同步测试报告（2026-02-13 历史回复格式一致性）](开发文档/测试管理/测试报告/对话同步测试报告_2026-02-13_历史回复格式一致性.md)
-* [服务项测试报告（2026-02-15 worktree服务项回归）](开发文档/测试管理/测试报告/服务项测试报告_2026-02-15_worktree服务项回归.md)
-* [代码可维护性测试报告（2026-02-10 全量执行）](开发文档/测试管理/测试报告/代码可维护性测试报告_20260210_全量执行.md)
 
 ### 技巧与速查
 
@@ -172,85 +145,8 @@
 ### 迭代需求
 
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
-* [模板索引（迭代需求）](内部参考/迭代需求/_templates/README.md)
-* [模板集（jjk-api-docs）](内部参考/迭代需求/_templates/jjk_api_docs_templates.md)
-* [模板集（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.md)
-* [模板集覆盖（jjk-clarify）](内部参考/迭代需求/_templates/jjk_clarify_templates.override.md)
-* [模板集（jjk-create-pr）](内部参考/迭代需求/_templates/jjk_create_pr_templates.md)
-* [模板集（jjk-debug）](内部参考/迭代需求/_templates/jjk_debug_templates.md)
-* [模板集（jjk-deslop）](内部参考/迭代需求/_templates/jjk_deslop_templates.md)
-* [模板集（jjk-doc-check）](内部参考/迭代需求/_templates/jjk_doc_check_templates.md)
-* [模板集（jjk-feature）](内部参考/迭代需求/_templates/jjk_feature_templates.md)
-* [模板集（jjk-git-commit）](内部参考/迭代需求/_templates/jjk_git_commit_templates.md)
-* [模板集（jjk-imp）](内部参考/迭代需求/_templates/jjk_imp_templates.md)
-* [模板集（jjk-imp-ws）](内部参考/迭代需求/_templates/jjk_imp_ws_templates.md)
-* [模板集（jjk-lint）](内部参考/迭代需求/_templates/jjk_lint_templates.md)
-* [模板集（jjk-pc）](内部参考/迭代需求/_templates/jjk_pc_templates.md)
-* [模板集（jjk-plan）](内部参考/迭代需求/_templates/jjk_plan_templates.md)
-* [模板集（jjk-quick）](内部参考/迭代需求/_templates/jjk_quick_templates.md)
-* [模板集（jjk-refactor）](内部参考/迭代需求/_templates/jjk_refactor_templates.md)
-* [模板集（jjk-review）](内部参考/迭代需求/_templates/jjk_review_templates.md)
-* [模板集（jjk-security-audit）](内部参考/迭代需求/_templates/jjk_security_audit_templates.md)
-* [模板集（jjk-test）](内部参考/迭代需求/_templates/jjk_test_templates.md)
-* [模板集（jjk-verify）](内部参考/迭代需求/_templates/jjk_verify_templates.md)
-* [模板集（jjk-vkplan）](内部参考/迭代需求/_templates/jjk_vkplan_templates.md)
-* [模板集（jjk-vktodo）](内部参考/迭代需求/_templates/jjk_vktodo_templates.md)
-* [模板集（jjk-vksync）](内部参考/迭代需求/_templates/jjk_vksync_templates.md)
-* [模板集（jjk-wtimp）](内部参考/迭代需求/_templates/jjk_wtimp_templates.md)
-* [问题修复计划（通用入口）](内部参考/迭代需求/fix_plan.md)
-* [需求基线（文档化永久记忆）](内部参考/迭代需求/文档化永久记忆_requirements.md)
-* [实施方案（文档化永久记忆，两表）](内部参考/迭代需求/文档化永久记忆_implementation_plan.md)
-* [需求基线（文档记忆混合检索）](内部参考/迭代需求/文档记忆混合检索_requirements.md)
-* [实施方案（文档记忆混合检索，FTS+向量）](内部参考/迭代需求/文档记忆混合检索_implementation_plan.md)
-* [需求基线（知识库检索P2分阶段治理）](内部参考/迭代需求/知识库检索P2分阶段治理_requirements.md)
-* [实施方案（知识库检索P2分阶段治理）](内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md)
-* [需求基线（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md)
-* [实施方案（用户个性化永久记忆与管理能力）](内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md)
-* [需求基线（全面代码审查整改，非安全范围40项）](内部参考/迭代需求/全面代码审查整改_requirements.md)
-* [实施方案（全面代码审查整改，非安全范围路线）](内部参考/迭代需求/全面代码审查整改_implementation_plan.md)
-* [需求基线（全量代码检查与精简治理）](内部参考/迭代需求/全量代码检查与精简治理_requirements.md)
-* [实施方案（全量代码检查与精简治理）](内部参考/迭代需求/全量代码检查与精简治理_implementation_plan.md)
-* [实施总控（OpenClaw 全量迁移）](内部参考/迭代需求/openclaw全量迁移_implementation_plan.md)
-* [需求基线（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_requirements.md)
-* [实施方案（OpenClaw迁移重建基线）](内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md)
-* [需求基线（OpenClaw特性迁移完善）](内部参考/迭代需求/openclaw特性迁移完善_requirements.md)
-* [实施方案（OpenClaw特性迁移完善）](内部参考/迭代需求/openclaw特性迁移完善_implementation_plan.md)
-* [验证报告（OpenClaw特性迁移完善，2026-02-27）](内部参考/迭代需求/openclaw特性迁移完善_verification_report_20260227_worker3.md)
-* [需求基线（意图目标分解治理）](内部参考/迭代需求/意图目标分解治理_requirements.md)
-* [实施方案（意图目标分解治理）](内部参考/迭代需求/意图目标分解治理_implementation_plan.md)
-* [实施方案（迁移执行波次 P1~P6）](内部参考/迭代需求/迁移执行波次_implementation_plan.md)
-* [需求基线（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_requirements.md)
-* [需求基线（多智能体合同驱动分层）](内部参考/迭代需求/多智能体合同驱动分层_requirements.md)
-* [实施方案（多智能体合同驱动分层）](内部参考/迭代需求/多智能体合同驱动分层_implementation_plan.md)
-* [实施方案（多智能体完整交付架构重构）](内部参考/迭代需求/多智能体完整交付架构重构_implementation_plan.md)
-* [研究报告（heartbeat替代cron交叉验证）](内部参考/迭代需求/heartbeat替代cron_交叉验证研究报告.md)
-* [依赖分析报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban依赖分析报告.md)
-* [方案评审报告（vibe_kanban）](内部参考/迭代需求/vibe_kanban方案评审报告.md)
-* [融合参考报告（用户资产 + Superpowers + OMX，2026-02-28）](内部参考/迭代需求/用户资产_superpowers_omx融合参考报告_20260228.md)
-* [PR拆单执行稿（P0屎山治理：SSE分发/recovery_policy/SkillService一期，2026-02-28）](内部参考/迭代需求/P0屎山治理_SSE分发_recovery_policy_SkillService一期_PR拆单_20260228.md)
-* [需求基线（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_requirements.md)
-* [实施方案（自动化大型任务开发，主机方案）](内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md)
-* [完成报告（自动化大型任务开发，主机方案，2026-03-01）](内部参考/迭代需求/自动化大型任务开发_主机方案_completion_report_20260301.md)
-* [设计方案（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发设计方案.md)
-* [全量打钩板清单（自动化大型任务开发）](内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md)
-* [问题修复卡（待办补充答非所问，2026-02-18）](内部参考/迭代需求/fix_plan_todo_reject_clarify_20260218.md)
-* [问题修复卡（待办单目标复合描述识别，2026-03-01）](内部参考/迭代需求/fix_plan_todo_compound_clarify_loop_20260301.md)
-* [问题修复卡（管理员 dept_code 拒绝，2026-02-24）](内部参考/迭代需求/fix_plan_dept_code_reject_20260224.md)
-* [问题修复卡（问数查询结果展示，2026-02-25）](内部参考/迭代需求/fix_plan_data_query_display_20260225.md)
-* [问题修复卡（问数权限/CTE/占位符/SSE字段，2026-02-26）](内部参考/迭代需求/fix_plan_cte_permission_reject_20260226.md)
-* [需求基线（待办单目标复合描述识别）](内部参考/迭代需求/待办单目标复合描述识别_requirements.md)
-* [实施方案（待办单目标复合描述识别）](内部参考/迭代需求/待办单目标复合描述识别_implementation_plan.md)
-* [需求基线（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_requirements.md)
-* [实施方案（streaming_wrapper 简化）](内部参考/迭代需求/streaming_wrapper简化_implementation_plan.md)
-* [需求基线（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_requirements.md)
-* [实施方案（聊天断页续跑与强停止）](内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md)
-* [需求基线（聊天停止后并发占用稳定性修复）](内部参考/迭代需求/聊天停止后并发占用稳定性修复_requirements.md)
-* [实施方案（聊天停止后并发占用稳定性修复）](内部参考/迭代需求/聊天停止后并发占用稳定性修复_implementation_plan.md)
-* [需求基线（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_requirements.md)
-* [实施方案（监督者子代理双轨收敛）](内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md)
-* [调试报告（stopped_event 导入契约，2026-03-01）](内部参考/迭代需求/debug_report_stopped_event_import_contract_20260301.md)
-* [需求基线（用户 Skill 严格用户源治理）](内部参考/迭代需求/用户Skill严格用户源治理_requirements.md)
-* [实施方案（用户 Skill 严格用户源治理）](内部参考/迭代需求/用户Skill严格用户源治理_implementation_plan.md)
+
+> 说明：该目录以过程文档为主，详细条目按主题目录内索引查看。
 
 ### 任务拆解
 
@@ -261,41 +157,6 @@
 * [并行计划模板](内部参考/任务拆解/_templates/parallel_plan_template.md)
 * [工作包模板](内部参考/任务拆解/_templates/workstream_template.md)
 * [合并检查模板](内部参考/任务拆解/_templates/merge_checklist_template.md)
-
-#### 当前并行拆解（2026-02-21 OpenClaw迁移重建基线）
-
-* [并行总计划](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md)
-* [WS-00 C00 预检门禁冻结](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md)
-* [WS-C01 P1 运行时可取消控制](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C01_P1_运行时可取消控制.md)
-* [WS-C02 P2 工具治理一期](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C02_P2_工具治理一期.md)
-* [WS-C03 P3 Skill 多用户版本治理](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md)
-* [WS-C04 P4 记忆检索增强](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md)
-* [WS-C05 P5 稳态增强与插件后置](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md)
-* [WS-C06 P6 收口与回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md)
-* [WS-G01 G-1 实测证据闭环](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md)
-* [WS-G02 G-2 复合任务编排](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md)
-* [WS-G03 G-3 契约一致性](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md)
-* [WS-G04 G-4 回滚演练](内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md)
-
-#### 当前并行拆解（2026-02-28 自动化大型任务开发_主机方案）
-
-* [并行总计划](内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md)
-
-#### 当前并行拆解（2026-02-28 意图目标分解治理）
-
-* [并行总计划](内部参考/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md)
-
-#### 当前并行拆解（2026-03-01 用户个性化永久记忆与管理能力）
-
-* [并行总计划](内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md)
-
-#### 当前并行拆解（2026-03-01 聊天断页续跑与强停止）
-
-* [并行总计划](内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md)
-
-#### 当前并行拆解（2026-03-01 知识库检索P2分阶段治理）
-
-* [并行总计划](内部参考/任务拆解/2026-03-01_知识库检索P2分阶段治理/parallel_plan.md)
 
 ---
 

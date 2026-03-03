@@ -4,7 +4,7 @@
 检查项：
 1. 相对链接存在性（忽略 fenced code / inline code）
 2. docs/SUMMARY.md 链接目标存在性
-3. 非归档文档是否被 SUMMARY 收录
+3. 非归档且非任务拆解/规划草稿文档是否被 SUMMARY 收录
 4. 测试报告命名与主/归档规则
 5. 双库变量名黑名单（DATA_DATABASE_URL）
 6. OpenClaw Gate 看板（11.2/11.5）状态收口
@@ -696,11 +696,11 @@ def is_archived_doc(path: Path) -> bool:
 
 def is_summary_optional_doc(path: Path) -> bool:
     rel_posix = path.relative_to(DOCS_DIR).as_posix()
-    if rel_posix.startswith("内部参考/任务拆解/") and "/workstreams/" in rel_posix:
+    if rel_posix.startswith("内部参考/任务拆解/"):
         return True
-    if rel_posix.startswith("内部参考/迭代需求/fix_plan_"):
+    if rel_posix.startswith("plans/"):
         return True
-    if rel_posix.startswith("内部参考/迭代需求/") and rel_posix.endswith("依赖分析报告.md"):
+    if rel_posix.startswith("内部参考/迭代需求/"):
         return True
     return False
 

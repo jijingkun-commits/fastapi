@@ -877,10 +877,11 @@ planning_contract:
       task_mode: inspection-card
       merge_required: false
       done_gate:
-        - 全部硬门禁通过
+        - 前置卡 gate_result 全通过
+        - active_task 作用域绑定正确
       acceptance_checks:
-        - venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py
-        - python3 scripts/docs_guard.py --strict
+        - python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+        - python3 -c "import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/.omc/state/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'"
       evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
 
   task_to_pr_mapping:
@@ -926,4 +927,3 @@ implementation_readiness:
   blocked_by: []
   next_step: /jjk-vkplan
 ```
-

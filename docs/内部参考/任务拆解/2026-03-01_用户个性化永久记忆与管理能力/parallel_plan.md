@@ -64,7 +64,7 @@ automation_contract:
 | C04 | P4 | P4-01 | 向量状态看板增强 | embedding status repo/api | pytest embedding_status | 回退旧统计结构 |
 | C05 | P5 | P5-01,P5-02 | 后台页面与交互 | web admin memory panel | npm lint | 隐藏 admin 菜单 |
 | C06 | P6 | P6-01 | 配置+文档+测试收口 | config_contract/init sql/docs | pytest + docs_guard | 全量开关关闭 |
-| G01 | Gate | G-1 | 全链路硬门禁 | docs_guard + tests + active_task | pytest + docs_guard | 停止落卡执行 |
+| G01 | Gate | G-1 | 全链路硬门禁 | scope_guard + gate_result 聚合 | scope_guard + gate_result 校验 | 停止落卡执行 |
 
 ## 2. 目标与边界
 
@@ -138,15 +138,14 @@ automation_contract:
 
 ### 9.1 WS-G01 结果
 
-- `pytest`: 待执行
-- `lint`: 待执行
-- `docs_guard`: 待执行
+- `scope_guard`: 待执行
+- `gate_result 聚合校验`: 待执行
 
 ### 9.2 WS-G01 预期动作
 
-1. 执行 memory admin API + audit 关键回归。
-2. 执行 `docs_guard --strict`。
-3. 校验 `_active_task.json` 与 `task_key`/`task_split_dir` 一致。
+1. 执行 `python3 scripts/coder4_scope_guard.py ...` 校验作用域绑定与 active_task 一致。
+2. 聚合检查 `.omc/state/attempts/C01~C06/gate_result.json` 均为 `passed=true`。
+3. 若任一前置卡缺失 gate_result 或失败，立即阻断并暂停后续落卡执行。
 
 ## 10. 信息防丢失检查
 

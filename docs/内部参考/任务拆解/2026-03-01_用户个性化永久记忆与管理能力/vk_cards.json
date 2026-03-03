@@ -535,8 +535,8 @@
         "G-1"
       ],
       "mechanism_summary": [
-        "聚合执行卡验收结果，确认 implementation hard gate 全绿",
-        "校验 docs_guard、关键测试、active_task 作用域一致性",
+        "聚合执行卡 gate_result，确认 implementation hard gate 全绿",
+        "校验 active_task 作用域与 scope_guard 一致性",
         "门禁失败时禁止进入 /jjk-vktodo 自动落卡执行"
       ],
       "code_anchor_refs": [
@@ -548,8 +548,8 @@
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
-        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+        "python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json",
+        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/.omc/state/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
       ],
       "rollback_anchors": [
         "暂停 /jjk-vktodo",
@@ -564,12 +564,12 @@
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "done_gate": [
-        "所有 acceptance_checks 通过",
+        "前置卡 gate_result 全通过",
         "active_task 作用域绑定正确"
       ],
       "check_cmd": [
-        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+        "python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json",
+        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/.omc/state/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
     }
