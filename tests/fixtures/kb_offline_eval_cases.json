@@ -1,0 +1,127 @@
+{
+  "name": "kb_offline_eval",
+  "version": "v1",
+  "source": "S0_baseline",
+  "cases": [
+    {
+      "case_id": "KB-S0-001",
+      "scenario": "产品功能类",
+      "query": "新渠道批量导入支持什么能力",
+      "expected_docs": [
+        "DOC-PROD-001"
+      ],
+      "must_have_evidence": [
+        "批量导入",
+        "字段映射"
+      ],
+      "forbidden_evidence": [
+        "免审核直通"
+      ],
+      "grade_rule": {
+        "min_relevance": 0.8
+      },
+      "mock_debug": {
+        "answer": "新渠道支持批量导入模板，并提供字段映射与失败重试。",
+        "retrieved_docs": [
+          {
+            "doc_id": "DOC-PROD-001",
+            "title": "新渠道产品能力白皮书",
+            "snippet": "支持批量导入、字段映射、失败记录导出和校验提示。"
+          }
+        ],
+        "citations": [
+          {
+            "doc_id": "DOC-PROD-001",
+            "quote": "支持批量导入、字段映射、失败记录导出。"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "KB-S0-002",
+      "scenario": "流程制度类",
+      "query": "变更审批流程需要哪些步骤",
+      "expected_docs": [
+        "DOC-PROC-007"
+      ],
+      "must_have_evidence": [
+        "发起审批",
+        "主管复核"
+      ],
+      "forbidden_evidence": [
+        "审批可跳过"
+      ],
+      "grade_rule": {
+        "min_relevance": 0.8
+      },
+      "mock_debug": {
+        "answer": "流程要求先发起审批，再由主管复核后才能发布。",
+        "retrieved_docs": [
+          {
+            "doc_id": "DOC-PROC-007",
+            "title": "发布变更审批制度",
+            "snippet": "发起审批 -> 主管复核 -> 安全签署 -> 发布。"
+          }
+        ],
+        "citations": [
+          {
+            "doc_id": "DOC-PROC-007",
+            "quote": "发起审批 -> 主管复核 -> 安全签署 -> 发布。"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "KB-S0-003",
+      "scenario": "操作手册类",
+      "query": "怎么在控制台查看同步日志",
+      "expected_docs": [
+        "DOC-OPS-015"
+      ],
+      "must_have_evidence": [
+        "系统设置",
+        "同步日志"
+      ],
+      "forbidden_evidence": [
+        "无需登录"
+      ],
+      "grade_rule": {
+        "min_relevance": 0.8
+      },
+      "mock_debug": {
+        "answer": "进入系统设置后打开同步日志页签即可按日期筛选日志。",
+        "retrieved_docs": [
+          {
+            "doc_id": "DOC-OPS-015",
+            "title": "控制台操作手册",
+            "snippet": "路径：系统设置 -> 运维中心 -> 同步日志，可按日期筛选。"
+          }
+        ],
+        "citations": [
+          {
+            "doc_id": "DOC-OPS-015",
+            "quote": "系统设置 -> 运维中心 -> 同步日志。"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "KB-S0-004",
+      "scenario": "负样本类",
+      "query": "明年股市会涨到多少点",
+      "expected_docs": [],
+      "must_have_evidence": [],
+      "forbidden_evidence": [
+        "确定上涨"
+      ],
+      "grade_rule": {
+        "min_relevance": 0.8
+      },
+      "mock_debug": {
+        "answer": "当前知识库没有可支撑该预测的问题证据，建议使用财经分析工具。",
+        "retrieved_docs": [],
+        "citations": []
+      }
+    }
+  ]
+}
