@@ -4,7 +4,7 @@
 """
 import requests
 import logging
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import tool
 
@@ -85,7 +85,121 @@ def _convert_ragflow_image_url(url: str) -> str:
     return url
 
 
-def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
+def _to_bool_flag(value: Any, default: bool) -> bool:
+    """将配置值转换为布尔开关。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _to_positive_int(value: Any, default: int) -> int:
+    """将配置值转换为正整数，非法值回退默认值。"""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _chunk_similarity(chunk: dict) -> float:
+    """读取 chunk 相似度。"""
+    try:
+        return float(chunk.get("similarity", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_chunk_content(content: Any) -> str:
+    """将 chunk 文本归一化用于去重和卡片摘要。"""
+    return " ".join(str(content or "").split())
+
+
+def _resolve_chunk_document_key(chunk: dict) -> str:
+    """提取文档维度主键，用于同文档限额。"""
+    for key in ("document_id", "doc_id", "document_keyword", "document_name"):
+        value = chunk.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+
+    fallback_chunk_id = chunk.get("chunk_id") or chunk.get("id")
+    if fallback_chunk_id is not None:
+        return f"chunk:{fallback_chunk_id}"
+
+    return f"unknown:{id(chunk)}"
+
+
+def _dedup_and_cap_candidates(
+    chunks: list[dict],
+    *,
+    max_chunks_per_doc: int,
+    max_total_chunks: int,
+    enable_dedup: bool,
+    enable_doc_cap: bool,
+) -> list[dict]:
+    """执行候选去重与同文档限额。"""
+    if not chunks:
+        return []
+
+    safe_doc_cap = _to_positive_int(max_chunks_per_doc, 2)
+    safe_total_cap = _to_positive_int(max_total_chunks, 30)
+
+    sorted_chunks = sorted(chunks, key=_chunk_similarity, reverse=True)
+    selected: list[dict] = []
+    seen_keys: set[tuple[str, str]] = set()
+    doc_counts: dict[str, int] = {}
+
+    for chunk in sorted_chunks:
+        if len(selected) >= safe_total_cap:
+            break
+
+        doc_key = _resolve_chunk_document_key(chunk)
+        content_key = _normalize_chunk_content(chunk.get("content", ""))
+        if not content_key:
+            fallback_chunk_id = chunk.get("chunk_id") or chunk.get("id")
+            content_key = str(fallback_chunk_id or "")
+
+        dedup_key = (doc_key, content_key)
+        if enable_dedup and content_key and dedup_key in seen_keys:
+            continue
+
+        if enable_doc_cap and doc_counts.get(doc_key, 0) >= safe_doc_cap:
+            continue
+
+        selected.append(chunk)
+        doc_counts[doc_key] = doc_counts.get(doc_key, 0) + 1
+        if enable_dedup and content_key:
+            seen_keys.add(dedup_key)
+
+    return selected
+
+
+def _build_evidence_snippet(content: Any, max_chars: int) -> str:
+    """生成证据卡片摘要文本。"""
+    snippet = _normalize_chunk_content(content)
+    if not snippet:
+        return "（空片段）"
+
+    safe_max_chars = _to_positive_int(max_chars, 320)
+    if len(snippet) <= safe_max_chars:
+        return snippet
+
+    return f"{snippet[:safe_max_chars].rstrip()}..."
+
+
+def _format_retrieval_results(chunks: list, max_evidence_chars: int = 320) -> tuple[str, dict]:
     """格式化检索结果。
     
     Args:
@@ -102,17 +216,15 @@ def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
     results = []
     kb_images = {}  # 图片映射 {占位符索引: URL}
     image_url_to_idx: dict[str, int] = {}
-    # 仅处理前 30 个片段
-    chunks = chunks[:30]
     logger.debug("JJK-ragchunks tool返回的前10条: %s", chunks)
     
     for i, chunk in enumerate(chunks, 0):
         content = chunk.get("content", "")
+        snippet = _build_evidence_snippet(content, max_evidence_chars)
         
         # RAGFlow 使用 document_keyword 而非 document_name
-        source = chunk.get("document_keyword") or chunk.get("document_name", "未知来源")
-        # similarity 已经是 0-1 范围的浮点数
-        score = chunk.get("similarity", 0)
+        source = str(chunk.get("document_keyword") or chunk.get("document_name") or "未知来源")
+        score = _chunk_similarity(chunk)
         
         # 尝试获取文档下载链接
         document_id = chunk.get("document_id")
@@ -122,7 +234,10 @@ def _format_retrieval_results(chunks: list) -> tuple[str, dict]:
             encoded_name = quote(source)
             source_link = f" ([⬇️ 下载](/api/v1/assets/proxy/ragflow/doc/{document_id}?name={encoded_name}))"
 
-        result_text = f"【{i}】{content}\n   📄 来源: {source}{source_link} | 相关度: {score:.2%}"
+        result_text = (
+            f"【证据卡片{i}】 摘要: {snippet}\n"
+            f"   来源: {source}{source_link} | 相关度: {score:.2%}"
+        )
         
         # 如果有图片，使用占位符 [IMG-N]
         # 约束：同一图片 URL 在一次检索结果中只分配一个占位符，避免回答重复渲染相同图片
@@ -180,6 +295,12 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         return "⚠️ 知识库 ID 未配置：请设置 RAGFLOW_DATASET_IDS 或 RAGFLOW_DATASET_ID 环境变量"
     
     try:
+        enable_candidate_dedup = _to_bool_flag(getattr(config, "RAGFLOW_ENABLE_CANDIDATE_DEDUP", True), True)
+        enable_doc_cap = _to_bool_flag(getattr(config, "RAGFLOW_ENABLE_DOC_CAP", True), True)
+        max_chunks_per_doc = _to_positive_int(getattr(config, "RAGFLOW_MAX_CHUNKS_PER_DOC", 2), 2)
+        max_total_chunks = _to_positive_int(config.RAGFLOW_PAGE_SIZE, 8)
+        max_evidence_chars = _to_positive_int(getattr(config, "RAGFLOW_EVIDENCE_MAX_CHARS", 320), 320)
+
         logger.info("RAGFlow 检索: query=%s, datasets=%s", query[:50], target_datasets)
         
         # 调用 RAGFlow API（支持多知识库）
@@ -220,12 +341,24 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                         logger.warning(f"知识库 {single_id} 检索失败: {e}")
                 
                 # 按照相似度排序
-                all_chunks.sort(key=lambda x: x.get("similarity", 0), reverse=True)
-                # 取总的 page_size
-                final_chunks = all_chunks[:config.RAGFLOW_PAGE_SIZE]
+                final_chunks = _dedup_and_cap_candidates(
+                    all_chunks,
+                    max_chunks_per_doc=max_chunks_per_doc,
+                    max_total_chunks=max_total_chunks,
+                    enable_dedup=enable_candidate_dedup,
+                    enable_doc_cap=enable_doc_cap,
+                )
                 
-                result_text, kb_images = _format_retrieval_results(final_chunks)
-                logger.info("混合检索完成: 合并后找到 %d 条结果, 图片=%d", len(final_chunks), len(kb_images))
+                result_text, kb_images = _format_retrieval_results(final_chunks, max_evidence_chars)
+                logger.info(
+                    "混合检索完成: raw=%d, selected=%d, doc_cap=%s, dedup=%s, per_doc_limit=%d, 图片=%d",
+                    len(all_chunks),
+                    len(final_chunks),
+                    enable_doc_cap,
+                    enable_candidate_dedup,
+                    max_chunks_per_doc,
+                    len(kb_images),
+                )
                 
                 # 将图片映射附加到返回值（使用特殊分隔符）
                 if kb_images:
@@ -238,12 +371,25 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         
         # 格式化结果
         chunks = data.get("data", {}).get("chunks", [])
-        result_text, kb_images = _format_retrieval_results(chunks)
+        selected_chunks = _dedup_and_cap_candidates(
+            chunks,
+            max_chunks_per_doc=max_chunks_per_doc,
+            max_total_chunks=max_total_chunks,
+            enable_dedup=enable_candidate_dedup,
+            enable_doc_cap=enable_doc_cap,
+        )
+        result_text, kb_images = _format_retrieval_results(selected_chunks, max_evidence_chars)
         
         # 统计图片数量
         logger.info(
-            "RAGFlow 检索完成: chunks=%d, 结果长度=%d, 图片映射=%d",
-            len(chunks), len(result_text), len(kb_images)
+            "RAGFlow 检索完成: raw=%d, selected=%d, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
+            len(chunks),
+            len(selected_chunks),
+            max_chunks_per_doc,
+            enable_doc_cap,
+            enable_candidate_dedup,
+            len(result_text),
+            len(kb_images),
         )
         
         # 调试日志

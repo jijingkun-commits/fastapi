@@ -1,12 +1,16 @@
 """RAGFlow 工具测试（中文注释）。
 
-验证知识库图片占位符分配与去重行为。
+验证检索参数、候选去重、证据卡片与图片占位符契约。
 """
 
 import requests
 
 from app.ai.tools import ragflow_tool
-from app.ai.tools.ragflow_tool import _call_ragflow_retrieval, _format_retrieval_results
+from app.ai.tools.ragflow_tool import (
+    _call_ragflow_retrieval,
+    _dedup_and_cap_candidates,
+    _format_retrieval_results,
+)
 
 
 def test_call_ragflow_retrieval_payload_should_split_page_size_and_top_k(monkeypatch) -> None:
@@ -108,8 +112,84 @@ def test_knowledge_search_timeout_should_return_degraded_message(monkeypatch) ->
     assert "知识库检索超时" in result
 
 
-def test_format_retrieval_results_should_deduplicate_same_image_url() -> None:
-    """同一图片在多个片段出现时，只分配一次占位符。"""
+def test_dedup_candidates_should_remove_repeated_content_within_same_document() -> None:
+    """dedup 开启时，同文档重复内容只保留最高分。"""
+
+    chunks = [
+        {
+            "document_id": "doc-a",
+            "content": "报销需先走 OA 审批",
+            "similarity": 0.96,
+        },
+        {
+            "document_id": "doc-a",
+            "content": "报销需先走 OA 审批\n",
+            "similarity": 0.80,
+        },
+        {
+            "document_id": "doc-b",
+            "content": "交通费需上传发票",
+            "similarity": 0.75,
+        },
+    ]
+
+    selected = _dedup_and_cap_candidates(
+        chunks,
+        max_chunks_per_doc=3,
+        max_total_chunks=10,
+        enable_dedup=True,
+        enable_doc_cap=True,
+    )
+
+    assert len(selected) == 2
+    assert selected[0]["document_id"] == "doc-a"
+    assert selected[0]["similarity"] == 0.96
+    assert selected[1]["document_id"] == "doc-b"
+
+
+def test_dedup_candidates_should_limit_chunks_per_document() -> None:
+    """doc cap 开启时，每个文档返回条数受控。"""
+
+    chunks = [
+        {
+            "document_id": "doc-a",
+            "content": "A1",
+            "similarity": 0.95,
+        },
+        {
+            "document_id": "doc-a",
+            "content": "A2",
+            "similarity": 0.90,
+        },
+        {
+            "document_id": "doc-a",
+            "content": "A3",
+            "similarity": 0.85,
+        },
+        {
+            "document_id": "doc-b",
+            "content": "B1",
+            "similarity": 0.80,
+        },
+    ]
+
+    selected = _dedup_and_cap_candidates(
+        chunks,
+        max_chunks_per_doc=2,
+        max_total_chunks=10,
+        enable_dedup=True,
+        enable_doc_cap=True,
+    )
+
+    doc_a_chunks = [chunk for chunk in selected if chunk["document_id"] == "doc-a"]
+    assert len(doc_a_chunks) == 2
+    assert [chunk["content"] for chunk in doc_a_chunks] == ["A1", "A2"]
+    assert any(chunk["document_id"] == "doc-b" for chunk in selected)
+
+
+def test_evidence_cards_should_keep_kb_image_placeholder_dedup() -> None:
+    """证据卡片化后依然维持 KB 图片占位符兼容。"""
+
     chunks = [
         {
             "content": "第一段内容",
@@ -129,12 +209,13 @@ def test_format_retrieval_results_should_deduplicate_same_image_url() -> None:
 
     assert kb_images == {0: "/api/v1/assets/proxy/ragflow/img-dup"}
     assert formatted_text.count("[IMG-0]") == 1
-    assert "【1】第二段内容" in formatted_text
-    assert "【1】第二段内容\n   相关图片:" not in formatted_text
+    assert "【证据卡片1】 摘要: 第二段内容" in formatted_text
+    assert "【证据卡片1】 摘要: 第二段内容\n   相关图片:" not in formatted_text
 
 
-def test_format_retrieval_results_should_keep_stable_placeholder_indices() -> None:
+def test_evidence_cards_should_keep_stable_placeholder_indices() -> None:
     """多个图片时，占位符按首次出现顺序稳定递增。"""
+
     chunks = [
         {
             "content": "内容1",
@@ -167,8 +248,25 @@ def test_format_retrieval_results_should_keep_stable_placeholder_indices() -> No
     assert formatted_text.count("相关图片:") == 2
 
 
-def test_format_retrieval_results_should_ignore_blank_image_id() -> None:
+def test_evidence_cards_should_truncate_long_content_with_configured_limit() -> None:
+    """证据卡片摘要应按字符预算截断，降低上下文噪声。"""
+
+    chunks = [
+        {
+            "content": "A" * 80,
+            "document_keyword": "文档",
+            "similarity": 0.88,
+        }
+    ]
+
+    formatted_text, _ = _format_retrieval_results(chunks, max_evidence_chars=20)
+
+    assert "摘要: AAAAAAAAAAAAAAAAAAAA..." in formatted_text
+
+
+def test_evidence_cards_should_ignore_blank_image_id() -> None:
     """空白 image_id 不应产出占位符。"""
+
     chunks = [
         {
             "content": "内容",
@@ -182,3 +280,59 @@ def test_format_retrieval_results_should_ignore_blank_image_id() -> None:
 
     assert kb_images == {}
     assert "相关图片:" not in formatted_text
+
+
+def test_knowledge_search_should_apply_dedup_and_doc_cap(monkeypatch) -> None:
+    """knowledge_search 应在结果组装前执行候选去重与文档限额。"""
+
+    def _fake_retrieval(**_: dict) -> dict:
+        return {
+            "code": 0,
+            "data": {
+                "chunks": [
+                    {
+                        "document_id": "doc-a",
+                        "document_keyword": "文档A",
+                        "content": "同一段证据",
+                        "similarity": 0.95,
+                    },
+                    {
+                        "document_id": "doc-a",
+                        "document_keyword": "文档A",
+                        "content": "同一段证据\n",
+                        "similarity": 0.90,
+                    },
+                    {
+                        "document_id": "doc-a",
+                        "document_keyword": "文档A",
+                        "content": "文档A的第二段",
+                        "similarity": 0.89,
+                    },
+                    {
+                        "document_id": "doc-b",
+                        "document_keyword": "文档B",
+                        "content": "文档B证据",
+                        "similarity": 0.87,
+                    },
+                ]
+            },
+        }
+
+    monkeypatch.setattr(ragflow_tool, "_call_ragflow_retrieval", _fake_retrieval)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_KEY", "test-key")
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_DATASET_IDS", ["kb-default"])
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_SIMILARITY_THRESHOLD", 0.2)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_PAGE_SIZE", 10)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TOP_K", 10)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_VECTOR_WEIGHT", 0.6)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TIMEOUT_SECONDS", 20)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_CANDIDATE_DEDUP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_DOC_CAP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_MAX_CHUNKS_PER_DOC", 1, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_EVIDENCE_MAX_CHARS", 120, raising=False)
+
+    result = ragflow_tool.knowledge_search.func(query="报销流程", dataset_id=None)
+
+    assert result.count("来源: 文档A") == 1
+    assert result.count("来源: 文档B") == 1
+    assert result.count("【证据卡片") == 2
