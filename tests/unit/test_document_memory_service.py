@@ -1,6 +1,7 @@
 """文档化永久记忆服务单元测试。"""
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import app.services.document_memory_service as memory_service
 
@@ -9,6 +10,16 @@ import app.services.document_memory_service as memory_service
 class _DummyDocument:
     id: int
     content_md: str
+
+
+@dataclass
+class _DummyLegacyMemory:
+    memory_key: str
+    memory_value: str
+    scope: str = "global"
+    source_thread_id: str | None = None
+    source_message_id: int | None = None
+    update_time: datetime | None = None
 
 
 class _DummySession:
@@ -128,3 +139,111 @@ def test_recall_builds_context_with_citation(monkeypatch):
 
     assert "用户长期记忆片段" in context
     assert "引用: memory://user/2/daily/2026-02-28#L3-L5" in context
+
+
+def test_bootstrap_preference_documents_should_upsert_template(monkeypatch):
+    """新用户应按模板初始化 preference 文档。"""
+
+    captured = {"upserts": []}
+
+    monkeypatch.setattr(
+        memory_service,
+        "_load_preference_bootstrap_template",
+        lambda: {"assistant.persona": "小嘉"},
+    )
+
+    def _fake_upsert(db, **kwargs):  # noqa: ANN001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=31, content_md=kwargs["content_md"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "replace_document_chunks",
+        lambda *args, **kwargs: 1,
+    )
+
+    session = _DummySession()
+    seeded = memory_service.bootstrap_preference_documents(session, user_id=21)
+
+    assert seeded == 1
+    assert session.commit_called is True
+    assert captured["upserts"][0]["doc_kind"] == "preference"
+    assert captured["upserts"][0]["doc_key"] == "global:assistant.persona"
+
+
+def test_migrate_legacy_preference_kv_should_convert_when_no_preference_doc(monkeypatch):
+    """legacy KV 存在且未迁移时，应转换为 preference 文档。"""
+
+    legacy_item = _DummyLegacyMemory(
+        memory_key="assistant.persona",
+        memory_value="小哈",
+        source_thread_id="thread-1",
+        source_message_id=1001,
+        update_time=datetime.now(),
+    )
+    captured = {"upserts": [], "count_kwargs": None, "archive_kwargs": None}
+
+    def _fake_count(*args, **kwargs):  # noqa: ANN001
+        captured["count_kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "count_documents", _fake_count)
+    monkeypatch.setattr(
+        memory_service.user_memory_repo,
+        "list_active_memories",
+        lambda *args, **kwargs: [legacy_item],
+    )
+    monkeypatch.setattr(
+        memory_service.user_memory_repo,
+        "archive_active_memories",
+        lambda *args, **kwargs: captured.update({"archive_kwargs": kwargs}) or 1,
+    )
+
+    def _fake_upsert(db, **kwargs):  # noqa: ANN001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=41, content_md=kwargs["content_md"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "replace_document_chunks",
+        lambda *args, **kwargs: 1,
+    )
+
+    session = _DummySession()
+    migrated = memory_service.migrate_legacy_preference_kv(session, user_id=2)
+
+    assert migrated == 1
+    assert session.commit_called is True
+    assert captured["count_kwargs"]["status"] is None
+    assert captured["upserts"][0]["doc_kind"] == "preference"
+    assert captured["upserts"][0]["doc_key"] == "global:assistant.persona"
+    assert captured["archive_kwargs"] is not None
+    assert captured["archive_kwargs"]["memory_keys"] == ["assistant.persona"]
+
+
+def test_migrate_legacy_preference_kv_should_skip_when_any_status_preference_exists(monkeypatch):
+    """只要 preference 文档存在（含 archived），就不应再次迁移。"""
+
+    captured = {"list_called": False, "count_kwargs": None}
+
+    def _fake_count(*args, **kwargs):  # noqa: ANN001
+        captured["count_kwargs"] = kwargs
+        return 1
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "count_documents", _fake_count)
+
+    def _unexpected_list(*args, **kwargs):  # noqa: ANN001
+        captured["list_called"] = True
+        raise AssertionError("should not call list_active_memories")
+
+    monkeypatch.setattr(memory_service.user_memory_repo, "list_active_memories", _unexpected_list)
+
+    session = _DummySession()
+    migrated = memory_service.migrate_legacy_preference_kv(session, user_id=2)
+
+    assert migrated == 0
+    assert session.commit_called is False
+    assert captured["list_called"] is False
+    assert captured["count_kwargs"]["status"] is None

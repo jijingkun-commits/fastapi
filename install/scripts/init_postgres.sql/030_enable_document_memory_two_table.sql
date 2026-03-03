@@ -80,12 +80,7 @@ INSERT INTO t_system_config (
     is_readonly
 )
 VALUES
-    ('feature.enable_document_memory', 'false', 'boolean', 'feature', '文档化永久记忆总开关（两表）', false, false),
-    ('feature.enable_document_memory_recall', 'false', 'boolean', 'feature', '文档化记忆召回开关', false, false),
-    ('feature.enable_document_memory_flush', 'false', 'boolean', 'feature', '文档化记忆写入开关', false, false),
-    ('feature.enable_document_memory_hybrid_search', 'false', 'boolean', 'feature', '文档记忆混合检索开关（FTS+向量）', false, false),
-    ('feature.enable_document_memory_embedding_worker', 'false', 'boolean', 'feature', '文档记忆向量异步补偿开关', false, false),
-    ('feature.enable_document_memory_admin_api', 'false', 'boolean', 'feature', '文档记忆后台运维 API 开关', false, false),
+    ('feature.enable_document_memory', 'false', 'boolean', 'feature', '用户个性化永久记忆总开关（纯文档）', false, false),
     ('memory.document.max_results', '6', 'number', 'memory', '文档记忆检索结果上限', false, false),
     ('memory.document.max_injected_chars', '1200', 'number', 'memory', '文档记忆注入预算（字符）', false, false),
     ('memory.document.hybrid.vector_weight', '0.7', 'number', 'memory', '文档记忆向量权重', false, false),

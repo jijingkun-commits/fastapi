@@ -138,29 +138,8 @@ SQL_REQUIRE_APPROVAL = os.getenv("SQL_REQUIRE_APPROVAL", "true").lower() == "tru
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
 
-# 跨会话用户偏好记忆开关
-ENABLE_USER_PREFERENCE_MEMORY = os.getenv("ENABLE_USER_PREFERENCE_MEMORY", "false").lower() == "true"
-USER_PREFERENCE_MEMORY_MAX_ITEMS = int(os.getenv("USER_PREFERENCE_MEMORY_MAX_ITEMS", "8"))
-
-# 文档化永久记忆开关（两表方案）
+# 用户个性化永久记忆开关（纯文档 + 单开关）
 ENABLE_DOCUMENT_MEMORY = os.getenv("ENABLE_DOCUMENT_MEMORY", "false").lower() == "true"
-ENABLE_DOCUMENT_MEMORY_RECALL = os.getenv("ENABLE_DOCUMENT_MEMORY_RECALL", "false").lower() == "true"
-ENABLE_DOCUMENT_MEMORY_FLUSH = os.getenv("ENABLE_DOCUMENT_MEMORY_FLUSH", "false").lower() == "true"
-ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH = (
-    os.getenv("ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH", "false").lower() == "true"
-)
-ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER = (
-    os.getenv("ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER", "false").lower() == "true"
-)
-ENABLE_DOCUMENT_MEMORY_ADMIN_API = (
-    os.getenv("ENABLE_DOCUMENT_MEMORY_ADMIN_API", "false").lower() == "true"
-)
-ENABLE_DOCUMENT_MEMORY_ADMIN_WEB = (
-    os.getenv("ENABLE_DOCUMENT_MEMORY_ADMIN_WEB", "false").lower() == "true"
-)
-ENABLE_DOCUMENT_MEMORY_ADMIN_AUDIT = (
-    os.getenv("ENABLE_DOCUMENT_MEMORY_ADMIN_AUDIT", "false").lower() == "true"
-)
 DOCUMENT_MEMORY_ADMIN_DEFAULT_PAGE_SIZE = int(
     os.getenv("DOCUMENT_MEMORY_ADMIN_DEFAULT_PAGE_SIZE", "20")
 )

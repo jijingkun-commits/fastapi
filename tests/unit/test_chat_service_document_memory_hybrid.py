@@ -4,14 +4,14 @@ from app.services import chat_service
 
 
 def test_document_memory_hybrid_flag_reads_config_resolver(monkeypatch) -> None:  # noqa: ANN001
-    """环境变量未显式设置时应读取 ConfigResolver。"""
+    """环境变量未显式设置时应读取文档记忆总开关。"""
 
-    monkeypatch.delenv("ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH", raising=False)
+    monkeypatch.delenv("ENABLE_DOCUMENT_MEMORY", raising=False)
 
     class _Resolver:
         @classmethod
         def get_bool(cls, key: str, default: bool = False) -> bool:  # noqa: ARG003
-            if key == "feature.enable_document_memory_hybrid_search":
+            if key == "feature.enable_document_memory":
                 return True
             return default
 
@@ -23,12 +23,12 @@ def test_document_memory_hybrid_flag_reads_config_resolver(monkeypatch) -> None:
 def test_document_memory_hybrid_flag_env_override(monkeypatch) -> None:  # noqa: ANN001
     """环境变量显式值应覆盖配置中心。"""
 
-    monkeypatch.setenv("ENABLE_DOCUMENT_MEMORY_HYBRID_SEARCH", "false")
+    monkeypatch.setenv("ENABLE_DOCUMENT_MEMORY", "false")
 
     class _Resolver:
         @classmethod
         def get_bool(cls, key: str, default: bool = False) -> bool:  # noqa: ARG003
-            if key == "feature.enable_document_memory_hybrid_search":
+            if key == "feature.enable_document_memory":
                 return True
             return default
 

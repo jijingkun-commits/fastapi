@@ -10,6 +10,7 @@ from app.models.user_memory import UserMemory
 
 
 ACTIVE_STATUS = "active"
+ARCHIVED_STATUS = "archived"
 
 
 def list_active_memories(
@@ -116,3 +117,36 @@ def touch_last_seen(db: Session, memories: list[UserMemory]) -> None:
     for memory in memories:
         memory.last_seen_at = now
     db.flush()
+
+
+def archive_active_memories(
+    db: Session,
+    *,
+    user_id: int,
+    scope: str = "global",
+    memory_keys: list[str] | None = None,
+) -> int:
+    """将活跃 KV 记忆归档，避免重复迁移。"""
+
+    now = datetime.now()
+    query = db.query(UserMemory).filter(
+        UserMemory.user_id == user_id,
+        UserMemory.status == ACTIVE_STATUS,
+    )
+    if scope:
+        query = query.filter(UserMemory.scope == scope)
+    if memory_keys:
+        keys = [str(item).strip() for item in memory_keys if str(item).strip()]
+        if not keys:
+            return 0
+        query = query.filter(UserMemory.memory_key.in_(keys))
+
+    affected = query.update(
+        {
+            UserMemory.status: ARCHIVED_STATUS,
+            UserMemory.update_time: now,
+        },
+        synchronize_session=False,
+    )
+    db.flush()
+    return int(affected or 0)

@@ -1,4 +1,4 @@
-"""用户创建时偏好记忆初始化测试。"""
+"""用户创建时文档记忆初始化测试。"""
 
 from datetime import datetime
 
@@ -29,8 +29,8 @@ def _build_create_payload() -> UserCreate:
     )
 
 
-def test_create_user_seeds_preference_memory_when_feature_enabled(monkeypatch):
-    """总开关开启时，新用户应执行偏好记忆模板初始化。"""
+def test_create_user_seeds_document_memory_when_feature_enabled(monkeypatch):
+    """总开关开启时，新用户应执行文档记忆模板初始化。"""
 
     payload = _build_create_payload()
     seed_calls = []
@@ -43,13 +43,13 @@ def test_create_user_seeds_preference_memory_when_feature_enabled(monkeypatch):
         "create_user",
         lambda **kwargs: _DummyUser(user_id=21),
     )
-    monkeypatch.setattr("app.services.user_service._is_user_preference_memory_enabled", lambda: True)
+    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: True)
 
     def _fake_bootstrap(db, *, user_id):
         seed_calls.append(user_id)
         return 1
 
-    monkeypatch.setattr("app.services.user_service.bootstrap_user_preferences", _fake_bootstrap)
+    monkeypatch.setattr("app.services.user_service.bootstrap_preference_documents", _fake_bootstrap)
 
     user_item, error = user_service.create_user(db=object(), data=payload)
 
@@ -59,8 +59,8 @@ def test_create_user_seeds_preference_memory_when_feature_enabled(monkeypatch):
     assert seed_calls == [21]
 
 
-def test_create_user_skips_preference_memory_when_feature_disabled(monkeypatch):
-    """总开关关闭时，新用户不应触发偏好记忆模板初始化。"""
+def test_create_user_skips_document_memory_when_feature_disabled(monkeypatch):
+    """总开关关闭时，新用户不应触发文档记忆模板初始化。"""
 
     payload = _build_create_payload()
 
@@ -72,9 +72,9 @@ def test_create_user_skips_preference_memory_when_feature_disabled(monkeypatch):
         "create_user",
         lambda **kwargs: _DummyUser(user_id=22),
     )
-    monkeypatch.setattr("app.services.user_service._is_user_preference_memory_enabled", lambda: False)
+    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
     monkeypatch.setattr(
-        "app.services.user_service.bootstrap_user_preferences",
+        "app.services.user_service.bootstrap_preference_documents",
         lambda db, *, user_id: (_ for _ in ()).throw(AssertionError("should not be called")),
     )
 

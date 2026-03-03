@@ -32,7 +32,6 @@ def test_rebuild_embeddings_async_should_return_processing(memory_admin_client: 
     """异步重建请求应返回 processing。"""
 
     monkeypatch.setattr(memory_admin_api, "_is_document_memory_admin_enabled", lambda: True)
-    monkeypatch.setattr(memory_admin_api, "_is_embedding_worker_enabled", lambda: True)
     monkeypatch.setattr(memory_admin_api, "_run_embedding_rebuild_task", lambda **kwargs: None)
     monkeypatch.setattr(
         memory_admin_api.document_memory_repo,
@@ -591,17 +590,16 @@ def test_rebuild_embeddings_should_reject_when_admin_api_disabled(
     )
 
     assert response.status_code == 409
-    assert "ENABLE_DOCUMENT_MEMORY_ADMIN_API" in response.json()["detail"]
+    assert "ENABLE_DOCUMENT_MEMORY" in response.json()["detail"]
 
 
-def test_retry_failed_async_should_reject_when_worker_disabled(
+def test_retry_failed_async_should_return_processing_when_admin_enabled(
     memory_admin_client: TestClient,
     monkeypatch,  # noqa: ANN001
 ) -> None:
-    """异步重试在 worker 关闭时应返回 409。"""
+    """单开关开启时，异步重试应直接受理。"""
 
     monkeypatch.setattr(memory_admin_api, "_is_document_memory_admin_enabled", lambda: True)
-    monkeypatch.setattr(memory_admin_api, "_is_embedding_worker_enabled", lambda: False)
     monkeypatch.setattr(
         memory_admin_api.document_memory_embedding_service,
         "retry_failed_chunks",
@@ -613,5 +611,7 @@ def test_retry_failed_async_should_reject_when_worker_disabled(
         json={"user_id": 1001, "limit": 10, "run_async": True},
     )
 
-    assert response.status_code == 409
-    assert "ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processing"
+    assert payload["reset"] == 2

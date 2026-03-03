@@ -13,6 +13,11 @@ class _MappingResult:
     def all(self):
         return self._rows
 
+    def first(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
 
 class _DummySession:
     def __init__(self, responses):
@@ -21,6 +26,16 @@ class _DummySession:
 
     def execute(self, sql, params):  # noqa: ANN001
         self.calls.append(params)
+        return _MappingResult(self._responses.pop(0))
+
+
+class _StatusDummySession:
+    def __init__(self, responses):
+        self._responses = responses
+        self.calls = []
+
+    def execute(self, sql, params):  # noqa: ANN001
+        self.calls.append((str(sql), params))
         return _MappingResult(self._responses.pop(0))
 
 
@@ -95,3 +110,31 @@ def test_search_chunks_should_fallback_when_primary_miss() -> None:
     assert len(results) == 1
     assert len(db.calls) == 2
     assert results[0]["chunk_text"] == "fallback"
+
+
+def test_embedding_status_sql_should_use_cast_syntax() -> None:
+    """向量状态 SQL 不能使用 psycopg 不兼容的 :param::type 语法。"""
+
+    db = _StatusDummySession(
+        [
+            [
+                {
+                    "total": 0,
+                    "pending": 0,
+                    "ready": 0,
+                    "failed": 0,
+                }
+            ]
+        ]
+    )
+
+    payload = repo.get_embedding_status_counts(db, source="memory")
+
+    assert payload["total"] == 0
+    executed_sql, executed_params = db.calls[0]
+    assert ":user_id::int" not in executed_sql
+    assert ":doc_id::bigint" not in executed_sql
+    assert "COALESCE(CAST(:user_id AS int), c.user_id)" in executed_sql
+    assert "COALESCE(CAST(:doc_id AS bigint), c.doc_id)" in executed_sql
+    assert executed_params["user_id"] is None
+    assert executed_params["doc_id"] is None

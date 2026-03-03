@@ -13,8 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import (
     DOCUMENT_MEMORY_EMBEDDING_BATCH_SIZE,
     DOCUMENT_MEMORY_EMBEDDING_MAX_RETRY,
-    ENABLE_DOCUMENT_MEMORY_ADMIN_API,
-    ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER,
+    ENABLE_DOCUMENT_MEMORY,
 )
 from app.db.session import SessionLocal, get_db
 from app.repositories import document_memory_repo
@@ -60,28 +59,12 @@ def _is_document_memory_admin_enabled() -> bool:
         from app.services.config_resolver import ConfigResolver
 
         resolved = ConfigResolver.get_bool(
-            "feature.enable_document_memory_admin_api",
-            ENABLE_DOCUMENT_MEMORY_ADMIN_API,
+            "feature.enable_document_memory",
+            ENABLE_DOCUMENT_MEMORY,
         )
-        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY_ADMIN_API", bool(resolved))
+        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY", bool(resolved))
     except Exception:
-        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY_ADMIN_API", ENABLE_DOCUMENT_MEMORY_ADMIN_API)
-
-
-def _is_embedding_worker_enabled() -> bool:
-    try:
-        from app.services.config_resolver import ConfigResolver
-
-        resolved = ConfigResolver.get_bool(
-            "feature.enable_document_memory_embedding_worker",
-            ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER,
-        )
-        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER", bool(resolved))
-    except Exception:
-        return _is_enabled_env(
-            "ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER",
-            ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER,
-        )
+        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY", ENABLE_DOCUMENT_MEMORY)
 
 
 def _embedding_batch_size() -> int:
@@ -114,7 +97,7 @@ def _ensure_admin_api_enabled() -> None:
     if not _is_document_memory_admin_enabled():
         raise HTTPException(
             status_code=409,
-            detail="ENABLE_DOCUMENT_MEMORY_ADMIN_API 未开启",
+            detail="ENABLE_DOCUMENT_MEMORY 未开启",
         )
 
 
@@ -304,11 +287,6 @@ def rebuild_document_embeddings(
         return DocumentEmbeddingRebuildResponse(status="idle", total=0)
 
     if request.run_async:
-        if not _is_embedding_worker_enabled():
-            raise HTTPException(
-                status_code=409,
-                detail="ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER 未开启",
-            )
         background_tasks.add_task(
             _run_embedding_rebuild_task,
             user_id=request.user_id,
@@ -417,11 +395,6 @@ def retry_failed_document_embeddings(
         return DocumentEmbeddingRebuildResponse(status="idle", reset=0, total=0)
 
     if request.run_async:
-        if not _is_embedding_worker_enabled():
-            raise HTTPException(
-                status_code=409,
-                detail="ENABLE_DOCUMENT_MEMORY_EMBEDDING_WORKER 未开启",
-            )
         background_tasks.add_task(
             _run_embedding_rebuild_task,
             user_id=request.user_id,

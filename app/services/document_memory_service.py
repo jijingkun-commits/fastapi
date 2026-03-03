@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.ai.utils.embedding_util import get_embedding
-from app.repositories import document_memory_repo
+from app.repositories import document_memory_repo, user_memory_repo
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,11 @@ _DEFAULT_MAX_INJECTED_CHARS = 1200
 _DEFAULT_VECTOR_WEIGHT = 0.70
 _DEFAULT_TEXT_WEIGHT = 0.30
 _DEFAULT_MIN_SCORE = 0.05
+_DEFAULT_PREFERENCE_DOC_KIND = "preference"
+_DEFAULT_PREFERENCE_SCOPE = "global"
+_PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY = "memory.user_preference_bootstrap_template"
+_PREFERENCE_BOOTSTRAP_TEMPLATE_DEFAULT = {"assistant.persona": "小嘉"}
+_PREFERENCE_BOOTSTRAP_SOURCE_THREAD_ID = "system.user_bootstrap"
 
 
 def _normalize_text(text: str) -> str:
@@ -59,6 +64,118 @@ def _build_daily_entry(
     if source_message_id:
         lines.append(f"- 来源消息：{source_message_id}")
     return "\n".join(lines)
+
+
+def _normalize_bootstrap_template(raw_template: Any) -> dict[str, str]:
+    """规范化偏好模板，过滤非法值。"""
+
+    if not isinstance(raw_template, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in raw_template.items():
+        memory_key = str(raw_key or "").strip()
+        memory_value = str(raw_value or "").strip()
+        if not memory_key or not memory_value:
+            continue
+        normalized[memory_key] = memory_value[:200]
+    return normalized
+
+
+def _load_preference_bootstrap_template() -> dict[str, str]:
+    """读取偏好初始化模板。"""
+
+    fallback = dict(_PREFERENCE_BOOTSTRAP_TEMPLATE_DEFAULT)
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        raw_template = ConfigResolver.get_json_dict(
+            _PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY,
+            fallback,
+        )
+    except Exception as config_error:
+        logger.warning("读取偏好初始化模板失败，使用默认模板: error=%s", config_error)
+        return fallback
+
+    normalized = _normalize_bootstrap_template(raw_template)
+    return normalized if normalized else fallback
+
+
+def _build_preference_document_content(
+    *,
+    memory_key: str,
+    memory_value: str,
+    scope: str,
+    source_thread_id: str | None,
+    source_message_id: int | None,
+    updated_time: datetime | None,
+) -> str:
+    """构建偏好记忆文档正文。"""
+
+    lines = [
+        f"# 用户偏好 {memory_key}",
+        "",
+        f"- key: {memory_key}",
+        f"- value: {memory_value}",
+        f"- scope: {scope}",
+    ]
+    if source_thread_id:
+        lines.append(f"- source_thread_id: {source_thread_id}")
+    if source_message_id:
+        lines.append(f"- source_message_id: {source_message_id}")
+    if updated_time:
+        lines.append(f"- updated_at: {updated_time.isoformat()}")
+    return "\n".join(lines).strip()
+
+
+def _upsert_preference_document(
+    db: Session,
+    *,
+    user_id: int,
+    memory_key: str,
+    memory_value: str,
+    scope: str,
+    source_thread_id: str | None,
+    source_message_id: int | None,
+    updated_time: datetime | None,
+) -> None:
+    """写入单条 preference 文档。"""
+
+    doc_key = f"{scope}:{memory_key}"
+    content_md = _build_preference_document_content(
+        memory_key=memory_key,
+        memory_value=memory_value,
+        scope=scope,
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+        updated_time=updated_time,
+    )
+    content_hash = _hash_text(content_md)
+
+    document = document_memory_repo.upsert_document(
+        db,
+        user_id=user_id,
+        doc_kind=_DEFAULT_PREFERENCE_DOC_KIND,
+        doc_key=doc_key,
+        title=f"偏好记忆 {memory_key}",
+        content_md=content_md,
+        summary_md=memory_value[:200],
+        source=_DEFAULT_MEMORY_SOURCE,
+        scope="private",
+        scope_ref=scope,
+        content_hash=content_hash,
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+    )
+
+    chunks = _split_document_to_chunks(content_md)
+    document_memory_repo.replace_document_chunks(
+        db,
+        user_id=user_id,
+        doc_id=document.id,
+        chunks=chunks,
+        source=_DEFAULT_MEMORY_SOURCE,
+    )
 
 
 def _should_persist_memory(user_text: str) -> bool:
@@ -295,6 +412,102 @@ def recall(
         current_len = next_len
 
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def bootstrap_preference_documents(
+    db: Session,
+    *,
+    user_id: int,
+    template: dict[str, Any] | None = None,
+) -> int:
+    """新用户初始化 preference 文档记忆。"""
+
+    if not user_id:
+        return 0
+
+    template_payload = (
+        _load_preference_bootstrap_template()
+        if template is None
+        else _normalize_bootstrap_template(template)
+    )
+    if not template_payload:
+        return 0
+
+    for memory_key, memory_value in template_payload.items():
+        _upsert_preference_document(
+            db,
+            user_id=user_id,
+            memory_key=memory_key,
+            memory_value=memory_value,
+            scope=_DEFAULT_PREFERENCE_SCOPE,
+            source_thread_id=_PREFERENCE_BOOTSTRAP_SOURCE_THREAD_ID,
+            source_message_id=None,
+            updated_time=None,
+        )
+
+    db.commit()
+    return len(template_payload)
+
+
+def migrate_legacy_preference_kv(
+    db: Session,
+    *,
+    user_id: int,
+    scope: str = _DEFAULT_PREFERENCE_SCOPE,
+    limit: int = 100,
+) -> int:
+    """将 legacy KV 偏好迁移为 preference 文档记忆（幂等）。"""
+
+    if not user_id:
+        return 0
+
+    if document_memory_repo.count_documents(
+        db,
+        user_id=user_id,
+        doc_kind=_DEFAULT_PREFERENCE_DOC_KIND,
+        status=None,
+        source=_DEFAULT_MEMORY_SOURCE,
+    ) > 0:
+        return 0
+
+    memories = user_memory_repo.list_active_memories(
+        db,
+        user_id=user_id,
+        scope=scope,
+        limit=max(1, int(limit)),
+    )
+    if not memories:
+        return 0
+
+    migrated = 0
+    migrated_keys: set[str] = set()
+    for memory in memories:
+        memory_key = str(getattr(memory, "memory_key", "") or "").strip()
+        memory_value = str(getattr(memory, "memory_value", "") or "").strip()
+        if not memory_key or not memory_value:
+            continue
+        _upsert_preference_document(
+            db,
+            user_id=user_id,
+            memory_key=memory_key,
+            memory_value=memory_value,
+            scope=str(getattr(memory, "scope", "") or scope),
+            source_thread_id=getattr(memory, "source_thread_id", None),
+            source_message_id=getattr(memory, "source_message_id", None),
+            updated_time=getattr(memory, "update_time", None),
+        )
+        migrated += 1
+        migrated_keys.add(memory_key)
+
+    if migrated > 0:
+        user_memory_repo.archive_active_memories(
+            db,
+            user_id=user_id,
+            scope=scope,
+            memory_keys=sorted(migrated_keys),
+        )
+        db.commit()
+    return migrated
 
 
 def flush(

@@ -199,18 +199,12 @@ def test_delete_memory_should_record_completed_audit(monkeypatch) -> None:  # no
 
 
 def test_memory_admin_feature_flags_should_be_registered_in_config_contract() -> None:
-    """web/audit 开关应纳入配置契约。"""
+    """记忆能力应通过单开关纳入配置契约。"""
 
-    web_spec = CONFIG_SPECS["feature.enable_document_memory_admin_web"]
-    audit_spec = CONFIG_SPECS["feature.enable_document_memory_admin_audit"]
-
-    assert web_spec.value_type == "boolean"
-    assert web_spec.default is False
-    assert web_spec.env_key == "ENABLE_DOCUMENT_MEMORY_ADMIN_WEB"
-
-    assert audit_spec.value_type == "boolean"
-    assert audit_spec.default is False
-    assert audit_spec.env_key == "ENABLE_DOCUMENT_MEMORY_ADMIN_AUDIT"
+    switch_spec = CONFIG_SPECS["feature.enable_document_memory"]
+    assert switch_spec.value_type == "boolean"
+    assert switch_spec.default is False
+    assert switch_spec.env_key == "ENABLE_DOCUMENT_MEMORY"
 
 
 def test_memory_admin_pagination_should_be_registered_in_config_contract() -> None:
@@ -232,8 +226,7 @@ def test_memory_admin_config_resolver_should_read_dynamic_values(monkeypatch) ->
     """ConfigResolver 应支持解析 memory-admin 新增配置。"""
 
     values = {
-        "feature.enable_document_memory_admin_web": "true",
-        "feature.enable_document_memory_admin_audit": "1",
+        "feature.enable_document_memory": "true",
         "memory.document.admin.default_page_size": "30",
         "memory.document.admin.max_page_size": "120",
     }
@@ -243,8 +236,7 @@ def test_memory_admin_config_resolver_should_read_dynamic_values(monkeypatch) ->
 
     monkeypatch.setattr("app.services.config_resolver.SystemConfigService.get", _mock_get)
 
-    assert ConfigResolver.get_bool("feature.enable_document_memory_admin_web", False) is True
-    assert ConfigResolver.get_bool("feature.enable_document_memory_admin_audit", False) is True
+    assert ConfigResolver.get_bool("feature.enable_document_memory", False) is True
     assert ConfigResolver.get_int("memory.document.admin.default_page_size", 20) == 30
     assert ConfigResolver.get_int("memory.document.admin.max_page_size", 100) == 120
 
@@ -252,7 +244,6 @@ def test_memory_admin_config_resolver_should_read_dynamic_values(monkeypatch) ->
 def test_memory_admin_runtime_constants_should_be_exposed() -> None:
     """运行时配置模块应暴露 memory-admin 新增常量。"""
 
-    assert isinstance(config.ENABLE_DOCUMENT_MEMORY_ADMIN_WEB, bool)
-    assert isinstance(config.ENABLE_DOCUMENT_MEMORY_ADMIN_AUDIT, bool)
+    assert isinstance(config.ENABLE_DOCUMENT_MEMORY, bool)
     assert isinstance(config.DOCUMENT_MEMORY_ADMIN_DEFAULT_PAGE_SIZE, int)
     assert isinstance(config.DOCUMENT_MEMORY_ADMIN_MAX_PAGE_SIZE, int)

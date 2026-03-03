@@ -20,6 +20,30 @@ EMBEDDING_DIMENSION_USER = "user"
 EMBEDDING_DIMENSION_DOC = "doc"
 
 
+def count_documents(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    doc_kind: str | None = None,
+    status: str | None = ACTIVE_STATUS,
+    source: str | None = None,
+) -> int:
+    """统计文档条数。"""
+
+    query = db.query(func.count(UserMemoryDocument.id))
+
+    if user_id is not None:
+        query = query.filter(UserMemoryDocument.user_id == int(user_id))
+    if status:
+        query = query.filter(UserMemoryDocument.status == str(status))
+    if doc_kind:
+        query = query.filter(UserMemoryDocument.doc_kind == str(doc_kind))
+    if source:
+        query = query.filter(UserMemoryDocument.source == str(source))
+
+    return int(query.scalar() or 0)
+
+
 def get_active_document(
     db: Session,
     *,
@@ -430,8 +454,8 @@ def get_embedding_status_counts(
         JOIN t_user_memory_document d ON d.id = c.doc_id
         WHERE d.status = 'active'
           AND c.source = :source
-          AND (:user_id::int IS NULL OR c.user_id = :user_id)
-          AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+          AND c.user_id = COALESCE(CAST(:user_id AS int), c.user_id)
+          AND c.doc_id = COALESCE(CAST(:doc_id AS bigint), c.doc_id)
         """
     )
     row = db.execute(
@@ -477,8 +501,8 @@ def get_embedding_status_counts(
             JOIN t_user_memory_document d ON d.id = c.doc_id
             WHERE d.status = 'active'
               AND c.source = :source
-              AND (:user_id::int IS NULL OR c.user_id = :user_id)
-              AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+              AND c.user_id = COALESCE(CAST(:user_id AS int), c.user_id)
+              AND c.doc_id = COALESCE(CAST(:doc_id AS bigint), c.doc_id)
             GROUP BY c.user_id
             ORDER BY total DESC, c.user_id ASC
             OFFSET :offset
@@ -494,8 +518,8 @@ def get_embedding_status_counts(
                 JOIN t_user_memory_document d ON d.id = c.doc_id
                 WHERE d.status = 'active'
                   AND c.source = :source
-                  AND (:user_id::int IS NULL OR c.user_id = :user_id)
-                  AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+                  AND c.user_id = COALESCE(CAST(:user_id AS int), c.user_id)
+                  AND c.doc_id = COALESCE(CAST(:doc_id AS bigint), c.doc_id)
                 GROUP BY c.user_id
             ) grouped
             """
@@ -517,8 +541,8 @@ def get_embedding_status_counts(
             JOIN t_user_memory_document d ON d.id = c.doc_id
             WHERE d.status = 'active'
               AND c.source = :source
-              AND (:user_id::int IS NULL OR c.user_id = :user_id)
-              AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+              AND c.user_id = COALESCE(CAST(:user_id AS int), c.user_id)
+              AND c.doc_id = COALESCE(CAST(:doc_id AS bigint), c.doc_id)
             GROUP BY c.doc_id, c.user_id, d.doc_kind, d.doc_key, d.title
             ORDER BY total DESC, c.doc_id ASC
             OFFSET :offset
@@ -534,8 +558,8 @@ def get_embedding_status_counts(
                 JOIN t_user_memory_document d ON d.id = c.doc_id
                 WHERE d.status = 'active'
                   AND c.source = :source
-                  AND (:user_id::int IS NULL OR c.user_id = :user_id)
-                  AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+                  AND c.user_id = COALESCE(CAST(:user_id AS int), c.user_id)
+                  AND c.doc_id = COALESCE(CAST(:doc_id AS bigint), c.doc_id)
                 GROUP BY c.doc_id, c.user_id
             ) grouped
             """

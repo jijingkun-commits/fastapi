@@ -54,9 +54,6 @@ INSERT INTO t_system_config (
     is_readonly
 )
 VALUES
-    ('feature.enable_document_memory_hybrid_search', 'false', 'boolean', 'feature', '文档记忆混合检索开关（FTS+向量）', false, false),
-    ('feature.enable_document_memory_embedding_worker', 'false', 'boolean', 'feature', '文档记忆向量异步补偿开关', false, false),
-    ('feature.enable_document_memory_admin_api', 'false', 'boolean', 'feature', '文档记忆后台运维 API 开关', false, false),
     ('memory.document.hybrid.min_score', '0.05', 'number', 'memory', '文档记忆混合召回最低分', false, false),
     ('memory.document.embedding.batch_size', '32', 'number', 'memory', '文档记忆向量补偿批大小', false, false),
     ('memory.document.embedding.max_retry', '3', 'number', 'memory', '文档记忆向量自动重试上限', false, false)

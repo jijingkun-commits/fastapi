@@ -56,7 +56,7 @@ def test_create_user_bootstraps_skill_template_when_enabled(monkeypatch) -> None
     payload = _build_create_payload()
     bootstrap_calls: List[int] = []
     _stub_user_repo(monkeypatch, user_id=31)
-    monkeypatch.setattr("app.services.user_service._is_user_preference_memory_enabled", lambda: False)
+    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
     monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: True)
     monkeypatch.setattr(
         "app.services.user_service.bootstrap_user_skills",
@@ -77,7 +77,7 @@ def test_create_user_bootstrap_skill_failure_should_not_block_creation(monkeypat
     payload = _build_create_payload()
     db = _DummySession()
     _stub_user_repo(monkeypatch, user_id=32)
-    monkeypatch.setattr("app.services.user_service._is_user_preference_memory_enabled", lambda: False)
+    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
     monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: True)
 
     def _raise_bootstrap(db, *, user_id):  # noqa: ANN001
@@ -98,7 +98,7 @@ def test_create_user_skips_skill_bootstrap_when_disabled(monkeypatch) -> None:  
 
     payload = _build_create_payload()
     _stub_user_repo(monkeypatch, user_id=33)
-    monkeypatch.setattr("app.services.user_service._is_user_preference_memory_enabled", lambda: False)
+    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
     monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: False)
     monkeypatch.setattr(
         "app.services.user_service.bootstrap_user_skills",
