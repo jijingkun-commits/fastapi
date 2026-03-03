@@ -7,6 +7,7 @@ import requests
 
 from app.ai.tools import ragflow_tool
 from app.ai.tools.ragflow_tool import (
+    _build_metadata_condition,
     _build_retrieval_queries,
     _call_ragflow_retrieval,
     _dedup_and_cap_candidates,
@@ -62,6 +63,96 @@ def test_call_ragflow_retrieval_payload_should_split_page_size_and_top_k(monkeyp
     assert captured["timeout"] == 12
 
 
+def test_call_ragflow_retrieval_payload_should_include_metadata_condition(monkeypatch) -> None:
+    """显式 metadata_condition 时，请求 payload 应透传过滤条件。"""
+
+    captured: dict = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"code": 0, "data": {"chunks": []}}
+
+    def _fake_post(url: str, headers: dict, json: dict, timeout: float) -> _FakeResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setattr(ragflow_tool.requests, "post", _fake_post)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_URL", "http://unit.test/api/v1")
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_KEY", "test-key")
+
+    response = _call_ragflow_retrieval(
+        query="报销流程",
+        dataset_ids=["kb-1"],
+        similarity_threshold=0.2,
+        page_size=4,
+        top_k=8,
+        vector_weight=0.6,
+        timeout_seconds=10,
+        metadata_condition={
+            "operator": "and",
+            "conditions": [
+                {
+                    "field": "domain",
+                    "operator": "eq",
+                    "value": "process",
+                }
+            ],
+        },
+    )
+
+    assert response["code"] == 0
+    assert captured["json"]["metadata_condition"] == {
+        "operator": "and",
+        "conditions": [
+            {
+                "field": "domain",
+                "operator": "eq",
+                "value": "process",
+            }
+        ],
+    }
+
+
+def test_build_metadata_condition_should_route_query_to_domain() -> None:
+    """命中领域提示词时，应构造 metadata 过滤条件。"""
+
+    condition = _build_metadata_condition(
+        "报销流程怎么走",
+        enable_domain_routing=True,
+        domain_hints={"process": ["报销", "流程"], "product": ["功能"]},
+        metadata_field="kb_domain",
+    )
+
+    assert condition == {
+        "operator": "and",
+        "conditions": [
+            {
+                "field": "kb_domain",
+                "operator": "eq",
+                "value": "process",
+            }
+        ],
+    }
+
+
+def test_build_metadata_condition_should_fallback_none_when_no_domain_hit() -> None:
+    """未命中领域时，应回退无 metadata 过滤。"""
+
+    condition = _build_metadata_condition(
+        "天气如何",
+        enable_domain_routing=True,
+        domain_hints={"process": ["报销", "流程"]},
+    )
+
+    assert condition is None
+
+
 def test_knowledge_search_payload_should_keep_dataset_override_compatibility(monkeypatch) -> None:
     """显式 dataset_id 仍应优先于默认配置。"""
 
@@ -112,6 +203,68 @@ def test_knowledge_search_timeout_should_return_degraded_message(monkeypatch) ->
     result = ragflow_tool.knowledge_search.func(query="社保政策", dataset_id=None)
 
     assert "知识库检索超时" in result
+
+
+def test_knowledge_search_metadata_should_fallback_to_full_library_on_filter_error(monkeypatch) -> None:
+    """metadata 过滤异常时，应自动回退无过滤检索路径。"""
+
+    captured_calls: list[dict] = []
+
+    def _fake_retrieval(**kwargs) -> dict:
+        captured_calls.append(dict(kwargs))
+        if kwargs.get("metadata_condition"):
+            return {
+                "code": 1,
+                "message": "metadata condition invalid",
+                "data": {"chunks": []},
+            }
+
+        return {
+            "code": 0,
+            "data": {
+                "chunks": [
+                    {
+                        "document_id": "doc-main",
+                        "document_keyword": "制度文档",
+                        "content": "报销需先提交申请",
+                        "similarity": 0.91,
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(ragflow_tool, "_call_ragflow_retrieval", _fake_retrieval)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_KEY", "test-key")
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_DATASET_IDS", ["kb-default"])
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_SIMILARITY_THRESHOLD", 0.2)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_PAGE_SIZE", 4)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TOP_K", 8)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_VECTOR_WEIGHT", 0.6)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TIMEOUT_SECONDS", 20)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_DOMAIN_ROUTING", True, raising=False)
+    monkeypatch.setattr(
+        ragflow_tool.config,
+        "RAGFLOW_DOMAIN_ROUTING_HINTS",
+        {"process": ["报销", "流程"]},
+        raising=False,
+    )
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_DOMAIN_METADATA_FIELD", "domain", raising=False)
+
+    result = ragflow_tool.knowledge_search.func(query="报销流程", dataset_id=None)
+
+    assert "来源: 制度文档" in result
+    assert len(captured_calls) == 2
+    assert captured_calls[0]["metadata_condition"] == {
+        "operator": "and",
+        "conditions": [
+            {
+                "field": "domain",
+                "operator": "eq",
+                "value": "process",
+            }
+        ],
+    }
+    assert "metadata_condition" not in captured_calls[1]
 
 
 def test_dedup_candidates_should_remove_repeated_content_within_same_document() -> None:

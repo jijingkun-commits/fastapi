@@ -32,6 +32,7 @@ def _call_ragflow_retrieval(
     top_k: int = 5,
     vector_weight: float = 0.3,
     timeout_seconds: float = 30,
+    metadata_condition: dict[str, Any] | None = None,
 ) -> dict:
     """调用 RAGFlow 检索 API。
     
@@ -43,24 +44,28 @@ def _call_ragflow_retrieval(
         top_k: 候选召回深度
         vector_weight: 向量相似度权重（0-1），剩余为关键词权重
         timeout_seconds: 请求超时秒数
+        metadata_condition: 元数据过滤条件
         
     Returns:
         API 响应数据
     """
     try:
         effective_page_size = top_k if page_size is None else page_size
+        payload: dict[str, Any] = {
+            "question": query,
+            "dataset_ids": dataset_ids,
+            "similarity_threshold": similarity_threshold,
+            "page_size": effective_page_size,
+            "top_k": top_k,
+            "vector_similarity_weight": vector_weight,
+        }
+        if metadata_condition:
+            payload["metadata_condition"] = metadata_condition
 
         response = requests.post(
             f"{config.RAGFLOW_API_URL}/retrieval",
             headers={"Authorization": f"Bearer {config.RAGFLOW_API_KEY}"},
-            json={
-                "question": query,
-                "dataset_ids": dataset_ids,
-                "similarity_threshold": similarity_threshold,
-                "page_size": effective_page_size,
-                "top_k": top_k,
-                "vector_similarity_weight": vector_weight,
-            },
+            json=payload,
             timeout=timeout_seconds,
         )
         response.raise_for_status()
@@ -211,6 +216,185 @@ def _normalize_rewrite_terms(raw_terms: Any) -> dict[str, list[str]]:
     return {"__default__": terms} if terms else {}
 
 
+_DEFAULT_DOMAIN_HINTS: dict[str, list[str]] = {
+    "todo": ["待办", "任务", "提醒", "清单", "todo"],
+    "data": ["数据", "指标", "报表", "统计", "sql", "数据库", "分析"],
+    "process": ["制度", "流程", "规范", "审批", "报销", "请假"],
+    "product": ["产品", "功能", "渠道", "能力", "特性"],
+}
+
+
+def _normalize_domain_hints(raw_hints: Any) -> dict[str, list[str]]:
+    """归一化领域路由提示词配置。"""
+
+    def _as_term_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, (list, tuple, set)):
+            terms = []
+            for item in value:
+                text = str(item).strip()
+                if text:
+                    terms.append(text)
+            return terms
+        return []
+
+    if raw_hints is None:
+        return dict(_DEFAULT_DOMAIN_HINTS)
+
+    source: Any = raw_hints
+    if isinstance(raw_hints, str):
+        payload = raw_hints.strip()
+        if not payload:
+            return dict(_DEFAULT_DOMAIN_HINTS)
+        try:
+            source = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.warning("RAGFLOW_DOMAIN_ROUTING_HINTS 不是合法 JSON，回退默认领域词典")
+            return dict(_DEFAULT_DOMAIN_HINTS)
+
+    if not isinstance(source, dict):
+        logger.warning("RAGFLOW_DOMAIN_ROUTING_HINTS 类型非法，回退默认领域词典")
+        return dict(_DEFAULT_DOMAIN_HINTS)
+
+    normalized: dict[str, list[str]] = {}
+    for raw_domain, raw_terms in source.items():
+        domain = str(raw_domain).strip().lower()
+        if not domain:
+            continue
+        terms = _as_term_list(raw_terms)
+        if terms:
+            normalized[domain] = terms
+
+    return normalized or dict(_DEFAULT_DOMAIN_HINTS)
+
+
+def _detect_query_domain(raw_query: str, domain_hints: dict[str, list[str]]) -> str | None:
+    """根据 query 命中情况推断领域。"""
+    normalized_query = str(raw_query or "").strip().lower()
+    if not normalized_query:
+        return None
+
+    best_domain: str | None = None
+    best_hits = 0
+    best_position = len(normalized_query) + 1
+
+    for domain, hints in domain_hints.items():
+        hits = 0
+        first_position = len(normalized_query) + 1
+        for hint in hints:
+            normalized_hint = str(hint).strip().lower()
+            if not normalized_hint:
+                continue
+            position = normalized_query.find(normalized_hint)
+            if position < 0:
+                continue
+            hits += 1
+            first_position = min(first_position, position)
+
+        if hits > best_hits or (hits == best_hits and hits > 0 and first_position < best_position):
+            best_domain = domain
+            best_hits = hits
+            best_position = first_position
+
+    return best_domain if best_hits > 0 else None
+
+
+def _build_metadata_condition(
+    raw_query: str,
+    *,
+    enable_domain_routing: bool,
+    domain_hints: Any,
+    metadata_field: str = "domain",
+) -> dict[str, Any] | None:
+    """根据 query 领域构造 metadata 过滤条件。"""
+    if not enable_domain_routing:
+        return None
+
+    safe_metadata_field = str(metadata_field or "").strip() or "domain"
+
+    try:
+        normalized_hints = _normalize_domain_hints(domain_hints)
+        detected_domain = _detect_query_domain(raw_query, normalized_hints)
+        if not detected_domain:
+            return None
+
+        return {
+            "operator": "and",
+            "conditions": [
+                {
+                    "field": safe_metadata_field,
+                    "operator": "eq",
+                    "value": detected_domain,
+                }
+            ],
+        }
+    except Exception as exc:
+        logger.warning("构造 metadata 过滤条件失败，回退全库检索: %s", exc)
+        return None
+
+
+def _is_metadata_filter_error(error_msg: str | None) -> bool:
+    """判断错误是否来自 metadata 过滤条件。"""
+    normalized = str(error_msg or "").strip().lower()
+    if not normalized:
+        return False
+
+    metadata_error_hints = (
+        "metadata",
+        "filter",
+        "condition",
+        "field",
+        "where",
+    )
+    return any(hint in normalized for hint in metadata_error_hints)
+
+
+def _retrieve_chunks_with_metadata_fallback(
+    query: str,
+    *,
+    dataset_ids: list[str],
+    similarity_threshold: float,
+    page_size: int,
+    top_k: int,
+    vector_weight: float,
+    timeout_seconds: float,
+    metadata_condition: dict[str, Any] | None,
+    route_id: str,
+) -> tuple[list[dict[str, Any]], str | None, bool]:
+    """执行检索，metadata 过滤失败时回退无过滤路径。"""
+
+    def _retrieve(metadata_filter: dict[str, Any] | None) -> tuple[list[dict[str, Any]], str | None]:
+        return _retrieve_chunks_for_query(
+            query,
+            dataset_ids=dataset_ids,
+            similarity_threshold=similarity_threshold,
+            page_size=page_size,
+            top_k=top_k,
+            vector_weight=vector_weight,
+            timeout_seconds=timeout_seconds,
+            metadata_condition=metadata_filter,
+        )
+
+    if not metadata_condition:
+        chunks, error_msg = _retrieve(None)
+        return chunks, error_msg, False
+
+    try:
+        chunks, error_msg = _retrieve(metadata_condition)
+    except requests.exceptions.RequestException as exc:
+        logger.warning("领域路由检索请求异常，回退无过滤检索: route=%s, error=%s", route_id, exc)
+        fallback_chunks, fallback_error = _retrieve(None)
+        return fallback_chunks, fallback_error, True
+
+    if error_msg and _is_metadata_filter_error(error_msg):
+        logger.warning("领域路由 metadata 过滤失败，回退无过滤检索: route=%s, error=%s", route_id, error_msg)
+        fallback_chunks, fallback_error = _retrieve(None)
+        return fallback_chunks, fallback_error, True
+
+    return chunks, error_msg, False
+
+
 def _build_retrieval_queries(
     raw_query: str,
     *,
@@ -352,16 +536,23 @@ def _retrieve_chunks_for_query(
     top_k: int,
     vector_weight: float,
     timeout_seconds: float,
+    metadata_condition: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """执行单路检索并兼容多知识库 hybrid fallback。"""
+    retrieval_kwargs: dict[str, Any] = {
+        "query": query,
+        "dataset_ids": dataset_ids,
+        "similarity_threshold": similarity_threshold,
+        "page_size": page_size,
+        "top_k": top_k,
+        "vector_weight": vector_weight,
+        "timeout_seconds": timeout_seconds,
+    }
+    if metadata_condition:
+        retrieval_kwargs["metadata_condition"] = metadata_condition
+
     data = _call_ragflow_retrieval(
-        query=query,
-        dataset_ids=dataset_ids,
-        similarity_threshold=similarity_threshold,
-        page_size=page_size,
-        top_k=top_k,
-        vector_weight=vector_weight,
-        timeout_seconds=timeout_seconds,
+        **retrieval_kwargs,
     )
     if data.get("code") == 0:
         return data.get("data", {}).get("chunks", []), None
@@ -374,15 +565,9 @@ def _retrieve_chunks_for_query(
     all_chunks: list[dict[str, Any]] = []
     for single_id in dataset_ids:
         try:
-            sub_data = _call_ragflow_retrieval(
-                query=query,
-                dataset_ids=[single_id],
-                similarity_threshold=similarity_threshold,
-                page_size=page_size,
-                top_k=top_k,
-                vector_weight=vector_weight,
-                timeout_seconds=timeout_seconds,
-            )
+            sub_kwargs = dict(retrieval_kwargs)
+            sub_kwargs["dataset_ids"] = [single_id]
+            sub_data = _call_ragflow_retrieval(**sub_kwargs)
         except requests.exceptions.RequestException as exc:
             logger.warning("知识库 %s 检索失败: %s", single_id, exc)
             continue
@@ -558,11 +743,17 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         enable_doc_cap = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_DOC_CAP", True), True)
         enable_query_rewrite = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_QUERY_REWRITE", False), False)
         enable_multi_route_rerank = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_MULTI_ROUTE_RERANK", False), False)
+        enable_domain_routing = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_DOMAIN_ROUTING", False), False)
         max_chunks_per_doc = _to_positive_int(_get_config_value("RAGFLOW_MAX_CHUNKS_PER_DOC", 2), 2)
         max_total_chunks = _to_positive_int(config.RAGFLOW_PAGE_SIZE, 8)
         max_evidence_chars = _to_positive_int(_get_config_value("RAGFLOW_EVIDENCE_MAX_CHARS", 320), 320)
         max_rewrite_queries = _to_positive_int(_get_config_value("RAGFLOW_MAX_REWRITE_QUERIES", 2), 2)
         rewrite_terms = _get_config_value("RAGFLOW_QUERY_REWRITE_TERMS", None)
+        domain_hints = _get_config_value("RAGFLOW_DOMAIN_ROUTING_HINTS", None)
+        metadata_field = (
+            str(_get_config_value("RAGFLOW_DOMAIN_METADATA_FIELD", "domain") or "domain").strip()
+            or "domain"
+        )
         main_route_weight = _to_non_negative_float(_get_config_value("RAGFLOW_MAIN_ROUTE_WEIGHT", 1.0), 1.0)
         rewrite_route_weight = _to_non_negative_float(_get_config_value("RAGFLOW_REWRITE_ROUTE_WEIGHT", 0.7), 0.7)
         similarity_weight = _to_non_negative_float(_get_config_value("RAGFLOW_RERANK_SIMILARITY_WEIGHT", 0.6), 0.6)
@@ -579,12 +770,26 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         if not retrieval_routes:
             return "知识库检索失败: 查询内容为空"
 
+        metadata_condition = _build_metadata_condition(
+            query,
+            enable_domain_routing=enable_domain_routing,
+            domain_hints=domain_hints,
+            metadata_field=metadata_field,
+        )
+        routed_domain: str | None = None
+        if metadata_condition:
+            conditions = metadata_condition.get("conditions", [])
+            if conditions:
+                routed_domain = str(conditions[0].get("value") or "").strip() or None
+
         logger.info(
-            "RAGFlow 检索: query=%s, routes=%d, rewrite=%s, rerank=%s, datasets=%s",
+            "RAGFlow 检索: query=%s, routes=%d, rewrite=%s, rerank=%s, domain_routing=%s, routed_domain=%s, datasets=%s",
             query[:50],
             len(retrieval_routes),
             enable_query_rewrite,
             enable_multi_route_rerank,
+            bool(metadata_condition),
+            routed_domain,
             target_datasets,
         )
 
@@ -592,12 +797,13 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         route_errors: list[str] = []
         raw_chunks_count = 0
         success_count = 0
+        metadata_fallback_count = 0
 
         for route in retrieval_routes:
             route_id = route["route_id"]
             route_query = route["query"]
             try:
-                chunks, error_msg = _retrieve_chunks_for_query(
+                chunks, error_msg, used_metadata_fallback = _retrieve_chunks_with_metadata_fallback(
                     route_query,
                     dataset_ids=target_datasets,
                     similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
@@ -605,6 +811,8 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                     top_k=config.RAGFLOW_TOP_K,
                     vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
                     timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
+                    metadata_condition=metadata_condition,
+                    route_id=route_id,
                 )
             except requests.exceptions.Timeout as exc:
                 if route_id == "main":
@@ -619,9 +827,17 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                 route_errors.append(f"{route_id}: request_error")
                 continue
 
+            if used_metadata_fallback:
+                metadata_fallback_count += 1
+
             if error_msg:
                 if route_id == "main":
-                    logger.warning("RAGFlow 检索失败: %s", error_msg)
+                    logger.warning(
+                        "RAGFlow 检索失败: domain=%s, metadata=%s, error=%s",
+                        routed_domain,
+                        bool(metadata_condition),
+                        error_msg,
+                    )
                     return f"检索失败: {error_msg}"
                 logger.warning("扩展路检索失败，已回退主路: route=%s, error=%s", route_id, error_msg)
                 route_errors.append(f"{route_id}: {error_msg}")
@@ -657,13 +873,16 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
 
         fallback_count = len(retrieval_routes) - success_count
         logger.info(
-            "RAGFlow 检索完成: routes=%d, fallback_routes=%d, raw=%d, merged=%d, selected=%d, rerank=%s, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
+            "RAGFlow 检索完成: routes=%d, fallback_routes=%d, raw=%d, merged=%d, selected=%d, rerank=%s, domain_routing=%s, routed_domain=%s, metadata_fallback_routes=%d, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
             len(retrieval_routes),
             fallback_count,
             raw_chunks_count,
             len(merged_chunks),
             len(selected_chunks),
             enable_multi_route_rerank,
+            bool(metadata_condition),
+            routed_domain,
+            metadata_fallback_count,
             max_chunks_per_doc,
             enable_doc_cap,
             enable_candidate_dedup,
