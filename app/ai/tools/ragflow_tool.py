@@ -4,6 +4,8 @@
 """
 import requests
 import logging
+import json
+import os
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import tool
@@ -111,12 +113,39 @@ def _to_positive_int(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def _to_non_negative_float(value: Any, default: float) -> float:
+    """将配置值转换为非负浮点数，非法值回退默认值。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _get_config_value(key: str, default: Any) -> Any:
+    """优先读取 config 属性，不存在时回退环境变量。"""
+    if hasattr(config, key):
+        return getattr(config, key)
+    env_value = os.getenv(key)
+    if env_value is None:
+        return default
+    return env_value
+
+
 def _chunk_similarity(chunk: dict) -> float:
     """读取 chunk 相似度。"""
     try:
         return float(chunk.get("similarity", 0) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _chunk_rank_score(chunk: dict) -> float:
+    """读取用于候选筛选排序的分数。"""
+    try:
+        return float(chunk.get("final_score", chunk.get("similarity", 0)) or 0)
+    except (TypeError, ValueError):
+        return _chunk_similarity(chunk)
 
 
 def _normalize_chunk_content(content: Any) -> str:
@@ -141,6 +170,234 @@ def _resolve_chunk_document_key(chunk: dict) -> str:
     return f"unknown:{id(chunk)}"
 
 
+def _normalize_rewrite_terms(raw_terms: Any) -> dict[str, list[str]]:
+    """归一化改写词配置。"""
+
+    def _as_term_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, (list, tuple, set)):
+            terms = []
+            for item in value:
+                text = str(item).strip()
+                if text:
+                    terms.append(text)
+            return terms
+        return []
+
+    if raw_terms is None:
+        return {}
+
+    source: Any = raw_terms
+    if isinstance(raw_terms, str):
+        payload = raw_terms.strip()
+        if not payload:
+            return {}
+        try:
+            source = json.loads(payload)
+        except json.JSONDecodeError:
+            source = payload
+
+    if isinstance(source, dict):
+        normalized: dict[str, list[str]] = {}
+        for key, value in source.items():
+            key_text = str(key).strip() or "__default__"
+            terms = _as_term_list(value)
+            if terms:
+                normalized[key_text] = terms
+        return normalized
+
+    terms = _as_term_list(source)
+    return {"__default__": terms} if terms else {}
+
+
+def _build_retrieval_queries(
+    raw_query: str,
+    *,
+    enable_query_rewrite: bool,
+    rewrite_terms: Any,
+    max_rewrite_queries: int = 2,
+    main_route_weight: float = 1.0,
+    rewrite_route_weight: float = 0.7,
+) -> list[dict[str, Any]]:
+    """构造检索路由：原问主路 + 扩展路。"""
+    base_query = str(raw_query or "").strip()
+    if not base_query:
+        return []
+
+    routes = [
+        {
+            "route_id": "main",
+            "route_name": "原问主路",
+            "query": base_query,
+            "route_weight": _to_non_negative_float(main_route_weight, 1.0),
+        }
+    ]
+    if not enable_query_rewrite:
+        return routes
+
+    try:
+        normalized_terms = _normalize_rewrite_terms(rewrite_terms)
+        matched_terms: list[str] = []
+        for key, terms in normalized_terms.items():
+            if key != "__default__" and key not in base_query:
+                continue
+            matched_terms.extend(terms)
+
+        unique_terms: list[str] = []
+        seen_terms: set[str] = set()
+        for term in matched_terms:
+            normalized = str(term).strip()
+            if not normalized or normalized in seen_terms:
+                continue
+            if normalized in base_query:
+                continue
+            seen_terms.add(normalized)
+            unique_terms.append(normalized)
+
+        rewrite_limit = _to_positive_int(max_rewrite_queries, 2)
+        safe_rewrite_weight = _to_non_negative_float(rewrite_route_weight, 0.7)
+        for index, term in enumerate(unique_terms[:rewrite_limit], start=1):
+            routes.append(
+                {
+                    "route_id": f"rewrite_{index}",
+                    "route_name": f"扩展路{index}",
+                    "query": f"{base_query} {term}",
+                    "route_weight": safe_rewrite_weight,
+                }
+            )
+        return routes
+    except Exception as exc:
+        logger.warning("构造改写路由失败，回退原问主路: %s", exc)
+        return routes
+
+
+def _merge_and_rerank_candidates(
+    chunks: list[dict[str, Any]],
+    *,
+    enable_rerank: bool,
+    similarity_weight: float,
+    route_weight_weight: float,
+) -> list[dict[str, Any]]:
+    """多路候选融合并重排，保留可解释分数字段。"""
+    if not chunks:
+        return []
+
+    safe_similarity_weight = _to_non_negative_float(similarity_weight, 0.6)
+    safe_route_weight_weight = _to_non_negative_float(route_weight_weight, 0.4)
+    total_weight = safe_similarity_weight + safe_route_weight_weight
+    if total_weight <= 0:
+        safe_similarity_weight, safe_route_weight_weight = 1.0, 0.0
+        total_weight = 1.0
+
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for chunk in chunks:
+        doc_key = _resolve_chunk_document_key(chunk)
+        content_key = _normalize_chunk_content(chunk.get("content", ""))
+        if not content_key:
+            fallback_id = chunk.get("chunk_id") or chunk.get("id")
+            content_key = str(fallback_id or "")
+
+        dedup_key = (doc_key, content_key)
+        route_id = str(chunk.get("_route_id") or "main")
+        route_weight = _to_non_negative_float(chunk.get("_route_weight"), 1.0)
+        similarity = _chunk_similarity(chunk)
+
+        existing = merged.get(dedup_key)
+        if existing is None:
+            merged_chunk = dict(chunk)
+            merged_chunk["similarity"] = similarity
+            merged_chunk["similarity_score"] = similarity
+            merged_chunk["route_weight"] = route_weight
+            merged_chunk["matched_routes"] = [route_id]
+            merged_chunk["route_hits"] = 1
+            merged[dedup_key] = merged_chunk
+            continue
+
+        existing["similarity"] = max(_chunk_similarity(existing), similarity)
+        existing["similarity_score"] = existing["similarity"]
+        existing["route_weight"] = max(_to_non_negative_float(existing.get("route_weight"), 0), route_weight)
+
+        if route_id not in existing["matched_routes"]:
+            existing["matched_routes"].append(route_id)
+            existing["route_hits"] = len(existing["matched_routes"])
+
+    reranked = list(merged.values())
+    for chunk in reranked:
+        similarity_score = _chunk_similarity(chunk)
+        route_score = _to_non_negative_float(chunk.get("route_weight"), 0)
+        coverage_bonus = 1.0 + 0.05 * max(int(chunk.get("route_hits", 1)) - 1, 0)
+
+        if enable_rerank:
+            final_score = (
+                (safe_similarity_weight * similarity_score + safe_route_weight_weight * route_score) / total_weight
+            ) * coverage_bonus
+        else:
+            final_score = similarity_score
+
+        chunk["similarity_score"] = similarity_score
+        chunk["route_score"] = route_score
+        chunk["final_score"] = round(final_score, 6)
+
+    reranked.sort(key=_chunk_rank_score, reverse=True)
+    return reranked
+
+
+def _retrieve_chunks_for_query(
+    query: str,
+    *,
+    dataset_ids: list[str],
+    similarity_threshold: float,
+    page_size: int,
+    top_k: int,
+    vector_weight: float,
+    timeout_seconds: float,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """执行单路检索并兼容多知识库 hybrid fallback。"""
+    data = _call_ragflow_retrieval(
+        query=query,
+        dataset_ids=dataset_ids,
+        similarity_threshold=similarity_threshold,
+        page_size=page_size,
+        top_k=top_k,
+        vector_weight=vector_weight,
+        timeout_seconds=timeout_seconds,
+    )
+    if data.get("code") == 0:
+        return data.get("data", {}).get("chunks", []), None
+
+    error_msg = data.get("message", "未知错误")
+    if "hybrid search" not in str(error_msg).lower() or len(dataset_ids) <= 1:
+        return [], str(error_msg)
+
+    logger.warning("多知识库不支持混合检索，尝试逐个检索并合并结果")
+    all_chunks: list[dict[str, Any]] = []
+    for single_id in dataset_ids:
+        try:
+            sub_data = _call_ragflow_retrieval(
+                query=query,
+                dataset_ids=[single_id],
+                similarity_threshold=similarity_threshold,
+                page_size=page_size,
+                top_k=top_k,
+                vector_weight=vector_weight,
+                timeout_seconds=timeout_seconds,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning("知识库 %s 检索失败: %s", single_id, exc)
+            continue
+
+        if sub_data.get("code") == 0:
+            all_chunks.extend(sub_data.get("data", {}).get("chunks", []))
+            continue
+
+        logger.warning("知识库 %s 检索失败: %s", single_id, sub_data.get("message", "未知错误"))
+
+    if all_chunks:
+        return all_chunks, None
+    return [], str(error_msg)
+
+
 def _dedup_and_cap_candidates(
     chunks: list[dict],
     *,
@@ -156,7 +413,7 @@ def _dedup_and_cap_candidates(
     safe_doc_cap = _to_positive_int(max_chunks_per_doc, 2)
     safe_total_cap = _to_positive_int(max_total_chunks, 30)
 
-    sorted_chunks = sorted(chunks, key=_chunk_similarity, reverse=True)
+    sorted_chunks = sorted(chunks, key=_chunk_rank_score, reverse=True)
     selected: list[dict] = []
     seen_keys: set[tuple[str, str]] = set()
     doc_counts: dict[str, int] = {}
@@ -225,6 +482,7 @@ def _format_retrieval_results(chunks: list, max_evidence_chars: int = 320) -> tu
         # RAGFlow 使用 document_keyword 而非 document_name
         source = str(chunk.get("document_keyword") or chunk.get("document_name") or "未知来源")
         score = _chunk_similarity(chunk)
+        final_score = _chunk_rank_score(chunk)
         
         # 尝试获取文档下载链接
         document_id = chunk.get("document_id")
@@ -234,10 +492,13 @@ def _format_retrieval_results(chunks: list, max_evidence_chars: int = 320) -> tu
             encoded_name = quote(source)
             source_link = f" ([⬇️ 下载](/api/v1/assets/proxy/ragflow/doc/{document_id}?name={encoded_name}))"
 
-        result_text = (
-            f"【证据卡片{i}】 摘要: {snippet}\n"
-            f"   来源: {source}{source_link} | 相关度: {score:.2%}"
-        )
+        result_text = f"【证据卡片{i}】 摘要: {snippet}\n   来源: {source}{source_link} | 相关度: {score:.2%}"
+        if "final_score" in chunk:
+            route_weight = _to_non_negative_float(chunk.get("route_weight"), 0)
+            result_text += (
+                f" | 综合分: {final_score:.4f}"
+                f" (相似度: {score:.4f}, 路由权重: {route_weight:.4f})"
+            )
         
         # 如果有图片，使用占位符 [IMG-N]
         # 约束：同一图片 URL 在一次检索结果中只分配一个占位符，避免回答重复渲染相同图片
@@ -278,8 +539,6 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
     - 在整合内容时，把相关的 [IMG-N] 放在对应段落附近
     - 系统会自动将占位符替换为实际图片
     """
-    import json
-    
     # 检查配置
     if not config.RAGFLOW_API_KEY:
         return "⚠️ 知识库未配置：请设置 RAGFLOW_API_KEY 环境变量"
@@ -295,102 +554,124 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         return "⚠️ 知识库 ID 未配置：请设置 RAGFLOW_DATASET_IDS 或 RAGFLOW_DATASET_ID 环境变量"
     
     try:
-        enable_candidate_dedup = _to_bool_flag(getattr(config, "RAGFLOW_ENABLE_CANDIDATE_DEDUP", True), True)
-        enable_doc_cap = _to_bool_flag(getattr(config, "RAGFLOW_ENABLE_DOC_CAP", True), True)
-        max_chunks_per_doc = _to_positive_int(getattr(config, "RAGFLOW_MAX_CHUNKS_PER_DOC", 2), 2)
+        enable_candidate_dedup = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_CANDIDATE_DEDUP", True), True)
+        enable_doc_cap = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_DOC_CAP", True), True)
+        enable_query_rewrite = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_QUERY_REWRITE", False), False)
+        enable_multi_route_rerank = _to_bool_flag(_get_config_value("RAGFLOW_ENABLE_MULTI_ROUTE_RERANK", False), False)
+        max_chunks_per_doc = _to_positive_int(_get_config_value("RAGFLOW_MAX_CHUNKS_PER_DOC", 2), 2)
         max_total_chunks = _to_positive_int(config.RAGFLOW_PAGE_SIZE, 8)
-        max_evidence_chars = _to_positive_int(getattr(config, "RAGFLOW_EVIDENCE_MAX_CHARS", 320), 320)
+        max_evidence_chars = _to_positive_int(_get_config_value("RAGFLOW_EVIDENCE_MAX_CHARS", 320), 320)
+        max_rewrite_queries = _to_positive_int(_get_config_value("RAGFLOW_MAX_REWRITE_QUERIES", 2), 2)
+        rewrite_terms = _get_config_value("RAGFLOW_QUERY_REWRITE_TERMS", None)
+        main_route_weight = _to_non_negative_float(_get_config_value("RAGFLOW_MAIN_ROUTE_WEIGHT", 1.0), 1.0)
+        rewrite_route_weight = _to_non_negative_float(_get_config_value("RAGFLOW_REWRITE_ROUTE_WEIGHT", 0.7), 0.7)
+        similarity_weight = _to_non_negative_float(_get_config_value("RAGFLOW_RERANK_SIMILARITY_WEIGHT", 0.6), 0.6)
+        route_weight_weight = _to_non_negative_float(_get_config_value("RAGFLOW_RERANK_ROUTE_WEIGHT", 0.4), 0.4)
 
-        logger.info("RAGFlow 检索: query=%s, datasets=%s", query[:50], target_datasets)
-        
-        # 调用 RAGFlow API（支持多知识库）
-        data = _call_ragflow_retrieval(
-            query=query,
-            dataset_ids=target_datasets,
-            similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
-            page_size=config.RAGFLOW_PAGE_SIZE,
-            top_k=config.RAGFLOW_TOP_K,
-            vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
-            timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
+        retrieval_routes = _build_retrieval_queries(
+            query,
+            enable_query_rewrite=enable_query_rewrite,
+            rewrite_terms=rewrite_terms,
+            max_rewrite_queries=max_rewrite_queries,
+            main_route_weight=main_route_weight,
+            rewrite_route_weight=rewrite_route_weight,
         )
-        
-        # 检查响应
-        if data.get("code") != 0:
-            error_msg = data.get("message", "未知错误")
-            
-            # 混合检索回退逻辑
-            if "hybrid search" in error_msg.lower() and len(target_datasets) > 1:
-                logger.warning("多知识库不支持混合检索，尝试逐个检索并合并结果")
-                
-                all_chunks = []
-                for single_id in target_datasets:
-                    try:
-                        sub_data = _call_ragflow_retrieval(
-                            query=query,
-                            dataset_ids=[single_id],
-                            similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
-                            page_size=config.RAGFLOW_PAGE_SIZE,
-                            top_k=config.RAGFLOW_TOP_K,
-                            vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
-                            timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
-                        )
-                        if sub_data.get("code") == 0:
-                            chunks = sub_data.get("data", {}).get("chunks", [])
-                            all_chunks.extend(chunks)
-                    except Exception as e:
-                        logger.warning(f"知识库 {single_id} 检索失败: {e}")
-                
-                # 按照相似度排序
-                final_chunks = _dedup_and_cap_candidates(
-                    all_chunks,
-                    max_chunks_per_doc=max_chunks_per_doc,
-                    max_total_chunks=max_total_chunks,
-                    enable_dedup=enable_candidate_dedup,
-                    enable_doc_cap=enable_doc_cap,
-                )
-                
-                result_text, kb_images = _format_retrieval_results(final_chunks, max_evidence_chars)
-                logger.info(
-                    "混合检索完成: raw=%d, selected=%d, doc_cap=%s, dedup=%s, per_doc_limit=%d, 图片=%d",
-                    len(all_chunks),
-                    len(final_chunks),
-                    enable_doc_cap,
-                    enable_candidate_dedup,
-                    max_chunks_per_doc,
-                    len(kb_images),
-                )
-                
-                # 将图片映射附加到返回值（使用特殊分隔符）
-                if kb_images:
-                    result_text += f"\n\n<!--KB_IMAGES:{json.dumps(kb_images)}-->"
-                
-                return result_text
+        if not retrieval_routes:
+            return "知识库检索失败: 查询内容为空"
 
-            logger.warning("RAGFlow 检索失败: %s", error_msg)
-            return f"检索失败: {error_msg}"
-        
-        # 格式化结果
-        chunks = data.get("data", {}).get("chunks", [])
+        logger.info(
+            "RAGFlow 检索: query=%s, routes=%d, rewrite=%s, rerank=%s, datasets=%s",
+            query[:50],
+            len(retrieval_routes),
+            enable_query_rewrite,
+            enable_multi_route_rerank,
+            target_datasets,
+        )
+
+        route_chunks: list[dict[str, Any]] = []
+        route_errors: list[str] = []
+        raw_chunks_count = 0
+        success_count = 0
+
+        for route in retrieval_routes:
+            route_id = route["route_id"]
+            route_query = route["query"]
+            try:
+                chunks, error_msg = _retrieve_chunks_for_query(
+                    route_query,
+                    dataset_ids=target_datasets,
+                    similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
+                    page_size=config.RAGFLOW_PAGE_SIZE,
+                    top_k=config.RAGFLOW_TOP_K,
+                    vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
+                    timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
+                )
+            except requests.exceptions.Timeout as exc:
+                if route_id == "main":
+                    raise
+                logger.warning("扩展路检索超时，已回退主路: route=%s, error=%s", route_id, exc)
+                route_errors.append(f"{route_id}: timeout")
+                continue
+            except requests.exceptions.RequestException as exc:
+                if route_id == "main":
+                    raise
+                logger.warning("扩展路检索失败，已回退主路: route=%s, error=%s", route_id, exc)
+                route_errors.append(f"{route_id}: request_error")
+                continue
+
+            if error_msg:
+                if route_id == "main":
+                    logger.warning("RAGFlow 检索失败: %s", error_msg)
+                    return f"检索失败: {error_msg}"
+                logger.warning("扩展路检索失败，已回退主路: route=%s, error=%s", route_id, error_msg)
+                route_errors.append(f"{route_id}: {error_msg}")
+                continue
+
+            success_count += 1
+            raw_chunks_count += len(chunks)
+            route_weight = _to_non_negative_float(route.get("route_weight"), 1.0)
+            for chunk in chunks:
+                enriched_chunk = dict(chunk)
+                enriched_chunk["_route_id"] = route_id
+                enriched_chunk["_route_name"] = route.get("route_name")
+                enriched_chunk["_route_weight"] = route_weight
+                route_chunks.append(enriched_chunk)
+
+        if success_count == 0:
+            return "知识库检索失败: 所有检索路由均不可用"
+
+        merged_chunks = _merge_and_rerank_candidates(
+            route_chunks,
+            enable_rerank=enable_multi_route_rerank,
+            similarity_weight=similarity_weight,
+            route_weight_weight=route_weight_weight,
+        )
         selected_chunks = _dedup_and_cap_candidates(
-            chunks,
+            merged_chunks,
             max_chunks_per_doc=max_chunks_per_doc,
             max_total_chunks=max_total_chunks,
             enable_dedup=enable_candidate_dedup,
             enable_doc_cap=enable_doc_cap,
         )
         result_text, kb_images = _format_retrieval_results(selected_chunks, max_evidence_chars)
-        
-        # 统计图片数量
+
+        fallback_count = len(retrieval_routes) - success_count
         logger.info(
-            "RAGFlow 检索完成: raw=%d, selected=%d, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
-            len(chunks),
+            "RAGFlow 检索完成: routes=%d, fallback_routes=%d, raw=%d, merged=%d, selected=%d, rerank=%s, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
+            len(retrieval_routes),
+            fallback_count,
+            raw_chunks_count,
+            len(merged_chunks),
             len(selected_chunks),
+            enable_multi_route_rerank,
             max_chunks_per_doc,
             enable_doc_cap,
             enable_candidate_dedup,
             len(result_text),
             len(kb_images),
         )
+        if route_errors:
+            logger.info("RAGFlow 扩展路回退详情: %s", route_errors)
         
         # 调试日志
         logger.debug("="*60)

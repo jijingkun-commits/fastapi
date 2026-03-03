@@ -7,9 +7,11 @@ import requests
 
 from app.ai.tools import ragflow_tool
 from app.ai.tools.ragflow_tool import (
+    _build_retrieval_queries,
     _call_ragflow_retrieval,
     _dedup_and_cap_candidates,
     _format_retrieval_results,
+    _merge_and_rerank_candidates,
 )
 
 
@@ -336,3 +338,154 @@ def test_knowledge_search_should_apply_dedup_and_doc_cap(monkeypatch) -> None:
     assert result.count("来源: 文档A") == 1
     assert result.count("来源: 文档B") == 1
     assert result.count("【证据卡片") == 2
+
+
+def test_build_retrieval_queries_rewrite_should_keep_main_and_append_rewrites() -> None:
+    """改写路应在保留主路前提下追加扩展查询。"""
+
+    routes = _build_retrieval_queries(
+        "新渠道有哪些功能",
+        enable_query_rewrite=True,
+        rewrite_terms={
+            "__default__": ["业务场景"],
+            "渠道": ["产品能力", "功能特性"],
+        },
+        max_rewrite_queries=2,
+        main_route_weight=1.0,
+        rewrite_route_weight=0.7,
+    )
+
+    assert len(routes) == 3
+    assert routes[0]["route_id"] == "main"
+    assert routes[0]["query"] == "新渠道有哪些功能"
+    assert routes[0]["route_weight"] == 1.0
+    assert routes[1]["query"] == "新渠道有哪些功能 业务场景"
+    assert routes[2]["query"] == "新渠道有哪些功能 产品能力"
+    assert all(route["route_weight"] == 0.7 for route in routes[1:])
+
+
+def test_build_retrieval_queries_rewrite_should_fallback_to_main_on_error() -> None:
+    """改写构造异常时应自动回退主路。"""
+
+    class _BrokenMap(dict):
+        def items(self):
+            raise RuntimeError("broken")
+
+    routes = _build_retrieval_queries(
+        "员工请假制度",
+        enable_query_rewrite=True,
+        rewrite_terms=_BrokenMap({"请假": ["休假"]}),
+    )
+
+    assert routes == [
+        {
+            "route_id": "main",
+            "route_name": "原问主路",
+            "query": "员工请假制度",
+            "route_weight": 1.0,
+        }
+    ]
+
+
+def test_merge_and_rerank_candidates_should_keep_explainable_scores() -> None:
+    """融合重排应保留 final_score 与 route_weight 等可解释分数。"""
+
+    merged = _merge_and_rerank_candidates(
+        [
+            {
+                "document_id": "doc-a",
+                "content": "主路命中",
+                "similarity": 0.90,
+                "_route_id": "main",
+                "_route_weight": 1.0,
+            },
+            {
+                "document_id": "doc-a",
+                "content": "主路命中",
+                "similarity": 0.86,
+                "_route_id": "rewrite_1",
+                "_route_weight": 0.8,
+            },
+            {
+                "document_id": "doc-b",
+                "content": "改写命中",
+                "similarity": 0.88,
+                "_route_id": "rewrite_1",
+                "_route_weight": 0.8,
+            },
+        ],
+        enable_rerank=True,
+        similarity_weight=0.6,
+        route_weight_weight=0.4,
+    )
+
+    assert merged[0]["document_id"] == "doc-a"
+    assert merged[0]["route_hits"] == 2
+    assert merged[0]["matched_routes"] == ["main", "rewrite_1"]
+    assert merged[0]["route_weight"] == 1.0
+    assert merged[0]["final_score"] > merged[1]["final_score"]
+
+
+def test_format_retrieval_results_should_render_final_score_explanation() -> None:
+    """融合后候选应在卡片中展示综合分解释字段。"""
+
+    formatted_text, _ = _format_retrieval_results(
+        [
+            {
+                "content": "融合命中证据",
+                "document_keyword": "文档A",
+                "similarity": 0.90,
+                "final_score": 0.94,
+                "route_weight": 1.0,
+            }
+        ]
+    )
+
+    assert "综合分:" in formatted_text
+    assert "路由权重" in formatted_text
+
+
+def test_knowledge_search_rewrite_should_fallback_to_main_when_rewrite_times_out(monkeypatch) -> None:
+    """改写路超时时不应阻断主路结果。"""
+
+    calls: list[str] = []
+
+    def _fake_retrieval(**kwargs) -> dict:
+        calls.append(kwargs["query"])
+        if kwargs["query"] == "报销流程":
+            return {
+                "code": 0,
+                "data": {
+                    "chunks": [
+                        {
+                            "document_id": "doc-main",
+                            "document_keyword": "主路文档",
+                            "content": "先提交申请再上传发票",
+                            "similarity": 0.92,
+                        }
+                    ]
+                },
+            }
+
+        raise requests.exceptions.Timeout("rewrite timeout")
+
+    monkeypatch.setattr(ragflow_tool, "_call_ragflow_retrieval", _fake_retrieval)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_KEY", "test-key")
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_DATASET_IDS", ["kb-default"])
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_SIMILARITY_THRESHOLD", 0.2)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_PAGE_SIZE", 4)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TOP_K", 8)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_VECTOR_WEIGHT", 0.6)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TIMEOUT_SECONDS", 20)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_QUERY_REWRITE", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_QUERY_REWRITE_TERMS", ["发票规范"], raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_MULTI_ROUTE_RERANK", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_CANDIDATE_DEDUP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_DOC_CAP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_MAX_CHUNKS_PER_DOC", 2, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_EVIDENCE_MAX_CHARS", 120, raising=False)
+
+    result = ragflow_tool.knowledge_search.func(query="报销流程", dataset_id=None)
+
+    assert "来源: 主路文档" in result
+    assert calls == ["报销流程", "报销流程 发票规范"]
