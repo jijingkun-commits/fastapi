@@ -14,6 +14,34 @@
 - active_task_alignment 差异:
 ```
 
+## 本项目默认覆盖（串行主干状态）
+
+```yaml
+vk_cards:
+  done_definition: verify_passed_and_merged
+  execution_mode: serial
+
+  cards:
+    - task_mode: implementation-card
+      merge_required: true
+
+gate_cards:
+  - card_id: G01
+    task_mode: inspection-card
+    merge_required: false
+  - card_id: IG01
+    task_mode: inspection-card
+    merge_required: false
+
+execution_contract:
+  delivery_mode: staged
+  execution_unit: per_card
+  commit_policy: per_card
+  merge_policy: per_card_to_master
+  stop_boundary: per_card
+  stop_on_blocked: true
+```
+
 ## 本项目强制追加字段（卡片 PR 归属）
 
 当输出 `vk_cards.json` 时，每张可执行卡必须具备 PR 映射字段：

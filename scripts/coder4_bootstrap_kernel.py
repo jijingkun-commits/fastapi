@@ -49,11 +49,19 @@ IDEMPOTENCY_RETENTION_MULTIPLIER = 3
 ATTEMPT_KEEP_LATEST = 20
 STATE_LOCK_SUFFIX = ".lock"
 STATE_BACKUP_SUFFIX = ".bak"
+DEFAULT_DIRTY_POLICY_VERSION = "v1_docs_templates"
+DEFAULT_DIRTY_WHITELIST = (
+    "docs/",
+    ".cursor/commands/",
+    ".agents/skills/",
+    ".claude/commands/",
+)
 
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"
 IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
 AUTO_WAKE_DISABLE_ENV = "DISABLE_AUTO_WAKE"
 VK_SYNC_DISABLE_ENV = "DISABLE_VK_SYNC"
+DIRTY_WHITELIST_ENV = "CODER4_DIRTY_WHITELIST"
 OPENCLAW_GATEWAY_ENV = "OPENCLAW_GATEWAY"
 OPENCLAW_HOOKS_TOKEN_ENV = "OPENCLAW_HOOKS_TOKEN"
 
@@ -99,7 +107,10 @@ class KernelContext:
     main_repo_path: str
     main_repo_clean: bool
     main_repo_dirty_preview: list[str]
+    main_repo_dirty_ignored_preview: list[str]
     main_repo_error: str | None
+    dirty_policy_version: str
+    dirty_whitelist: list[str]
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +128,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trigger-source", default=os.getenv("CODER4_TRIGGER_SOURCE", "wake"))
     parser.add_argument("--idempotency-key", default="")
     parser.add_argument("--idempotency-window-seconds", type=int, default=DEFAULT_IDEMPOTENCY_WINDOW_SECONDS)
+    parser.add_argument("--subagent-id", default="")
+    parser.add_argument("--ws-file", default="")
+    parser.add_argument("--commit-sha", default="")
+    parser.add_argument("--merge-sha", default="")
+    parser.add_argument("--dirty-whitelist", default=os.getenv(DIRTY_WHITELIST_ENV, ""))
+    parser.add_argument("--dirty-policy-version", default=DEFAULT_DIRTY_POLICY_VERSION)
     parser.add_argument("--output", default="")
     return parser.parse_args()
 
@@ -284,6 +301,9 @@ def record_attempt_evidence(
     execution_mode: str = "serial",
     worktree_path: str | None = None,
     commit_sha: str | None = None,
+    merge_sha: str | None = None,
+    subagent_id: str | None = None,
+    ws_file: str | None = None,
 ) -> dict[str, Any]:
     normalized_card_id = _normalize_attempt_card_id(card_id)
     card_dir = _resolve_attempt_card_dir(attempts_root, task_key, normalized_card_id)
@@ -292,6 +312,15 @@ def record_attempt_evidence(
     if not commit_sha and isinstance(applied, dict):
         raw_sha = str(applied.get("commit_sha") or "").strip()
         commit_sha = raw_sha or None
+    if not merge_sha and isinstance(applied, dict):
+        raw_merge_sha = str(applied.get("merge_sha") or "").strip()
+        merge_sha = raw_merge_sha or None
+    if not subagent_id and isinstance(applied, dict):
+        raw_subagent_id = str(applied.get("subagent_id") or "").strip()
+        subagent_id = raw_subagent_id or None
+    if not ws_file and isinstance(applied, dict):
+        raw_ws_file = str(applied.get("ws_file") or "").strip()
+        ws_file = raw_ws_file or None
 
     evidence = {
         "target_status": target_status,
@@ -316,6 +345,9 @@ def record_attempt_evidence(
             "evidence": evidence,
             "worktree_path": str(worktree_path or Path.cwd().resolve()),
             "commit_sha": commit_sha,
+            "merge_sha": merge_sha,
+            "subagent_id": subagent_id,
+            "ws_file": ws_file,
             "execution_mode": str(execution_mode or "serial"),
             "trigger": str(trigger_source or "manual"),
             "duration_seconds": duration_seconds,
@@ -338,6 +370,9 @@ def record_attempt_evidence(
         "attempt_file": str(attempt_file),
         "worktree_path": attempt_payload["worktree_path"],
         "commit_sha": commit_sha,
+        "merge_sha": merge_sha,
+        "subagent_id": subagent_id,
+        "ws_file": ws_file,
         "evidence": evidence,
     }
     append_jsonl(ledger_file, ledger_entry)
@@ -1014,7 +1049,37 @@ def resolve_repo_root(active_task_path: Path) -> Path:
     return Path.cwd().resolve()
 
 
-def inspect_repo_clean(repo_root: Path) -> tuple[bool, list[str], str | None]:
+def parse_dirty_whitelist(raw: str | None) -> list[str]:
+    value = str(raw or "").strip()
+    if not value:
+        return list(DEFAULT_DIRTY_WHITELIST)
+
+    parsed: list[str] = []
+    for segment in value.split(","):
+        prefix = segment.strip().strip("/")
+        if not prefix:
+            continue
+        parsed.append(f"{prefix}/")
+    return parsed or list(DEFAULT_DIRTY_WHITELIST)
+
+
+def _extract_dirty_path(status_line: str) -> str:
+    body = status_line[3:] if len(status_line) >= 3 else status_line
+    if " -> " in body:
+        body = body.split(" -> ", 1)[1]
+    return body.strip()
+
+
+def _is_whitelisted_dirty_path(path: str, whitelist: list[str]) -> bool:
+    normalized = path.strip().lstrip("./")
+    return any(normalized.startswith(prefix) for prefix in whitelist)
+
+
+def inspect_repo_clean(
+    repo_root: Path,
+    *,
+    dirty_whitelist: list[str],
+) -> tuple[bool, list[str], list[str], str | None]:
     proc = subprocess.run(
         ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
         capture_output=True,
@@ -1025,9 +1090,19 @@ def inspect_repo_clean(repo_root: Path) -> tuple[bool, list[str], str | None]:
         stderr = proc.stderr.strip()
         stdout = proc.stdout.strip()
         detail = stderr or stdout or f"returncode={proc.returncode}"
-        return False, [], f"git_status_failed:{detail}"
-    dirty = [line.rstrip() for line in proc.stdout.splitlines() if line.strip()]
-    return len(dirty) == 0, dirty[:8], None
+        return False, [], [], f"git_status_failed:{detail}"
+
+    disallowed_dirty: list[str] = []
+    allowed_dirty: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = _extract_dirty_path(line)
+        if path and _is_whitelisted_dirty_path(path, dirty_whitelist):
+            allowed_dirty.append(line.rstrip())
+        else:
+            disallowed_dirty.append(line.rstrip())
+    return len(disallowed_dirty) == 0, disallowed_dirty[:8], allowed_dirty[:8], None
 
 
 def _task_preview(task: dict[str, Any]) -> dict[str, str]:
@@ -1146,6 +1221,8 @@ def build_kernel_context(
     *,
     local_mode: bool = False,
     state_path: Path | None = None,
+    dirty_whitelist: list[str] | None = None,
+    dirty_policy_version: str = DEFAULT_DIRTY_POLICY_VERSION,
 ) -> KernelContext:
     active = load_json(active_task_path)
     project_id = str(active.get("project_id") or "").strip()
@@ -1232,8 +1309,17 @@ def build_kernel_context(
             single_active_card=single_active_card,
         )
 
+    effective_dirty_whitelist = list(dirty_whitelist or DEFAULT_DIRTY_WHITELIST)
     repo_root = resolve_repo_root(active_task_path)
-    main_repo_clean, main_repo_dirty_preview, main_repo_error = inspect_repo_clean(repo_root)
+    (
+        main_repo_clean,
+        main_repo_dirty_preview,
+        main_repo_dirty_ignored_preview,
+        main_repo_error,
+    ) = inspect_repo_clean(
+        repo_root,
+        dirty_whitelist=effective_dirty_whitelist,
+    )
 
     preflight_ok = False
     preflight_reason = f"{preflight_required}_not_done"
@@ -1288,7 +1374,10 @@ def build_kernel_context(
         main_repo_path=str(repo_root),
         main_repo_clean=main_repo_clean,
         main_repo_dirty_preview=main_repo_dirty_preview,
+        main_repo_dirty_ignored_preview=main_repo_dirty_ignored_preview,
         main_repo_error=main_repo_error,
+        dirty_policy_version=str(dirty_policy_version or DEFAULT_DIRTY_POLICY_VERSION),
+        dirty_whitelist=effective_dirty_whitelist,
     )
 
 
@@ -1311,6 +1400,9 @@ def decide_action(ctx: KernelContext) -> tuple[str, str | None, str | None, str 
             "reason": "main_repo_dirty",
             "repo_root": ctx.main_repo_path,
             "dirty_preview": ctx.main_repo_dirty_preview,
+            "dirty_ignored_preview": ctx.main_repo_dirty_ignored_preview,
+            "dirty_policy_version": ctx.dirty_policy_version,
+            "dirty_whitelist": ctx.dirty_whitelist,
         }
         if ctx.main_repo_error:
             detail["error"] = ctx.main_repo_error
@@ -1565,6 +1657,8 @@ def main() -> int:
     idempotency_window_seconds = _normalize_window_seconds(args.idempotency_window_seconds)
     run_lock_disabled = is_disabled_by_env(RUN_LOCK_DISABLE_ENV)
     idempotency_disabled = is_disabled_by_env(IDEMPOTENCY_DISABLE_ENV)
+    dirty_whitelist = parse_dirty_whitelist(args.dirty_whitelist)
+    dirty_policy_version = str(args.dirty_policy_version or DEFAULT_DIRTY_POLICY_VERSION)
 
     try:
         with with_run_lock(run_lock_file) as lock_acquired:
@@ -1603,6 +1697,8 @@ def main() -> int:
                 args.vk_api_base,
                 local_mode=args.local_mode,
                 state_path=state_path,
+                dirty_whitelist=dirty_whitelist,
+                dirty_policy_version=dirty_policy_version,
             )
             action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
 
@@ -1666,7 +1762,10 @@ def main() -> int:
                                 "ok": ctx.main_repo_clean,
                                 "repo_root": ctx.main_repo_path,
                                 "dirty_preview": ctx.main_repo_dirty_preview,
+                                "dirty_ignored_preview": ctx.main_repo_dirty_ignored_preview,
                                 "error": ctx.main_repo_error,
+                                "dirty_policy_version": ctx.dirty_policy_version,
+                                "dirty_whitelist": ctx.dirty_whitelist,
                             },
                         }
                     )
@@ -1691,6 +1790,10 @@ def main() -> int:
                         blocked_details=blocked_details,
                         idempotency_key=idempotency_key,
                         execution_mode=ctx.execution_mode,
+                        subagent_id=str(args.subagent_id or "").strip() or None,
+                        ws_file=str(args.ws_file or "").strip() or None,
+                        commit_sha=str(args.commit_sha or "").strip() or None,
+                        merge_sha=str(args.merge_sha or "").strip() or None,
                     )
                     result.update(
                         {
@@ -1763,7 +1866,10 @@ def main() -> int:
                 idempotency_key=idempotency_key,
                 execution_mode=ctx.execution_mode,
                 worktree_path=worktree_path,
-                commit_sha=str(applied.get("commit_sha") or "").strip() or None,
+                subagent_id=str(args.subagent_id or "").strip() or None,
+                ws_file=str(args.ws_file or "").strip() or None,
+                commit_sha=str(args.commit_sha or applied.get("commit_sha") or "").strip() or None,
+                merge_sha=str(args.merge_sha or applied.get("merge_sha") or "").strip() or None,
             )
 
             scoped_counts = count_statuses(ctx.scoped_tasks)
@@ -1801,7 +1907,10 @@ def main() -> int:
                     "ok": ctx.main_repo_clean,
                     "repo_root": ctx.main_repo_path,
                     "dirty_preview": ctx.main_repo_dirty_preview,
+                    "dirty_ignored_preview": ctx.main_repo_dirty_ignored_preview,
                     "error": ctx.main_repo_error,
+                    "dirty_policy_version": ctx.dirty_policy_version,
+                    "dirty_whitelist": ctx.dirty_whitelist,
                 },
                 "applied": applied,
                 "auto_wake": auto_wake,
@@ -1820,6 +1929,12 @@ def main() -> int:
                     "attempt_id": attempt_evidence["attempt"]["attempt_id"],
                     "attempt_file": attempt_evidence["attempt_file"],
                     "result": attempt_result,
+                },
+                "execution_evidence": {
+                    "subagent_id": attempt_evidence["attempt"].get("subagent_id"),
+                    "ws_file": attempt_evidence["attempt"].get("ws_file"),
+                    "commit_sha": attempt_evidence["attempt"].get("commit_sha"),
+                    "merge_sha": attempt_evidence["attempt"].get("merge_sha"),
                 },
                 "task_ledger_file": str(task_ledger_file),
                 "local_mode": args.local_mode,

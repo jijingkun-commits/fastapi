@@ -207,12 +207,12 @@ coder4 每一轮按固定顺序执行：
 ### Step B：落卡到 VK（让 Bot 代办）
 
 你不手工执行 `/jjk-vktodo`。  
-直接让 `jjk_coder4_bot` 执行落卡，并强制“单卡滚动创建”：
+直接让 `jjk_coder4_bot` 执行 create-only 落卡：
 
-1. 调用 `/jjk-vktodo <task_split_dir>`
-2. 当前有 scoped 非 done 卡时，禁止再创建下一张
-3. 仅在当前卡 `done` 后，按 `card_order` 创建下一张
-4. 全程保持“每次最多 1 张 scoped 非 done 卡”
+1. 调用 `/jjk-vktodo <task_split_dir> create`
+2. 仅做幂等建卡，不做 move/review/done 推进
+3. 建卡成功后把状态推进交给 `/jjk-cardrun <task_split_dir> loop`
+4. 串行约束由 `/jjk-cardrun` 保证：`verify -> merge -> done` 后才进入下一卡
 
 ### Step C：更新自动作用域（让 Bot 代办）
 
@@ -299,14 +299,16 @@ project_id：<VK_PROJECT_ID>
 
 ```text
 请在 /Users/jijingkun/bojxAI/fastapi 执行以下任务并回报结果：
-1) 执行 /jjk-vktodo <task_split_dir> 落卡到 project_id=<VK_PROJECT_ID>
-2) 按 card_order 单卡滚动创建：当前有 scoped 非 done 卡时，不创建下一张；仅在当前卡 done 后创建下一张
+1) 执行 /jjk-vktodo <task_split_dir> create（create-only）落卡到 project_id=<VK_PROJECT_ID>
+2) 严禁执行 /jjk-vktodo move/review/done，状态推进统一交给 /jjk-cardrun
 3) 写入 /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json：
    {"task_split_dir":"<task_split_dir>","project_id":"<VK_PROJECT_ID>","requested_by":"operator","requested_at":"<now>","applied":false}
 4) 执行 python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
-5) 回报：
+5) 执行 /jjk-cardrun <task_split_dir> once（验证可启动）；持续执行使用 /jjk-cardrun <task_split_dir> loop
+6) 回报：
    - 当前 scoped 卡总数与非 done 数
    - scope_guard action
+   - cardrun 当前动作（card_id/action/result）
    - 任务级 `_active_task.json` 与根目录索引的 task_key/task_split_dir/project_id
    - 与 vk_cards.json 是否一致
 ```
@@ -332,19 +334,18 @@ project_id：<VK_PROJECT_ID>
 - mode=<start|stop>  # start=开启自动持续，stop=仅停止 cron
 
 [执行步骤]
-1) 执行 /jjk-vktodo <task_split_dir>，按 card_order 单卡滚动创建：
-   - 当前有 scoped 非 done 卡时，禁止创建下一张
-   - 仅在当前卡 done 后创建下一张
+1) 执行 /jjk-vktodo <task_split_dir> create（create-only 幂等建卡）
 2) 写入 coder4_scope_request.json（task_split_dir/project_id/applied=false）
 3) 执行 python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
 4) 校验任务级 `_active_task.json` 与索引 `_active_task.json`、`vk_cards.json` 一致性（task_key/task_split_dir/project_id）
-4) 调用 cron list（含 disabled）定位 coder4 job_id
-5) 若 mode=start：cron update enabled=true；若 mode=stop：cron update enabled=false
-6) 调用 cron runs 返回最近 5 次结果
+5) 若 mode=start：执行 /jjk-cardrun <task_split_dir> loop；若 mode=stop：停止当前 loop/cron
+6) 调用 cron list（含 disabled）定位 coder4 job_id，并按 mode 更新 enabled
+7) 调用 cron runs 返回最近 5 次结果
 
 [输出格式]
-- vktodo: success/fail + scoped总数 + scoped非done数
+- vktodo: create-only success/fail + created/skipped/failed
 - scope_guard: action + reason_or_none
+- cardrun: mode + current_card + action + result
 - active_task: task_key / task_split_dir / project_id / preflight_required
 - consistency: pass/fail + 差异项
 - cron: job_id / enabled(before->after)
@@ -359,7 +360,8 @@ project_id：<VK_PROJECT_ID>
 ```
 
 期望 Bot 内部动作：
-1) `/jjk-vktodo <task_split_dir>`（单卡滚动创建）
+1) `/jjk-vktodo <task_split_dir> create`（create-only 落卡）
 2) 写入 `coder4_scope_request.json`
 3) 执行 `python3 scripts/coder4_scope_guard.py ...`
-4) `cron list` 找到 coder4 job，再 `cron update enabled=true`
+4) `/jjk-cardrun <task_split_dir> loop`
+5) `cron list` 找到 coder4 job，再 `cron update enabled=true`

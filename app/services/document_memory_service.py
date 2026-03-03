@@ -32,6 +32,12 @@ _DEFAULT_PREFERENCE_SCOPE = "global"
 _PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY = "memory.user_preference_bootstrap_template"
 _PREFERENCE_BOOTSTRAP_TEMPLATE_DEFAULT = {"assistant.persona": "小嘉"}
 _PREFERENCE_BOOTSTRAP_SOURCE_THREAD_ID = "system.user_bootstrap"
+_SOURCE_METADATA_PATTERNS = (
+    re.compile(r"^- (来源线程|来源消息)："),
+    re.compile(r"^- source_(thread_id|message_id):", re.IGNORECASE),
+    re.compile(r"^# 记忆日记 \d{4}-\d{2}-\d{2}$"),
+    re.compile(r"^### \d{2}:\d{2}:\d{2}$"),
+)
 
 
 def _normalize_text(text: str) -> str:
@@ -64,6 +70,36 @@ def _build_daily_entry(
     if source_message_id:
         lines.append(f"- 来源消息：{source_message_id}")
     return "\n".join(lines)
+
+
+def _build_daily_summary(user_text: str, *, max_chars: int = 180) -> str:
+    """构建 daily 文档摘要，避免后台列表为空。"""
+
+    plain = " ".join(str(user_text or "").split()).strip()
+    if not plain:
+        return "用户记忆片段"
+    if len(plain) <= max_chars:
+        return plain
+    return f"{plain[:max_chars].rstrip()}..."
+
+
+def _is_source_metadata_line(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    return any(pattern.search(stripped) for pattern in _SOURCE_METADATA_PATTERNS)
+
+
+def _strip_source_metadata_lines(text: str) -> str:
+    """移除来源元数据行，降低 UUID/消息号对检索与注入的噪声。"""
+
+    lines = (text or "").splitlines()
+    cleaned = [line for line in lines if not _is_source_metadata_line(line)]
+    while cleaned and not cleaned[0].strip():
+        cleaned.pop(0)
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+    return "\n".join(cleaned).strip()
 
 
 def _normalize_bootstrap_template(raw_template: Any) -> dict[str, str]:
@@ -221,7 +257,7 @@ def _split_document_to_chunks(
     while cursor < len(lines):
         end = min(len(lines), cursor + safe_max_lines)
         segment = lines[cursor:end]
-        chunk_text = "\n".join(segment).strip()
+        chunk_text = _strip_source_metadata_lines("\n".join(segment))
         if chunk_text:
             chunks.append(
                 {
@@ -364,18 +400,65 @@ def memory_get(
     )
 
 
-def recall(
+def _build_preference_context(
+    db: Session,
+    *,
+    user_id: int,
+    max_items: int = 6,
+    max_chars: int = 360,
+) -> str:
+    """构建稳定偏好上下文（与 query 无关，始终注入）。"""
+
+    if not user_id:
+        return ""
+
+    documents, _ = document_memory_repo.list_documents(
+        db,
+        user_id=user_id,
+        doc_kind=_DEFAULT_PREFERENCE_DOC_KIND,
+        status="active",
+        source=_DEFAULT_MEMORY_SOURCE,
+        page=1,
+        page_size=max(1, int(max_items)),
+    )
+    if not documents:
+        return ""
+
+    header = "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）："
+    lines = [header]
+    budget = max(120, int(max_chars))
+    current_len = len(header)
+
+    for item in documents:
+        summary = str(item.get("summary_md") or "").strip()
+        doc_key = str(item.get("doc_key") or "").strip()
+        if not summary or not doc_key:
+            continue
+
+        display_key = doc_key.split(":", 1)[-1] if ":" in doc_key else doc_key
+        citation = f"memory://user/{user_id}/{_DEFAULT_PREFERENCE_DOC_KIND}/{doc_key}#L1-L5"
+        line = f"- {display_key}: {summary}\n  引用: {citation}"
+        next_len = current_len + len(line) + 1
+        if next_len > budget:
+            break
+        lines.append(line)
+        current_len = next_len
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _build_retrieval_context(
     db: Session,
     *,
     user_id: int,
     query_text: str,
-    max_results: int = _DEFAULT_MAX_RESULTS,
-    max_injected_chars: int = _DEFAULT_MAX_INJECTED_CHARS,
-    min_score: float = _DEFAULT_MIN_SCORE,
-    vector_weight: float = _DEFAULT_VECTOR_WEIGHT,
-    text_weight: float = _DEFAULT_TEXT_WEIGHT,
+    max_results: int,
+    max_injected_chars: int,
+    min_score: float,
+    vector_weight: float,
+    text_weight: float,
 ) -> str:
-    """构建可注入模型的文档记忆上下文。"""
+    """构建与 query 相关的检索记忆上下文。"""
 
     results = memory_search(
         db,
@@ -403,7 +486,8 @@ def recall(
             lines=max(1, int(result["end_line"]) - int(result["start_line"]) + 1),
         )
         snippet = excerpt.get("text") if excerpt else result.get("chunk_text", "")
-        snippet = _clamp_context_lines(str(snippet or ""))
+        snippet = _strip_source_metadata_lines(str(snippet or ""))
+        snippet = _clamp_context_lines(snippet)
         line = f"- {snippet}\n  引用: {result['citation']}"
         next_len = current_len + len(line) + 1
         if next_len > budget:
@@ -412,6 +496,45 @@ def recall(
         current_len = next_len
 
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def recall(
+    db: Session,
+    *,
+    user_id: int,
+    query_text: str,
+    max_results: int = _DEFAULT_MAX_RESULTS,
+    max_injected_chars: int = _DEFAULT_MAX_INJECTED_CHARS,
+    min_score: float = _DEFAULT_MIN_SCORE,
+    vector_weight: float = _DEFAULT_VECTOR_WEIGHT,
+    text_weight: float = _DEFAULT_TEXT_WEIGHT,
+) -> str:
+    """构建可注入模型的文档记忆上下文。"""
+
+    total_budget = max(120, int(max_injected_chars))
+    preference_budget = max(120, min(360, int(total_budget * 0.4)))
+    retrieval_budget = max(80, total_budget - preference_budget)
+
+    preference_context = _build_preference_context(
+        db,
+        user_id=user_id,
+        max_items=max_results,
+        max_chars=preference_budget,
+    )
+    retrieval_context = _build_retrieval_context(
+        db,
+        user_id=user_id,
+        query_text=query_text,
+        max_results=max_results,
+        max_injected_chars=retrieval_budget,
+        min_score=min_score,
+        vector_weight=vector_weight,
+        text_weight=text_weight,
+    )
+
+    if preference_context and retrieval_context:
+        return f"{preference_context}\n\n{retrieval_context}"
+    return preference_context or retrieval_context
 
 
 def bootstrap_preference_documents(
@@ -558,7 +681,7 @@ def flush(
             doc_key=doc_key,
             title=doc_title,
             content_md=merged,
-            summary_md=None,
+            summary_md=_build_daily_summary(text),
             source=_DEFAULT_MEMORY_SOURCE,
             scope="private",
             scope_ref=source_thread_id,

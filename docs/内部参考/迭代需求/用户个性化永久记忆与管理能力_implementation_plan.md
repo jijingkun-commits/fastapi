@@ -177,6 +177,8 @@ H --> F
 | P5-01 | C05 | 管理后台记忆列表页 | `web/src/app/admin/memory/page.tsx`; `web/src/components/admin/MemoryAdminPanel.tsx`; `web/src/lib/memory-admin-api.ts` | `cd web && npm run lint` | 设计文档 5.2 |
 | P5-02 | C05 | 详情抽屉 + 治理动作按钮 | `MemoryAdminPanel.tsx` `MemoryDetailDrawer` | `cd web && npm run lint` | 需求 FR-12~FR-15 |
 | P6-01 | C06 | 配置/迁移/文档收口 | `app/core/config_contract.py`; `install/sql/init_postgres.sql`; `docs/SUMMARY.md` | `python3 scripts/docs_guard.py --strict` | 平台治理要求 |
+| G-1 | G01 | 流程门禁（作用域与 gate_result 聚合） | `scripts/coder4_scope_guard.py`; `.omc/state/attempts/*/gate_result.json` | `python3 scripts/coder4_scope_guard.py ...` + gate_result 聚合校验 | 串行流程门禁要求 |
+| IG-1 | IG01 | 集成门禁（merge 证据与主干可见） | `scripts/check_integration_gate.py::run_check`; `.omc/state/attempts/*/merge_result.json` | `python3 scripts/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --baseline master` | 主干可见性验收要求 |
 
 ---
 
@@ -785,16 +787,17 @@ test_strategy:
 ```yaml
 planning_contract:
   execution_mode: serial
-  card_order: [C01, C02, C03, C04, C05, C06, G01]
+  card_order: [C01, C02, C03, C04, C05, C06, G01, IG01]
   strict_single_active_card: true
   auto_done_policy:
     implementation-card: hard_gate
     inspection-card: policy_gate
   gate_contract:
     mode: as_cards
-    gate_ids: [G01]
+    gate_ids: [G01, IG01]
     depends_on:
       G01: [C06]
+      IG01: [G01]
 
   cards:
     - card_id: C01
@@ -882,6 +885,18 @@ planning_contract:
       acceptance_checks:
         - python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
         - python3 -c "import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/.omc/state/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'"
+      evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
+
+    - card_id: IG01
+      wave: Gate
+      feature_ids: [IG-1]
+      depends_on: [G01]
+      task_mode: inspection-card
+      merge_required: false
+      done_gate:
+        - 实现卡已合并且主干可见
+      acceptance_checks:
+        - python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --baseline master
       evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
 
   task_to_pr_mapping:

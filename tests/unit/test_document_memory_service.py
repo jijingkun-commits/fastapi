@@ -95,16 +95,21 @@ def test_flush_persists_daily_document_and_chunks(monkeypatch):
     assert captured["upsert"] is not None
     assert captured["upsert"]["user_id"] == 9
     assert captured["upsert"]["doc_kind"] == "daily"
+    assert captured["upsert"]["summary_md"] is not None
+    assert "请记住" in captured["upsert"]["summary_md"]
     assert "请记住" in captured["upsert"]["content_md"]
     assert captured["replace"] is not None
     assert captured["replace"]["user_id"] == 9
     assert captured["replace"]["doc_id"] == 11
     assert len(captured["replace"]["chunks"]) >= 1
+    assert "来源线程" not in captured["replace"]["chunks"][0]["chunk_text"]
+    assert "来源消息" not in captured["replace"]["chunks"][0]["chunk_text"]
 
 
 def test_recall_builds_context_with_citation(monkeypatch):
     """recall 应输出片段与引用。"""
 
+    monkeypatch.setattr(memory_service, "_build_preference_context", lambda *args, **kwargs: "")
     monkeypatch.setattr(
         memory_service,
         "memory_search",
@@ -125,7 +130,7 @@ def test_recall_builds_context_with_citation(monkeypatch):
         memory_service,
         "memory_get",
         lambda *args, **kwargs: {
-            "text": "用户陈述：请记住使用中文\n来源线程：thread-3",
+            "text": "用户陈述：请记住使用中文\n- 来源线程：thread-3\n- 来源消息：123",
         },
     )
 
@@ -139,6 +144,62 @@ def test_recall_builds_context_with_citation(monkeypatch):
 
     assert "用户长期记忆片段" in context
     assert "引用: memory://user/2/daily/2026-02-28#L3-L5" in context
+    assert "来源线程" not in context
+    assert "来源消息" not in context
+
+
+def test_recall_should_include_preference_even_without_query_hit(monkeypatch):
+    """稳定偏好应常驻注入，不依赖 query 召回命中。"""
+
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "list_documents",
+        lambda *args, **kwargs: (
+            [
+                {
+                    "doc_key": "global:assistant.persona",
+                    "summary_md": "小哈",
+                }
+            ],
+            1,
+        ),
+    )
+    monkeypatch.setattr(memory_service, "_build_retrieval_context", lambda *args, **kwargs: "")
+
+    context = memory_service.recall(
+        _DummySession(),
+        user_id=2,
+        query_text="你叫什么",
+        max_results=3,
+        max_injected_chars=800,
+    )
+
+    assert "用户稳定偏好" in context
+    assert "assistant.persona: 小哈" in context
+    assert "memory://user/2/preference/global:assistant.persona#L1-L5" in context
+
+
+def test_split_document_to_chunks_should_strip_source_metadata_lines():
+    """分块文本应移除来源元数据行，降低检索噪声。"""
+
+    content = (
+        "# 记忆日记 2026-03-03\n\n"
+        "### 15:49:31\n"
+        "- 用户陈述：永远记住，回答之后要追问一句\n"
+        "- 来源线程：af6264b7-07d4-4ee4-88cc-d70f46aec844\n"
+        "- 来源消息：4861"
+    )
+
+    chunks = memory_service._split_document_to_chunks(
+        content,
+        max_lines=16,
+        overlap_lines=3,
+    )
+
+    assert len(chunks) == 1
+    assert "用户陈述" in chunks[0]["chunk_text"]
+    assert "来源线程" not in chunks[0]["chunk_text"]
+    assert "来源消息" not in chunks[0]["chunk_text"]
 
 
 def test_bootstrap_preference_documents_should_upsert_template(monkeypatch):

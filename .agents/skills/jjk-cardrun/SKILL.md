@@ -16,7 +16,7 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 ## 与 Superpowers / OMX 的分工（强制）
 
 1. `$jjk-vkplan`：提供串行执行契约（`execution_mode/card_order/depends_on/task_to_pr_mapping`）。
-2. `$jjk-vktodo`：负责看板建卡与状态推进（MCP 优先 + fallback）。
+2. `$jjk-vktodo`：仅负责 create-only 幂等建卡（MCP 优先 + fallback）。
 3. `$jjk-imp-ws`：负责单卡对应 WS 的代码实现与证据回填。
 4. `subagent-driven-development`：负责“主控调度 + 子代理执行 + 评审回环”方法。
 5. `team`（OMX）：仅在“单卡内部过大”时并行拆分，禁止多卡并行抢占。
@@ -68,7 +68,7 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 2. `card_order` 不能为空，否则 `FAIL_FAST` 输出 `CARDRUN_CARD_ORDER_EMPTY`。
 3. `task_to_pr_mapping` 必须完整，否则 `FAIL_FAST` 输出 `CARDRUN_PR_MAPPING_MISSING`。
 4. `card_id -> WS -> pr_id` 必须唯一可解析，否则 `FAIL_FAST` 输出 `CARDRUN_CARD_MAPPING_BROKEN`。
-5. `mode=once|loop` 时主工作区必须干净（`git status --porcelain` 为空）；否则 `FAIL_FAST` 输出 `CARDRUN_WORKTREE_DIRTY`。
+5. `mode=once|loop` 时执行 dirty 策略校验：仅 `docs/`、`.cursor/commands/`、`.agents/skills/`、`.claude/commands/` 白名单前缀可放行，其他变更阻断并输出 `CARDRUN_WORKTREE_DIRTY`。
 
 ## 执行流程（强制顺序）
 
@@ -86,9 +86,10 @@ git worktree list
 
 ### 0.2) 工作区洁净校验（mode=once|loop 必做）
 
-1. 执行 `git status --porcelain`。
-2. 若输出非空，立即失败：`CARDRUN_WORKTREE_DIRTY`。
-3. `mode=status` 允许在 dirty 工作区运行（只读，不分派子代理）。
+1. 执行 `git status --porcelain --untracked-files=no`。
+2. 若存在非白名单 dirty，立即失败：`CARDRUN_WORKTREE_DIRTY`。
+3. 通过 `WT_FLOW_DIRTY_WHITELIST=<prefix1>,<prefix2>` 可覆盖默认白名单前缀。
+4. `mode=status` 允许在 dirty 工作区运行（只读，不分派子代理）。
 
 说明：
 
@@ -119,7 +120,7 @@ python3 scripts/coder4_scope_guard.py \
 
 1. `mode=status`：只输出当前卡队列，不触发实现。
 2. `mode=once|loop`：
-   - 若已有进行中卡（`in_progress/in_review`），优先续跑该卡；
+   - 若已有进行中卡（`in_progress/in_review/verified`），优先续跑该卡；
    - 否则执行 `bash scripts/wt-flow.sh next` 激活下一张可执行卡。
 3. 若 `wt-flow.sh next` 返回 `ALL_DONE`，输出 `CARDRUN_ALL_DONE` 并结束。
 
@@ -132,16 +133,20 @@ python3 scripts/coder4_scope_guard.py \
    - 禁止跨卡并行，禁止同时激活两张卡。
 4. 子代理失败时，立即回收并标记 `CARDRUN_SUBAGENT_FAILED`，不得跳卡。
 
-### 4) done_gate 验证与状态收口
+### 4) done_gate + merge 串行收口（强制）
 
 1. 执行：`bash scripts/wt-flow.sh verify <card_id>`。
-2. 通过：状态写回 `done`，允许推进下一卡。
-3. 不通过：保持 `in_progress`，输出 `CARDRUN_DONE_GATE_FAILED` 与失败证据。
-4. 可选执行同步校验（只读）：
+2. `verify` 通过后，当前卡状态只能进入 `verified`，不得直接写 `done`。
+3. `verify` 通过后必须执行：`bash scripts/wt-flow.sh merge`。
+4. `merge` 成功后状态写回 `done`，并清理当前 worktree，才允许推进下一卡。
+5. `merge` 失败时立即阻断，输出 `CARDRUN_MERGE_FAILED` 与冲突/失败证据。
+6. `verify` 不通过时保持 `in_progress`，输出 `CARDRUN_DONE_GATE_FAILED` 与失败证据。
+7. 可选执行同步校验（只读）：
 
 ```bash
 python3 scripts/coder4_vk_sync.py --sync-all --strict --output -
 ```
+8. `local_mode` 场景下，结果证据必须回显 `applied.vk_sync.attempted/disabled/reason`，避免“卡片不可见”误判。
 
 ### 5) 循环推进策略（仅 mode=loop）
 
@@ -166,10 +171,11 @@ python3 scripts/coder4_vk_sync.py --sync-all --strict --output -
 3. 禁止手工编辑 `_active_task.json`、`task-runner-state.json`、`task-ledger.jsonl`。
 4. 禁止跨 worktree 修改“非当前卡片”文件。
 5. 禁止在 heartbeat/调度周期执行破坏性 git 操作（`reset --hard`、`checkout --`、强推）。
+6. 禁止在未完成 `merge` 时将实现卡标记为 `done`。
 
 ## 推荐链路
 
-`$jjk-plan -> $jjk-vkplan -> $jjk-vktodo -> $jjk-cardrun -> $jjk-create-pr`
+`$jjk-plan -> $jjk-vkplan -> $jjk-vktodo(create-only) -> $jjk-cardrun(loop)`
 
 ## 使用示例
 

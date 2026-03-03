@@ -33,16 +33,21 @@
     "C04",
     "C05",
     "C06",
-    "G01"
+    "G01",
+    "IG01"
   ],
   "gate_contract": {
     "mode": "as_cards",
     "gate_ids": [
-      "G01"
+      "G01",
+      "IG01"
     ],
     "depends_on": {
       "G01": [
         "C06"
+      ],
+      "IG01": [
+        "G01"
       ]
     }
   },
@@ -69,7 +74,8 @@
       "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C04_C04P4向量状态看板增强.md",
       "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C05_C05P5管理后台页面列表+详情+操作.md",
       "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C06_C06P6配置、迁移、文档与测试收口.md",
-      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md",
+      "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-IG01_IG01集成门禁主干可见性校验.md"
     ]
   },
   "mapping_checks": {
@@ -572,6 +578,66 @@
         "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/.omc/state/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
+    },
+    {
+      "id": "PP-20260301-USER-MEMORY-ADMIN::WS-IG01",
+      "card_id": "IG01",
+      "title": "IG01 集成门禁主干可见性校验 [PP-20260301-USER-MEMORY-ADMIN]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260301-USER-MEMORY-ADMIN",
+        "2026-03-01_用户个性化永久记忆与管理能力",
+        "serial",
+        "lane-gate"
+      ],
+      "hard_depends_on": [
+        "G01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G01"
+      ],
+      "feature_ids": [
+        "IG-1"
+      ],
+      "mechanism_summary": [
+        "校验实现卡 merge_result 证据完整且 merged=true",
+        "校验 merge_commit 为 baseline(master) 可见祖先",
+        "未通过则阻断最终完成态，避免仅本地 done 的假完成"
+      ],
+      "code_anchor_refs": [
+        "scripts/check_integration_gate.py::run_check",
+        ".omc/state/attempts/<card_id>/merge_result.json",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
+      ],
+      "example_refs": [
+        "docs/开发文档/技巧与速查/AI协作速查表.md#串行主干状态流最小路径"
+      ],
+      "acceptance_checks": [
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --baseline master"
+      ],
+      "rollback_anchors": [
+        "暂停最终交付并回到缺失 merge 证据的实现卡补账",
+        "恢复到 G01 通过但 IG01 待通过状态"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "scripts/check_integration_gate.py",
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/vk_cards.json",
+        "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md"
+      ],
+      "done_gate": [
+        "实现卡 merge_result 证据齐全且 merged=true",
+        "merge_commit 全部对 baseline(master) 可见"
+      ],
+      "check_cmd": [
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --baseline master"
+      ],
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-IG01_IG01集成门禁主干可见性校验.md"
     }
   ]
 }

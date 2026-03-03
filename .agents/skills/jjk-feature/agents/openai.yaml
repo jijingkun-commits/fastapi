@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-feature"
-  short_description: "全流程开发入口（澄清->规划->实现->审查->验证）：单命令编排，禁止跳阶段"
-  default_prompt: "$jjk-feature"

@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-doc-check"
-  short_description: "文档同步检查入口（消费 diff/manifest）：映射规则核验与遗漏分级，支持大范围自动 Team"
-  default_prompt: "$jjk-doc-check"

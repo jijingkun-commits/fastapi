@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-imp"
-  short_description: "代码实现入口（结合 TDD + 完成前校验）：按计划执行代码改动与文档回填"
-  default_prompt: "$jjk-imp"

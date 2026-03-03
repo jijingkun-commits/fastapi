@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-git-commit"
-  short_description: "提交入口（消费 manifest/review）：生成可追溯 commit 并执行原子提交，支持大范围自动 Team"
-  default_prompt: "$jjk-git-commit"

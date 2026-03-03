@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-pc"
-  short_description: "问题诊断入口（结合 systematic-debugging）：仅分析定位并产出修复计划，不修改代码"
-  default_prompt: "$jjk-pc"

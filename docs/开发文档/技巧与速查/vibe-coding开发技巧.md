@@ -440,14 +440,14 @@ description: 命令的简短描述
 
 ### 7.7 并行与看板协作
 
-用于多 AI / 多 worktree 并行开发，核心链路为 `/jjk-plan -> /jjk-vkplan -> /jjk-vktodo -> /jjk-cardrun -> /jjk-imp-ws`。
+用于多 AI / 多 worktree 协作，核心链路为 `/jjk-plan -> /jjk-vkplan -> /jjk-vktodo(create-only) -> /jjk-cardrun(loop)`。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/jjk-vkplan` | 并行拆解入口 - 在 `/jjk-plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/jjk-vkplan` |
 | `/jjk-vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/jjk-vksync 2026-02-14_文档治理执行 check` |
-| `/jjk-vktodo` | 批量建卡/推进 - 默认执行基线硬拦截并支持本地后端兜底 | `/jjk-vktodo 2026-02-14_文档治理执行 move Doing` |
-| `/jjk-cardrun` | 串行执行调度 - 消费 `vk_cards.json` 按 `card_order` 单活卡推进并调度子代理 | `/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once` |
+| `/jjk-vktodo` | create-only 幂等建卡 - 消费 `vk_cards.json` 落卡，不负责状态推进 | `/jjk-vktodo 2026-02-14_文档治理执行 create` |
+| `/jjk-cardrun` | 串行执行调度 - 消费 `vk_cards.json` 按 `card_order` 单活卡推进并执行 `verify -> merge -> done` | `/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop` |
 | `/jjk-imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/jjk-imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
 
 ### 7.8 问题诊断（只分析不改码）
@@ -483,8 +483,8 @@ npx ai-agent-skills update --all    # 更新全部
 
 # 并行与看板 - 多 worktree 协作
 /jjk-vkplan        # 在 /jjk-plan 后执行并行拆解并产出 vk_cards.json
-/jjk-vktodo        # 批量建卡/推进，默认执行基线硬拦截
-/jjk-cardrun       # 按 card_order 串行推进，并由主控调度子代理执行当前卡
+/jjk-vktodo        # create-only 落卡（不做 move/review/done）
+/jjk-cardrun       # 按 card_order 串行推进，并执行 verify->merge->done 收口
 /jjk-vksync        # 手动执行 G0 基线同步检查（check/apply）
 /jjk-imp-ws        # 按单个 WS 白名单执行实现与回填
 
@@ -553,7 +553,7 @@ npx ai-agent-skills update --all    # 更新全部
 ├── jjk-verify.md          # 一站式验证（审查 + 测试 + UAT）
 ├── jjk-vkplan.md          # 并行拆解
 ├── jjk-vksync.md          # 基线同步检查
-├── jjk-vktodo.md          # 批量建卡/推进
+├── jjk-vktodo.md          # create-only 幂等建卡
 └── jjk-wtimp.md           # Worktree 隔离编码
 ```
 

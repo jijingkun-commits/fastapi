@@ -1,7 +1,0 @@
-# <!-- AUTO-GENERATED: jjk-skill-mirror -->
-policy:
-  allow_implicit_invocation: false
-interface:
-  display_name: "jjk-plan"
-  short_description: "正式规划：默认产出专题前缀需求与技术方案，可选生成并行 card_seed"
-  default_prompt: "$jjk-plan"

@@ -5,7 +5,7 @@
 1. Rules: .cursor/rules/*.mdc -> .claude/rules/*.md（去 frontmatter，下划线转连字符）
 2. Commands: .cursor/commands/*.md -> .claude/commands/*.md（直接复制，替代 symlink）
 3. Commands: .cursor/commands/*.md -> ~/.codex/prompts/*.md（由 ENABLE_PROMPT_REGISTRY_V2 控制 symlink/copy）
-4. Skills: .cursor/commands/jjk-*.md -> .agents/skills/jjk-*/SKILL.md（禁用隐式触发）
+4. Skills: .cursor/commands/jjk-*.md -> .agents/skills/jjk-*/SKILL.md（不注入 prompt 注册）
 
 用法:
     python scripts/sync_rules_to_cc.py          # 同步 rules + commands
@@ -577,23 +577,6 @@ def _render_skill_markdown(stem: str, source_file: str, source_description: str,
     )
 
 
-def _render_skill_openai_yaml(stem: str, source_description: str) -> str:
-    """渲染 agents/openai.yaml（显式调用优先）。"""
-    short_desc = " ".join(source_description.split()) or f"{stem} workflow"
-    if len(short_desc) > 120:
-        short_desc = short_desc[:117] + "..."
-
-    return (
-        f"# {SKILL_MIRROR_MARKER}\n"
-        f"policy:\n"
-        f"  allow_implicit_invocation: false\n"
-        f"interface:\n"
-        f"  display_name: {json.dumps(stem, ensure_ascii=False)}\n"
-        f"  short_description: {json.dumps(short_desc, ensure_ascii=False)}\n"
-        f"  default_prompt: {json.dumps(f'${stem}', ensure_ascii=False)}\n"
-    )
-
-
 def sync_jjk_command_skills() -> list[str]:
     """将 .cursor/commands/jjk-*.md 镜像为 .agents/skills/jjk-*/SKILL.md。"""
     if not CURSOR_COMMANDS_DIR.exists():
@@ -624,12 +607,13 @@ def sync_jjk_command_skills() -> list[str]:
             skill_md.write_text(rendered_md, encoding="utf-8")
 
         agents_dir = skill_dir / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
         openai_yaml = agents_dir / "openai.yaml"
-        rendered_yaml = _render_skill_openai_yaml(stem=stem, source_description=source_desc)
-        current_yaml = openai_yaml.read_text(encoding="utf-8") if openai_yaml.exists() else ""
-        if current_yaml != rendered_yaml:
-            openai_yaml.write_text(rendered_yaml, encoding="utf-8")
+        if openai_yaml.exists():
+            current_yaml = openai_yaml.read_text(encoding="utf-8")
+            if SKILL_MIRROR_MARKER in current_yaml:
+                openai_yaml.unlink()
+                if agents_dir.exists() and not any(agents_dir.iterdir()):
+                    agents_dir.rmdir()
 
         managed.append(stem)
 

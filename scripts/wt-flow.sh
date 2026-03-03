@@ -2,7 +2,7 @@
 # worktree 隔离开发生命周期管理脚本。
 # 用法:
 #   wt-flow.sh create <branch-slug> [base-branch]
-#   wt-flow.sh merge  [--no-cleanup]
+#   wt-flow.sh merge  [--no-cleanup] [--state-dir=<dir>]
 #   wt-flow.sh cleanup
 #   wt-flow.sh status
 #   wt-flow.sh guard   # 检查是否在 master 上，返回 0=安全 1=在 master
@@ -10,7 +10,8 @@
 #   wt-flow.sh verify  <card-id> [--state-dir=<dir>]
 #   wt-flow.sh list    [--state-dir=<dir>]
 #
-# merge 默认 fail-fast：主仓 dirty 时直接退出。
+# merge 默认 fail-fast：仅非白名单 dirty 会阻断。
+# 可通过 WT_FLOW_DIRTY_WHITELIST 配置白名单路径前缀（逗号分隔）。
 # 如需兼容旧行为，可显式设置 WT_FLOW_ALLOW_AUTOCOMMIT=1 启用 auto-commit + 重建。
 
 set -euo pipefail
@@ -38,6 +39,13 @@ ALLOWED_PREFIXES=(
   "${REPO_ROOT}/venv/bin/alembic"
   "npm"
 )
+DIRTY_POLICY_VERSION="v1_docs_templates"
+DEFAULT_DIRTY_WHITELIST=(
+  "docs/"
+  ".cursor/commands/"
+  ".agents/skills/"
+  ".claude/commands/"
+)
 
 WT_FLOW_PARSE_STATE_DIR=""
 WT_FLOW_PARSE_REMAINING=()
@@ -55,6 +63,97 @@ _require_cmd() {
 
 _to_upper() {
   printf "%s" "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+_normalize_dirty_prefix() {
+  local prefix="$1"
+  prefix="${prefix#"${prefix%%[![:space:]]*}"}"
+  prefix="${prefix%"${prefix##*[![:space:]]}"}"
+  prefix="${prefix#./}"
+  prefix="${prefix#/}"
+  prefix="${prefix%/}"
+  [[ -n "$prefix" ]] || return 1
+  echo "${prefix}/"
+}
+
+_dirty_whitelist_csv() {
+  local raw="${WT_FLOW_DIRTY_WHITELIST:-}"
+  local prefixes=()
+  local prefix normalized csv=""
+
+  if [[ -n "$raw" ]]; then
+    IFS=',' read -r -a prefixes <<< "$raw"
+  else
+    prefixes=("${DEFAULT_DIRTY_WHITELIST[@]}")
+  fi
+
+  for prefix in "${prefixes[@]}"; do
+    normalized="$(_normalize_dirty_prefix "$prefix" || true)"
+    [[ -n "$normalized" ]] || continue
+    if [[ -n "$csv" ]]; then
+      csv="${csv},${normalized}"
+    else
+      csv="${normalized}"
+    fi
+  done
+
+  if [[ -z "$csv" ]]; then
+    local old_ifs="$IFS"
+    IFS=,
+    csv="${DEFAULT_DIRTY_WHITELIST[*]}"
+    IFS="$old_ifs"
+  fi
+
+  echo "$csv"
+}
+
+_extract_dirty_path_from_status_line() {
+  local line="$1"
+  local path="$line"
+  if [[ "${#line}" -ge 3 ]]; then
+    path="${line:3}"
+  fi
+  if [[ "$path" == *" -> "* ]]; then
+    path="${path##* -> }"
+  fi
+  path="${path#./}"
+  path="${path#/}"
+  echo "$path"
+}
+
+_is_dirty_path_allowed() {
+  local path="$1" whitelist_csv="$2"
+  local prefixes=()
+  local prefix
+  IFS=',' read -r -a prefixes <<< "$whitelist_csv"
+  for prefix in "${prefixes[@]}"; do
+    [[ -z "$prefix" ]] && continue
+    if [[ "$path" == "$prefix"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_collect_disallowed_dirty_lines() {
+  local whitelist_csv="$1"
+  local line path
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    path="$(_extract_dirty_path_from_status_line "$line")"
+    if ! _is_dirty_path_allowed "$path" "$whitelist_csv"; then
+      echo "$line"
+    fi
+  done < <(git status --porcelain --untracked-files=no)
+}
+
+_format_dirty_preview() {
+  local lines="$1"
+  if [[ -z "$lines" ]]; then
+    echo ""
+    return 0
+  fi
+  printf "%s\n" "$lines" | sed '/^$/d' | head -n 8 | tr '\n' '; ' | sed 's/; $//'
 }
 
 _normalize_status() {
@@ -295,8 +394,12 @@ _resolve_worktree_path_for_card() {
 }
 
 _ensure_clean() {
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    _die "工作区有未提交的变更，请先 commit 或 stash"
+  local whitelist_csv disallowed preview
+  whitelist_csv="$(_dirty_whitelist_csv)"
+  disallowed="$(_collect_disallowed_dirty_lines "$whitelist_csv")"
+  if [[ -n "$disallowed" ]]; then
+    preview="$(_format_dirty_preview "$disallowed")"
+    _die "工作区存在非白名单变更，policy=${DIRTY_POLICY_VERSION} whitelist=${whitelist_csv} preview=${preview}"
   fi
 }
 
@@ -323,6 +426,64 @@ _read_state() {
 
 _clear_state() {
   rm -f "$STATE_FILE"
+}
+
+_mark_card_done_after_merge() {
+  local branch="$1" base_branch="$2" state_dir="$3" merge_commit="$4"
+
+  if [[ ! "$branch" =~ ^feature/(.+)$ ]]; then
+    return 0
+  fi
+
+  local card_id
+  card_id="$(_to_upper "${BASH_REMATCH[1]}")"
+  [[ -n "$card_id" ]] || return 0
+
+  local state_file
+  state_file="$(_task_state_file "$state_dir")"
+  [[ -f "$state_file" ]] || return 0
+
+  if ! jq -e --arg card "$card_id" 'any(.card_order[]?; ascii_upcase == ($card | ascii_upcase))' "$state_file" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local merged_at
+  merged_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  _update_json_file "$state_file" \
+    --arg card "$card_id" \
+    --arg now "$merged_at" \
+    '
+    .current_card = $card
+    | .card_status = ((.card_status // {}) + {($card): "done"})
+    | .card_status_map = ((.card_status_map // {}) + {($card): "done"})
+    | .last_action = "merge"
+    | .last_action_result = "merged_to_base"
+    | .no_increment_count = 0
+    | .last_updated = $now
+    '
+
+  local result_file result_tmp
+  result_file="${state_dir}/attempts/${card_id}/merge_result.json"
+  mkdir -p "$(dirname "$result_file")"
+  result_tmp="${result_file}.tmp"
+  if ! jq -n \
+    --arg card_id "$card_id" \
+    --arg merged_at "$merged_at" \
+    --arg branch "$branch" \
+    --arg base_branch "$base_branch" \
+    --arg merge_commit "$merge_commit" \
+    '{
+      card_id: $card_id,
+      merged: true,
+      merged_at: $merged_at,
+      branch: $branch,
+      base_branch: $base_branch,
+      merge_commit: $merge_commit
+    }' > "$result_tmp"; then
+    rm -f "$result_tmp"
+    _die "写入 merge 结果失败: ${result_file}"
+  fi
+  mv "$result_tmp" "$result_file"
 }
 
 # --- 命令: create ---
@@ -464,7 +625,29 @@ cmd_next() {
 
 cmd_merge() {
   local no_cleanup=false
-  [[ "${1:-}" == "--no-cleanup" ]] && no_cleanup=true
+  local state_dir="$(_default_state_dir)"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-cleanup)
+        no_cleanup=true
+        shift
+        ;;
+      --state-dir=*)
+        state_dir="${1#*=}"
+        shift
+        ;;
+      --state-dir)
+        shift
+        [[ $# -gt 0 ]] || _die "--state-dir 缺少参数"
+        state_dir="$1"
+        shift
+        ;;
+      *)
+        _die "用法: wt-flow.sh merge [--no-cleanup] [--state-dir=<dir>]"
+        ;;
+    esac
+  done
 
   local state
   state="$(_read_state)"
@@ -483,6 +666,9 @@ cmd_merge() {
   ahead="$(git rev-list --count "${base_branch}..${branch}" 2>/dev/null || echo 0)"
   if [[ "$ahead" -eq 0 ]]; then
     _log "分支 ${branch} 没有新提交，跳过合并"
+    local no_merge_commit
+    no_merge_commit="$(git rev-parse "${base_branch}" 2>/dev/null || true)"
+    _mark_card_done_after_merge "$branch" "$base_branch" "$state_dir" "$no_merge_commit"
     if [[ "$no_cleanup" == false ]]; then
       cmd_cleanup
     fi
@@ -508,8 +694,12 @@ cmd_merge() {
   # 切回主仓库执行合并
   cd "$REPO_ROOT"
 
-  # 主仓库不干净时默认 fail-fast；仅在显式开关开启时允许 auto-commit。
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+  # 主仓库不干净时默认 fail-fast（白名单内变更放行）；仅在显式开关开启时允许 auto-commit。
+  local whitelist_csv disallowed preview
+  whitelist_csv="$(_dirty_whitelist_csv)"
+  disallowed="$(_collect_disallowed_dirty_lines "$whitelist_csv")"
+  if [[ -n "$disallowed" ]]; then
+    preview="$(_format_dirty_preview "$disallowed")"
     if [[ "${WT_FLOW_ALLOW_AUTOCOMMIT:-0}" == "1" ]]; then
       _log "主仓库有未提交变更，检测到 WT_FLOW_ALLOW_AUTOCOMMIT=1，执行 auto-commit + 重建策略 ..."
       git add -u
@@ -518,7 +708,7 @@ cmd_merge() {
       cmd_cleanup
       return 0
     fi
-    _die "主仓库有未提交变更，默认策略为 fail-fast。请先手动提交/清理，或显式设置 WT_FLOW_ALLOW_AUTOCOMMIT=1"
+    _die "主仓库存在非白名单变更，policy=${DIRTY_POLICY_VERSION} whitelist=${whitelist_csv} preview=${preview}。请先提交/清理，或设置 WT_FLOW_ALLOW_AUTOCOMMIT=1"
   fi
 
   git checkout "${base_branch}"
@@ -530,6 +720,9 @@ cmd_merge() {
   fi
 
   _log "合并完成"
+  local merge_commit
+  merge_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+  _mark_card_done_after_merge "$branch" "$base_branch" "$state_dir" "$merge_commit"
 
   if [[ "$no_cleanup" == false ]]; then
     cmd_cleanup
@@ -731,14 +924,14 @@ cmd_verify() {
       --arg now "$checked_at" \
       '
       .current_card = $card
-      | .card_status = ((.card_status // {}) + {($card): "done"})
-      | .card_status_map = ((.card_status_map // {}) + {($card): "done"})
+      | .card_status = ((.card_status // {}) + {($card): "verified"})
+      | .card_status_map = ((.card_status_map // {}) + {($card): "verified"})
       | .last_action = "verify"
-      | .last_action_result = "done_gate_passed"
+      | .last_action_result = "done_gate_passed_waiting_merge"
       | .no_increment_count = 0
       | .last_updated = $now
       '
-    _log "GATE_PASSED: ${card_id}"
+    _log "GATE_PASSED: ${card_id} (status=verified, waiting merge)"
     return 0
   fi
 
@@ -822,15 +1015,16 @@ main() {
       echo ""
       echo "  create <slug> [base]  从 base 创建 worktree"
       echo "  next [--state-dir]    选择下一张可执行卡并创建 worktree"
-      echo "  verify <card-id>      执行 done_gate 验收（白名单命令前缀）"
+      echo "  verify <card-id>      执行 done_gate 验收（通过后置为 verified）"
       echo "  list [--state-dir]    查看卡片队列与状态"
-      echo "  merge [--no-cleanup]  合并回基准分支"
+      echo "  merge [--no-cleanup] [--state-dir]  合并回基准分支并标记 done"
       echo "  cleanup               清理 worktree 和分支"
       echo "  status                查看当前会话"
       echo "  guard                 检查是否在主分支上"
       echo ""
       echo "环境变量:"
-      echo "  WT_FLOW_ALLOW_AUTOCOMMIT=1  主仓 dirty 时允许 auto-commit（默认关闭）"
+      echo "  WT_FLOW_DIRTY_WHITELIST=docs/,.cursor/commands/  配置 dirty 白名单前缀（逗号分隔）"
+      echo "  WT_FLOW_ALLOW_AUTOCOMMIT=1  非白名单 dirty 时允许 auto-commit（默认关闭）"
       echo "  WT_FLOW_STATE_DIR         覆盖 task-runner-state 目录（默认 .omc/state）"
       echo "  WT_FLOW_ACTIVE_TASK_FILE  覆盖 active task 文件路径"
       exit 1
