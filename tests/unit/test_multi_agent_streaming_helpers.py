@@ -37,6 +37,8 @@ from app.ai.workflow.multi_agent_graph import (
     _prefill_emitted_message_ids,
     _record_emitted_message_id,
     _run_streaming_dispatch_loop,
+    _prepare_messages_for_supervisor_inference,
+    _prepare_streaming_inference_state,
 )
 from app.services.chat_service import degrade_on_plugin_failure
 
@@ -229,6 +231,82 @@ def test_handle_messages_mode_tool_message_emits_tool_end_and_kb_images() -> Non
     assert handled is True
     assert kb_images == {"img-1": "https://example.com/a.png"}
     assert emitted_events == [("knowledge_search", "tool payload", "supervisor")]
+
+
+def test_prepare_messages_for_supervisor_inference_sets_tool_message_truncation_flag() -> None:
+    """压缩后的 ToolMessage 应记录 truncation_flag 诊断字段。"""
+    tool_message = ToolMessage(
+        content="A" * 5000,
+        tool_call_id="tool-call-1",
+        name="knowledge_search",
+        id="tool-msg-1",
+    )
+
+    prepared = _prepare_messages_for_supervisor_inference([tool_message])
+
+    assert prepared[0] is not tool_message
+    assert "已省略" in str(prepared[0].content)
+    assert prepared[0].additional_kwargs.get("truncation_flag") is True
+
+
+def test_prepare_messages_for_supervisor_inference_skips_short_tool_message_truncation_flag() -> None:
+    """短 ToolMessage 不应被压缩，也不应新增截断标记。"""
+    tool_message = ToolMessage(
+        content="短结果",
+        tool_call_id="tool-call-2",
+        name="knowledge_search",
+    )
+
+    prepared = _prepare_messages_for_supervisor_inference([tool_message])
+
+    assert prepared[0] is tool_message
+    assert prepared[0].additional_kwargs.get("truncation_flag") is None
+
+
+def test_prepare_streaming_inference_state_tracks_tool_message_diagnostics() -> None:
+    """推理态应记录 ToolMessage 压缩前后预算诊断。"""
+    state = {
+        "messages": [
+            HumanMessage(content="请总结检索证据"),
+            ToolMessage(
+                content="A" * 5000,
+                tool_call_id="tool-call-3",
+                name="knowledge_search",
+            ),
+        ],
+        "delivery_meta": {"source": "existing"},
+    }
+
+    pruned_state, *_ = _prepare_streaming_inference_state(state)
+
+    delivery_meta = pruned_state["delivery_meta"]
+    assert delivery_meta["source"] == "existing"
+    assert delivery_meta["truncation_flag"] is True
+    assert delivery_meta["tool_message_count"] == 1
+    assert delivery_meta["truncated_tool_message_count"] == 1
+    assert delivery_meta["tool_message_chars_before"] > delivery_meta["tool_message_chars_after"]
+
+
+def test_prepare_streaming_inference_state_keeps_tool_message_without_truncation() -> None:
+    """短 ToolMessage 不压缩时应保持 truncation_flag 为 False。"""
+    state = {
+        "messages": [
+            HumanMessage(content="请总结"),
+            ToolMessage(
+                content="短结果",
+                tool_call_id="tool-call-4",
+                name="knowledge_search",
+            ),
+        ],
+    }
+
+    pruned_state, *_ = _prepare_streaming_inference_state(state)
+
+    delivery_meta = pruned_state["delivery_meta"]
+    assert delivery_meta["truncation_flag"] is False
+    assert delivery_meta["tool_message_count"] == 1
+    assert delivery_meta["truncated_tool_message_count"] == 0
+    assert delivery_meta["tool_message_chars_before"] == delivery_meta["tool_message_chars_after"]
 
 
 def test_emit_messages_mode_token_filters_internal_content() -> None:

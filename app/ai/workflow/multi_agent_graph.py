@@ -1962,39 +1962,104 @@ def _truncate_tool_message_text(
     return f"{head}{omitted_notice}{tail}"
 
 
-def _compact_tool_message_for_inference(message: ToolMessage) -> ToolMessage:
-    """仅在推理输入阶段压缩 ToolMessage，不影响持久化原始消息。"""
-    content_text = _normalize_text_content(getattr(message, "content", ""))
-    compacted_text = _truncate_tool_message_text(content_text)
-    if compacted_text == content_text:
-        return message
+def _build_truncated_tool_message(
+    message: ToolMessage,
+    *,
+    compacted_text: str,
+    raw_chars: int,
+    compacted_chars: int,
+) -> ToolMessage:
+    """构造带诊断字段的压缩 ToolMessage。"""
+    additional_kwargs = dict(getattr(message, "additional_kwargs", {}) or {})
+    additional_kwargs.update(
+        {
+            "truncation_flag": True,
+            "tool_message_chars_before": raw_chars,
+            "tool_message_chars_after": compacted_chars,
+        }
+    )
 
     if hasattr(message, "model_copy"):
-        try:
-            return message.model_copy(update={"content": compacted_text})
-        except Exception as exc:
-            logger.debug("ToolMessage 压缩失败，回退原消息: %s", exc)
-            return message
+        return message.model_copy(update={"content": compacted_text, "additional_kwargs": additional_kwargs})
 
-    return message
+    return ToolMessage(
+        content=compacted_text,
+        tool_call_id=str(getattr(message, "tool_call_id", "unknown_tool_call")),
+        name=getattr(message, "name", None),
+        id=getattr(message, "id", None),
+        additional_kwargs=additional_kwargs,
+        response_metadata=dict(getattr(message, "response_metadata", {}) or {}),
+        artifact=getattr(message, "artifact", None),
+        status=getattr(message, "status", "success"),
+    )
 
 
-def _prepare_messages_for_supervisor_inference(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+def _compact_tool_message_for_inference(message: ToolMessage) -> tuple[ToolMessage, bool, int, int]:
+    """仅在推理输入阶段压缩 ToolMessage，不影响持久化原始消息。"""
+    content_text = _normalize_text_content(getattr(message, "content", ""))
+    raw_chars = len(content_text)
+    compacted_text = _truncate_tool_message_text(content_text)
+    if compacted_text == content_text:
+        return message, False, raw_chars, raw_chars
+
+    compacted_chars = len(compacted_text)
+    try:
+        compacted_message = _build_truncated_tool_message(
+            message,
+            compacted_text=compacted_text,
+            raw_chars=raw_chars,
+            compacted_chars=compacted_chars,
+        )
+    except Exception as exc:
+        logger.debug("ToolMessage 压缩失败，回退原消息: %s", exc)
+        return message, False, raw_chars, raw_chars
+
+    return compacted_message, True, raw_chars, compacted_chars
+
+
+def _prepare_messages_for_supervisor_inference(
+    messages: Sequence[BaseMessage],
+    *,
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> list[BaseMessage]:
     """准备 Supervisor 推理输入，压缩超长工具消息。"""
     prepared: list[BaseMessage] = []
+    tool_message_count = 0
     compacted_count = 0
+    tool_message_chars_before = 0
+    tool_message_chars_after = 0
 
     for message in messages or []:
         if isinstance(message, ToolMessage):
-            compacted = _compact_tool_message_for_inference(message)
-            if compacted is not message:
+            tool_message_count += 1
+            compacted, truncated, chars_before, chars_after = _compact_tool_message_for_inference(message)
+            if truncated:
                 compacted_count += 1
+            tool_message_chars_before += chars_before
+            tool_message_chars_after += chars_after
             prepared.append(compacted)
             continue
         prepared.append(message)
 
+    truncation_flag = compacted_count > 0
+    if diagnostics is not None:
+        diagnostics.update(
+            {
+                "tool_message_count": tool_message_count,
+                "truncated_tool_message_count": compacted_count,
+                "tool_message_chars_before": tool_message_chars_before,
+                "tool_message_chars_after": tool_message_chars_after,
+                "truncation_flag": truncation_flag,
+            }
+        )
+
     if compacted_count:
-        logger.info("Supervisor 上下文压缩: compacted_tool_messages=%d", compacted_count)
+        logger.info(
+            "Supervisor 上下文压缩: compacted_tool_messages=%d, tool_chars=%d->%d",
+            compacted_count,
+            tool_message_chars_before,
+            tool_message_chars_after,
+        )
 
     return prepared
 
@@ -2858,7 +2923,11 @@ def _prepare_streaming_inference_state(
 ) -> Tuple[Dict[str, Any], int, int, int, int, int]:
     """构造 streaming_wrapper 调用 agent.astream 前的推理态 state。"""
     original_messages = state.get("messages", [])
-    prepared_messages = _prepare_messages_for_supervisor_inference(original_messages)
+    inference_diagnostics: Dict[str, Any] = {}
+    prepared_messages = _prepare_messages_for_supervisor_inference(
+        original_messages,
+        diagnostics=inference_diagnostics,
+    )
 
     from app.ai import config as ai_config
 
@@ -2878,6 +2947,20 @@ def _prepare_streaming_inference_state(
 
     pruned_state = state.copy()
     pruned_state["messages"] = _inject_streaming_context_messages(pruned_messages, state)
+    existing_delivery_meta = pruned_state.get("delivery_meta")
+    delivery_meta = dict(existing_delivery_meta) if isinstance(existing_delivery_meta, dict) else {}
+    delivery_meta.update(
+        {
+            "truncation_flag": bool(inference_diagnostics.get("truncation_flag", False)),
+            "tool_message_count": int(inference_diagnostics.get("tool_message_count") or 0),
+            "truncated_tool_message_count": int(
+                inference_diagnostics.get("truncated_tool_message_count") or 0
+            ),
+            "tool_message_chars_before": int(inference_diagnostics.get("tool_message_chars_before") or 0),
+            "tool_message_chars_after": int(inference_diagnostics.get("tool_message_chars_after") or 0),
+        }
+    )
+    pruned_state["delivery_meta"] = delivery_meta
 
     prepared_token_estimate = int(count_tokens_approximately(prepared_messages) or 0)
     pruned_token_estimate = int(count_tokens_approximately(pruned_messages) or 0)

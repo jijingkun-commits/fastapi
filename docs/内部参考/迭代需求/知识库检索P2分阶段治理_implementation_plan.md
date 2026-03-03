@@ -765,6 +765,14 @@ planning_contract:
 
 ---
 
+
+### 8.1 C04 / T-05 实施证据（2026-03-03）
+
+| card_id | task_id | pr_id | 代码改动 | 关键诊断字段 | 验证命令 | 结果 | 回滚锚点 |
+|---|---|---|---|---|---|---|---|
+| C04 | T-05 | PR-03 | `app/ai/workflow/multi_agent_graph.py` 增加 ToolMessage 压缩诊断写回；`tests/unit/test_multi_agent_streaming_helpers.py` 增加 `truncation_flag` 回归 | `truncation_flag`、`tool_message_count`、`tool_message_chars_before`、`tool_message_chars_after` | `venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message`（实际执行：`/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message`） | PASS（5 passed） | 回退 SUPERVISOR_TOOL_MESSAGE 配置与压缩逻辑 |
+
+
 ## 9. implementation_readiness（机读结论）
 
 ```yaml
