@@ -39,11 +39,11 @@ DEFAULT_ACTIVE_TASK = (
     "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json"
 )
 DEFAULT_API_BASE = "http://127.0.0.1:3001"
-DEFAULT_STATE_FILE = ".omc/state/task-runner-state.json"
-DEFAULT_RUN_LOCK_FILE = ".omc/state/coder4-run.lock"
-DEFAULT_IDEMPOTENCY_FILE = ".omc/state/coder4-idempotency.json"
-DEFAULT_ATTEMPTS_DIR = ".omc/state/attempts"
-DEFAULT_TASK_LEDGER_FILE = ".omc/state/task-ledger.jsonl"
+DEFAULT_STATE_FILE = ".omc/state/{task_key}/task-runner-state.json"
+DEFAULT_RUN_LOCK_FILE = ".omc/state/{task_key}/coder4-run.lock"
+DEFAULT_IDEMPOTENCY_FILE = ".omc/state/{task_key}/coder4-idempotency.json"
+DEFAULT_ATTEMPTS_DIR = ".omc/state/{task_key}/attempts"
+DEFAULT_TASK_LEDGER_FILE = ".omc/state/{task_key}/task-ledger.jsonl"
 DEFAULT_IDEMPOTENCY_WINDOW_SECONDS = 120
 IDEMPOTENCY_RETENTION_MULTIPLIER = 3
 ATTEMPT_KEEP_LATEST = 20
@@ -214,6 +214,14 @@ def _sanitize_path_segment(value: str, *, fallback: str) -> str:
     return segment or fallback
 
 
+def render_task_scoped_path(raw_path: str, *, task_key: str) -> str:
+    template = str(raw_path or "")
+    if "{task_key}" not in template:
+        return template
+    scoped_task_key = _sanitize_path_segment(task_key, fallback="unknown_task")
+    return template.replace("{task_key}", scoped_task_key)
+
+
 def _normalize_attempt_card_id(card_id: str | None) -> str:
     normalized = str(card_id or "").strip().upper()
     if not normalized:
@@ -224,6 +232,10 @@ def _normalize_attempt_card_id(card_id: str | None) -> str:
 def _resolve_attempt_card_dir(attempts_root: Path, task_key: str, card_id: str | None) -> Path:
     normalized_task_key = _sanitize_path_segment(task_key, fallback="unknown_task")
     normalized_card_id = _normalize_attempt_card_id(card_id)
+    root_name = attempts_root.name
+    parent_name = attempts_root.parent.name
+    if root_name == normalized_task_key or parent_name == normalized_task_key:
+        return attempts_root / normalized_card_id
     return attempts_root / normalized_task_key / normalized_card_id
 
 
@@ -1256,12 +1268,13 @@ def build_kernel_context(
 
     if local_mode:
         if state_path is None:
+            default_state_file = render_task_scoped_path(DEFAULT_STATE_FILE, task_key=task_key)
             for ancestor in active_task_path.parents:
                 if (ancestor / ".git").exists():
-                    state_path = (ancestor / DEFAULT_STATE_FILE).resolve()
+                    state_path = (ancestor / default_state_file).resolve()
                     break
             if state_path is None:
-                state_path = (Path.cwd() / DEFAULT_STATE_FILE).resolve()
+                state_path = (Path.cwd() / default_state_file).resolve()
         local_state = load_local_state(state_path, task_key, card_order)
         state_map = dict(local_state.get("card_status_map") or {})
         for cid in card_order:
@@ -1646,6 +1659,15 @@ def main() -> int:
         write_output_file(args.output, payload)
         print(json.dumps(payload, ensure_ascii=False))
         return 1
+
+    active_payload = load_json(active_task_path)
+    active_task_key = str(active_payload.get("task_key") or "").strip()
+    if active_task_key:
+        args.state_file = render_task_scoped_path(args.state_file, task_key=active_task_key)
+        args.attempts_dir = render_task_scoped_path(args.attempts_dir, task_key=active_task_key)
+        args.task_ledger_file = render_task_scoped_path(args.task_ledger_file, task_key=active_task_key)
+        args.run_lock_file = render_task_scoped_path(args.run_lock_file, task_key=active_task_key)
+        args.idempotency_file = render_task_scoped_path(args.idempotency_file, task_key=active_task_key)
 
     state_path = resolve_state_file_path(active_task_path, args.state_file)
     attempts_root = resolve_runtime_file_path(active_task_path, args.attempts_dir)

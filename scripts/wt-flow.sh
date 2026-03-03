@@ -18,9 +18,9 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 WT_BASE="${REPO_ROOT}/.worktrees"
-STATE_FILE="${REPO_ROOT}/.omc/state/wt-flow-state.json"
 ACTIVE_TASK_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/_active_task.json"
 DEFAULT_STATE_DIR="${REPO_ROOT}/.omc/state"
+LEGACY_STATE_FILE="${DEFAULT_STATE_DIR}/wt-flow-state.json"
 ALLOWED_PREFIXES=(
   "bash"
   "python"
@@ -49,6 +49,7 @@ DEFAULT_DIRTY_WHITELIST=(
 
 WT_FLOW_PARSE_STATE_DIR=""
 WT_FLOW_PARSE_REMAINING=()
+WT_FLOW_LAST_SESSION_FILE=""
 
 # --- 工具函数 ---
 
@@ -63,6 +64,95 @@ _require_cmd() {
 
 _to_upper() {
   printf "%s" "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+_trim_spaces() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  echo "$value"
+}
+
+_sanitize_task_key_segment() {
+  local value
+  value="$(_trim_spaces "${1:-}")"
+  if [[ -z "$value" ]]; then
+    echo ""
+    return 0
+  fi
+  value="$(printf "%s" "$value" | sed -E 's/[^A-Za-z0-9._-]+/_/g')"
+  value="${value#_}"
+  value="${value%_}"
+  echo "$value"
+}
+
+_active_task_key() {
+  local active_file="${WT_FLOW_ACTIVE_TASK_FILE:-$ACTIVE_TASK_FILE}"
+  if [[ ! -f "$active_file" ]]; then
+    echo ""
+    return 0
+  fi
+  jq -r '.task_key // ""' "$active_file" 2>/dev/null || echo ""
+}
+
+_task_state_root() {
+  local state_dir="$1"
+  local task_key_override="${2:-}"
+  local task_key="$task_key_override"
+  if [[ -z "$task_key" ]]; then
+    task_key="$(_active_task_key)"
+  fi
+  task_key="$(_sanitize_task_key_segment "$task_key")"
+  if [[ -n "$task_key" ]]; then
+    echo "${state_dir}/${task_key}"
+    return 0
+  fi
+  echo "$state_dir"
+}
+
+_task_state_file() {
+  local state_dir="$1"
+  local task_key_override="${2:-}"
+  local root
+  root="$(_task_state_root "$state_dir" "$task_key_override")"
+  echo "${root}/task-runner-state.json"
+}
+
+_task_state_file_for_read() {
+  local state_dir="$1"
+  local scoped_candidate legacy_candidate
+  scoped_candidate="$(_task_state_file "$state_dir")"
+  if [[ -f "$scoped_candidate" ]]; then
+    echo "$scoped_candidate"
+    return 0
+  fi
+  legacy_candidate="${state_dir}/task-runner-state.json"
+  if [[ -f "$legacy_candidate" ]]; then
+    echo "$legacy_candidate"
+    return 0
+  fi
+  echo "$scoped_candidate"
+}
+
+_session_state_file() {
+  local task_key_override="${1:-}"
+  local task_root
+  task_root="$(_task_state_root "$DEFAULT_STATE_DIR" "$task_key_override")"
+  echo "${task_root}/wt-flow-state.json"
+}
+
+_session_state_file_for_read() {
+  local scoped_candidate
+  scoped_candidate="$(_session_state_file)"
+  if [[ -f "$scoped_candidate" ]]; then
+    echo "$scoped_candidate"
+    return 0
+  fi
+  if [[ -f "$LEGACY_STATE_FILE" ]]; then
+    echo "$LEGACY_STATE_FILE"
+    return 0
+  fi
+  return 1
 }
 
 _normalize_dirty_prefix() {
@@ -206,11 +296,6 @@ _parse_state_dir_flag() {
   WT_FLOW_PARSE_STATE_DIR="$state_dir"
 }
 
-_task_state_file() {
-  local state_dir="$1"
-  echo "${state_dir}/task-runner-state.json"
-}
-
 _state_status_value() {
   local state_file="$1" card_id="$2"
   jq -r --arg card "$card_id" '((.card_status // {})[$card] // (.card_status_map // {})[$card] // "todo")' "$state_file"
@@ -320,13 +405,6 @@ _extract_effective_prefix() {
   _extract_prefix "$check"
 }
 
-_trim_spaces() {
-  local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  echo "$value"
-}
-
 _normalize_check_for_worktree() {
   local check="$1" worktree_path="$2"
   local trimmed target rest rel
@@ -373,19 +451,50 @@ _is_allowed_prefix() {
 
 _resolve_worktree_path_for_card() {
   local card_id="$1"
-  local by_card="${WT_BASE}/${card_id}"
+  local active_task_key sanitized_task_key by_card by_task_card
+  active_task_key="$(_active_task_key)"
+  sanitized_task_key="$(_sanitize_task_key_segment "$active_task_key")"
+
+  if [[ -n "$sanitized_task_key" ]]; then
+    by_task_card="${WT_BASE}/${sanitized_task_key}/${card_id}"
+    if [[ -d "$by_task_card" ]]; then
+      echo "$by_task_card"
+      return 0
+    fi
+  fi
+
+  by_card="${WT_BASE}/${card_id}"
   if [[ -d "$by_card" ]]; then
     echo "$by_card"
     return 0
   fi
 
-  if [[ -f "$STATE_FILE" ]]; then
-    local state branch wt_path
-    state="$(cat "$STATE_FILE")"
+  local state_file state branch wt_path legacy_wt_path
+  if state_file="$(_session_state_file_for_read)"; then
+    state="$(cat "$state_file")"
     branch="$(echo "$state" | sed -n 's/.*"branch": *"\([^"]*\)".*/\1/p' | head -n1)"
     wt_path="$(echo "$state" | sed -n 's/.*"worktree": *"\([^"]*\)".*/\1/p' | head -n1)"
+    if [[ "$branch" =~ ^feature/(.+)/(.+)$ ]]; then
+      local branch_task_key branch_card_id
+      branch_task_key="$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
+      branch_card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+      if [[ "$branch_card_id" == "$card_id" && -d "$wt_path" ]]; then
+        if [[ -z "$sanitized_task_key" || "$branch_task_key" == "$sanitized_task_key" ]]; then
+          echo "$wt_path"
+          return 0
+        fi
+      fi
+    fi
     if [[ "$branch" == "feature/${card_id}" && -d "$wt_path" ]]; then
       echo "$wt_path"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$sanitized_task_key" ]]; then
+    legacy_wt_path="${WT_BASE}/${card_id}"
+    if [[ -d "$legacy_wt_path" ]]; then
+      echo "$legacy_wt_path"
       return 0
     fi
   fi
@@ -405,43 +514,65 @@ _ensure_clean() {
 
 _save_state() {
   local branch="$1" worktree="$2" base="$3"
-  mkdir -p "$(dirname "$STATE_FILE")"
-  cat > "$STATE_FILE" <<EOF
+  local task_key
+  task_key="$(_active_task_key)"
+  local state_file
+  state_file="$(_session_state_file "$task_key")"
+  mkdir -p "$(dirname "$state_file")"
+  cat > "$state_file" <<EOF
 {
   "branch": "$branch",
   "worktree": "$worktree",
   "base_branch": "$base",
+  "task_key": "$task_key",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+  WT_FLOW_LAST_SESSION_FILE="$state_file"
 }
 
 _read_state() {
-  if [[ ! -f "$STATE_FILE" ]]; then
+  local state_file=""
+  if ! state_file="$(_session_state_file_for_read)"; then
     _die "没有活跃的 worktree 会话，请先执行 create"
   fi
+  WT_FLOW_LAST_SESSION_FILE="$state_file"
   # 输出 JSON 内容供调用方解析
-  cat "$STATE_FILE"
+  cat "$state_file"
 }
 
 _clear_state() {
-  rm -f "$STATE_FILE"
+  local state_file="${WT_FLOW_LAST_SESSION_FILE:-}"
+  if [[ -z "$state_file" ]]; then
+    state_file="$(_session_state_file)"
+  fi
+  rm -f "$state_file"
 }
 
 _mark_card_done_after_merge() {
   local branch="$1" base_branch="$2" state_dir="$3" merge_commit="$4"
 
-  if [[ ! "$branch" =~ ^feature/(.+)$ ]]; then
+  local task_key=""
+  local card_id=""
+  if [[ "$branch" =~ ^feature/(.+)/(.+)$ ]]; then
+    task_key="$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
+    card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+  elif [[ "$branch" =~ ^feature/(.+)$ ]]; then
+    card_id="$(_to_upper "${BASH_REMATCH[1]}")"
+  else
     return 0
   fi
 
-  local card_id
-  card_id="$(_to_upper "${BASH_REMATCH[1]}")"
   [[ -n "$card_id" ]] || return 0
 
-  local state_file
-  state_file="$(_task_state_file "$state_dir")"
+  local state_file task_state_root
+  if [[ -n "$task_key" ]]; then
+    state_file="$(_task_state_file "$state_dir" "$task_key")"
+  else
+    state_file="$(_task_state_file_for_read "$state_dir")"
+  fi
   [[ -f "$state_file" ]] || return 0
+  task_state_root="$(dirname "$state_file")"
 
   if ! jq -e --arg card "$card_id" 'any(.card_order[]?; ascii_upcase == ($card | ascii_upcase))' "$state_file" >/dev/null 2>&1; then
     return 0
@@ -463,7 +594,7 @@ _mark_card_done_after_merge() {
     '
 
   local result_file result_tmp
-  result_file="${state_dir}/attempts/${card_id}/merge_result.json"
+  result_file="${task_state_root}/attempts/${card_id}/merge_result.json"
   mkdir -p "$(dirname "$result_file")"
   result_tmp="${result_file}.tmp"
   if ! jq -n \
@@ -494,8 +625,16 @@ cmd_create() {
 
   _ensure_clean
 
-  local branch="feature/${slug}"
-  local wt_path="${WT_BASE}/${slug}"
+  local task_key sanitized_task_key branch wt_path
+  task_key="$(_active_task_key)"
+  sanitized_task_key="$(_sanitize_task_key_segment "$task_key")"
+
+  branch="feature/${slug}"
+  wt_path="${WT_BASE}/${slug}"
+  if [[ -n "$sanitized_task_key" ]]; then
+    branch="feature/${sanitized_task_key}/${slug}"
+    wt_path="${WT_BASE}/${sanitized_task_key}/${slug}"
+  fi
 
   if git show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null; then
     _die "分支 ${branch} 已存在，请换一个名字或先清理"
@@ -530,7 +669,7 @@ cmd_next() {
 
   local state_dir="$WT_FLOW_PARSE_STATE_DIR"
   local state_file
-  state_file="$(_task_state_file "$state_dir")"
+  state_file="$(_task_state_file_for_read "$state_dir")"
   [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
 
   local cards_file execution_mode card status
@@ -757,12 +896,13 @@ cmd_cleanup() {
 # --- 命令: status ---
 
 cmd_status() {
-  if [[ ! -f "$STATE_FILE" ]]; then
+  local state_file=""
+  if ! state_file="$(_session_state_file_for_read)"; then
     _log "没有活跃的 worktree 会话"
     return 0
   fi
   _log "当前会话:"
-  cat "$STATE_FILE"
+  cat "$state_file"
 }
 
 # --- 命令: guard ---
@@ -790,7 +930,7 @@ cmd_verify() {
 
   local state_dir="$WT_FLOW_PARSE_STATE_DIR"
   local state_file
-  state_file="$(_task_state_file "$state_dir")"
+  state_file="$(_task_state_file_for_read "$state_dir")"
   [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
 
   local cards_file
@@ -883,7 +1023,9 @@ cmd_verify() {
     passed_json="false"
   fi
 
-  local result_file="${state_dir}/attempts/${card_id}/gate_result.json"
+  local state_root
+  state_root="$(dirname "$state_file")"
+  local result_file="${state_root}/attempts/${card_id}/gate_result.json"
   mkdir -p "$(dirname "$result_file")"
 
   local checked_at evidence_payload result_tmp
@@ -962,7 +1104,7 @@ cmd_list() {
 
   local state_dir="$WT_FLOW_PARSE_STATE_DIR"
   local state_file
-  state_file="$(_task_state_file "$state_dir")"
+  state_file="$(_task_state_file_for_read "$state_dir")"
   [[ -f "$state_file" ]] || _die "状态文件不存在: ${state_file}"
 
   local cards_file

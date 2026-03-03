@@ -133,6 +133,27 @@ def _load_card_status_map(state_file: Path) -> dict[str, str]:
     return result
 
 
+def _sanitize_task_key_segment(task_key: str) -> str:
+    normalized = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in str(task_key or "").strip())
+    return normalized.strip("._")
+
+
+def _resolve_task_state_dir(state_dir: Path, task_key: str) -> Path:
+    sanitized_task_key = _sanitize_task_key_segment(task_key)
+    if not sanitized_task_key:
+        return state_dir
+
+    scoped_dir = state_dir / sanitized_task_key
+    scoped_state_file = scoped_dir / "task-runner-state.json"
+    legacy_state_file = state_dir / "task-runner-state.json"
+
+    if scoped_state_file.exists() or (scoped_dir / "attempts").exists():
+        return scoped_dir
+    if legacy_state_file.exists() or (state_dir / "attempts").exists():
+        return state_dir
+    return scoped_dir
+
+
 def run_check(
     *,
     repo_root: Path,
@@ -151,7 +172,8 @@ def run_check(
         raise IntegrationGateError(f"{vk_cards_path} 未找到 merge_required 的 implementation-card")
 
     task_key = str(vk_cards.get("task_key") or "").strip()
-    state_file = state_dir / "task-runner-state.json"
+    resolved_state_dir = _resolve_task_state_dir(state_dir, task_key)
+    state_file = resolved_state_dir / "task-runner-state.json"
     status_map = _load_card_status_map(state_file)
 
     missing_merge_result: list[str] = []
@@ -163,7 +185,7 @@ def run_check(
     checked_cards: list[dict[str, Any]] = []
 
     for card_id in merge_required_cards:
-        merge_result_path = state_dir / "attempts" / card_id / "merge_result.json"
+        merge_result_path = resolved_state_dir / "attempts" / card_id / "merge_result.json"
         card_result: dict[str, Any] = {
             "card_id": card_id,
             "merge_result_file": str(merge_result_path),
@@ -231,6 +253,7 @@ def run_check(
         "baseline": baseline,
         "baseline_sha": baseline_sha,
         "state_dir": str(state_dir),
+        "resolved_state_dir": str(resolved_state_dir),
         "merge_required_cards": merge_required_cards,
         "checked_cards": checked_cards,
         "errors": errors,

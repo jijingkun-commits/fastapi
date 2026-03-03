@@ -22,7 +22,7 @@ from urllib import error, parse, request
 
 
 DEFAULT_ACTIVE_TASK = "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json"
-DEFAULT_STATE_FILE = ".omc/state/task-runner-state.json"
+DEFAULT_STATE_FILE = ".omc/state/{task_key}/task-runner-state.json"
 DEFAULT_API_BASE = "http://127.0.0.1:3001"
 DEFAULT_TIMEOUT_SECONDS = 8
 DISABLE_VK_SYNC_ENV = "DISABLE_VK_SYNC"
@@ -144,6 +144,19 @@ def resolve_runtime_file_path(active_task_path: Path, raw_path: str) -> Path:
         if (ancestor / ".git").exists():
             return (ancestor / target_path).resolve()
     return (Path.cwd() / target_path).resolve()
+
+
+def sanitize_task_key_segment(task_key: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(task_key or "").strip())
+    normalized = normalized.strip("._")
+    return normalized or "unknown_task"
+
+
+def render_task_scoped_path(raw_path: str, *, task_key: str) -> str:
+    template = str(raw_path or "")
+    if "{task_key}" not in template:
+        return template
+    return template.replace("{task_key}", sanitize_task_key_segment(task_key))
 
 
 def resolve_vk_cards_path(active_task_path: Path, active_payload: dict[str, Any], task_split_dir: str) -> Path:
@@ -296,6 +309,8 @@ def load_context(args: argparse.Namespace) -> SyncContext:
     task_key = str(args.task_key or "").strip() or str(active_payload.get("task_key") or "").strip()
     if not task_key:
         raise ValueError("active task missing task_key")
+
+    args.state_file = render_task_scoped_path(args.state_file, task_key=task_key)
 
     project_id = str(args.project_id or "").strip() or str(active_payload.get("project_id") or "").strip()
 

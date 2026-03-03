@@ -187,7 +187,13 @@ def main() -> int:
 
         current_split = str(active_payload.get("task_split_dir") or "").strip()
         current_project = str(active_payload.get("project_id") or "").strip()
-        if current_split == task_split_dir and current_project == project_id:
+        current_task_key = str(active_payload.get("task_key") or "").strip()
+        already_active = (
+            current_split == task_split_dir
+            and current_project == project_id
+            and current_task_key == task_key
+        )
+        if already_active:
             mark_applied(
                 request_payload,
                 request_path=request_path,
