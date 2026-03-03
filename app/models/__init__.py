@@ -12,6 +12,7 @@ from app.models.llm_scene import LLMScene
 from app.models.user_memory import UserMemory
 from app.models.chat_run import ChatRun
 from app.models.document_memory import UserMemoryDocument, UserMemoryChunk
+from app.models.memory_admin_audit import UserMemoryAdminAudit
 
 __all__ = [
     "User",
@@ -35,4 +36,5 @@ __all__ = [
     "ChatRun",
     "UserMemoryDocument",
     "UserMemoryChunk",
+    "UserMemoryAdminAudit",
 ]

@@ -16,6 +16,7 @@ import {
     Shield,
     Bot,
     Sparkles,
+    BrainCircuit,
     Settings,
     Users,
     Database,
@@ -53,6 +54,11 @@ const navItems = [
         title: "技能管理",
         href: "/admin/skills",
         icon: Sparkles,
+    },
+    {
+        title: "记忆管理",
+        href: "/admin/memory",
+        icon: BrainCircuit,
     },
     {
         title: "系统配置",

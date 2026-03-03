@@ -186,6 +186,35 @@ COMMENT ON COLUMN t_user_memory_chunk.chunk_tsv IS '全文检索向量';
 COMMENT ON COLUMN t_user_memory_chunk.embedding IS '向量嵌入（2048维）';
 COMMENT ON COLUMN t_user_memory_chunk.embedding_status IS '向量状态: pending/ready/failed';
 
+-- 记忆管理动作审计表
+CREATE TABLE IF NOT EXISTS t_user_memory_admin_audit (
+    id BIGSERIAL PRIMARY KEY,
+    operator_user_id INTEGER NOT NULL,
+    target_user_id INTEGER,
+    memory_id BIGINT,
+    action VARCHAR(64) NOT NULL,
+    action_payload JSONB,
+    result_status VARCHAR(16) NOT NULL,
+    error_message TEXT,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_admin_audit_operator_time
+    ON t_user_memory_admin_audit(operator_user_id, create_time);
+CREATE INDEX IF NOT EXISTS idx_memory_admin_audit_target_time
+    ON t_user_memory_admin_audit(target_user_id, create_time);
+CREATE INDEX IF NOT EXISTS idx_memory_admin_audit_memory_time
+    ON t_user_memory_admin_audit(memory_id, create_time);
+
+COMMENT ON TABLE t_user_memory_admin_audit IS '记忆管理动作审计表';
+COMMENT ON COLUMN t_user_memory_admin_audit.operator_user_id IS '操作人用户ID';
+COMMENT ON COLUMN t_user_memory_admin_audit.target_user_id IS '目标用户ID';
+COMMENT ON COLUMN t_user_memory_admin_audit.memory_id IS '记忆文档ID';
+COMMENT ON COLUMN t_user_memory_admin_audit.action IS '管理动作';
+COMMENT ON COLUMN t_user_memory_admin_audit.action_payload IS '动作上下文';
+COMMENT ON COLUMN t_user_memory_admin_audit.result_status IS '执行结果';
+COMMENT ON COLUMN t_user_memory_admin_audit.error_message IS '失败原因';
+
 -- 对话资产表（图片、图表等）
 CREATE TYPE asset_type AS ENUM ('chart', 'image', 'export', 'attachment');
 
@@ -584,6 +613,10 @@ VALUES
     ('feature.enable_document_memory_hybrid_search', 'false', 'boolean', 'feature', '文档记忆混合检索开关（FTS+向量）', false, false),
     ('feature.enable_document_memory_embedding_worker', 'false', 'boolean', 'feature', '文档记忆向量异步补偿开关', false, false),
     ('feature.enable_document_memory_admin_api', 'false', 'boolean', 'feature', '文档记忆后台运维 API 开关', false, false),
+    ('feature.enable_document_memory_admin_web', 'false', 'boolean', 'feature', '文档记忆后台管理页面开关', false, false),
+    ('feature.enable_document_memory_admin_audit', 'false', 'boolean', 'feature', '文档记忆后台管理审计开关', false, false),
+    ('memory.document.admin.default_page_size', '20', 'number', 'memory', '文档记忆后台管理默认分页大小', false, false),
+    ('memory.document.admin.max_page_size', '100', 'number', 'memory', '文档记忆后台管理最大分页大小', false, false),
     ('memory.document.max_results', '6', 'number', 'memory', '文档记忆检索结果上限', false, false),
     ('memory.document.max_injected_chars', '1200', 'number', 'memory', '文档记忆注入预算（字符）', false, false),
     ('memory.document.hybrid.vector_weight', '0.7', 'number', 'memory', '文档记忆向量权重', false, false),

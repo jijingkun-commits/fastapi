@@ -5,16 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.models.document_memory import UserMemoryChunk, UserMemoryDocument
 
 
 ACTIVE_STATUS = "active"
+ARCHIVED_STATUS = "archived"
 EMBEDDING_STATUS_PENDING = "pending"
 EMBEDDING_STATUS_READY = "ready"
 EMBEDDING_STATUS_FAILED = "failed"
+EMBEDDING_DIMENSION_USER = "user"
+EMBEDDING_DIMENSION_DOC = "doc"
 
 
 def get_active_document(
@@ -274,6 +277,13 @@ def _normalize_embedding_statuses(statuses: Iterable[str] | None) -> tuple[str, 
     return tuple(dict.fromkeys(normalized))
 
 
+def _normalize_embedding_dimension(dimension: str | None) -> str | None:
+    normalized = str(dimension or "").strip().lower()
+    if normalized in {EMBEDDING_DIMENSION_USER, EMBEDDING_DIMENSION_DOC}:
+        return normalized
+    return None
+
+
 def list_chunks_for_embedding(
     db: Session,
     *,
@@ -403,7 +413,10 @@ def get_embedding_status_counts(
     user_id: int | None = None,
     doc_id: int | None = None,
     source: str = "memory",
-) -> dict[str, int]:
+    dimension: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict[str, Any]:
     """查询向量状态统计。"""
 
     sql = text(
@@ -429,13 +442,195 @@ def get_embedding_status_counts(
             "doc_id": doc_id,
         },
     ).mappings().first()
-    if row is None:
-        return {"total": 0, "pending": 0, "ready": 0, "failed": 0}
+    status = {
+        "total": int((row or {}).get("total") or 0),
+        "pending": int((row or {}).get("pending") or 0),
+        "ready": int((row or {}).get("ready") or 0),
+        "failed": int((row or {}).get("failed") or 0),
+    }
+
+    normalized_dimension = _normalize_embedding_dimension(dimension)
+    if normalized_dimension is None:
+        return status
+
+    safe_limit = max(1, int(limit))
+    safe_offset = max(0, int(offset))
+    params = {
+        "source": source,
+        "user_id": user_id,
+        "doc_id": doc_id,
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
+
+    if normalized_dimension == EMBEDDING_DIMENSION_USER:
+        group_sql = text(
+            """
+            SELECT
+                c.user_id::int AS user_id,
+                COUNT(1)::int AS total,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'pending')::int AS pending,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'ready')::int AS ready,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'failed')::int AS failed,
+                COUNT(DISTINCT c.doc_id)::int AS document_total
+            FROM t_user_memory_chunk c
+            JOIN t_user_memory_document d ON d.id = c.doc_id
+            WHERE d.status = 'active'
+              AND c.source = :source
+              AND (:user_id::int IS NULL OR c.user_id = :user_id)
+              AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+            GROUP BY c.user_id
+            ORDER BY total DESC, c.user_id ASC
+            OFFSET :offset
+            LIMIT :limit
+            """
+        )
+        group_total_sql = text(
+            """
+            SELECT COUNT(1)::int AS group_total
+            FROM (
+                SELECT c.user_id
+                FROM t_user_memory_chunk c
+                JOIN t_user_memory_document d ON d.id = c.doc_id
+                WHERE d.status = 'active'
+                  AND c.source = :source
+                  AND (:user_id::int IS NULL OR c.user_id = :user_id)
+                  AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+                GROUP BY c.user_id
+            ) grouped
+            """
+        )
+    else:
+        group_sql = text(
+            """
+            SELECT
+                c.doc_id::bigint AS doc_id,
+                c.user_id::int AS user_id,
+                d.doc_kind,
+                d.doc_key,
+                d.title,
+                COUNT(1)::int AS total,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'pending')::int AS pending,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'ready')::int AS ready,
+                COUNT(1) FILTER (WHERE c.embedding_status = 'failed')::int AS failed
+            FROM t_user_memory_chunk c
+            JOIN t_user_memory_document d ON d.id = c.doc_id
+            WHERE d.status = 'active'
+              AND c.source = :source
+              AND (:user_id::int IS NULL OR c.user_id = :user_id)
+              AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+            GROUP BY c.doc_id, c.user_id, d.doc_kind, d.doc_key, d.title
+            ORDER BY total DESC, c.doc_id ASC
+            OFFSET :offset
+            LIMIT :limit
+            """
+        )
+        group_total_sql = text(
+            """
+            SELECT COUNT(1)::int AS group_total
+            FROM (
+                SELECT c.doc_id, c.user_id
+                FROM t_user_memory_chunk c
+                JOIN t_user_memory_document d ON d.id = c.doc_id
+                WHERE d.status = 'active'
+                  AND c.source = :source
+                  AND (:user_id::int IS NULL OR c.user_id = :user_id)
+                  AND (:doc_id::bigint IS NULL OR c.doc_id = :doc_id)
+                GROUP BY c.doc_id, c.user_id
+            ) grouped
+            """
+        )
+
+    group_rows = db.execute(group_sql, params).mappings().all()
+    group_total_row = db.execute(group_total_sql, params).mappings().first()
+
+    groups: list[dict[str, Any]] = []
+    for group_row in group_rows:
+        group_item: dict[str, Any] = {
+            "total": int(group_row.get("total") or 0),
+            "pending": int(group_row.get("pending") or 0),
+            "ready": int(group_row.get("ready") or 0),
+            "failed": int(group_row.get("failed") or 0),
+        }
+        if normalized_dimension == EMBEDDING_DIMENSION_USER:
+            group_item.update(
+                user_id=int(group_row.get("user_id") or 0),
+                document_total=int(group_row.get("document_total") or 0),
+            )
+        else:
+            group_item.update(
+                doc_id=int(group_row.get("doc_id") or 0),
+                user_id=int(group_row.get("user_id") or 0),
+                doc_kind=str(group_row.get("doc_kind") or ""),
+                doc_key=str(group_row.get("doc_key") or ""),
+                title=group_row.get("title"),
+            )
+        groups.append(group_item)
+
     return {
-        "total": int(row.get("total") or 0),
-        "pending": int(row.get("pending") or 0),
-        "ready": int(row.get("ready") or 0),
-        "failed": int(row.get("failed") or 0),
+        **status,
+        "dimension": normalized_dimension,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "group_total": int((group_total_row or {}).get("group_total") or 0),
+        "groups": groups,
+    }
+
+
+def get_memory_overview_stats(
+    db: Session,
+    *,
+    source: str = "memory",
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """读取文档记忆总览统计。"""
+
+    safe_top_n = max(1, int(top_n))
+    totals_sql = text(
+        """
+        WITH active_documents AS (
+            SELECT id, user_id
+            FROM t_user_memory_document
+            WHERE status = 'active'
+              AND source = :source
+        ),
+        source_chunks AS (
+            SELECT c.id
+            FROM t_user_memory_chunk c
+            JOIN active_documents d ON d.id = c.doc_id
+            WHERE c.source = :source
+        )
+        SELECT
+            (SELECT COUNT(1) FROM active_documents)::int AS total_documents,
+            (SELECT COUNT(DISTINCT user_id) FROM active_documents)::int AS total_users,
+            (SELECT COUNT(1) FROM source_chunks)::int AS total_chunks
+        """
+    )
+    totals_row = db.execute(totals_sql, {"source": source}).mappings().first()
+
+    embedding_status = get_embedding_status_counts(db, source=source)
+    user_groups = get_embedding_status_counts(
+        db,
+        source=source,
+        dimension=EMBEDDING_DIMENSION_USER,
+        limit=safe_top_n,
+    )
+    doc_groups = get_embedding_status_counts(
+        db,
+        source=source,
+        dimension=EMBEDDING_DIMENSION_DOC,
+        limit=safe_top_n,
+    )
+
+    return {
+        "totals": {
+            "users": int((totals_row or {}).get("total_users") or 0),
+            "documents": int((totals_row or {}).get("total_documents") or 0),
+            "chunks": int((totals_row or {}).get("total_chunks") or 0),
+        },
+        "embedding_status": embedding_status,
+        "top_users": list(user_groups.get("groups") or []),
+        "top_documents": list(doc_groups.get("groups") or []),
     }
 
 
@@ -464,6 +659,341 @@ def count_embedding_candidates(
     if doc_id:
         query = query.filter(UserMemoryChunk.doc_id == doc_id)
     return int(query.count())
+
+
+def _normalize_optional_filter(value: str | None) -> str | None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    return cleaned
+
+
+def list_documents(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    doc_kind: str | None = None,
+    status: str | None = ACTIVE_STATUS,
+    source: str | None = None,
+    keyword: str | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict[str, Any]], int]:
+    """分页查询记忆文档列表（含分块状态聚合）。"""
+
+    safe_page = max(1, int(page))
+    safe_page_size = max(1, int(page_size))
+    offset = (safe_page - 1) * safe_page_size
+
+    chunk_stats_subquery = (
+        db.query(
+            UserMemoryChunk.doc_id.label("doc_id"),
+            func.count(UserMemoryChunk.id).label("chunk_total"),
+            func.sum(
+                case(
+                    (UserMemoryChunk.embedding_status == EMBEDDING_STATUS_READY, 1),
+                    else_=0,
+                )
+            ).label("ready_chunks"),
+            func.sum(
+                case(
+                    (UserMemoryChunk.embedding_status == EMBEDDING_STATUS_FAILED, 1),
+                    else_=0,
+                )
+            ).label("failed_chunks"),
+        )
+        .group_by(UserMemoryChunk.doc_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(
+            UserMemoryDocument,
+            chunk_stats_subquery.c.chunk_total,
+            chunk_stats_subquery.c.ready_chunks,
+            chunk_stats_subquery.c.failed_chunks,
+        )
+        .outerjoin(
+            chunk_stats_subquery,
+            chunk_stats_subquery.c.doc_id == UserMemoryDocument.id,
+        )
+    )
+
+    if user_id is not None:
+        query = query.filter(UserMemoryDocument.user_id == int(user_id))
+
+    normalized_status = _normalize_optional_filter(status)
+    if normalized_status and normalized_status.lower() != "all":
+        query = query.filter(UserMemoryDocument.status == normalized_status.lower())
+
+    normalized_doc_kind = _normalize_optional_filter(doc_kind)
+    if normalized_doc_kind:
+        query = query.filter(func.lower(UserMemoryDocument.doc_kind) == normalized_doc_kind.lower())
+
+    normalized_source = _normalize_optional_filter(source)
+    if normalized_source:
+        query = query.filter(func.lower(UserMemoryDocument.source) == normalized_source.lower())
+
+    normalized_keyword = _normalize_optional_filter(keyword)
+    if normalized_keyword:
+        like_value = f"%{normalized_keyword}%"
+        query = query.filter(
+            or_(
+                UserMemoryDocument.title.ilike(like_value),
+                UserMemoryDocument.doc_key.ilike(like_value),
+                UserMemoryDocument.content_md.ilike(like_value),
+            )
+        )
+
+    if updated_from is not None:
+        query = query.filter(UserMemoryDocument.update_time >= updated_from)
+    if updated_to is not None:
+        query = query.filter(UserMemoryDocument.update_time <= updated_to)
+
+    total = int(query.with_entities(func.count(UserMemoryDocument.id)).scalar() or 0)
+    rows = (
+        query.order_by(
+            UserMemoryDocument.update_time.desc(),
+            UserMemoryDocument.id.desc(),
+        )
+        .offset(offset)
+        .limit(safe_page_size)
+        .all()
+    )
+
+    items: list[dict[str, Any]] = []
+    for document, chunk_total, ready_chunks, failed_chunks in rows:
+        items.append(
+            {
+                "memory_id": int(document.id),
+                "user_id": int(document.user_id),
+                "doc_kind": str(document.doc_kind),
+                "doc_key": str(document.doc_key),
+                "title": document.title,
+                "summary_md": document.summary_md,
+                "source": str(document.source),
+                "scope": str(document.scope),
+                "scope_ref": document.scope_ref,
+                "status": str(document.status),
+                "revision": int(document.revision or 1),
+                "chunk_total": int(chunk_total or 0),
+                "ready_chunks": int(ready_chunks or 0),
+                "failed_chunks": int(failed_chunks or 0),
+                "create_time": document.create_time,
+                "update_time": document.update_time,
+            }
+        )
+    return items, total
+
+
+def get_document_detail(
+    db: Session,
+    *,
+    doc_id: int,
+    user_id: int | None = None,
+) -> Optional[dict[str, Any]]:
+    """查询单条记忆文档详情。"""
+
+    chunk_stats_subquery = (
+        db.query(
+            UserMemoryChunk.doc_id.label("doc_id"),
+            func.count(UserMemoryChunk.id).label("chunk_total"),
+            func.sum(
+                case(
+                    (UserMemoryChunk.embedding_status == EMBEDDING_STATUS_READY, 1),
+                    else_=0,
+                )
+            ).label("ready_chunks"),
+            func.sum(
+                case(
+                    (UserMemoryChunk.embedding_status == EMBEDDING_STATUS_FAILED, 1),
+                    else_=0,
+                )
+            ).label("failed_chunks"),
+        )
+        .group_by(UserMemoryChunk.doc_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(
+            UserMemoryDocument,
+            chunk_stats_subquery.c.chunk_total,
+            chunk_stats_subquery.c.ready_chunks,
+            chunk_stats_subquery.c.failed_chunks,
+        )
+        .outerjoin(
+            chunk_stats_subquery,
+            chunk_stats_subquery.c.doc_id == UserMemoryDocument.id,
+        )
+        .filter(UserMemoryDocument.id == int(doc_id))
+    )
+    if user_id is not None:
+        query = query.filter(UserMemoryDocument.user_id == int(user_id))
+
+    row = query.first()
+    if row is None:
+        return None
+
+    document, chunk_total, ready_chunks, failed_chunks = row
+    return {
+        "memory_id": int(document.id),
+        "user_id": int(document.user_id),
+        "doc_kind": str(document.doc_kind),
+        "doc_key": str(document.doc_key),
+        "title": document.title,
+        "content_md": document.content_md,
+        "summary_md": document.summary_md,
+        "source": str(document.source),
+        "scope": str(document.scope),
+        "scope_ref": document.scope_ref,
+        "status": str(document.status),
+        "revision": int(document.revision or 1),
+        "source_thread_id": document.source_thread_id,
+        "source_message_id": document.source_message_id,
+        "chunk_total": int(chunk_total or 0),
+        "ready_chunks": int(ready_chunks or 0),
+        "failed_chunks": int(failed_chunks or 0),
+        "create_time": document.create_time,
+        "update_time": document.update_time,
+    }
+
+
+def list_document_chunks(
+    db: Session,
+    *,
+    doc_id: int,
+    user_id: int | None = None,
+    embedding_status: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[dict[str, Any]], int]:
+    """分页查询文档分块列表。"""
+
+    safe_page = max(1, int(page))
+    safe_page_size = max(1, int(page_size))
+    offset = (safe_page - 1) * safe_page_size
+
+    query = db.query(UserMemoryChunk).filter(UserMemoryChunk.doc_id == int(doc_id))
+    if user_id is not None:
+        query = query.filter(UserMemoryChunk.user_id == int(user_id))
+
+    normalized_embedding_status = _normalize_optional_filter(embedding_status)
+    if normalized_embedding_status and normalized_embedding_status.lower() != "all":
+        query = query.filter(UserMemoryChunk.embedding_status == normalized_embedding_status.lower())
+
+    total = int(query.with_entities(func.count(UserMemoryChunk.id)).scalar() or 0)
+    rows = (
+        query.order_by(
+            UserMemoryChunk.chunk_no.asc(),
+            UserMemoryChunk.id.asc(),
+        )
+        .offset(offset)
+        .limit(safe_page_size)
+        .all()
+    )
+
+    items: list[dict[str, Any]] = []
+    for chunk in rows:
+        items.append(
+            {
+                "chunk_id": int(chunk.id),
+                "doc_id": int(chunk.doc_id),
+                "user_id": int(chunk.user_id),
+                "chunk_no": int(chunk.chunk_no),
+                "start_line": int(chunk.start_line),
+                "end_line": int(chunk.end_line),
+                "chunk_text": str(chunk.chunk_text or ""),
+                "chunk_hash": str(chunk.chunk_hash or ""),
+                "embedding_status": str(chunk.embedding_status or EMBEDDING_STATUS_PENDING),
+                "embedding_retry_count": int(chunk.embedding_retry_count or 0),
+                "embedding_model": chunk.embedding_model,
+                "embedding_error": chunk.embedding_error,
+                "embedding_updated_time": chunk.embedding_updated_time,
+                "source": str(chunk.source or "memory"),
+                "create_time": chunk.create_time,
+                "update_time": chunk.update_time,
+            }
+        )
+    return items, total
+
+
+def archive_document(
+    db: Session,
+    *,
+    doc_id: int,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """将记忆文档归档为 archived（幂等）。"""
+
+    query = db.query(UserMemoryDocument).filter(UserMemoryDocument.id == int(doc_id))
+    if user_id is not None:
+        query = query.filter(UserMemoryDocument.user_id == int(user_id))
+
+    document = query.first()
+    if document is None:
+        return {
+            "found": False,
+            "changed": False,
+            "status": "missing",
+            "update_time": None,
+        }
+
+    current_status = str(document.status or "").lower()
+    if current_status == ARCHIVED_STATUS:
+        return {
+            "found": True,
+            "changed": False,
+            "status": ARCHIVED_STATUS,
+            "update_time": document.update_time,
+        }
+
+    now = datetime.now()
+    document.status = ARCHIVED_STATUS
+    document.update_time = now
+    db.flush()
+    return {
+        "found": True,
+        "changed": True,
+        "status": ARCHIVED_STATUS,
+        "update_time": now,
+    }
+
+
+def delete_document(
+    db: Session,
+    *,
+    doc_id: int,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """硬删除记忆文档（幂等）。"""
+
+    query = db.query(UserMemoryDocument).filter(UserMemoryDocument.id == int(doc_id))
+    if user_id is not None:
+        query = query.filter(UserMemoryDocument.user_id == int(user_id))
+
+    document = query.first()
+    if document is None:
+        return {
+            "found": False,
+            "deleted": False,
+            "deleted_chunks": 0,
+        }
+
+    deleted_chunks = int(
+        db.query(UserMemoryChunk)
+        .filter(UserMemoryChunk.doc_id == int(document.id))
+        .delete(synchronize_session=False)
+    )
+    db.delete(document)
+    db.flush()
+    return {
+        "found": True,
+        "deleted": True,
+        "deleted_chunks": deleted_chunks,
+    }
 
 
 def get_document_excerpt(
