@@ -26,8 +26,10 @@ def _call_ragflow_retrieval(
     query: str, 
     dataset_ids: list[str],
     similarity_threshold: float = 0.2,
+    page_size: int | None = None,
     top_k: int = 5,
     vector_weight: float = 0.3,
+    timeout_seconds: float = 30,
 ) -> dict:
     """调用 RAGFlow 检索 API。
     
@@ -35,13 +37,17 @@ def _call_ragflow_retrieval(
         query: 检索问题
         dataset_ids: 知识库 ID 列表
         similarity_threshold: 相似度阈值
-        top_k: 返回结果数量
+        page_size: 返回结果数量（为空时回退 top_k）
+        top_k: 候选召回深度
         vector_weight: 向量相似度权重（0-1），剩余为关键词权重
+        timeout_seconds: 请求超时秒数
         
     Returns:
         API 响应数据
     """
     try:
+        effective_page_size = top_k if page_size is None else page_size
+
         response = requests.post(
             f"{config.RAGFLOW_API_URL}/retrieval",
             headers={"Authorization": f"Bearer {config.RAGFLOW_API_KEY}"},
@@ -49,10 +55,11 @@ def _call_ragflow_retrieval(
                 "question": query,
                 "dataset_ids": dataset_ids,
                 "similarity_threshold": similarity_threshold,
+                "page_size": effective_page_size,
                 "top_k": top_k,
                 "vector_similarity_weight": vector_weight,
             },
-            timeout=30,
+            timeout=timeout_seconds,
         )
         response.raise_for_status()
         return response.json()
@@ -180,8 +187,10 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
             query=query,
             dataset_ids=target_datasets,
             similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
+            page_size=config.RAGFLOW_PAGE_SIZE,
             top_k=config.RAGFLOW_TOP_K,
             vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
+            timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
         )
         
         # 检查响应
@@ -199,8 +208,10 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                             query=query,
                             dataset_ids=[single_id],
                             similarity_threshold=config.RAGFLOW_SIMILARITY_THRESHOLD,
+                            page_size=config.RAGFLOW_PAGE_SIZE,
                             top_k=config.RAGFLOW_TOP_K,
                             vector_weight=config.RAGFLOW_VECTOR_WEIGHT,
+                            timeout_seconds=config.RAGFLOW_TIMEOUT_SECONDS,
                         )
                         if sub_data.get("code") == 0:
                             chunks = sub_data.get("data", {}).get("chunks", [])
@@ -210,8 +221,8 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                 
                 # 按照相似度排序
                 all_chunks.sort(key=lambda x: x.get("similarity", 0), reverse=True)
-                # 取总的 top_k
-                final_chunks = all_chunks[:config.RAGFLOW_TOP_K]
+                # 取总的 page_size
+                final_chunks = all_chunks[:config.RAGFLOW_PAGE_SIZE]
                 
                 result_text, kb_images = _format_retrieval_results(final_chunks)
                 logger.info("混合检索完成: 合并后找到 %d 条结果, 图片=%d", len(final_chunks), len(kb_images))
@@ -249,6 +260,9 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         return result_text
         
 
+    except requests.exceptions.Timeout as e:
+        logger.warning("RAGFlow 请求超时: %s", e)
+        return "知识库检索超时，请稍后重试。"
     except requests.exceptions.RequestException as e:
         logger.error("RAGFlow 请求错误: %s", e)
         return f"知识库服务请求失败: {e}"
