@@ -214,3 +214,23 @@ def test_main_strict_exit_nonzero_on_failed_sync(monkeypatch, tmp_path, capsys):
     payload = json.loads(output)
     assert payload["ok"] is False
     assert payload["strict_mode"] is True
+
+
+def test_build_vktodo_card_title_injects_main_task_name_before_subtask():
+    module = _load_module()
+
+    title = module.build_vktodo_card_title(
+        raw_title="G01 Gate 统一质量门禁 [PP-20260301-KB-RETRIEVAL-P2]",
+        card_id="G01",
+        task_key="PP-20260301-KB-RETRIEVAL-P2",
+        main_task_name="知识库检索P2分阶段治理",
+    )
+
+    assert title == "G01 Gate 知识库检索P2分阶段治理 统一质量门禁 [PP-20260301-KB-RETRIEVAL-P2]"
+
+
+def test_extract_main_task_name_removes_date_prefix():
+    module = _load_module()
+
+    assert module.extract_main_task_name("2026-03-01_知识库检索P2分阶段治理") == "知识库检索P2分阶段治理"
+    assert module.extract_main_task_name("知识库检索P2分阶段治理") == "知识库检索P2分阶段治理"

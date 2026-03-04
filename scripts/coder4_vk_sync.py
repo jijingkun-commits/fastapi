@@ -35,6 +35,7 @@ class SyncContext:
     active_task_path: Path
     project_id: str
     task_key: str
+    main_task_name: str
     card_order: list[str]
     cards_by_id: dict[str, dict[str, Any]]
     state_path: Path
@@ -157,6 +158,45 @@ def render_task_scoped_path(raw_path: str, *, task_key: str) -> str:
     if "{task_key}" not in template:
         return template
     return template.replace("{task_key}", sanitize_task_key_segment(task_key))
+
+
+def extract_main_task_name(task_split_dir: str) -> str:
+    normalized = str(task_split_dir or "").strip()
+    if not normalized:
+        return ""
+    if "_" not in normalized:
+        return normalized
+    prefix, suffix = normalized.split("_", 1)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", prefix):
+        return suffix.strip()
+    return normalized
+
+
+def build_vktodo_card_title(*, raw_title: str, card_id: str, task_key: str, main_task_name: str) -> str:
+    normalized_card_id = str(card_id or "").strip().upper()
+    normalized_task_key = str(task_key or "").strip()
+    normalized_main_task_name = str(main_task_name or "").strip()
+    fallback_title = f"{normalized_card_id} [{normalized_task_key}]"
+    title = str(raw_title or "").strip() or fallback_title
+
+    if not normalized_main_task_name or normalized_main_task_name in title:
+        return title
+
+    suffix_match = re.search(r"\s+\[[^\]]+\]$", title)
+    suffix = suffix_match.group(0) if suffix_match else ""
+    body = title[:-len(suffix)].rstrip() if suffix else title
+
+    prefix_match = re.match(
+        r"^(?P<prefix>[CG]\d{2}(?:\s+(?:S\d+|P\d+|Q\d+|M\d+|T\d+|R\d+|Gate))?)\s+(?P<subtask>.+)$",
+        body,
+        flags=re.IGNORECASE,
+    )
+    if not prefix_match:
+        return f"{normalized_main_task_name} {title}"
+
+    prefix = prefix_match.group("prefix").strip()
+    subtask_name = prefix_match.group("subtask").strip()
+    return f"{prefix} {normalized_main_task_name} {subtask_name}{suffix}"
 
 
 def resolve_vk_cards_path(active_task_path: Path, active_payload: dict[str, Any], task_split_dir: str) -> Path:
@@ -305,6 +345,7 @@ def load_context(args: argparse.Namespace) -> SyncContext:
     task_split_dir = str(active_payload.get("task_split_dir") or "").strip()
     if not task_split_dir:
         raise ValueError("active task missing task_split_dir")
+    main_task_name = extract_main_task_name(task_split_dir)
 
     task_key = str(args.task_key or "").strip() or str(active_payload.get("task_key") or "").strip()
     if not task_key:
@@ -335,6 +376,7 @@ def load_context(args: argparse.Namespace) -> SyncContext:
         active_task_path=active_task_path,
         project_id=project_id,
         task_key=task_key,
+        main_task_name=main_task_name,
         card_order=card_order,
         cards_by_id=cards_by_id,
         state_path=state_path,
@@ -407,9 +449,15 @@ def _sync_single_card(
         return result
 
     card_meta = ctx.cards_by_id.get(normalized_card_id) or {}
+    raw_title = str(card_meta.get("title") or f"{normalized_card_id} [{ctx.task_key}]")
     payload = {
         "project_id": ctx.project_id,
-        "title": str(card_meta.get("title") or f"{normalized_card_id} [{ctx.task_key}]"),
+        "title": build_vktodo_card_title(
+            raw_title=raw_title,
+            card_id=normalized_card_id,
+            task_key=ctx.task_key,
+            main_task_name=ctx.main_task_name,
+        ),
         "description": build_card_description(card_meta, ctx.task_key, normalized_card_id),
         "status": desired_status,
     }
