@@ -1,5 +1,5 @@
 ---
-description: 串行卡片执行入口（消费 /jjk-vkplan 产物）：主控调度 + 子代理逐卡执行 + done_gate 验证
+description: 串行卡片执行入口（消费 /jjk-vkplan 产物）：主控调度 + 子代理逐卡执行 + done_gate 验证 + 会话隔离
 ---
 
 > 参考规则: @dual-database
@@ -9,6 +9,132 @@ description: 串行卡片执行入口（消费 /jjk-vkplan 产物）：主控调
 `/jjk-cardrun` 是 `jjk-*` 体系里的串行执行入口，负责消费 `/jjk-vkplan` 产物（`vk_cards.json`、`parallel_plan.md`、`WS-*.md`），并按 `card_order` 单卡推进。
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
+
+## 会话隔离机制（v2.0 新增）
+
+### 设计目标
+
+支持多个 `jjk-cardrun` 实例并行执行，避免分支名和 worktree 路径冲突。
+
+### 命名规则
+
+#### 分支命名
+
+- **有 task_key + 会话隔离**：`feature/<task_key>/<card_id>/<session_id>`
+- **有 task_key（旧版兼容）**：`feature/<task_key>/<card_id>`
+- **无 task_key（旧版兼容）**：`feature/<card_id>`
+
+#### Worktree 路径
+
+- **有 task_key + 会话隔离**：`.worktrees/<task_key>/<card_id>/<session_id>`
+- **有 task_key（旧版兼容）**：`.worktrees/<task_key>/<card_id>`
+- **无 task_key（旧版兼容）**：`.worktrees/<card_id>`
+
+#### Session ID 格式
+
+- 格式：`<timestamp>-<random_suffix>`
+- 示例：`1709539200-a3f2`
+- 生成方式：`date +%s` + 4 位随机十六进制
+
+### 使用方式
+
+#### 自动生成会话 ID（推荐）
+
+```bash
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop
+```
+
+每次执行自动生成新的 session_id，避免冲突。
+
+#### 手动指定会话 ID（高级用法）
+
+```bash
+export WT_FLOW_SESSION_ID="1709539200-a3f2"
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop
+```
+
+用于：
+- 恢复中断的会话
+- 多个 cardrun 实例协作（不同 session_id）
+- 调试特定会话
+
+#### 查看所有活跃会话
+
+```bash
+bash scripts/wt-flow.sh global-status
+```
+
+输出示例：
+
+```
+=== 全局 Worktree 状态 ===
+TASK_KEY                                      CARD     STATUS          WORKTREE_PATH                                      BRANCH
+--------------------------------------------- -------- --------------- -------------------------------------------------- ----------------------------------------
+2026-03-01_用户个性化永久记忆与管理能力      C01      active          .worktrees/2026-03-01_.../C01/1709539200-a3f2     feature/2026-03-01_.../C01/1709539200-a3f2
+2026-03-01_用户个性化永久记忆与管理能力      C02      active          .worktrees/2026-03-01_.../C02/1709539300-b4e3     feature/2026-03-01_.../C02/1709539300-b4e3
+2026-02-28_另一个任务                         G01      active          .worktrees/2026-02-28_.../G01/1709539400-c5f4     feature/2026-02-28_.../G01/1709539400-c5f4
+```
+
+### 并行执行场景
+
+#### 场景 1：同一 task 的不同卡片并行（支持）
+
+```bash
+# 终端 1
+export WT_FLOW_SESSION_ID="session-1"
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once
+
+# 终端 2
+export WT_FLOW_SESSION_ID="session-2"
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once
+```
+
+**结果**：
+- 分支名：`feature/2026-03-01_.../C01/session-1` 和 `feature/2026-03-01_.../C02/session-2`
+- Worktree：`.worktrees/2026-03-01_.../C01/session-1` 和 `.worktrees/2026-03-01_.../C02/session-2`
+- **不冲突**
+
+#### 场景 2：不同 task 并行（支持）
+
+```bash
+# 终端 1
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop
+
+# 终端 2
+/jjk-cardrun 2026-02-28_另一个任务 loop
+```
+
+**结果**：不同 task_key，天然隔离，不冲突。
+
+#### 场景 3：同一卡片多实例（支持，但需手动指定 session_id）
+
+```bash
+# 终端 1
+export WT_FLOW_SESSION_ID="session-1"
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once
+
+# 终端 2（同一张卡片）
+export WT_FLOW_SESSION_ID="session-2"
+/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 once
+```
+
+**结果**：
+- 如果两个实例选中同一张卡片（如 C01），会创建两个独立的 worktree
+- 分支名：`feature/.../C01/session-1` 和 `feature/.../C01/session-2`
+- **不冲突**
+
+### 状态文件隔离
+
+每个会话使用独立的状态文件：
+
+- **有 session_id**：`.omc/state/<task_key>/sessions/<session_id>/wt-flow-state.json`
+- **无 session_id（旧版）**：`.omc/state/<task_key>/wt-flow-state.json`
+
+### 兼容性
+
+- **向后兼容**：未设置 `WT_FLOW_SESSION_ID` 时，行为与旧版一致
+- **自动升级**：首次使用会话隔离后，后续操作自动识别会话 ID
+- **混合模式**：新旧 worktree 可以共存，互不干扰
 
 ## 与 Superpowers / OMX 的分工（强制）
 

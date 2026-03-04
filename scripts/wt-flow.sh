@@ -50,8 +50,25 @@ DEFAULT_DIRTY_WHITELIST=(
 WT_FLOW_PARSE_STATE_DIR=""
 WT_FLOW_PARSE_REMAINING=()
 WT_FLOW_LAST_SESSION_FILE=""
+WT_FLOW_SESSION_ID="${WT_FLOW_SESSION_ID:-}"
 
 # --- 工具函数 ---
+
+_generate_session_id() {
+  local timestamp
+  timestamp="$(date +%s)"
+  local random_suffix
+  random_suffix="$(printf "%04x" $((RANDOM % 65536)))"
+  echo "${timestamp}-${random_suffix}"
+}
+
+_get_or_create_session_id() {
+  if [[ -n "$WT_FLOW_SESSION_ID" ]]; then
+    echo "$WT_FLOW_SESSION_ID"
+    return 0
+  fi
+  _generate_session_id
+}
 
 _log()  { echo "[wt-flow] $*"; }
 _err()  { echo "[wt-flow] ERROR: $*" >&2; }
@@ -136,13 +153,28 @@ _task_state_file_for_read() {
 
 _session_state_file() {
   local task_key_override="${1:-}"
+  local session_id="${2:-}"
   local task_root
   task_root="$(_task_state_root "$DEFAULT_STATE_DIR" "$task_key_override")"
-  echo "${task_root}/wt-flow-state.json"
+  if [[ -n "$session_id" ]]; then
+    echo "${task_root}/sessions/${session_id}/wt-flow-state.json"
+  else
+    echo "${task_root}/wt-flow-state.json"
+  fi
 }
 
 _session_state_file_for_read() {
+  local session_id="${WT_FLOW_SESSION_ID:-}"
   local scoped_candidate
+
+  if [[ -n "$session_id" ]]; then
+    scoped_candidate="$(_session_state_file "" "$session_id")"
+    if [[ -f "$scoped_candidate" ]]; then
+      echo "$scoped_candidate"
+      return 0
+    fi
+  fi
+
   scoped_candidate="$(_session_state_file)"
   if [[ -f "$scoped_candidate" ]]; then
     echo "$scoped_candidate"
@@ -451,11 +483,21 @@ _is_allowed_prefix() {
 
 _resolve_worktree_path_for_card() {
   local card_id="$1"
-  local active_task_key sanitized_task_key by_card by_task_card
+  local session_id="${WT_FLOW_SESSION_ID:-}"
+  local active_task_key sanitized_task_key by_card by_task_card by_session
+
   active_task_key="$(_active_task_key)"
   sanitized_task_key="$(_sanitize_task_key_segment "$active_task_key")"
 
   if [[ -n "$sanitized_task_key" ]]; then
+    if [[ -n "$session_id" ]]; then
+      by_session="${WT_BASE}/${sanitized_task_key}/${card_id}/${session_id}"
+      if [[ -d "$by_session" ]]; then
+        echo "$by_session"
+        return 0
+      fi
+    fi
+
     by_task_card="${WT_BASE}/${sanitized_task_key}/${card_id}"
     if [[ -d "$by_task_card" ]]; then
       echo "$by_task_card"
@@ -474,7 +516,21 @@ _resolve_worktree_path_for_card() {
     state="$(cat "$state_file")"
     branch="$(echo "$state" | sed -n 's/.*"branch": *"\([^"]*\)".*/\1/p' | head -n1)"
     wt_path="$(echo "$state" | sed -n 's/.*"worktree": *"\([^"]*\)".*/\1/p' | head -n1)"
-    if [[ "$branch" =~ ^feature/(.+)/(.+)$ ]]; then
+
+    if [[ "$branch" =~ ^feature/(.+)/(.+)/(.+)$ ]]; then
+      local branch_task_key branch_card_id branch_session_id
+      branch_task_key="$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
+      branch_card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+      branch_session_id="${BASH_REMATCH[3]}"
+      if [[ "$branch_card_id" == "$card_id" && -d "$wt_path" ]]; then
+        if [[ -z "$sanitized_task_key" || "$branch_task_key" == "$sanitized_task_key" ]]; then
+          if [[ -z "$session_id" || "$branch_session_id" == "$session_id" ]]; then
+            echo "$wt_path"
+            return 0
+          fi
+        fi
+      fi
+    elif [[ "$branch" =~ ^feature/(.+)/(.+)$ ]]; then
       local branch_task_key branch_card_id
       branch_task_key="$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
       branch_card_id="$(_to_upper "${BASH_REMATCH[2]}")"
@@ -513,11 +569,11 @@ _ensure_clean() {
 }
 
 _save_state() {
-  local branch="$1" worktree="$2" base="$3"
+  local branch="$1" worktree="$2" base="$3" session_id="$4"
   local task_key
   task_key="$(_active_task_key)"
   local state_file
-  state_file="$(_session_state_file "$task_key")"
+  state_file="$(_session_state_file "$task_key" "$session_id")"
   mkdir -p "$(dirname "$state_file")"
   cat > "$state_file" <<EOF
 {
@@ -525,6 +581,7 @@ _save_state() {
   "worktree": "$worktree",
   "base_branch": "$base",
   "task_key": "$task_key",
+  "session_id": "$session_id",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -625,15 +682,16 @@ cmd_create() {
 
   _ensure_clean
 
-  local task_key sanitized_task_key branch wt_path
+  local task_key sanitized_task_key branch wt_path session_id
   task_key="$(_active_task_key)"
   sanitized_task_key="$(_sanitize_task_key_segment "$task_key")"
+  session_id="$(_get_or_create_session_id)"
 
   branch="feature/${slug}"
   wt_path="${WT_BASE}/${slug}"
   if [[ -n "$sanitized_task_key" ]]; then
-    branch="feature/${sanitized_task_key}/${slug}"
-    wt_path="${WT_BASE}/${sanitized_task_key}/${slug}"
+    branch="feature/${sanitized_task_key}/${slug}/${session_id}"
+    wt_path="${WT_BASE}/${sanitized_task_key}/${slug}/${session_id}"
   fi
 
   if git show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null; then
@@ -649,12 +707,13 @@ cmd_create() {
   git fetch origin "${base}" 2>/dev/null || true
   git worktree add -b "${branch}" "${wt_path}" "${base}"
 
-  _save_state "$branch" "$wt_path" "$base"
+  _save_state "$branch" "$wt_path" "$base" "$session_id"
 
   _log "worktree 已创建:"
   _log "  分支:    ${branch}"
   _log "  路径:    ${wt_path}"
   _log "  基准:    ${base}"
+  _log "  会话:    ${session_id}"
   echo "${wt_path}"
 }
 
@@ -916,6 +975,68 @@ cmd_guard() {
   return 0
 }
 
+# --- 命令: global-status ---
+
+cmd_global_status() {
+  _require_cmd jq
+
+  echo "=== 全局 Worktree 状态 ==="
+  printf "%-45s %-8s %-15s %-50s %-40s\n" "TASK_KEY" "CARD" "STATUS" "WORKTREE_PATH" "BRANCH"
+  printf "%-45s %-8s %-15s %-50s %-40s\n" "---------------------------------------------" "--------" "---------------" "--------------------------------------------------" "----------------------------------------"
+
+  local all_sessions=()
+  if [[ -d "${DEFAULT_STATE_DIR}" ]]; then
+    while IFS= read -r session_file; do
+      [[ -z "$session_file" ]] && continue
+      all_sessions+=("$session_file")
+    done < <(find "${DEFAULT_STATE_DIR}" -name "wt-flow-state.json" -type f 2>/dev/null)
+  fi
+
+  if [[ "${#all_sessions[@]}" -eq 0 ]]; then
+    echo "无活跃的 worktree 会话"
+    return 0
+  fi
+
+  for session_file in "${all_sessions[@]}"; do
+    local task_key branch wt_path session_id card_id status
+    task_key="$(jq -r '.task_key // "unknown"' "$session_file" 2>/dev/null || echo "unknown")"
+    branch="$(jq -r '.branch // ""' "$session_file" 2>/dev/null || echo "")"
+    wt_path="$(jq -r '.worktree // ""' "$session_file" 2>/dev/null || echo "")"
+    session_id="$(jq -r '.session_id // ""' "$session_file" 2>/dev/null || echo "")"
+
+    card_id=""
+    if [[ "$branch" =~ ^feature/(.+)/(.+)/(.+)$ ]]; then
+      card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+    elif [[ "$branch" =~ ^feature/(.+)/(.+)$ ]]; then
+      card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+    elif [[ "$branch" =~ ^feature/(.+)$ ]]; then
+      card_id="$(_to_upper "${BASH_REMATCH[1]}")"
+    fi
+
+    status="active"
+    if [[ ! -d "$wt_path" ]]; then
+      status="stale"
+    fi
+
+    local display_path="${wt_path#"$REPO_ROOT/"}"
+    local display_branch="${branch}"
+    if [[ "${#display_branch}" -gt 40 ]]; then
+      display_branch="${display_branch:0:37}..."
+    fi
+
+    printf "%-45s %-8s %-15s %-50s %-40s\n" \
+      "${task_key:0:45}" \
+      "${card_id}" \
+      "${status}" \
+      "${display_path:0:50}" \
+      "${display_branch}"
+  done
+
+  echo ""
+  echo "提示: 使用 'wt-flow.sh status' 查看当前会话详情"
+  echo "提示: 使用 'WT_FLOW_SESSION_ID=<session_id> wt-flow.sh ...' 操作特定会话"
+}
+
 # --- 命令: verify ---
 
 cmd_verify() {
@@ -1152,10 +1273,11 @@ main() {
     cleanup) cmd_cleanup "$@" ;;
     status)  cmd_status "$@" ;;
     guard)   cmd_guard "$@" ;;
+    global-status) cmd_global_status "$@" ;;
     *)
-      echo "用法: wt-flow.sh {create|next|verify|list|merge|cleanup|status|guard}"
+      echo "用法: wt-flow.sh {create|next|verify|list|merge|cleanup|status|guard|global-status}"
       echo ""
-      echo "  create <slug> [base]  从 base 创建 worktree"
+      echo "  create <slug> [base]  从 base 创建 worktree（自动生成会话 ID）"
       echo "  next [--state-dir]    选择下一张可执行卡并创建 worktree"
       echo "  verify <card-id>      执行 done_gate 验收（通过后置为 verified）"
       echo "  list [--state-dir]    查看卡片队列与状态"
@@ -1163,8 +1285,10 @@ main() {
       echo "  cleanup               清理 worktree 和分支"
       echo "  status                查看当前会话"
       echo "  guard                 检查是否在主分支上"
+      echo "  global-status         查看所有活跃的 worktree 会话"
       echo ""
       echo "环境变量:"
+      echo "  WT_FLOW_SESSION_ID=<id>  指定会话 ID（用于多实例并行）"
       echo "  WT_FLOW_DIRTY_WHITELIST=docs/,.cursor/commands/  配置 dirty 白名单前缀（逗号分隔）"
       echo "  WT_FLOW_ALLOW_AUTOCOMMIT=1  非白名单 dirty 时允许 auto-commit（默认关闭）"
       echo "  WT_FLOW_STATE_DIR         覆盖 task-runner-state 目录（默认 .omc/state）"

@@ -2611,6 +2611,19 @@ def _apply_router_contract_guard(
     if not _is_router_contract_guard_enabled():
         return normalized_handoffs, [], []
 
+    intent_plan = state.get("intent_plan")
+    decomposed_goals = state.get("decomposed_goals")
+    has_explicit_contract = bool(
+        isinstance(intent_plan, dict)
+        and isinstance(intent_plan.get("goals"), list)
+        and intent_plan.get("goals")
+    )
+    has_runtime_contract = bool(
+        isinstance(decomposed_goals, list) and decomposed_goals
+    )
+    if not (has_explicit_contract or has_runtime_contract):
+        return normalized_handoffs, [], []
+
     active_goals = _resolve_active_goals(state)
     dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
     if not dispatch_queue:
@@ -3419,6 +3432,22 @@ def _dispatch_values_mode_chunk(
             final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
             final_state["intent_plan"] = decompose_plan
 
+        raw_runtime_goals = final_state.get("decomposed_goals")
+        if not isinstance(raw_runtime_goals, list):
+            raw_runtime_goals = ctx.state.get("decomposed_goals")
+        raw_intent_plan = final_state.get("intent_plan")
+        if not isinstance(raw_intent_plan, dict):
+            raw_intent_plan = ctx.state.get("intent_plan")
+        has_explicit_router_contract = bool(
+            extracted_goals
+            or (isinstance(raw_runtime_goals, list) and raw_runtime_goals)
+            or (
+                isinstance(raw_intent_plan, dict)
+                and isinstance(raw_intent_plan.get("goals"), list)
+                and raw_intent_plan.get("goals")
+            )
+        )
+
         runtime_goals = final_state.get("decomposed_goals")
         if not isinstance(runtime_goals, list):
             runtime_goals = ctx.state.get("decomposed_goals")
@@ -3458,10 +3487,15 @@ def _dispatch_values_mode_chunk(
                 has_direct_lookup=has_direct_lookup,
                 state=guard_state,
             )
-            guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
-                normalized_batch,
-                state=guard_state,
-            )
+            if has_explicit_router_contract:
+                guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
+                    normalized_batch,
+                    state=guard_state,
+                )
+            else:
+                guarded_batch = list(normalized_batch)
+                blocked_handoffs = []
+                pending_goals = []
 
             existing_meta = (
                 final_state.get("delivery_meta")

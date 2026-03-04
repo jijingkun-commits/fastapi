@@ -28,7 +28,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -107,10 +107,10 @@ class KernelContext:
     main_repo_path: str
     main_repo_clean: bool
     main_repo_dirty_preview: list[str]
-    main_repo_dirty_ignored_preview: list[str]
-    main_repo_error: str | None
-    dirty_policy_version: str
-    dirty_whitelist: list[str]
+    main_repo_dirty_ignored_preview: list[str] = field(default_factory=list)
+    main_repo_error: str | None = None
+    dirty_policy_version: str = DEFAULT_DIRTY_POLICY_VERSION
+    dirty_whitelist: list[str] = field(default_factory=lambda: list(DEFAULT_DIRTY_WHITELIST))
 
 
 def parse_args() -> argparse.Namespace:
@@ -1679,8 +1679,15 @@ def main() -> int:
     idempotency_window_seconds = _normalize_window_seconds(args.idempotency_window_seconds)
     run_lock_disabled = is_disabled_by_env(RUN_LOCK_DISABLE_ENV)
     idempotency_disabled = is_disabled_by_env(IDEMPOTENCY_DISABLE_ENV)
-    dirty_whitelist = parse_dirty_whitelist(args.dirty_whitelist)
-    dirty_policy_version = str(args.dirty_policy_version or DEFAULT_DIRTY_POLICY_VERSION)
+    dirty_whitelist = parse_dirty_whitelist(getattr(args, "dirty_whitelist", ""))
+    dirty_policy_version = str(
+        getattr(args, "dirty_policy_version", DEFAULT_DIRTY_POLICY_VERSION)
+        or DEFAULT_DIRTY_POLICY_VERSION
+    )
+    subagent_id = str(getattr(args, "subagent_id", "") or "").strip() or None
+    ws_file = str(getattr(args, "ws_file", "") or "").strip() or None
+    commit_sha = str(getattr(args, "commit_sha", "") or "").strip() or None
+    merge_sha = str(getattr(args, "merge_sha", "") or "").strip() or None
 
     try:
         with with_run_lock(run_lock_file) as lock_acquired:
@@ -1812,10 +1819,10 @@ def main() -> int:
                         blocked_details=blocked_details,
                         idempotency_key=idempotency_key,
                         execution_mode=ctx.execution_mode,
-                        subagent_id=str(args.subagent_id or "").strip() or None,
-                        ws_file=str(args.ws_file or "").strip() or None,
-                        commit_sha=str(args.commit_sha or "").strip() or None,
-                        merge_sha=str(args.merge_sha or "").strip() or None,
+                        subagent_id=subagent_id,
+                        ws_file=ws_file,
+                        commit_sha=commit_sha,
+                        merge_sha=merge_sha,
                     )
                     result.update(
                         {
@@ -1888,10 +1895,10 @@ def main() -> int:
                 idempotency_key=idempotency_key,
                 execution_mode=ctx.execution_mode,
                 worktree_path=worktree_path,
-                subagent_id=str(args.subagent_id or "").strip() or None,
-                ws_file=str(args.ws_file or "").strip() or None,
-                commit_sha=str(args.commit_sha or applied.get("commit_sha") or "").strip() or None,
-                merge_sha=str(args.merge_sha or applied.get("merge_sha") or "").strip() or None,
+                subagent_id=subagent_id,
+                ws_file=ws_file,
+                commit_sha=commit_sha or str(applied.get("commit_sha") or "").strip() or None,
+                merge_sha=merge_sha or str(applied.get("merge_sha") or "").strip() or None,
             )
 
             scoped_counts = count_statuses(ctx.scoped_tasks)

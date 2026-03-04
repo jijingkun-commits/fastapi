@@ -250,6 +250,9 @@ def emit_status(
         node: 来源节点名称
         phase: 状态阶段（processing/generating/done）
     """
+    if not callable(writer):
+        return
+
     writer({
         "type": "status",
         "data": {"message": message, "phase": phase},
