@@ -876,4 +876,27 @@ incremental_execution:
       - venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q
     verification:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q -> 4 passed (coverage 30.08%)"
+  - card_id: C07
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-07]
+    pr_id: PR-07
+    pr_branch: codex/user-memory-async-pr-07
+    pr_depends_on: [PR-06]
+    pr_subject: 混合检索注入口径统一
+    mechanism_summary:
+      - FTS 与向量分数按权重混合排序
+      - 检索注入直接使用 chunk_text 与 citation，避免 recall 阶段二次回源导致口径漂移
+    changed_files:
+      - app/services/document_memory_service.py
+      - tests/unit/test_document_memory_service_hybrid.py
+    rollback_anchors:
+      - 检索权重回退 text-only
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_document_memory_service_hybrid.py -q
+      - venv/bin/python -m pytest tests/unit/test_document_memory_repo_hybrid_search.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_service_hybrid.py -q --no-cov -> 3 passed"
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_repo_hybrid_search.py -q --no-cov -> 3 passed"
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_service_hybrid.py -q -> 3 passed, coverage gate 29.91% < 30.00%"
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_repo_hybrid_search.py -q -> 3 passed, coverage gate 29.62% < 30.00%"
 ```

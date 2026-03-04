@@ -523,17 +523,13 @@ def _build_retrieval_context(
     current_len = len(header)
 
     for result in results:
-        excerpt = memory_get(
-            db,
-            user_id=user_id,
-            doc_id=int(result["doc_id"]),
-            from_line=int(result["start_line"]),
-            lines=max(1, int(result["end_line"]) - int(result["start_line"]) + 1),
-        )
-        snippet = excerpt.get("text") if excerpt else result.get("chunk_text", "")
-        snippet = _strip_source_metadata_lines(str(snippet or ""))
+        snippet = _strip_source_metadata_lines(str(result.get("chunk_text") or ""))
         snippet = _clamp_context_lines(snippet)
-        line = f"- {snippet}\n  引用: {result['citation']}"
+        citation = str(result.get("citation") or "").strip()
+        if not snippet or not citation:
+            continue
+
+        line = f"- {snippet}\n  引用: {citation}"
         next_len = current_len + len(line) + 1
         if next_len > budget:
             break
