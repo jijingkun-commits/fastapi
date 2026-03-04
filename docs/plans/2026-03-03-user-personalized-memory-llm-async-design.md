@@ -271,6 +271,6 @@ flowchart LR
 
 ## 6. 审批记录（待补）
 
-- design_approved: false
-- approved_at: <待补>
-- approved_round: <待补>
+- design_approved: true
+- approved_at: "2026-03-04 10:41 CST"
+- approved_round: "round-2"

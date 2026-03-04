@@ -23,6 +23,81 @@ def test_infer_initial_intent_plan_avoids_data_goal_for_generic_query_word() -> 
     assert todo_goal["allowed_agents"] == ["todo_expert"]
 
 
+def test_infer_initial_intent_plan_keeps_data_goal_when_mixed_with_external() -> None:
+    """数据查询 + 天气等外部信息并存时，必须同时保留 data 与 external 目标。"""
+    state = {
+        "messages": [
+            HumanMessage(content="1、查询2025年6月30日贷款余额前10名客户\n2、查询嘉兴今天的天气"),
+        ]
+    }
+
+    plan = _infer_initial_intent_plan(state)
+    kinds = [str(goal.get("kind") or "") for goal in list(plan.get("goals") or [])]
+
+    assert kinds == ["data.query", "external.lookup"]
+
+    data_goal = next(goal for goal in plan["goals"] if goal.get("kind") == "data.query")
+    external_goal = next(goal for goal in plan["goals"] if goal.get("kind") == "external.lookup")
+    assert data_goal["allowed_agents"] == ["data_expert"]
+    assert external_goal["allowed_agents"] == []
+
+
+def test_resolve_decomposed_goals_prefers_model_primary(monkeypatch) -> None:
+    """decompose_goals 在模型可用时应优先采用结构化 planner 结果。"""
+
+    def _fake_build_plan(_state, *, llm, mode):
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True},
+                {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+            ],
+        }
+
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "1、查贷款余额前10\n2、查嘉兴天气",
+        llm=object(),
+    )
+
+    assert source == "model_primary"
+    assert [goal["kind"] for goal in goals] == ["data.query", "external.lookup"]
+
+
+def test_resolve_decomposed_goals_reconcile_explicit_multi_goal(monkeypatch) -> None:
+    """显式多目标表达下，若模型漏拆目标，应自动触发规则补齐。"""
+
+    def _fake_build_plan(_state, *, llm, mode):
+        return {
+            "source": "model_primary",
+            "goals": [
+                {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True},
+            ],
+        }
+
+    def _fake_rule_goals(_query: str):
+        return [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+        ]
+
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+    monkeypatch.setattr(graph, "_build_decomposed_goals_for_query", _fake_rule_goals)
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "1、查贷款余额前10\n2、查嘉兴天气",
+        llm=object(),
+    )
+
+    assert source == "model_primary+rule_reconcile"
+    assert [goal["kind"] for goal in goals] == ["data.query", "external.lookup"]
+
+
 def test_build_intent_plan_uses_model_primary_when_available(monkeypatch) -> None:
     """模型路径可用时，应优先使用 model_primary 结果。"""
 

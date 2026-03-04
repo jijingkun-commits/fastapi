@@ -14,6 +14,56 @@
 - implementation_readiness 差异:
 ```
 
+## 本项目强制追加字段（Requirements Contract）
+
+当输出 `<topic>_requirements.md` 时，至少追加以下结构：
+
+```yaml
+requirements_contract:
+  topic: "<主题>"
+  status: draft
+  design_source: docs/plans/YYYY-MM-DD-<topic>-design.md
+  design_approved: true
+  owner: "<owner>"
+  approver: "<approver>"
+  updated_at: "YYYY-MM-DD HH:mm"
+```
+
+```yaml
+fr_contract_matrix:
+  - fr_id: FR-01
+    user_value: 简要价值说明
+    trigger: 触发条件
+    input_contract:
+      required_fields: [field_a, field_b]
+      source_of_truth: app/ai/state.py
+    output_contract:
+      required_fields: [result_x, result_y]
+      consumer: app/services/chat_service.py
+    failure_semantics: 失败时返回口径
+    observability_fields: [metric_a, metric_b]
+    rollback_anchor: ENABLE_XXX=false
+    owner: ai-workflow
+```
+
+```yaml
+traceability_matrix:
+  - design_item: D-01
+    fr_id: FR-01
+    feature_id: P1-01
+    task_id: T-01
+    tc_id: TC-XXX-01
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_xxx.py -q
+    evidence_entry: docs/内部参考/迭代需求/<topic>_implementation_plan.md
+```
+
+校验规则：
+
+1. 每个 `FR-*` 必须具备：`trigger/input_contract/output_contract/failure_semantics/observability_fields/rollback_anchor/owner`。
+2. 每个 `NFR-*` 必须含数字阈值（例如 `P50/P95`、错误率、恢复时长），禁止仅写“显著提升/明显下降”。
+3. 每个 `TC-*` 必须在 `traceability_matrix` 映射到唯一 `task_id` 与 `acceptance_cmd_ref`。
+4. 当 `requirements_contract.status` 为 `draft/草稿` 时，`implementation_readiness.implementation_ready` 必须为 `false`。
+
 ## 本项目强制追加字段（Task -> PR 映射）
 
 当输出 `<topic>_implementation_plan.md` 时，至少追加以下结构：

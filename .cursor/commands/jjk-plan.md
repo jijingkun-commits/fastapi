@@ -271,6 +271,17 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
    - 业务域任务：结合银行工作场景（如贷款/存款/分行/合规约束）
    - 平台/架构迁移任务：改为运行场景与系统约束（如路由、状态契约、回滚策略）
 
+### 1.A 需求具体度硬门禁（新增，强制）
+
+为防止“方向正确但实施歧义”，`<topic>_requirements.md` 必须满足以下最小粒度：
+
+1. 每条 `FR-*` 至少包含：`触发条件`、`输入合同`、`输出合同`、`失败语义`、`可观测字段`、`回滚锚点`、`owner`。
+2. 每条 `NFR-*` 必须包含数字阈值（如 `P50/P95`、错误率、成功率、恢复时长），禁止“显著提升/明显下降”这类纯描述口径。
+3. 每条 `TC-*` 必须绑定：`fr_id`、`task_id`、`acceptance_cmd_ref`，禁止只写场景不写实现落点。
+4. 必须产出 `traceability_matrix`：`design_item -> fr_id -> feature_id -> task_id -> tc_id -> acceptance_cmd -> evidence_entry`。
+5. `requirements` 状态与 `implementation_readiness` 必须一致：当需求状态为 `draft/草稿` 时，`implementation_ready` 必须为 `false`。
+6. 任一项缺失时，必须标记 `REQUIREMENTS_NOT_ACTIONABLE`，并阻断进入 `/jjk-imp` 与 `/jjk-vkplan`。
+
 ## 2. 技术方案 (Technical Design)
 
 **产出**: `docs/内部参考/迭代需求/<topic>_implementation_plan.md` (Artifact)
@@ -522,6 +533,8 @@ Gate 样例见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_
 4. 引用 `output/**` 时只允许“证据引用”，不允许把长篇分析原文直接复制到卡片描述。
 5. 若存在历史执行偏差，需在计划中新增“偏差修复清单”，明确哪些旧卡作废、哪些卡重建。
 6. 当开启 `hydrate` 时，归一化草案中的每个 `FP-xx` 必须显式映射到实现 `feature_id`（不得遗漏）。
+7. 必须提供 `traceability_matrix`，且支持从任意 `TC-*` 反查到唯一 `task_id` 与 `acceptance_cmd`。
+8. `design`、`requirements`、`implementation_plan` 三份文档的状态门禁必须一致，禁止出现“需求 draft 但 implementation_ready=true”双口径。
 
 ## 5. 衔接下游
 

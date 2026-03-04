@@ -147,7 +147,7 @@ automation_contract:
 ### 9.2 WS-G01 预期动作
 
 1. 执行 `python3 scripts/coder4_scope_guard.py ...` 校验作用域绑定与 active_task 一致。
-2. 聚合检查 `.omc/state/attempts/C01~C06/gate_result.json` 均为 `passed=true`。
+2. 聚合检查 `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/attempts/C01~C06/gate_result.json` 均为 `passed=true`。
 3. 若任一前置卡缺失 gate_result 或失败，立即阻断并暂停后续落卡执行。
 
 ### 9.3 WS-IG01 结果
@@ -157,9 +157,10 @@ automation_contract:
 
 ### 9.4 WS-IG01 预期动作
 
-1. 执行 `python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --baseline master`。
-2. 校验 `.omc/state/attempts/C01~C06/merge_result.json` 完整，且 `merge_commit` 均可追溯。
+1. 执行 `python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master`。
+2. 校验 `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/attempts/C01~C06/merge_result.json` 完整，且 `merge_commit` 均可追溯。
 3. 若任一实现卡缺失 merge 证据或 `master` 不可见，保持整体状态非最终完成。
+4. 状态目录约定与迁移步骤见 `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-00_C00_Codex门禁状态目录规范.md`。
 
 ## 10. 信息防丢失检查
 

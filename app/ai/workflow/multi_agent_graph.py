@@ -211,6 +211,9 @@ DATA_DOMAIN_HINTS = (
     "数据库",
     "sql",
     "分析",
+    "贷款",
+    "存款",
+    "余额",
 )
 
 DATA_STRONG_HINTS = (
@@ -220,6 +223,9 @@ DATA_STRONG_HINTS = (
     "指标",
     "字段",
     "表",
+    "贷款",
+    "存款",
+    "余额",
 )
 
 DELIVERY_RECOVERY_MARKER = "【交付补齐提示】"
@@ -1257,7 +1263,7 @@ def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
                 "order_hint": _first_hint_position(user_text, EXTERNAL_INFO_HINTS),
             }
         )
-    if has_data and not has_external and (not has_todo or has_data_strong):
+    if has_data and (not has_todo or has_data_strong):
         goals.append(
             {
                 "kind": "data.query",
@@ -4012,18 +4018,123 @@ def _build_decomposed_goals_for_query(user_query: str) -> list[Dict[str, Any]]:
     return _normalize_active_goals(raw_goals)
 
 
+def _has_explicit_multi_goal_markers(user_query: str) -> bool:
+    """检测用户是否显式表达“多目标请求”。"""
+    text = str(user_query or "").strip()
+    if not text:
+        return False
+    if len(re.findall(r"(?:^|\n)\s*\d+\s*[、\.\)]", text)) >= 2:
+        return True
+    if "\n" in text and len([line for line in text.splitlines() if line.strip()]) >= 2:
+        return True
+    lowered = text.lower()
+    return any(token in lowered for token in ("然后", "再", "并且", "以及", "同时", "and then"))
+
+
+def _merge_goal_candidates(
+    primary_goals: Sequence[Dict[str, Any]],
+    supplemental_goals: Sequence[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    """合并两组 goals，按语义桶去重并保持首见顺序。"""
+    merged: list[Dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    for raw_goal in [*list(primary_goals or []), *list(supplemental_goals or [])]:
+        if not isinstance(raw_goal, dict):
+            continue
+        kind = _normalize_model_goal_kind(str(raw_goal.get("kind") or "general.reply"))
+        bucket = _goal_kind_bucket(kind)
+        dedupe_key = bucket if bucket != "general" else kind
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        merged.append(
+            {
+                "goal_id": str(raw_goal.get("goal_id") or "").strip(),
+                "order": _parse_non_negative_int(raw_goal.get("order"), default=len(merged) + 1),
+                "kind": kind,
+                "title": str(raw_goal.get("title") or "").strip() or _default_goal_title(kind),
+                "must_answer": bool(raw_goal.get("must_answer", True)),
+                "allowed_agents": raw_goal.get("allowed_agents"),
+            }
+        )
+
+    return _normalize_active_goals(merged)
+
+
+def _resolve_decomposed_goals_for_query(
+    user_query: str,
+    *,
+    llm: Any = None,
+) -> Tuple[list[Dict[str, Any]], str]:
+    """生成 decompose_goals 产物：优先模型规划，失败时回退规则拆解。"""
+    normalized_query = str(user_query or "").strip()
+    fallback_goals = _build_decomposed_goals_for_query(normalized_query)
+
+    if llm is None:
+        return fallback_goals, "supervisor_rule_based"
+
+    state_seed: MultiAgentState = {
+        "messages": [HumanMessage(content=normalized_query)],
+    }
+    planner_settings = _resolve_intent_planner_settings(state_seed)
+    planner_mode = _normalize_intent_mode(planner_settings.get("intent_mode"), default="model_primary")
+
+    try:
+        intent_plan = _build_planner_intent_plan(
+            state_seed,
+            llm=llm,
+            mode=planner_mode,
+        )
+    except Exception as exc:
+        logger.warning("decompose_goals_model_failed_fallback_to_rule: %s", exc)
+        return fallback_goals, "supervisor_rule_based"
+
+    plan_goals = [
+        goal
+        for goal in list((intent_plan or {}).get("goals") or [])
+        if isinstance(goal, dict)
+    ]
+    normalized_plan_goals = _normalize_active_goals(plan_goals)
+    source = str((intent_plan or {}).get("source") or planner_mode or "model_primary")
+
+    if _has_explicit_multi_goal_markers(normalized_query) and _count_must_answer_goals(normalized_plan_goals) < 2:
+        reconciled_goals = _merge_goal_candidates(normalized_plan_goals, fallback_goals)
+        return reconciled_goals, f"{source}+rule_reconcile"
+
+    return normalized_plan_goals, source
+
+
 @tool("decompose_goals", description="将复合请求拆解为结构化目标列表，供 Supervisor 路由与门禁使用")
 def decompose_goals(
     user_query: Annotated[str, "用户原始请求（可包含复合目标）"],
 ) -> str:
-    """将用户请求拆解为 goals，返回标准 JSON。"""
-    goals = _build_decomposed_goals_for_query(str(user_query or ""))
+    """将用户请求拆解为 goals（规则兜底版本），返回标准 JSON。"""
+    goals, source = _resolve_decomposed_goals_for_query(str(user_query or ""))
     payload = {
         "action": "decompose_goals",
-        "source": "supervisor_rule_based",
+        "source": source,
         "goals": goals,
     }
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _create_decompose_goals_tool(llm: Any):
+    """创建模型优先的 decompose_goals 工具。"""
+
+    @tool("decompose_goals", description="将复合请求拆解为结构化目标列表，供 Supervisor 路由与门禁使用")
+    def _decompose_goals_with_model(
+        user_query: Annotated[str, "用户原始请求（可包含复合目标）"],
+    ) -> str:
+        goals, source = _resolve_decomposed_goals_for_query(str(user_query or ""), llm=llm)
+        payload = {
+            "action": "decompose_goals",
+            "source": source,
+            "goals": goals,
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    return _decompose_goals_with_model
 
 
 def _create_task_handoff_tool(agent_name: str, description: str):
@@ -4274,12 +4385,13 @@ async def create_multi_agent_graph(
     
     # 2. 获取 Supervisor 的简单工具（可以直接调用）
     supervisor_simple_tools = _get_supervisor_tools()
+    decompose_goals_tool = _create_decompose_goals_tool(llm)
     
     # 3. 创建 Supervisor Agent（handoff 工具 + 简单工具）
     # 使用 create_react_agent，支持工具返回 Command 对象
     supervisor_agent = create_react_agent(
         llm,
-        handoff_tools + [decompose_goals] + supervisor_simple_tools,
+        handoff_tools + [decompose_goals_tool] + supervisor_simple_tools,
         prompt=SUPERVISOR_PROMPT,
         name="supervisor",
     )

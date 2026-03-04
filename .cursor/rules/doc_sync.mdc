@@ -153,6 +153,15 @@ docs/
 - 纯格式化/重构（不改功能）
 - 简单 Bug 修复（不涉及设计）
 
+## 跳过条件例外（强制）
+
+命中以下任一场景时，禁止套用“跳过条件”，必须同步更新 design/requirements/implementation 三件套：
+
+1. 变更命中 `app/ai/**`（含 workflow、state、contracts、prompts）。
+2. 变更命中跨端事件契约（如 `app/ai/events.py`、`app/services/chat_service.py`、`web/src/types/**`）。
+3. 涉及状态字段迁移、契约字段新增/删除、路由门禁语义变化。
+4. 涉及灰度开关、回滚策略、验收口径（TC/命令）调整。
+
 ## 配置参数同步门禁（新增）
 
 当变更命中以下任一项时，必须同步更新配置说明文档，禁止只改代码不改文档：

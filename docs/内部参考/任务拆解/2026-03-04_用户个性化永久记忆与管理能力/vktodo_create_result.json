@@ -1,0 +1,53 @@
+{
+  "task_key": "PP-20260304-USER-MEMORY-LLM-ASYNC",
+  "task_split_dir": "2026-03-04_用户个性化永久记忆与管理能力",
+  "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0",
+  "target_total": 10,
+  "created_count": 10,
+  "skipped_count": 0,
+  "failed_count": 0,
+  "created": [
+    {
+      "card_id": "C01",
+      "task_id": "a21e2b36-6a82-403b-99a0-526372f76e59"
+    },
+    {
+      "card_id": "C02",
+      "task_id": "65a40f82-5dfe-4be8-9e00-606675e61a5d"
+    },
+    {
+      "card_id": "C03",
+      "task_id": "82488548-167e-49fc-befd-dbd0704e7b65"
+    },
+    {
+      "card_id": "C04",
+      "task_id": "0d0f76b5-406d-4ea5-8346-c8bd9e174b14"
+    },
+    {
+      "card_id": "C05",
+      "task_id": "9438de3a-33a5-4401-8bd1-0f356d0bf94c"
+    },
+    {
+      "card_id": "C06",
+      "task_id": "d4c00a71-39ee-40c5-b94c-a110076c8bcc"
+    },
+    {
+      "card_id": "C07",
+      "task_id": "018ffaf0-b407-477f-9d3e-c7edc1bdcbd7"
+    },
+    {
+      "card_id": "C08",
+      "task_id": "03bbc93a-0a2a-4856-a47d-cd923be03405"
+    },
+    {
+      "card_id": "C09",
+      "task_id": "42ed1b69-f67e-4126-bfcb-75c66d14a8b0"
+    },
+    {
+      "card_id": "G01",
+      "task_id": "fe5138a9-2bab-4220-bee3-e44e4af2a64f"
+    }
+  ],
+  "skipped": [],
+  "failed": []
+}

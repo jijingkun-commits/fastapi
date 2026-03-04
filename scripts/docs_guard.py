@@ -28,6 +28,9 @@ DOCS_DIR = ROOT / "docs"
 SUMMARY_FILE = DOCS_DIR / "SUMMARY.md"
 REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
 WAVE_PLAN_FILE = DOCS_DIR / "内部参考" / "迭代需求" / "迁移执行波次_implementation_plan.md"
+ITERATION_REQUIREMENTS_DIR = DOCS_DIR / "内部参考" / "迭代需求"
+REQUIREMENTS_SUFFIX = "_requirements.md"
+IMPLEMENTATION_PLAN_SUFFIX = "_implementation_plan.md"
 G01_WORKSTREAM_FILE = (
     DOCS_DIR
     / "内部参考"
@@ -54,6 +57,7 @@ PENDING_STATUS_TOKENS = (
     "pending",
 )
 PENDING_EVIDENCE_TOKENS = ("待回填", "tbd", "todo", "pending", "待补", "待定")
+TC_ID_RE = re.compile(r"\bTC-[A-Za-z0-9-]+\b")
 
 
 FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
@@ -175,6 +179,36 @@ def parse_summary_links() -> list[str]:
         if path:
             links.append(path)
     return links
+
+
+def iter_requirement_plan_pairs() -> Iterable[tuple[Path, Path]]:
+    if not ITERATION_REQUIREMENTS_DIR.exists():
+        return
+
+    for req_file in sorted(ITERATION_REQUIREMENTS_DIR.glob(f"*{REQUIREMENTS_SUFFIX}")):
+        if "_templates" in req_file.parts:
+            continue
+        plan_name = req_file.name.replace(REQUIREMENTS_SUFFIX, IMPLEMENTATION_PLAN_SUFFIX)
+        if plan_name == req_file.name:
+            continue
+        plan_file = req_file.with_name(plan_name)
+        if plan_file.exists():
+            yield req_file, plan_file
+
+
+def extract_requirement_status(text: str) -> str:
+    match = re.search(r"状态[：:]\s*([^\n\r`]+)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def extract_implementation_ready(text: str) -> bool | None:
+    matches = list(re.finditer(r"implementation_ready:\s*(true|false)", text, re.IGNORECASE))
+    if not matches:
+        return None
+    latest = matches[-1].group(1).strip().lower()
+    return latest == "true"
 
 
 def extract_level3_section(text: str, heading_prefix: str) -> str:
@@ -876,6 +910,93 @@ def check_inline_path_refs(findings: list[Finding]) -> int:
     return count
 
 
+def check_requirement_plan_status_consistency(findings: list[Finding]) -> int:
+    count = 0
+    for req_file, plan_file in iter_requirement_plan_pairs():
+        req_text = read_text(req_file)
+        plan_text = read_text(plan_file)
+        status = extract_requirement_status(req_text)
+        implementation_ready = extract_implementation_ready(plan_text)
+        if not status or implementation_ready is None:
+            continue
+
+        normalized_status = re.sub(r"\s+", "", status).lower()
+        if ("draft" in normalized_status or "草稿" in normalized_status) and implementation_ready:
+            count += 1
+            findings.append(
+                Finding(
+                    category="requirement_status_mismatch",
+                    level="error",
+                    file=str(req_file.relative_to(ROOT)),
+                    detail=(
+                        f"需求状态为 `{status}`，但 `{plan_file.relative_to(ROOT)}` "
+                        "中 implementation_ready=true"
+                    ),
+                )
+            )
+    return count
+
+
+def check_requirement_tc_traceability(findings: list[Finding]) -> int:
+    count = 0
+    for req_file, plan_file in iter_requirement_plan_pairs():
+        req_text = read_text(req_file)
+        req_tc_ids = sorted(set(TC_ID_RE.findall(req_text)))
+        if not req_tc_ids:
+            continue
+
+        plan_text = read_text(plan_file)
+        plan_tc_ids = set(TC_ID_RE.findall(plan_text))
+        missing_tc = [tc_id for tc_id in req_tc_ids if tc_id not in plan_tc_ids]
+        if not missing_tc:
+            continue
+
+        count += len(missing_tc)
+        preview = ", ".join(missing_tc[:6])
+        suffix = "" if len(missing_tc) <= 6 else f" ... 共 {len(missing_tc)} 项"
+        findings.append(
+            Finding(
+                category="requirement_tc_traceability",
+                level="warning",
+                file=str(req_file.relative_to(ROOT)),
+                detail=(
+                    f"`{plan_file.relative_to(ROOT)}` 未显式覆盖 TC 映射："
+                    f"{preview}{suffix}"
+                ),
+            )
+        )
+    return count
+
+
+def check_requirement_nfr_numeric_threshold(findings: list[Finding]) -> int:
+    count = 0
+    section_pattern = re.compile(
+        r"^##+\s*[\d.]*\s*非功能需求[^\n]*\n(.*?)(?=^##+\s|\Z)",
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    for req_file in sorted(ITERATION_REQUIREMENTS_DIR.glob(f"*{REQUIREMENTS_SUFFIX}")):
+        if "_templates" in req_file.parts:
+            continue
+        req_text = read_text(req_file)
+        match = section_pattern.search(req_text)
+        if not match:
+            continue
+        nfr_body = match.group(1)
+        if re.search(r"\d", nfr_body):
+            continue
+
+        count += 1
+        findings.append(
+            Finding(
+                category="requirement_nfr_threshold",
+                level="warning",
+                file=str(req_file.relative_to(ROOT)),
+                detail="非功能需求未发现数字阈值，建议补充 P50/P95、错误率或恢复时长",
+            )
+        )
+    return count
+
+
 def summarize(findings: list[Finding], covered: int, total: int, stats: dict[str, int]) -> dict:
     errors = sum(1 for finding in findings if finding.level == "error")
     warnings = sum(1 for finding in findings if finding.level == "warning")
@@ -913,6 +1034,9 @@ def print_human_report(report: dict) -> None:
     print(f"g01_evidence_binding_errors: {stats['g01_evidence_binding_errors']}")
     print(f"wave_rollback_matrix_errors: {stats['wave_rollback_matrix_errors']}")
     print(f"path_reference_missing: {stats['path_reference_missing']}")
+    print(f"requirement_status_mismatch: {stats['requirement_status_mismatch']}")
+    print(f"requirement_tc_traceability_missing: {stats['requirement_tc_traceability_missing']}")
+    print(f"requirement_nfr_threshold_missing: {stats['requirement_nfr_threshold_missing']}")
     print(f"errors: {stats['errors']} | warnings: {stats['warnings']}")
 
     if report["findings"]:
@@ -946,6 +1070,9 @@ def main() -> int:
         "g01_evidence_binding_errors": check_g01_evidence_binding(findings),
         "wave_rollback_matrix_errors": check_wave_rollback_matrix(findings),
         "path_reference_missing": check_inline_path_refs(findings) if args.check_paths else 0,
+        "requirement_status_mismatch": check_requirement_plan_status_consistency(findings),
+        "requirement_tc_traceability_missing": check_requirement_tc_traceability(findings),
+        "requirement_nfr_threshold_missing": check_requirement_nfr_numeric_threshold(findings),
     }
     covered, total = check_summary_coverage(findings)
 
