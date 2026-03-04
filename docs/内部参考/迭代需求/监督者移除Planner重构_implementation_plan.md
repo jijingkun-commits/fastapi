@@ -90,10 +90,20 @@ test_strategy:
       - TC-SRP-03: active_goals 统一读取顺序正确
       - TC-SRP-08: coverage 缺口识别一致
     test_first: true
+  - feature_id: P1-03
+    test_cases:
+      - TC-SRP-04: 选中待办更新命中 current_todo_id
+      - TC-SRP-05: decompose_goals 异常时降级 general.reply
+    test_first: true
+  - feature_id: P1-04
+    test_cases:
+      - TC-SRP-09: 多目标完成后 final_answer 顺序聚合准确
+    test_first: true
   - feature_id: P1-05
     test_cases:
       - TC-SRP-06: compat=true 时仍有plan_ready
       - TC-SRP-07: compat=false 时无plan_ready
+      - TC-SRP-10: 关闭关键开关后可快速回到稳定路径
     test_first: true
 ```
 

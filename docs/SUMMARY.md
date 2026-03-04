@@ -153,6 +153,10 @@
 * [多任务并行Worktree命名空间与异步收口实施方案](内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md)
 * [监督者移除Planner重构需求（已收口）](内部参考/迭代需求/监督者移除Planner重构_requirements.md)
 * [监督者移除Planner重构实施方案（已收口）](内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md)
+* [意图优化需求](内部参考/迭代需求/意图优化_requirements.md)
+* [意图优化实施方案](内部参考/迭代需求/意图优化_implementation_plan.md)
+* [聊天多会话并发重分析需求](内部参考/迭代需求/聊天多会话并发重分析_requirements.md)
+* [聊天多会话并发重分析实施方案](内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md)
 
 > 说明：该目录以过程文档为主，详细条目按主题目录内索引查看。
 

@@ -971,7 +971,7 @@ def check_requirement_tc_traceability(findings: list[Finding]) -> int:
 def check_requirement_nfr_numeric_threshold(findings: list[Finding]) -> int:
     count = 0
     section_pattern = re.compile(
-        r"^##+\s*[\d.]*\s*非功能需求[^\n]*\n(.*?)(?=^##+\s|\Z)",
+        r"^##\s*[\d.]*\s*非功能需求[^\n]*\n(.*?)(?=^##\s|\Z)",
         re.IGNORECASE | re.MULTILINE | re.DOTALL,
     )
     for req_file in sorted(ITERATION_REQUIREMENTS_DIR.glob(f"*{REQUIREMENTS_SUFFIX}")):

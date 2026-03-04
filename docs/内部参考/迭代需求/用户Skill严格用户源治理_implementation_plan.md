@@ -140,6 +140,15 @@ test_strategy:
       - TC-SKILL-02: 用户仅能修改本人配置
       - TC-SKILL-03: 越权访问返回 403
     test_first: true
+  - feature_id: P1-04
+    test_cases:
+      - TC-SKILL-06: 管理员模板更新校验与落库成功
+      - TC-SKILL-07: 用户 A/B 检索隔离不互串
+    test_first: true
+  - feature_id: P1-05
+    test_cases:
+      - TC-SKILL-08: strict_user 回滚到 compat 后链路恢复可用
+    test_first: true
 ```
 
 ---
