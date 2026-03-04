@@ -684,9 +684,11 @@ llm = get_scene_llm(
 `multi_agent_graph` 的 planner 节点从“关键词主判定”调整为“模型主判定 + 规则兜底”：
 
 1. planner 首选模型结构化输出 `intent_plan`（`source=model_primary`），目标按语义拆分，不再因动作词（如“查询”）直接扩增 `data.query`。
-2. 当模型输出异常（不可解析/超时/结构非法）时，自动降级为 `heuristic_fallback`，并记录 `fallback_meta.reason`。
-3. 关键词规则仅保留兜底职责；执行收口仍由 `handoff_execution_trace + deliverables + coverage_report` 完成。
-4. 状态事件仍通过 `plan_ready -> coverage_check -> final_answer` 三段输出，前端应以覆盖率收口结果作为最终口径。
+2. `json_object` 主路径对“弱结构”输出（如 `goals: ["todo.query"]`）先做规范化再进入 `_IntentPlanModel` 校验，尽量留在 `model_primary`，避免把可恢复数据误判成失败。
+3. 当模型输出不可恢复异常（不可解析/超时/结构非法）时，自动降级为 `heuristic_fallback`，并记录 `fallback_meta.reason`。
+4. fallback 分类维持 `timeout / invalid_output / model_failure` 语义，日志区分“弱结构已恢复”和“不可恢复非法输出”，便于线上快速定位。
+5. 关键词规则仅保留兜底职责；执行收口仍由 `handoff_execution_trace + deliverables + coverage_report` 完成。
+6. 状态事件仍通过 `plan_ready -> coverage_check -> final_answer` 三段输出，前端应以覆盖率收口结果作为最终口径。
 
 ### internal 调用输入兼容（2026-02-08）
 

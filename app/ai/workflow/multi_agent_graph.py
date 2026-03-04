@@ -724,6 +724,72 @@ def _coerce_model_intent_plan_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _find_intent_plan_validation_error(exc: BaseException) -> Optional[ValidationError]:
+    """从异常链中提取 _IntentPlanModel 的 ValidationError。"""
+    stack: list[BaseException] = [exc]
+    visited: set[int] = set()
+
+    while stack:
+        current = stack.pop()
+        identity = id(current)
+        if identity in visited:
+            continue
+        visited.add(identity)
+
+        if isinstance(current, ValidationError):
+            title = str(getattr(current, "title", "") or "").strip()
+            if title == "_IntentPlanModel":
+                return current
+
+        cause = getattr(current, "__cause__", None)
+        context = getattr(current, "__context__", None)
+        if isinstance(cause, BaseException):
+            stack.append(cause)
+        if isinstance(context, BaseException):
+            stack.append(context)
+
+    return None
+
+
+def _recover_intent_plan_payload_from_validation_error(exc: ValidationError) -> Optional[Dict[str, Any]]:
+    """尝试从 _IntentPlanModel 校验异常恢复弱结构 payload。"""
+    errors = list(exc.errors())
+    if not errors:
+        return None
+
+    indexed_goals: Dict[int, Any] = {}
+    for item in errors:
+        loc = item.get("loc")
+        if not isinstance(loc, (list, tuple)) or len(loc) != 2:
+            return None
+        field_name, index = loc
+        if field_name != "goals" or not isinstance(index, int):
+            return None
+        if str(item.get("type") or "") != "model_type":
+            return None
+
+        value = item.get("input")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            indexed_goals[index] = stripped
+            continue
+        if isinstance(value, dict):
+            indexed_goals[index] = value
+            continue
+        return None
+
+    if not indexed_goals:
+        return None
+
+    ordered_indexes = sorted(indexed_goals.keys())
+    if ordered_indexes != list(range(ordered_indexes[-1] + 1)):
+        return None
+
+    return {"goals": [indexed_goals[index] for index in ordered_indexes]}
+
+
 def _build_model_primary_plan_from_parsed(
     parsed: _IntentPlanModel,
     *,
@@ -964,7 +1030,23 @@ def _infer_model_intent_plan_via_json_object(state: MultiAgentState, llm: Any) -
     except TimeoutError as exc:
         raise _PlannerModelTimeoutError(f"planner_llm_timeout:{exc}") from exc
     except Exception as exc:
-        raise _PlannerModelInvokeError(str(exc)) from exc
+        validation_error = _find_intent_plan_validation_error(exc)
+        if validation_error is None:
+            raise _PlannerModelInvokeError(str(exc)) from exc
+
+        recovered_payload = _recover_intent_plan_payload_from_validation_error(validation_error)
+        if recovered_payload is None:
+            logger.warning(
+                "planner_json_object_invalid_output_unrecoverable: %s",
+                validation_error,
+            )
+            raise _PlannerModelOutputError(str(validation_error)) from exc
+
+        logger.info(
+            "planner_json_object_weak_structure_recovered: goals=%s",
+            len(list(recovered_payload.get("goals") or [])),
+        )
+        raw_output = recovered_payload
 
     try:
         if isinstance(raw_output, _IntentPlanModel):

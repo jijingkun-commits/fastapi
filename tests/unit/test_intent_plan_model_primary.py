@@ -1,6 +1,7 @@
 """意图目标分解：模型主判定与兜底策略测试。"""
 
 from langchain_core.messages import HumanMessage
+from pydantic import ValidationError
 
 import app.ai.workflow.multi_agent_graph as graph
 from app.ai.workflow.multi_agent_graph import (
@@ -101,3 +102,69 @@ def test_infer_model_intent_plan_accepts_string_goal_list() -> None:
     kinds = [str(goal.get("kind") or "") for goal in list(plan.get("goals") or [])]
     assert kinds == ["todo.query", "external.lookup"]
     assert plan["goals"][0]["allowed_agents"] == ["todo_expert"]
+
+
+def test_json_object_primary_recovers_validation_error_weak_goals() -> None:
+    """structured invoke 阶段抛弱结构校验错时，应在主路径恢复，不触发兜底。"""
+
+    class _FakeStructuredLLM:
+        def invoke(self, _prompt: str):
+            raise ValidationError.from_exception_data(
+                "_IntentPlanModel",
+                [
+                    {
+                        "type": "model_type",
+                        "loc": ("goals", 0),
+                        "msg": "Input should be an object",
+                        "input": "todo.query",
+                        "ctx": {"class_name": "_IntentGoalModel"},
+                    },
+                    {
+                        "type": "model_type",
+                        "loc": ("goals", 1),
+                        "msg": "Input should be an object",
+                        "input": "external.lookup",
+                        "ctx": {"class_name": "_IntentGoalModel"},
+                    },
+                ],
+            )
+
+    class _FakeLLM:
+        def with_structured_output(self, _schema):
+            return _FakeStructuredLLM()
+
+    state = {"messages": [HumanMessage(content="先查待办 + 再看天气")]}
+    plan = graph._build_planner_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
+
+    assert plan["source"] == "model_primary"
+    assert [goal["kind"] for goal in plan["goals"]] == ["todo.query", "external.lookup"]
+    assert plan["goals"][0]["allowed_agents"] == ["todo_expert"]
+
+
+def test_json_object_primary_unrecoverable_validation_still_fallback() -> None:
+    """invoke 阶段遇到不可恢复校验错误时，应维持 invalid_output 兜底。"""
+
+    class _FakeStructuredLLM:
+        def invoke(self, _prompt: str):
+            raise ValidationError.from_exception_data(
+                "_IntentPlanModel",
+                [
+                    {
+                        "type": "model_type",
+                        "loc": ("goals", 0),
+                        "msg": "Input should be an object",
+                        "input": "",
+                        "ctx": {"class_name": "_IntentGoalModel"},
+                    }
+                ],
+            )
+
+    class _FakeLLM:
+        def with_structured_output(self, _schema):
+            return _FakeStructuredLLM()
+
+    state = {"messages": [HumanMessage(content="你好")]}
+    plan = graph._build_planner_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
+
+    assert plan["source"] == "heuristic_fallback"
+    assert plan.get("fallback_meta", {}).get("reason_code") == "invalid_output"

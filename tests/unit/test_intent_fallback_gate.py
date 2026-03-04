@@ -2,6 +2,7 @@
 
 import pytest
 from langchain_core.messages import HumanMessage
+from pydantic import ValidationError
 
 import app.ai.workflow.multi_agent_graph as graph
 from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan
@@ -55,6 +56,38 @@ def test_fallback_gate_classifies_invalid_output(monkeypatch) -> None:
     monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_invalid)
 
     plan = _build_planner_intent_plan(_base_state(), llm=object(), mode="model_primary")
+
+    assert plan["source"] == "heuristic_fallback"
+    meta = plan["fallback_meta"]
+    assert meta["fallback_rule_id"] == "planner_fallback.invalid_output"
+    assert meta["trigger"] == "invalid_output"
+
+
+def test_fallback_gate_classifies_unrecoverable_invoke_validation_error(monkeypatch) -> None:
+    """invoke 阶段不可恢复的 _IntentPlanModel 校验异常应分类为 invalid_output。"""
+
+    class _FakeStructuredLLM:
+        def invoke(self, _prompt: str):
+            raise ValidationError.from_exception_data(
+                "_IntentPlanModel",
+                [
+                    {
+                        "type": "model_type",
+                        "loc": ("goals", 0),
+                        "msg": "Input should be an object",
+                        "input": "",
+                        "ctx": {"class_name": "_IntentGoalModel"},
+                    }
+                ],
+            )
+
+    class _FakeLLM:
+        def with_structured_output(self, _schema):
+            return _FakeStructuredLLM()
+
+    monkeypatch.delenv("ENABLE_INTENT_FALLBACK_GATE", raising=False)
+
+    plan = _build_planner_intent_plan(_base_state(), llm=_FakeLLM(), mode="model_primary")
 
     assert plan["source"] == "heuristic_fallback"
     meta = plan["fallback_meta"]
