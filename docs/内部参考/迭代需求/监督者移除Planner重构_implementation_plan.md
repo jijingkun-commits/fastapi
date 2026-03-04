@@ -475,7 +475,7 @@ implementation_readiness:
   execution_contract_ready: true
 ```
 
-## 8. pr_ready_manifest（本轮更新：PR-02）
+## 8. pr_ready_manifest（本轮更新：PR-04）
 
 ```yaml
 pr_ready_manifest:
@@ -497,4 +497,14 @@ pr_ready_manifest:
     acceptance_cmds:
       - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: router 回退兼容入口
+
+  - task_id: T-07
+    pr_id: PR-04
+    card_id: C04
+    changed_files:
+      - app/ai/events.py
+      - app/services/chat_service.py
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
+    rollback_point: ENABLE_PLAN_READY_COMPAT=true
 ```

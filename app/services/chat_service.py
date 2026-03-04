@@ -249,6 +249,11 @@ def _is_sse_intent_goal_status_v2_enabled() -> bool:
     return _is_feature_enabled("ENABLE_SSE_INTENT_GOAL_STATUS_V2", True)
 
 
+def _is_plan_ready_compat_enabled() -> bool:
+    """plan_ready 兼容期开关（默认开启）。"""
+    return _is_feature_enabled("ENABLE_PLAN_READY_COMPAT", True)
+
+
 def _parse_non_negative_int(value: Any, default: int = 0) -> int:
     """解析非负整数。"""
     try:
@@ -258,8 +263,15 @@ def _parse_non_negative_int(value: Any, default: int = 0) -> int:
     return parsed if parsed >= 0 else default
 
 
-def _normalize_plan_ready_event_payload(event_data: dict[str, Any], *, node: str = "") -> dict[str, Any]:
+def _normalize_plan_ready_event_payload(
+    event_data: dict[str, Any],
+    *,
+    node: str = "",
+) -> Optional[dict[str, Any]]:
     """标准化 plan_ready 事件，补齐初判目标计数字段。"""
+    if not _is_plan_ready_compat_enabled():
+        return None
+
     payload = dict(event_data or {})
     if not _is_sse_intent_goal_status_v2_enabled():
         return payload
@@ -893,6 +905,9 @@ class ChatService:
                             event_data,
                             node=chunk.get("node", ""),
                         )
+                        if plan_payload is None:
+                            continue
+
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("plan_ready", plan_payload)
@@ -1504,6 +1519,9 @@ async def sse_resume_stream(
                         event_data,
                         node=chunk.get("node", ""),
                     )
+                    if plan_payload is None:
+                        continue
+
                     yield format_sse("plan_ready", plan_payload)
 
                 elif event_type == "coverage_check":

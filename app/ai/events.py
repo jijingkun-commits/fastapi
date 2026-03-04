@@ -16,6 +16,8 @@
 """
 from typing import TypedDict, Literal, Optional, Any, Callable
 
+from app.ai.runtime.recovery_policy import is_feature_flag_enabled
+
 
 # ==================== 事件类型定义 ====================
 
@@ -364,6 +366,9 @@ def emit_plan_ready(
     node: str = "",
 ) -> None:
     """发送 plan_ready 事件。"""
+    if not is_feature_flag_enabled("ENABLE_PLAN_READY_COMPAT", True):
+        return
+
     writer({
         "type": "plan_ready",
         "data": {"plan": plan},
