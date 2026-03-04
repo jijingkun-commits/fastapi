@@ -2,9 +2,43 @@
 
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
+    validate_active_goals_contract,
     validate_coverage_report_contract,
     validate_intent_plan_contract,
 )
+
+
+def test_validate_active_goals_contract_should_accept_goals_list() -> None:
+    """活动目标校验入口应直接支持 decomposed_goals 列表。"""
+    raw_goals = [
+        {
+            "goal_id": "GOAL-02",
+            "order": 2,
+            "kind": "todo.query",
+            "title": "待办事项",
+            "must_answer": True,
+            "allowed_agents": ["todo_expert"],
+        },
+        {
+            "goal_id": "GOAL-01",
+            "order": 1,
+            "kind": "general.reply",
+            "title": "问题回复",
+            "must_answer": True,
+            "allowed_agents": [],
+        },
+    ]
+
+    normalized, valid, error = validate_active_goals_contract(
+        raw_goals,
+        source="decompose_goals",
+        user_query="先回复再看待办",
+    )
+
+    assert valid is True
+    assert error == ""
+    assert normalized["source"] == "decompose_goals"
+    assert [goal["goal_id"] for goal in normalized["goals"]] == ["GOAL-01", "GOAL-02"]
 
 
 def test_validate_intent_plan_contract_should_accept_valid_payload() -> None:
@@ -72,12 +106,14 @@ def test_build_contract_validation_meta_should_merge_flags() -> None:
     existing = {"intent_plan_valid": True}
     merged = build_contract_validation_meta(
         existing_meta=existing,
-        intent_plan_valid=False,
-        intent_plan_error="validation_error:goal_empty",
+        active_goals_valid=False,
+        active_goals_error="validation_error:goal_empty",
         coverage_valid=True,
         coverage_error="",
     )
 
+    assert merged["active_goals_valid"] is False
+    assert merged["active_goals_error"] == "validation_error:goal_empty"
     assert merged["intent_plan_valid"] is False
     assert merged["intent_plan_error"] == "validation_error:goal_empty"
     assert merged["coverage_valid"] is True

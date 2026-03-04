@@ -116,8 +116,8 @@ def test_evaluate_handoff_progress_routes_direct_plus_single_expert_to_coverage(
     assert len(decision["handoff_execution_trace"]) == 1
 
 
-def test_evaluate_handoff_progress_returns_supervisor_when_coverage_missing() -> None:
-    """复合任务存在未完成目标时，应回到 supervisor 补齐而不是直接结束。"""
+def test_evaluate_handoff_progress_enters_coverage_gate_when_coverage_missing() -> None:
+    """复合任务存在未完成目标时，应统一进入 coverage_gate 决策下一跳。"""
     state = {
         "messages": [
             HumanMessage(content="先查待办 + 再看天气"),
@@ -143,14 +143,13 @@ def test_evaluate_handoff_progress_returns_supervisor_when_coverage_missing() ->
 
     decision = _evaluate_handoff_progress(state)
 
-    assert decision["evaluation"] == "continue"
-    assert decision["evaluation_route"] == "supervisor"
+    assert decision["evaluation"] == "coverage"
+    assert decision["evaluation_route"] == "coverage_gate"
     assert decision["pending_handoff"] is None
     assert decision["handoff_queue"] == []
-    assert decision["iteration_count"] == 1
+    assert "iteration_count" not in decision
+    assert decision["coverage_report"]["pass"] is False
     assert decision["delivery_meta"]["pending_goal_titles"] == ["外部信息"]
-    assert "【交付补齐提示】" in decision["system_context"]
-    assert "tavily_search" in decision["system_context"]
 
 
 def test_build_multi_intent_summary_content_contains_direct_and_expert_results() -> None:
@@ -266,28 +265,27 @@ def test_resolve_coverage_gate_route_returns_supervisor_when_missing_goals() -> 
 
 def test_resolve_coverage_gate_route_allows_partial_gap_for_subagent_only_missing() -> None:
     """仅专家目标缺失时，应允许直接进入 final_composer（A1 策略）。"""
+    active_goals = [
+        {
+            "goal_id": "GOAL-01",
+            "order": 1,
+            "kind": "general.reply",
+            "title": "问题回复",
+            "must_answer": True,
+            "allowed_agents": [],
+        },
+        {
+            "goal_id": "GOAL-02",
+            "order": 2,
+            "kind": "todo.query",
+            "title": "待办事项",
+            "must_answer": True,
+            "allowed_agents": [AgentType.TODO],
+        },
+    ]
     route = _resolve_coverage_gate_route(
         state={"coverage_retry_count": 0},
-        intent_plan={
-            "goals": [
-                {
-                    "goal_id": "GOAL-01",
-                    "order": 1,
-                    "kind": "general.reply",
-                    "title": "问题回复",
-                    "must_answer": True,
-                    "allowed_agents": [],
-                },
-                {
-                    "goal_id": "GOAL-02",
-                    "order": 2,
-                    "kind": "todo.query",
-                    "title": "待办事项",
-                    "must_answer": True,
-                    "allowed_agents": [AgentType.TODO],
-                },
-            ]
-        },
+        active_goals=active_goals,
         coverage_report={
             "pass": False,
             "missing_goals": [{"goal_id": "GOAL-02", "title": "待办事项", "reason": "missing_deliverable"}],
@@ -329,12 +327,10 @@ def test_resolve_coverage_gate_route_goes_final_when_passed() -> None:
 
 def test_compute_coverage_report_should_fill_goal_id_for_direct_deliverable() -> None:
     """direct tool 交付物未显式携带 goal_id 时，coverage 输出仍应满足合同。"""
-    intent_plan = {
-        "goals": [
-            {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
-            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
-        ]
-    }
+    active_goals = [
+        {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+        {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+    ]
     deliverables = [
         {
             "kind": "external.lookup",
@@ -351,7 +347,7 @@ def test_compute_coverage_report_should_fill_goal_id_for_direct_deliverable() ->
         },
     ]
 
-    report = _compute_coverage_report(intent_plan, deliverables)
+    report = _compute_coverage_report(active_goals, deliverables)
     normalized, valid, error = validate_coverage_report_contract(report)
 
     assert report["pass"] is True
@@ -362,12 +358,10 @@ def test_compute_coverage_report_should_fill_goal_id_for_direct_deliverable() ->
 
 def test_render_coverage_blocked_message_should_use_single_question_style() -> None:
     """coverage 门禁阻断文案应输出明确补齐目标与确认提问。"""
-    intent_plan = {
-        "goals": [
-            {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
-            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
-        ]
-    }
+    active_goals = [
+        {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+        {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+    ]
     coverage_report = {
         "pass": False,
         "missing_goals": [
@@ -375,7 +369,7 @@ def test_render_coverage_blocked_message_should_use_single_question_style() -> N
         ],
     }
 
-    message = _render_coverage_blocked_message(intent_plan, coverage_report)
+    message = _render_coverage_blocked_message(active_goals, coverage_report)
     questions = _build_coverage_clarification_questions(coverage_report)
 
     assert "为了保证回答完整" in message

@@ -10,18 +10,16 @@ from app.ai.workflow.multi_agent_graph import (
 )
 
 
-def _intent_plan_todo_only() -> dict:
-    return {
-        "goals": [
-            {
-                "goal_id": "GOAL-01",
-                "order": 1,
-                "kind": "todo.query",
-                "title": "待办事项",
-                "must_answer": True,
-            }
-        ]
-    }
+def _active_goals_todo_only() -> list[dict]:
+    return [
+        {
+            "goal_id": "GOAL-01",
+            "order": 1,
+            "kind": "todo.query",
+            "title": "待办事项",
+            "must_answer": True,
+        }
+    ]
 
 
 def test_coverage_reconcile_marks_missing_goal_without_runtime_evidence() -> None:
@@ -41,7 +39,7 @@ def test_coverage_reconcile_marks_missing_goal_without_runtime_evidence() -> Non
     }
 
     deliverables = _build_delivery_artifacts(state)
-    report = _compute_coverage_report(_intent_plan_todo_only(), deliverables)
+    report = _compute_coverage_report(_active_goals_todo_only(), deliverables)
     route = _resolve_coverage_gate_route(state={"coverage_retry_count": 0}, coverage_report=report)
 
     assert deliverables[0]["status"] == "pending"
@@ -73,7 +71,7 @@ def test_coverage_reconcile_accepts_todo_structured_result_as_evidence() -> None
     }
 
     deliverables = _build_delivery_artifacts(state)
-    report = _compute_coverage_report(_intent_plan_todo_only(), deliverables)
+    report = _compute_coverage_report(_active_goals_todo_only(), deliverables)
 
     assert deliverables[0]["status"] == "success"
     assert report["pass"] is True
@@ -98,7 +96,7 @@ def test_coverage_reconcile_can_be_disabled_by_flag(monkeypatch) -> None:
     }
 
     deliverables = _build_delivery_artifacts(state)
-    report = _compute_coverage_report(_intent_plan_todo_only(), deliverables)
+    report = _compute_coverage_report(_active_goals_todo_only(), deliverables)
 
     assert deliverables[0]["status"] == "success"
     assert report["pass"] is True

@@ -4,7 +4,10 @@ from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ValidationError
 
-from app.ai.contracts.delivery_contracts import CoverageReportContract, IntentPlanContract
+from app.ai.contracts.delivery_contracts import (
+    ActiveGoalsContract,
+    CoverageReportContract,
+)
 
 
 def _extract_validation_error(exc: ValidationError) -> str:
@@ -17,7 +20,7 @@ def _extract_validation_error(exc: ValidationError) -> str:
     return f"validation_error:{err_type}"
 
 
-def _build_fallback_intent_plan(user_query: str) -> Dict[str, Any]:
+def _build_fallback_active_goals_contract(user_query: str) -> Dict[str, Any]:
     return {
         "version": 1,
         "source": "contract_fallback",
@@ -34,6 +37,50 @@ def _build_fallback_intent_plan(user_query: str) -> Dict[str, Any]:
                 "confidence": None,
             }
         ],
+    }
+
+
+def _coerce_active_goals_payload(
+    raw_data: Any,
+    *,
+    source: str,
+    user_query: str,
+) -> Dict[str, Any]:
+    default_source = str(source or "runtime_active_goals")
+    default_user_query = str(user_query or "")
+
+    if isinstance(raw_data, dict):
+        source_data = dict(raw_data)
+        if isinstance(source_data.get("goals"), list):
+            return {
+                "version": source_data.get("version") or 1,
+                "source": str(source_data.get("source") or default_source),
+                "user_query": str(source_data.get("user_query") or default_user_query),
+                "goals": [goal for goal in list(source_data.get("goals") or []) if isinstance(goal, dict)],
+            }
+
+        decomposed_goals = source_data.get("decomposed_goals")
+        if isinstance(decomposed_goals, list):
+            return {
+                "version": source_data.get("version") or 1,
+                "source": str(source_data.get("source") or default_source),
+                "user_query": str(source_data.get("user_query") or default_user_query),
+                "goals": [goal for goal in decomposed_goals if isinstance(goal, dict)],
+            }
+
+    if isinstance(raw_data, (list, tuple)):
+        return {
+            "version": 1,
+            "source": default_source,
+            "user_query": default_user_query,
+            "goals": [goal for goal in raw_data if isinstance(goal, dict)],
+        }
+
+    return {
+        "version": 1,
+        "source": default_source,
+        "user_query": default_user_query,
+        "goals": [],
     }
 
 
@@ -60,10 +107,20 @@ def _build_fallback_coverage_report(raw_data: Any) -> Dict[str, Any]:
     }
 
 
-def validate_intent_plan_contract(raw_data: Any) -> Tuple[Dict[str, Any], bool, str]:
-    """校验 intent_plan 合同，失败时返回兜底合同。"""
+def validate_active_goals_contract(
+    raw_data: Any,
+    *,
+    source: str = "runtime_active_goals",
+    user_query: str = "",
+) -> Tuple[Dict[str, Any], bool, str]:
+    """校验活动目标合同，失败时返回最小可执行兜底。"""
+    normalized_raw = _coerce_active_goals_payload(
+        raw_data,
+        source=source,
+        user_query=user_query,
+    )
     try:
-        model = IntentPlanContract.model_validate(raw_data)
+        model = ActiveGoalsContract.model_validate(normalized_raw)
         normalized = model.model_dump()
         normalized["goals"] = sorted(
             list(normalized.get("goals") or []),
@@ -71,10 +128,23 @@ def validate_intent_plan_contract(raw_data: Any) -> Tuple[Dict[str, Any], bool, 
         )
         return normalized, True, ""
     except ValidationError as exc:
-        user_query = ""
-        if isinstance(raw_data, dict):
-            user_query = str(raw_data.get("user_query") or "")
-        return _build_fallback_intent_plan(user_query), False, _extract_validation_error(exc)
+        fallback_query = str(normalized_raw.get("user_query") or user_query or "")
+        return _build_fallback_active_goals_contract(fallback_query), False, _extract_validation_error(exc)
+
+
+def validate_intent_plan_contract(raw_data: Any) -> Tuple[Dict[str, Any], bool, str]:
+    """兼容入口：转发到 active_goals 合同校验。"""
+    compat_source = "compat_intent_plan"
+    compat_user_query = ""
+    if isinstance(raw_data, dict):
+        compat_source = str(raw_data.get("source") or compat_source)
+        compat_user_query = str(raw_data.get("user_query") or "")
+
+    return validate_active_goals_contract(
+        raw_data,
+        source=compat_source,
+        user_query=compat_user_query,
+    )
 
 
 def validate_coverage_report_contract(raw_data: Any) -> Tuple[Dict[str, Any], bool, str]:
@@ -94,6 +164,8 @@ def validate_coverage_report_contract(raw_data: Any) -> Tuple[Dict[str, Any], bo
 def build_contract_validation_meta(
     *,
     existing_meta: Optional[Dict[str, Any]] = None,
+    active_goals_valid: Optional[bool] = None,
+    active_goals_error: str = "",
     intent_plan_valid: Optional[bool] = None,
     intent_plan_error: str = "",
     coverage_valid: Optional[bool] = None,
@@ -102,9 +174,19 @@ def build_contract_validation_meta(
     """合并 contract 校验元数据，避免覆盖其他 delivery_meta 字段。"""
     merged = dict(existing_meta or {})
 
-    if intent_plan_valid is not None:
-        merged["intent_plan_valid"] = bool(intent_plan_valid)
-        merged["intent_plan_error"] = str(intent_plan_error or "")
+    if active_goals_valid is not None:
+        merged["active_goals_valid"] = bool(active_goals_valid)
+        merged["active_goals_error"] = str(active_goals_error or "")
+
+    compat_valid: Optional[bool] = intent_plan_valid
+    compat_error = str(intent_plan_error or "")
+    if compat_valid is None and active_goals_valid is not None:
+        compat_valid = bool(active_goals_valid)
+    if not compat_error and active_goals_error:
+        compat_error = str(active_goals_error)
+    if compat_valid is not None:
+        merged["intent_plan_valid"] = bool(compat_valid)
+        merged["intent_plan_error"] = compat_error
 
     if coverage_valid is not None:
         merged["coverage_valid"] = bool(coverage_valid)

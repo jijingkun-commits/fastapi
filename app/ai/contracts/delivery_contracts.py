@@ -21,13 +21,17 @@ class GoalContract(BaseModel):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
-class IntentPlanContract(BaseModel):
-    """意图计划合同。"""
+class ActiveGoalsContract(BaseModel):
+    """活动目标合同（decomposed_goals 主语义）。"""
 
     version: int = Field(default=1, ge=1)
     source: str = Field(min_length=1)
     user_query: str = ""
     goals: List[GoalContract] = Field(min_length=1)
+
+
+class IntentPlanContract(ActiveGoalsContract):
+    """兼容旧命名：迁移期保留 intent_plan 语义别名。"""
 
 
 class RouteDecisionContract(BaseModel):
