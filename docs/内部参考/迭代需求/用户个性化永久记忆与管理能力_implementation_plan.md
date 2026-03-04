@@ -776,4 +776,20 @@ incremental_execution:
       - memory.intent_async_enabled=false
     acceptance_checks:
       - venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py -q
+  - card_id: C02
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-02]
+    pr_id: PR-02
+    pr_branch: codex/user-memory-async-pr-02
+    pr_depends_on: [PR-01]
+    pr_subject: worker 抢占与状态机
+    mechanism_summary:
+      - Worker 使用 SKIP LOCKED 抢占 pending 任务
+      - failed 按退避重试并进入 dead_letter
+    rollback_anchors:
+      - 停止 worker 调度入口
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q -> 6 passed"
 ```
