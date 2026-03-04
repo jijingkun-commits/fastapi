@@ -186,6 +186,39 @@ COMMENT ON COLUMN t_user_memory_chunk.chunk_tsv IS '全文检索向量';
 COMMENT ON COLUMN t_user_memory_chunk.embedding IS '向量嵌入（2048维）';
 COMMENT ON COLUMN t_user_memory_chunk.embedding_status IS '向量状态: pending/ready/failed';
 
+-- 记忆意图异步任务队列表
+CREATE TABLE IF NOT EXISTS t_user_memory_intent_job (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    source_thread_id VARCHAR(100),
+    source_message_id BIGINT NOT NULL,
+    event_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    dedupe_key VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_until TIMESTAMP,
+    claimed_by VARCHAR(64),
+    claimed_at TIMESTAMP,
+    error_message TEXT,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_memory_intent_job_user_create
+    ON t_user_memory_intent_job(user_id, create_time);
+CREATE INDEX IF NOT EXISTS idx_user_memory_intent_job_status_retry
+    ON t_user_memory_intent_job(status, next_retry_time, create_time);
+CREATE INDEX IF NOT EXISTS idx_user_memory_intent_job_status_lease
+    ON t_user_memory_intent_job(status, lease_until);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_memory_intent_job_source_unique
+    ON t_user_memory_intent_job(user_id, source_message_id);
+
+COMMENT ON TABLE t_user_memory_intent_job IS '用户记忆意图异步任务队列表';
+COMMENT ON COLUMN t_user_memory_intent_job.dedupe_key IS '业务幂等键 user_id:source_message_id';
+COMMENT ON COLUMN t_user_memory_intent_job.status IS '任务状态: pending/processing/succeeded/failed/dead_letter';
+
 -- 记忆管理动作审计表
 CREATE TABLE IF NOT EXISTS t_user_memory_admin_audit (
     id BIGSERIAL PRIMARY KEY,
@@ -607,6 +640,7 @@ VALUES
     ('feature.proxy_experiment_providers', 'openai_proxy_trial', 'string', 'feature', '中转实验 provider 白名单（逗号分隔）', false, false),
     ('memory.user_preference_bootstrap_template', '{"assistant.persona":"小嘉"}', 'json', 'memory', '新用户偏好记忆初始化模板（JSON）', false, false),
     ('feature.enable_document_memory', 'false', 'boolean', 'feature', '用户个性化永久记忆总开关（纯文档）', false, false),
+    ('memory.intent_async_enabled', 'false', 'boolean', 'memory', '聊天主链路记忆异步入队开关', false, false),
     ('memory.document.admin.default_page_size', '20', 'number', 'memory', '文档记忆后台管理默认分页大小', false, false),
     ('memory.document.admin.max_page_size', '100', 'number', 'memory', '文档记忆后台管理最大分页大小', false, false),
     ('memory.document.max_results', '6', 'number', 'memory', '文档记忆检索结果上限', false, false),

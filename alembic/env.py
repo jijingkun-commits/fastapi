@@ -29,6 +29,7 @@ from app.models.data_permission import DataPermissionTable, DataPermissionRow, D
 from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user_memory import UserMemory
+from app.models.user_memory_intent_job import UserMemoryIntentJob
 from app.models.chat_run import ChatRun
 from app.models.agent_skill import AgentSkill, AgentSkillDefinition, AgentSkillVersion, UserSkillBinding
 

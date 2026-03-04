@@ -13,6 +13,7 @@ from app.models.user_memory import UserMemory
 from app.models.chat_run import ChatRun
 from app.models.document_memory import UserMemoryDocument, UserMemoryChunk
 from app.models.memory_admin_audit import UserMemoryAdminAudit
+from app.models.user_memory_intent_job import UserMemoryIntentJob
 
 __all__ = [
     "User",
@@ -37,4 +38,5 @@ __all__ = [
     "UserMemoryDocument",
     "UserMemoryChunk",
     "UserMemoryAdminAudit",
+    "UserMemoryIntentJob",
 ]

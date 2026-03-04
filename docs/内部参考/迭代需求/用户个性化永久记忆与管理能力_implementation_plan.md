@@ -756,3 +756,24 @@ execution_notes:
   alternative_tool: ""
   verification: "planning_contract 与 implementation_tasks 已双向绑定"
 ```
+
+---
+
+## 11. 增量执行记录（2026-03-04）
+
+```yaml
+incremental_execution:
+  - card_id: C01
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-01]
+    pr_id: PR-01
+    pr_branch: codex/user-memory-async-pr-01
+    pr_subject: 主链路入队与任务模型
+    mechanism_summary:
+      - chat 主链路只做入队，不执行记忆判定
+      - 任务幂等键使用 (user_id, source_message_id)
+    rollback_anchors:
+      - memory.intent_async_enabled=false
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py -q
+```

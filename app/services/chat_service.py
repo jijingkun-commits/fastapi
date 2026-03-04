@@ -28,6 +28,7 @@ from app.core.config import (
     DOCUMENT_MEMORY_TEXT_WEIGHT,
     DOCUMENT_MEMORY_VECTOR_WEIGHT,
     ENABLE_DOCUMENT_MEMORY,
+    MEMORY_INTENT_ASYNC_ENABLED,
 )
 from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 from app.core.message_content import normalize_message_content
@@ -38,6 +39,9 @@ from app.repositories import chat_repo
 from app.services.document_memory_service import (
     flush as flush_document_memory,
     recall as recall_document_memory,
+)
+from app.services.user_memory_intent_job_service import (
+    enqueue_from_chat_message as enqueue_memory_intent_job,
 )
 from app.services.run_control_service import run_control_service
 
@@ -79,6 +83,18 @@ def _is_document_memory_hybrid_enabled(fallback: bool) -> bool:
     """单开关模式：混合检索链路跟随文档记忆总开关。"""
 
     return _is_document_memory_enabled(fallback)
+
+
+def _is_memory_intent_async_enabled(fallback: bool) -> bool:
+    """读取记忆意图异步入队开关。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_bool("memory.intent_async_enabled", fallback)
+        return _is_feature_enabled("MEMORY_INTENT_ASYNC_ENABLED", bool(resolved))
+    except Exception:
+        return _is_feature_enabled("MEMORY_INTENT_ASYNC_ENABLED", fallback)
 
 
 def _get_document_memory_max_results(fallback: int) -> int:
@@ -142,6 +158,87 @@ def _get_document_memory_hybrid_min_score(fallback: float) -> float:
         return max(0.0, float(resolved))
     except Exception:
         return max(0.0, float(fallback))
+
+
+def _persist_document_memory_context(
+    db: Any,
+    *,
+    user_id: int | None,
+    prompt: str,
+    thread_id: str,
+    source_message_id: int | None,
+    document_memory_context: str,
+    document_memory_flush_enabled: bool,
+    document_memory_recall_enabled: bool,
+    memory_intent_async_enabled: bool,
+    document_memory_max_results: int,
+    document_memory_max_injected_chars: int,
+    document_hybrid_min_score: float,
+    document_vector_weight: float,
+    document_text_weight: float,
+) -> str:
+    """写入阶段记忆处理：同步 flush 或异步入队。"""
+
+    if not document_memory_flush_enabled or not user_id or not source_message_id:
+        return document_memory_context
+
+    if memory_intent_async_enabled:
+        try:
+            intent_job, created = enqueue_memory_intent_job(
+                db,
+                user_id=user_id,
+                source_thread_id=thread_id,
+                source_message_id=source_message_id,
+                user_text=prompt,
+            )
+            logger.info(
+                "记忆意图任务入队完成: user_id=%s, source_message_id=%s, job_id=%s, created=%s, status=%s",
+                user_id,
+                source_message_id,
+                intent_job.id,
+                created,
+                intent_job.status,
+            )
+        except Exception as memory_error:
+            logger.warning(
+                "记忆意图任务入队失败，已降级跳过: user_id=%s, source_message_id=%s, error=%s",
+                user_id,
+                source_message_id,
+                memory_error,
+            )
+        return document_memory_context
+
+    try:
+        persisted_doc_count = flush_document_memory(
+            db,
+            user_id=user_id,
+            user_text=prompt,
+            source_thread_id=thread_id,
+            source_message_id=source_message_id,
+        )
+        if persisted_doc_count:
+            logger.info(
+                "压缩前文档记忆 flush 成功: user_id=%s, count=%d",
+                user_id,
+                persisted_doc_count,
+            )
+            if document_memory_recall_enabled:
+                latest_document_context = recall_document_memory(
+                    db,
+                    user_id=user_id,
+                    query_text=prompt,
+                    max_results=document_memory_max_results,
+                    max_injected_chars=document_memory_max_injected_chars,
+                    min_score=document_hybrid_min_score,
+                    vector_weight=document_vector_weight,
+                    text_weight=document_text_weight,
+                )
+                if latest_document_context:
+                    return latest_document_context
+    except Exception as memory_error:
+        logger.warning("写入文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+
+    return document_memory_context
 
 
 def degrade_on_plugin_failure(error_text: str) -> Optional[str]:
@@ -614,6 +711,9 @@ class ChatService:
             document_memory_enabled
             and _is_document_memory_flush_enabled(ENABLE_DOCUMENT_MEMORY)
         )
+        memory_intent_async_enabled = _is_memory_intent_async_enabled(
+            MEMORY_INTENT_ASYNC_ENABLED,
+        )
         document_memory_hybrid_enabled = (
             document_memory_recall_enabled
             and _is_document_memory_hybrid_enabled(ENABLE_DOCUMENT_MEMORY)
@@ -746,36 +846,22 @@ class ChatService:
                 title=title,
             )
 
-            if document_memory_flush_enabled and user_id:
-                try:
-                    persisted_doc_count = flush_document_memory(
-                        db,
-                        user_id=user_id,
-                        user_text=prompt,
-                        source_thread_id=thread_id,
-                        source_message_id=saved_human.id,
-                    )
-                    if persisted_doc_count:
-                        logger.info(
-                            "压缩前文档记忆 flush 成功: user_id=%s, count=%d",
-                            user_id,
-                            persisted_doc_count,
-                        )
-                        if document_memory_recall_enabled:
-                            latest_document_context = recall_document_memory(
-                                db,
-                                user_id=user_id,
-                                query_text=prompt,
-                                max_results=document_memory_max_results,
-                                max_injected_chars=document_memory_max_injected_chars,
-                                min_score=document_hybrid_min_score,
-                                vector_weight=document_vector_weight,
-                                text_weight=document_text_weight,
-                            )
-                            if latest_document_context:
-                                document_memory_context = latest_document_context
-                except Exception as memory_error:
-                    logger.warning("写入文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
+            document_memory_context = _persist_document_memory_context(
+                db,
+                user_id=user_id,
+                prompt=prompt,
+                thread_id=thread_id,
+                source_message_id=getattr(saved_human, "id", None),
+                document_memory_context=document_memory_context,
+                document_memory_flush_enabled=document_memory_flush_enabled,
+                document_memory_recall_enabled=document_memory_recall_enabled,
+                memory_intent_async_enabled=memory_intent_async_enabled,
+                document_memory_max_results=document_memory_max_results,
+                document_memory_max_injected_chars=document_memory_max_injected_chars,
+                document_hybrid_min_score=document_hybrid_min_score,
+                document_vector_weight=document_vector_weight,
+                document_text_weight=document_text_weight,
+            )
 
             if document_memory_context:
                 memory_context = document_memory_context

@@ -140,6 +140,7 @@ THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "1024"))
 
 # 用户个性化永久记忆开关（纯文档 + 单开关）
 ENABLE_DOCUMENT_MEMORY = os.getenv("ENABLE_DOCUMENT_MEMORY", "false").lower() == "true"
+MEMORY_INTENT_ASYNC_ENABLED = os.getenv("MEMORY_INTENT_ASYNC_ENABLED", "false").lower() == "true"
 DOCUMENT_MEMORY_ADMIN_DEFAULT_PAGE_SIZE = int(
     os.getenv("DOCUMENT_MEMORY_ADMIN_DEFAULT_PAGE_SIZE", "20")
 )

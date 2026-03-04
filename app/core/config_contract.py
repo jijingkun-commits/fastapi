@@ -278,6 +278,13 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         default=False,
         env_key="ENABLE_DOCUMENT_MEMORY",
     ),
+    "memory.intent_async_enabled": ConfigSpec(
+        key="memory.intent_async_enabled",
+        source="db-dynamic",
+        value_type="boolean",
+        default=False,
+        env_key="MEMORY_INTENT_ASYNC_ENABLED",
+    ),
     "memory.document.admin.default_page_size": ConfigSpec(
         key="memory.document.admin.default_page_size",
         source="db-dynamic",
