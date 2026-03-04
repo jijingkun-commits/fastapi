@@ -36,8 +36,8 @@ def test_collect_returns_observed_metrics_when_has_recent_events() -> None:
     collector = RuntimeOverviewMetricCollector(store=store)
     snapshot = collector.collect()
 
-    assert snapshot["request_total"] == 3
-    assert snapshot["request_success"] == 2
+    assert snapshot["request_total"] == 2
+    assert snapshot["request_success"] == 1
     assert snapshot["request_5xx"] == 1
     assert snapshot["qps"] > 0
     assert snapshot["latency_p95_ms"] is not None
@@ -119,3 +119,27 @@ def test_collect_returns_no_traffic_hint_when_only_admin_overview_requests() -> 
     assert len(snapshot["alerts"]) == 1
     assert snapshot["alerts"][0]["code"] == "overview.runtime.no_traffic"
 
+
+def test_collect_only_counts_chat_question_paths_for_request_total_and_qps() -> None:
+    """请求总量与 QPS 仅按用户提问口径计数。"""
+
+    fixed_now = datetime(2026, 2, 14, 10, 8, 0, tzinfo=timezone.utc)
+    store = RuntimeRequestMetricsStore(now_provider=lambda: fixed_now)
+
+    store.record(
+        path="/api/v1/data-admin/metrics/stats",
+        status_code=200,
+        duration_ms=65,
+        recorded_at=fixed_now - timedelta(seconds=20),
+    )
+
+    collector = RuntimeOverviewMetricCollector(store=store)
+    snapshot = collector.collect()
+
+    assert snapshot["request_total"] == 0
+    assert snapshot["request_success"] == 0
+    assert snapshot["request_5xx"] == 0
+    assert snapshot["qps"] == 0
+    assert snapshot["latency_p95_ms"] is None
+    assert len(snapshot["modules"]) == 1
+    assert snapshot["modules"][0]["key"] == "data"

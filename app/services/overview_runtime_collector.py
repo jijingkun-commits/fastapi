@@ -64,6 +64,10 @@ class RuntimeOverviewMetricCollector:
     EXCLUDED_PATH_PREFIXES: tuple[str, ...] = (
         "/api/v1/admin-overview",
     )
+    QUESTION_PATH_PREFIXES: tuple[str, ...] = (
+        "/api/v1/chat/stream",
+        "/api/v1/chat/completions",
+    )
 
     def __init__(self, store=runtime_request_metrics_store) -> None:
         self._store = store
@@ -81,6 +85,11 @@ class RuntimeOverviewMetricCollector:
             if path.startswith(prefix):
                 return False
         return True
+
+    def _is_question_path(self, path: str) -> bool:
+        """判断请求是否计入“用户提问”口径。"""
+
+        return any(path.startswith(prefix) for prefix in self.QUESTION_PATH_PREFIXES)
 
     def collect(self) -> dict[str, Any]:
         now, events = self._store.list_recent(window_sec=self.WINDOW_SEC)
@@ -101,11 +110,13 @@ class RuntimeOverviewMetricCollector:
                 "changes": [],
             }
 
-        request_total = len(observed_events)
-        request_5xx = sum(1 for event in observed_events if event.status_code >= 500)
+        question_events = [event for event in observed_events if self._is_question_path(event.path)]
+
+        request_total = len(question_events)
+        request_5xx = sum(1 for event in question_events if event.status_code >= 500)
         request_success = request_total - request_5xx
 
-        latency_values = [event.duration_ms for event in observed_events]
+        latency_values = [event.duration_ms for event in question_events]
         latency_p95_ms = _percentile(latency_values, 0.95)
 
         qps = request_total / max(self.WINDOW_SEC, 1)
@@ -137,7 +148,7 @@ class RuntimeOverviewMetricCollector:
             "changes": [
                 {
                     "id": "overview.runtime.window",
-                    "title": f"实时观测窗口已更新（最近 5 分钟，共 {request_total} 条请求）",
+                    "title": f"实时观测窗口已更新（最近 5 分钟，共 {request_total} 次用户提问）",
                     "level": "info",
                     "occurred_at": _to_iso8601(now),
                 }
