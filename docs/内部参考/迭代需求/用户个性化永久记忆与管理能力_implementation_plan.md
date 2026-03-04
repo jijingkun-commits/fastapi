@@ -899,4 +899,24 @@ incremental_execution:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_repo_hybrid_search.py -q --no-cov -> 3 passed"
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_service_hybrid.py -q -> 3 passed, coverage gate 29.91% < 30.00%"
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_document_memory_repo_hybrid_search.py -q -> 3 passed, coverage gate 29.62% < 30.00%"
+  - card_id: C09
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-09]
+    pr_id: PR-09
+    pr_branch: codex/user-memory-async-pr-09
+    pr_depends_on: [PR-02, PR-07, PR-08]
+    pr_subject: 背压熔断与观测门禁
+    mechanism_summary:
+      - L1/L2/L3 背压分级
+      - 队列与时延指标接入告警门禁
+    changed_files:
+      - app/services/memory_intent_worker_service.py
+      - app/core/config_contract.py
+      - tests/unit/test_memory_intent_backpressure.py
+    rollback_anchors:
+      - backpressure_mode=disabled
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_backpressure.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_intent_backpressure.py -q -> 11 passed, coverage 30.12%"
 ```

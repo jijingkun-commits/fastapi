@@ -51,6 +51,14 @@ class ToolPolicyContract:
 TOOL_POLICY_CONTRACT = ToolPolicyContract()
 
 
+MEMORY_INTENT_BACKPRESSURE_THRESHOLDS: Dict[str, float] = {
+    "l2_queue_len": 5000.0,
+    "l3_queue_len": 10000.0,
+    "dead_letter_rate": 0.005,
+    "p95_latency_ms": 5000.0,
+}
+
+
 CONFIG_SPECS: Dict[str, ConfigSpec] = {
     # ==================== 模型路由 ====================
     "model_routing.default_chat": ConfigSpec(
@@ -284,6 +292,28 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         value_type="boolean",
         default=False,
         env_key="MEMORY_INTENT_ASYNC_ENABLED",
+    ),
+    "memory.intent.backpressure_mode": ConfigSpec(
+        key="memory.intent.backpressure_mode",
+        source="db-dynamic",
+        value_type="string",
+        default="enabled",
+        env_key="MEMORY_INTENT_BACKPRESSURE_MODE",
+        aliases=("backpressure_mode",),
+    ),
+    "memory.intent.backpressure.thresholds": ConfigSpec(
+        key="memory.intent.backpressure.thresholds",
+        source="db-dynamic",
+        value_type="json",
+        default=MEMORY_INTENT_BACKPRESSURE_THRESHOLDS,
+        env_key="MEMORY_INTENT_BACKPRESSURE_THRESHOLDS_JSON",
+    ),
+    "memory.intent.metrics_gate_enabled": ConfigSpec(
+        key="memory.intent.metrics_gate_enabled",
+        source="db-dynamic",
+        value_type="boolean",
+        default=True,
+        env_key="MEMORY_INTENT_METRICS_GATE_ENABLED",
     ),
     "memory.slot_governance_enabled": ConfigSpec(
         key="memory.slot_governance_enabled",
