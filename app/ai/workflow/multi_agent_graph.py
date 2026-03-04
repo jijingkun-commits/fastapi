@@ -30,7 +30,6 @@ from langgraph.graph import StateGraph, START, END
 
 from app.ai.llm_util import get_scene_llm, get_llm_capabilities, _normalize_text_content
 from app.ai.scene_registry import (
-    SCENE_KEY_INTENT_CLASSIFIER,
     SCENE_KEY_MULTI_AGENT_SUPERVISOR,
 )
 from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
@@ -45,7 +44,6 @@ from app.ai.events import (
     emit_tool_end,
     emit_result,
     emit_kb_images,
-    emit_plan_ready,
     emit_task_started,
     emit_task_finished,
     emit_coverage_check,
@@ -645,7 +643,7 @@ def _resolve_active_goals(
     *,
     runtime_goals: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> list[Dict[str, Any]]:
-    """统一解析活动目标：decomposed_goals 优先，其次兼容 intent_plan。"""
+    """统一解析活动目标：优先使用运行时与 `decomposed_goals`。"""
     runtime_list = [goal for goal in list(runtime_goals or []) if isinstance(goal, dict)]
     if runtime_list:
         return _normalize_active_goals(runtime_list)
@@ -653,12 +651,6 @@ def _resolve_active_goals(
     decomposed = state.get("decomposed_goals")
     if isinstance(decomposed, list) and decomposed:
         return _normalize_active_goals([goal for goal in decomposed if isinstance(goal, dict)])
-
-    legacy_plan = state.get("intent_plan")
-    if isinstance(legacy_plan, dict):
-        legacy_goals = [goal for goal in list(legacy_plan.get("goals") or []) if isinstance(goal, dict)]
-        if legacy_goals:
-            return _normalize_active_goals(legacy_goals)
 
     heuristic_plan = _infer_initial_intent_plan(state)
     heuristic_goals = [goal for goal in list(heuristic_plan.get("goals") or []) if isinstance(goal, dict)]
@@ -2841,7 +2833,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
         runtime_state["handoff_execution_trace"] = execution_trace
 
         active_goals = _ensure_active_goals_covers_runtime(runtime_state)
-        intent_plan = _build_active_goal_plan(
+        active_goal_plan = _build_active_goal_plan(
             runtime_state,
             runtime_goals=active_goals,
             source="evaluate_runtime",
@@ -2866,7 +2858,6 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "handoff_queue": [],
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_preview,
@@ -2881,7 +2872,6 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "handoff_queue": [],
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_preview,
@@ -2907,7 +2897,6 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "handoff_queue": [],
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_preview,
@@ -2922,14 +2911,13 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
             "handoff_queue": [],
             "completed_handoffs": completed_handoffs,
             "handoff_execution_trace": execution_trace,
-            "intent_plan": intent_plan,
             "decomposed_goals": list(active_goals),
             "deliverables": deliverables,
             "coverage_report": coverage_preview,
             "delivery_meta": delivery_meta,
             "system_context": _build_multi_intent_recovery_system_context(
                 str(state.get("system_context") or ""),
-                intent_plan,
+                active_goal_plan,
                 missing_goals,
             ),
         }
@@ -2970,13 +2958,10 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
 def _is_partial_gap_delivery_allowed(
     *,
     active_goals: Optional[Sequence[Dict[str, Any]]] = None,
-    intent_plan: Optional[Dict[str, Any]] = None,
     coverage_report: Dict[str, Any],
 ) -> bool:
     """判定是否允许“主问题完成 + 子任务缺口”直接收口输出。"""
     normalized_active_goals = _coerce_active_goals_input(active_goals or [])
-    if not normalized_active_goals and isinstance(intent_plan, dict):
-        normalized_active_goals = _coerce_active_goals_input(intent_plan)
     if not normalized_active_goals:
         return False
 
@@ -3013,7 +2998,6 @@ def _resolve_coverage_gate_route(
     state: MultiAgentState,
     coverage_report: Dict[str, Any],
     active_goals: Optional[Sequence[Dict[str, Any]]] = None,
-    intent_plan: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """决定 coverage_gate 下一跳与补齐轮次。"""
     previous_retry = _parse_non_negative_int(state.get("coverage_retry_count"), default=0)
@@ -3028,7 +3012,6 @@ def _resolve_coverage_gate_route(
 
     if _is_partial_gap_delivery_allowed(
         active_goals=active_goals,
-        intent_plan=intent_plan,
         coverage_report=coverage_report,
     ):
         return {
@@ -3430,7 +3413,6 @@ def _dispatch_values_mode_chunk(
                 source="decompose_goals",
             )
             final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
-            final_state["intent_plan"] = decompose_plan
 
         raw_runtime_goals = final_state.get("decomposed_goals")
         if not isinstance(raw_runtime_goals, list):
@@ -3457,20 +3439,9 @@ def _dispatch_values_mode_chunk(
             runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
         )
         final_state["decomposed_goals"] = active_goals
-        if not isinstance(final_state.get("intent_plan"), dict):
-            final_state["intent_plan"] = _build_active_goal_plan(
-                ctx.state,
-                runtime_goals=active_goals,
-                source="runtime_active_goals",
-            )
 
         guard_state = dict(ctx.state)
         guard_state["decomposed_goals"] = active_goals
-        guard_state["intent_plan"] = _build_active_goal_plan(
-            guard_state,
-            runtime_goals=active_goals,
-            source="router_guard_runtime",
-        )
 
         handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
@@ -4295,16 +4266,6 @@ async def create_multi_agent_graph(
         model_id=model_id,
     )
 
-    # 获取 Planner LLM（轻量意图分析，独立于主对话模型）
-    try:
-        planner_llm = get_scene_llm(
-            scene_key=SCENE_KEY_INTENT_CLASSIFIER,
-            force_thinking=False,
-        )
-    except Exception as exc:
-        logger.warning("planner_llm_init_failed_fallback_to_supervisor_llm: %s", exc)
-        planner_llm = llm
-    
     # 1. 创建 Handoff 工具（使用常量定义）
     handoff_tools = [
         _create_task_handoff_tool(agent_type, desc)
@@ -4439,7 +4400,6 @@ async def create_multi_agent_graph(
             "turn_id": None,
 
             # === 交付导向状态 ===
-            "intent_plan": None,
             "decomposed_goals": [],
             "task_graph": None,
             "task_runs": [],
@@ -4461,75 +4421,7 @@ async def create_multi_agent_graph(
             ),
         }
 
-    # 8. 定义规划节点（问题合同）
-    def _planner_node(state: MultiAgentState) -> dict:
-        """生成当前轮 intent_plan，并向前端发送 plan_ready 事件。"""
-        if not _is_delivery_orchestrator_v2_enabled():
-            return {}
-
-        planner_settings = _resolve_intent_planner_settings(state)
-        planner_mode = _normalize_intent_mode(
-            planner_settings.get("intent_mode"),
-            default=str(state.get("intent_mode") or "model_primary"),
-        )
-        raw_intent_plan = _build_planner_intent_plan(state, llm=planner_llm, mode=planner_mode)
-        planner_strategy = str(raw_intent_plan.get("planner_strategy") or "").strip() or "unknown"
-        planner_strategy_fallback = str(raw_intent_plan.get("planner_strategy_fallback") or "").strip()
-        planner_strategy_fallback_reason = str(raw_intent_plan.get("planner_strategy_fallback_reason") or "").strip()
-        intent_plan, active_goals_valid, active_goals_error = validate_active_goals_contract(
-            raw_intent_plan,
-            source=str(raw_intent_plan.get("source") or "planner_runtime"),
-            user_query=str(raw_intent_plan.get("user_query") or ""),
-        )
-        shadow_metrics = _build_intent_shadow_metrics(
-            state=state,
-            intent_plan=intent_plan,
-            planner_mode=planner_mode,
-            intent_shadow_enabled=bool(planner_settings.get("intent_shadow_enabled", False)),
-        )
-        source = str(intent_plan.get("source") or raw_intent_plan.get("source") or "unknown")
-        fallback_meta = _extract_planner_fallback_meta(raw_intent_plan, intent_plan)
-        status_message = _build_planner_status_message(intent_plan, raw_intent_plan=raw_intent_plan)
-
-        writer = get_stream_writer()
-        emit_status(
-            writer,
-            message=status_message,
-            node="planner",
-        )
-        if _is_sse_delivery_events_v2_enabled():
-            emit_plan_ready(writer, intent_plan, node="planner")
-
-        delivery_meta = {
-            **build_contract_validation_meta(
-                existing_meta=state.get("delivery_meta") if isinstance(state.get("delivery_meta"), dict) else {},
-                active_goals_valid=active_goals_valid,
-                active_goals_error=active_goals_error,
-            ),
-            "goal_count_initial": len(intent_plan.get("goals") or []),
-            "planner_structured_strategy": planner_strategy,
-            "planner_strategy_fallback": planner_strategy_fallback,
-            "planner_strategy_fallback_reason": planner_strategy_fallback_reason,
-            **shadow_metrics,
-        }
-        if source == "heuristic_fallback" and fallback_meta:
-            delivery_meta["planner_fallback_reason"] = str(fallback_meta.get("reason") or "")
-            delivery_meta["planner_fallback_rule_id"] = str(fallback_meta.get("fallback_rule_id") or "")
-            delivery_meta["planner_fallback_trigger"] = str(fallback_meta.get("trigger") or "")
-            delivery_meta["planner_fallback_reason_code"] = str(fallback_meta.get("reason_code") or "")
-
-        return {
-            "intent_plan": intent_plan,
-            "decomposed_goals": list(intent_plan.get("goals") or []),
-            "intent_mode": planner_mode,
-            "coverage_retry_count": 0,
-            "coverage_gate_route": "final_composer",
-            "coverage_partial_gap_allowed": False,
-            "route_decisions": [],
-            "delivery_meta": delivery_meta,
-        }
-
-    # 9. 定义评估节点（判断专家工作是否完成）
+    # 8. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
         """评估专家工作节点：支持 handoff 队列串行消费与复合任务汇总收口。"""
         decision = _evaluate_handoff_progress(state)
@@ -4589,7 +4481,7 @@ async def create_multi_agent_graph(
             return {}
 
         active_goals = _ensure_active_goals_covers_runtime(state)
-        intent_plan = _build_active_goal_plan(
+        active_goal_plan = _build_active_goal_plan(
             state,
             runtime_goals=active_goals,
             source="coverage_gate_runtime",
@@ -4601,7 +4493,6 @@ async def create_multi_agent_graph(
             state=state,
             coverage_report=coverage_report,
             active_goals=active_goals,
-            intent_plan=intent_plan,
         )
         route = str(route_state.get("route") or "final_composer")
         partial_gap_allowed = bool(route_state.get("partial_gap_allowed"))
@@ -4655,7 +4546,6 @@ async def create_multi_agent_graph(
 
         if route == "supervisor":
             return {
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
@@ -4669,7 +4559,7 @@ async def create_multi_agent_graph(
                 "handoff_queue": [],
                 "system_context": _build_multi_intent_recovery_system_context(
                     str(state.get("system_context") or ""),
-                    intent_plan,
+                    active_goal_plan,
                     missing_goals,
                 ),
             }
@@ -4684,7 +4574,6 @@ async def create_multi_agent_graph(
             )
             return {
                 "messages": [create_ai_message(blocked_answer)],
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
@@ -4698,7 +4587,6 @@ async def create_multi_agent_graph(
             }
 
         return {
-            "intent_plan": intent_plan,
             "decomposed_goals": list(active_goals),
             "deliverables": deliverables,
             "coverage_report": coverage_report,
@@ -4714,11 +4602,6 @@ async def create_multi_agent_graph(
             return {}
 
         active_goals = _ensure_active_goals_covers_runtime(state)
-        intent_plan = _build_active_goal_plan(
-            state,
-            runtime_goals=active_goals,
-            source="final_composer_runtime",
-        )
         deliverables = list(state.get("deliverables") or _build_delivery_artifacts(state))
         coverage_report = dict(state.get("coverage_report") or _compute_coverage_report(active_goals, deliverables))
         delivery_meta = dict(state.get("delivery_meta") or {})
@@ -4738,7 +4621,6 @@ async def create_multi_agent_graph(
             )
             return {
                 "messages": [create_ai_message(blocked_answer)],
-                "intent_plan": intent_plan,
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
@@ -4785,7 +4667,6 @@ async def create_multi_agent_graph(
 
         return {
             "messages": [create_ai_message(final_answer)],
-            "intent_plan": intent_plan,
             "decomposed_goals": list(active_goals),
             "deliverables": deliverables,
             "coverage_report": coverage_report,
@@ -4862,7 +4743,6 @@ async def create_multi_agent_graph(
 
     # 添加节点
     workflow.add_node("preprocess", _preprocess_multimodal)
-    workflow.add_node("planner", _planner_node)
     # 修复: Supervisor 也需要流式包装器,确保 LLM 输出是流式的
     workflow.add_node("supervisor", _create_streaming_agent_wrapper(supervisor_agent, "supervisor"))
     workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_graph_app, "data_expert"))
@@ -4877,8 +4757,7 @@ async def create_multi_agent_graph(
     
     # 添加边
     workflow.add_edge(START, "preprocess")
-    workflow.add_edge("preprocess", "planner")
-    workflow.add_edge("planner", "supervisor")
+    workflow.add_edge("preprocess", "supervisor")
     
     # 专家执行完 -> 评估节点
     workflow.add_edge("data_expert", "evaluate")

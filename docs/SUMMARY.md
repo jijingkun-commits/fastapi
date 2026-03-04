@@ -151,8 +151,8 @@
 * [知识库检索P2分阶段治理实施方案](内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md)
 * [多任务并行Worktree命名空间与异步收口需求](内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_requirements.md)
 * [多任务并行Worktree命名空间与异步收口实施方案](内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md)
-* [监督者移除Planner重构需求](内部参考/迭代需求/监督者移除Planner重构_requirements.md)
-* [监督者移除Planner重构实施方案](内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md)
+* [监督者移除Planner重构需求（已收口）](内部参考/迭代需求/监督者移除Planner重构_requirements.md)
+* [监督者移除Planner重构实施方案（已收口）](内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md)
 
 > 说明：该目录以过程文档为主，详细条目按主题目录内索引查看。
 

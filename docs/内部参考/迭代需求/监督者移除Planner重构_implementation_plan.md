@@ -530,4 +530,25 @@ pr_ready_manifest:
     acceptance_cmds:
       - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
     rollback_point: 回退测试迁移提交
+
+  - task_id: T-10
+    pr_id: PR-05
+    card_id: C05
+    changed_files:
+      - app/ai/workflow/multi_agent_graph.py
+      - app/ai/state.py
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
+    rollback_point: 恢复兼容代码分支
+
+  - task_id: T-11
+    pr_id: PR-05
+    card_id: C05
+    changed_files:
+      - docs/SUMMARY.md
+      - docs/内部参考/迭代需求/监督者移除Planner重构_requirements.md
+      - docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+    rollback_point: 恢复文档索引变更
 ```

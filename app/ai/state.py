@@ -133,7 +133,7 @@ class MultiAgentState(BaseAgentState, total=False):
 
     # 交付导向编排（Delivery Orchestrator V2）
     turn_id: str                        # 当前轮唯一标识（thread/run 维度内）
-    intent_plan: Dict[str, Any]         # 问题合同（目标列表）
+    decomposed_goals: List[Dict[str, Any]]  # 活动目标列表（唯一目标状态源）
     task_graph: Dict[str, Any]          # 执行任务图（预留）
     task_runs: List[Dict[str, Any]]     # 任务运行记录（预留）
     deliverables: List[Dict[str, Any]]  # 结构化交付物
