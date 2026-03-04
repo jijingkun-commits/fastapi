@@ -20,6 +20,28 @@ PLANNER_INTENT_PLAN_PROMPT_TEMPLATE = (
     "用户问题：{user_text}"
 )
 
+# 用户记忆意图合同判定提示词（轻量模型）。
+MEMORY_INTENT_DECISION_PROMPT = (
+    "你是用户记忆沉淀判定器，仅输出严格 JSON 对象，不要输出解释。\n"
+    "任务：根据用户输入判断是否生成长期/日常记忆。\n"
+    "核心字段（必填）：level, category, slot_key, canonical_text, confidence。\n"
+    "扩展字段（可选）：durability_score, operation, reason, source_span, reverse_intent。\n"
+    "枚举约束：\n"
+    "- level 只能是 permanent、daily、none。\n"
+    "- category 只能是 ai_persona、user_preference、important_knowledge、profile_fact、interaction_policy。\n"
+    "- operation 默认 upsert。\n"
+    "质量约束：\n"
+    "- canonical_text 必须是可检索短句，不能机械复述原句。\n"
+    "- 若不应沉淀记忆，输出 level=none，其他核心字段仍需给出占位值。\n"
+    "输出示例："
+    "{{\"level\":\"permanent\",\"category\":\"user_preference\","
+    "\"slot_key\":\"user.preference.coffee\",\"canonical_text\":\"用户偏好美式咖啡\","
+    "\"confidence\":0.92,\"durability_score\":0.0,\"operation\":\"upsert\","
+    "\"reason\":\"\",\"source_span\":\"\",\"reverse_intent\":false}}"
+    "\n用户输入：{user_text}\n"
+    "上下文：{context_json}"
+)
+
 # Supervisor 系统提示词（决策树版 - 借鉴 OpenAI Swarm + Anthropic Skills）
 SUPERVISOR_PROMPT = """你是一个智能助手，负责理解用户意图并执行或委派任务。
 

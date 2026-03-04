@@ -792,4 +792,24 @@ incremental_execution:
       - venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q
     verification:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q -> 6 passed"
+  - card_id: C03
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-03]
+    pr_id: PR-03
+    pr_branch: codex/user-memory-async-pr-03
+    pr_depends_on: [PR-02]
+    pr_subject: LLM 合同判定与容错
+    mechanism_summary:
+      - lightweight 模型输出结构化合同
+      - 核心字段缺失按 none 丢弃并审计
+    changed_files:
+      - app/services/memory_intent_llm_service.py
+      - app/ai/prompts/agent_prompts.py
+      - tests/unit/test_memory_intent_llm_service.py
+    rollback_anchors:
+      - 判定器降级为 none-only
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -> 8 passed"
 ```
