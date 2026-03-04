@@ -83,6 +83,51 @@ def _build_daily_summary(user_text: str, *, max_chars: int = 180) -> str:
     return f"{plain[:max_chars].rstrip()}..."
 
 
+def _build_slot_canonical_content(
+    *,
+    slot_key: str,
+    canonical_text: str,
+    operation: str,
+    event_time: datetime | None,
+    source_thread_id: str | None,
+    source_message_id: int | None,
+) -> str:
+    """构建槽位记忆文档正文。"""
+
+    normalized_slot_key = str(slot_key or "").strip() or "unknown.slot"
+    lines = [
+        f"# 槽位记忆 {normalized_slot_key}",
+        "",
+        f"- slot_key: {normalized_slot_key}",
+        f"- canonical_text: {canonical_text}",
+        f"- operation: {str(operation or 'upsert').strip() or 'upsert'}",
+    ]
+    if event_time:
+        lines.append(f"- event_time: {event_time.isoformat()}")
+    if source_thread_id:
+        lines.append(f"- source_thread_id: {source_thread_id}")
+    if source_message_id:
+        lines.append(f"- source_message_id: {source_message_id}")
+    return "\n".join(lines).strip()
+
+
+def _resolve_canonical_doc_key(
+    *,
+    doc_kind: str,
+    doc_key: str | None,
+    slot_key: str | None,
+    event_time: datetime,
+) -> str:
+    """解析 canonical flush 的文档键。"""
+
+    normalized_doc_key = str(doc_key or "").strip()
+    if normalized_doc_key:
+        return normalized_doc_key
+    if doc_kind == "daily":
+        return event_time.strftime("%Y-%m-%d")
+    return str(slot_key or "").strip()
+
+
 def _is_source_metadata_line(line: str) -> bool:
     stripped = str(line or "").strip()
     if not stripped:
@@ -650,53 +695,133 @@ def flush(
     if not _should_persist_memory(text):
         return 0
 
-    now = datetime.now()
-    doc_kind = "daily"
-    doc_key = now.strftime("%Y-%m-%d")
-    doc_title = f"记忆日记 {doc_key}"
+    return flush_canonical_memory(
+        db,
+        user_id=user_id,
+        canonical_text=text,
+        doc_kind="daily",
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+    )
+
+
+def flush_canonical_memory(
+    db: Session,
+    *,
+    user_id: int,
+    canonical_text: str,
+    doc_kind: str = "daily",
+    doc_key: str | None = None,
+    slot_key: str | None = None,
+    source_thread_id: str | None = None,
+    source_message_id: int | None = None,
+    source: str = _DEFAULT_MEMORY_SOURCE,
+    scope: str = "private",
+    scope_ref: str | None = None,
+    operation: str = "upsert",
+    event_time: datetime | None = None,
+) -> int:
+    """将 canonical_text 落库到 document/chunk 两表。"""
+
+    if not user_id:
+        return 0
+
+    normalized_text = _normalize_text(canonical_text)
+    if not normalized_text:
+        return 0
+
+    normalized_doc_kind = str(doc_kind or "daily").strip().lower()
+    if normalized_doc_kind == "permanent":
+        normalized_doc_kind = _DEFAULT_PREFERENCE_DOC_KIND
+
+    resolved_event_time = event_time or datetime.now()
+    resolved_doc_key = _resolve_canonical_doc_key(
+        doc_kind=normalized_doc_kind,
+        doc_key=doc_key,
+        slot_key=slot_key,
+        event_time=resolved_event_time,
+    )
+    if not resolved_doc_key:
+        logger.warning(
+            "flush_canonical_memory 缺少 doc_key: user_id=%s, doc_kind=%s",
+            user_id,
+            normalized_doc_kind,
+        )
+        return 0
+
+    resolved_slot_key = str(slot_key or "").strip() or None
+    if resolved_slot_key is None and normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND:
+        resolved_slot_key = resolved_doc_key
+
+    resolved_scope_ref = scope_ref
+    resolved_title: str
+    content_md: str
+    summary_md: str
 
     try:
-        existing = document_memory_repo.get_active_document(
-            db,
-            user_id=user_id,
-            doc_kind=doc_kind,
-            doc_key=doc_key,
-        )
-        entry = _build_daily_entry(
-            user_text=text,
-            source_thread_id=source_thread_id,
-            source_message_id=source_message_id,
-        )
-
-        if existing and existing.content_md:
-            merged = f"{existing.content_md.rstrip()}\n\n{entry}".strip()
+        if normalized_doc_kind == "daily":
+            resolved_title = f"记忆日记 {resolved_doc_key}"
+            existing = document_memory_repo.get_active_document(
+                db,
+                user_id=user_id,
+                doc_kind=normalized_doc_kind,
+                doc_key=resolved_doc_key,
+            )
+            entry = _build_daily_entry(
+                user_text=normalized_text,
+                source_thread_id=source_thread_id,
+                source_message_id=source_message_id,
+            )
+            if existing and existing.content_md:
+                content_md = f"{existing.content_md.rstrip()}\n\n{entry}".strip()
+            else:
+                content_md = f"# {resolved_title}\n\n{entry}".strip()
+            summary_md = _build_daily_summary(normalized_text)
+            if resolved_scope_ref is None:
+                resolved_scope_ref = source_thread_id
         else:
-            merged = f"# {doc_title}\n\n{entry}".strip()
+            resolved_title = (
+                f"槽位记忆 {resolved_slot_key or resolved_doc_key}"
+                if normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND
+                else f"记忆文档 {resolved_doc_key}"
+            )
+            content_md = _build_slot_canonical_content(
+                slot_key=resolved_slot_key or resolved_doc_key,
+                canonical_text=normalized_text,
+                operation=operation,
+                event_time=resolved_event_time,
+                source_thread_id=source_thread_id,
+                source_message_id=source_message_id,
+            )
+            summary_md = normalized_text[:200]
 
-        content_hash = _hash_text(merged)
+        content_hash = _hash_text(content_md)
         document = document_memory_repo.upsert_document(
             db,
             user_id=user_id,
-            doc_kind=doc_kind,
-            doc_key=doc_key,
-            title=doc_title,
-            content_md=merged,
-            summary_md=_build_daily_summary(text),
-            source=_DEFAULT_MEMORY_SOURCE,
-            scope="private",
-            scope_ref=source_thread_id,
+            doc_kind=normalized_doc_kind,
+            doc_key=resolved_doc_key,
+            slot_key=resolved_slot_key,
+            title=resolved_title,
+            content_md=content_md,
+            summary_md=summary_md,
+            source=source,
+            scope=scope,
+            scope_ref=resolved_scope_ref,
             content_hash=content_hash,
             source_thread_id=source_thread_id,
             source_message_id=source_message_id,
+            operation=operation,
+            last_event_time=resolved_event_time,
         )
 
-        chunks = _split_document_to_chunks(merged)
+        chunks = _split_document_to_chunks(content_md)
         document_memory_repo.replace_document_chunks(
             db,
             user_id=user_id,
             doc_id=document.id,
             chunks=chunks,
-            source=_DEFAULT_MEMORY_SOURCE,
+            source=source,
         )
         db.commit()
         return 1

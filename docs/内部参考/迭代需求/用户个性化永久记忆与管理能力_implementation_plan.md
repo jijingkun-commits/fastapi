@@ -856,4 +856,24 @@ incremental_execution:
       - venv/bin/python -m pytest tests/unit/test_memory_sensitive_guard_service.py -q
     verification:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_sensitive_guard_service.py -q -> 7 passed"
+  - card_id: C06
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-06]
+    pr_id: PR-06
+    pr_branch: codex/user-memory-async-pr-06
+    pr_depends_on: [PR-04, PR-05]
+    pr_subject: 文档落库与 embedding 补偿对齐
+    mechanism_summary:
+      - canonical_text 进入 document/chunk 两表
+      - chunk embedding_status=pending 走补偿链路
+    changed_files:
+      - app/services/document_memory_service.py
+      - app/services/document_memory_embedding_service.py
+      - tests/integration/test_document_memory_embedding_compensation.py
+    rollback_anchors:
+      - 回退到旧 flush 路径
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q -> 4 passed (coverage 30.08%)"
 ```

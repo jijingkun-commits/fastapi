@@ -37,7 +37,7 @@ def _normalize_status_filter(status_filter: Iterable[str] | None) -> tuple[str, 
     return tuple(dict.fromkeys(normalized))
 
 
-def process_pending_chunks(
+def compensate_pending_embeddings(
     db: Session,
     *,
     limit: int = DEFAULT_BATCH_SIZE,
@@ -118,6 +118,29 @@ def process_pending_chunks(
     }
 
 
+def process_pending_chunks(
+    db: Session,
+    *,
+    limit: int = DEFAULT_BATCH_SIZE,
+    user_id: int | None = None,
+    doc_id: int | None = None,
+    status_filter: Iterable[str] | None = None,
+    max_retry: int = DEFAULT_MAX_RETRY,
+    source: str = DEFAULT_SOURCE,
+) -> dict[str, int]:
+    """兼容旧入口：转发到 compensate_pending_embeddings。"""
+
+    return compensate_pending_embeddings(
+        db,
+        limit=limit,
+        user_id=user_id,
+        doc_id=doc_id,
+        status_filter=status_filter,
+        max_retry=max_retry,
+        source=source,
+    )
+
+
 def retry_failed_chunks(
     db: Session,
     *,
@@ -155,4 +178,3 @@ def get_embedding_status(
         doc_id=doc_id,
         source=source,
     )
-
