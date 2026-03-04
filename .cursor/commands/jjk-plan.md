@@ -280,7 +280,8 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. 每条 `TC-*` 必须绑定：`fr_id`、`task_id`、`acceptance_cmd_ref`，禁止只写场景不写实现落点。
 4. 必须产出 `traceability_matrix`：`design_item -> fr_id -> feature_id -> task_id -> tc_id -> acceptance_cmd -> evidence_entry`。
 5. `requirements` 状态与 `implementation_readiness` 必须一致：当需求状态为 `draft/草稿` 时，`implementation_ready` 必须为 `false`。
-6. 任一项缺失时，必须标记 `REQUIREMENTS_NOT_ACTIONABLE`，并阻断进入 `/jjk-imp` 与 `/jjk-vkplan`。
+6. 新增开关必须声明“默认开启（`true`）+ 回退关闭（`false`）”；除非用户明确要求灰度，禁止默认关闭并分阶段放量。
+7. 任一项缺失时，必须标记 `REQUIREMENTS_NOT_ACTIONABLE`，并阻断进入 `/jjk-imp` 与 `/jjk-vkplan`。
 
 ## 2. 技术方案 (Technical Design)
 
@@ -341,7 +342,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 3. 触发条件与状态流转（包括异常分支）
 4. 代码锚点（文件 + 函数/类，不允许只写行号）
 5. 关键数据结构/契约字段
-6. 回滚锚点（开关/降级策略）
+6. 回滚锚点（开关/降级策略，默认“关闭开关即回退”）
 7. 验证命令（最小 pytest/API/docs_guard）
 8. 来源证据（来自 output 或既有专题文档的精确引用）
 

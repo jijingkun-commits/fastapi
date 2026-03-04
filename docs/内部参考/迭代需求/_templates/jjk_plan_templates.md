@@ -42,7 +42,7 @@ fr_contract_matrix:
       consumer: app/services/chat_service.py
     failure_semantics: 失败时返回口径
     observability_fields: [metric_a, metric_b]
-    rollback_anchor: ENABLE_XXX=false
+    rollback_anchor: ENABLE_XXX=false（默认 true，回退时置 false）
     owner: ai-workflow
 ```
 
@@ -63,6 +63,7 @@ traceability_matrix:
 2. 每个 `NFR-*` 必须含数字阈值（例如 `P50/P95`、错误率、恢复时长），禁止仅写“显著提升/明显下降”。
 3. 每个 `TC-*` 必须在 `traceability_matrix` 映射到唯一 `task_id` 与 `acceptance_cmd_ref`。
 4. 当 `requirements_contract.status` 为 `draft/草稿` 时，`implementation_readiness.implementation_ready` 必须为 `false`。
+5. 新增开关默认值必须写为开启（`true`）；除非用户明确要求灰度，禁止采用“默认关闭 + 灰度放量”口径。
 
 ## 本项目强制追加字段（Task -> PR 映射）
 

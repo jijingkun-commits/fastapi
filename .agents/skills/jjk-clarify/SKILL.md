@@ -75,7 +75,8 @@ description: "Use when you need `jjk-clarify` in this repository. Source intent:
 2. 同轮允许最多 5 个结构化子项，用户可一次回复（例如 `A2/B1/C3/D2/E1`）。
 3. 默认模式最多 2 轮问题包；超过则建议切 `--deep`。
 4. 若还有关键不确定项，再加 1 个精准追问。
-5. 涉及架构/工作流/跨端契约时，`D. 量化目标` 与 `E. 失败与回滚口径` 为必问项，不得省略。
+5. 涉及架构/工作流/跨端契约时，`D. 量化目标` 与 `E. 发布与回退口径（默认全量开启）` 为必问项，不得省略。
+6. 涉及配置开关时，默认口径必须是“全量开启 + 一键关闭回退”；仅当用户明确要求灰度时，才允许给出灰度放量方案。
 
 模板见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`单主题问题包模板` 段）。  
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
@@ -149,7 +150,7 @@ description: "Use when you need `jjk-clarify` in this repository. Source intent:
 
 - 默认模式：使用“单主题问题包”做快速对齐。
 - Deep 模式：按领域逐个问题包深挖。
-- 若命中架构/状态契约/SSE 等高风险改动，问题包必须覆盖 `D. 量化目标` 与 `E. 回滚口径`。
+- 若命中架构/状态契约/SSE 等高风险改动，问题包必须覆盖 `D. 量化目标` 与 `E. 发布与回退口径（默认全量开启）`。
 
 ### 2) 复述确认
 
