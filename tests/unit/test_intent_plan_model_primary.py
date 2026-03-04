@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 import app.ai.workflow.multi_agent_graph as graph
 from app.ai.workflow.multi_agent_graph import (
-    _build_planner_intent_plan,
+    _build_planner_intent_plan as _build_intent_plan,
     _infer_initial_intent_plan,
 )
 
@@ -23,7 +23,7 @@ def test_infer_initial_intent_plan_avoids_data_goal_for_generic_query_word() -> 
     assert todo_goal["allowed_agents"] == ["todo_expert"]
 
 
-def test_build_planner_intent_plan_uses_model_primary_when_available(monkeypatch) -> None:
+def test_build_intent_plan_uses_model_primary_when_available(monkeypatch) -> None:
     """模型路径可用时，应优先使用 model_primary 结果。"""
 
     def _fake_model_plan(_state, _llm):
@@ -46,14 +46,14 @@ def test_build_planner_intent_plan_uses_model_primary_when_available(monkeypatch
     monkeypatch.setattr(graph, "_infer_model_intent_plan", _fake_model_plan)
 
     state = {"messages": [HumanMessage(content="先看天气再看待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode="model_primary")
+    plan = _build_intent_plan(state, llm=object(), mode="model_primary")
 
     assert plan["source"] == "model_primary"
     assert plan["goals"][0]["kind"] == "external.lookup"
     assert plan["goals"][0]["allowed_agents"] == []
 
 
-def test_build_planner_intent_plan_fallbacks_when_model_fails(monkeypatch) -> None:
+def test_build_intent_plan_fallbacks_when_model_fails(monkeypatch) -> None:
     """模型失败时应回退到 heuristic_fallback，并记录原因。"""
 
     def _raise_model_error(_state, _llm):
@@ -62,14 +62,14 @@ def test_build_planner_intent_plan_fallbacks_when_model_fails(monkeypatch) -> No
     monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_model_error)
 
     state = {"messages": [HumanMessage(content="请帮我看下待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode="model_primary")
+    plan = _build_intent_plan(state, llm=object(), mode="model_primary")
 
     assert plan["source"] == "heuristic_fallback"
     assert plan.get("fallback_meta", {}).get("reason", "").startswith("planner_model_error:")
     assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))
 
 
-def test_build_planner_intent_plan_supports_heuristic_only_mode(monkeypatch) -> None:
+def test_build_intent_plan_supports_heuristic_only_mode(monkeypatch) -> None:
     """显式指定 heuristic_only 时不调用模型路径。"""
 
     def _raise_if_called(*_args, **_kwargs):
@@ -78,7 +78,7 @@ def test_build_planner_intent_plan_supports_heuristic_only_mode(monkeypatch) -> 
     monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_if_called)
 
     state = {"messages": [HumanMessage(content="请帮我看下待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode="heuristic_only")
+    plan = _build_intent_plan(state, llm=object(), mode="heuristic_only")
 
     assert plan["source"] == "heuristic_only"
     assert any(goal.get("kind") == "todo.query" for goal in list(plan.get("goals") or []))
@@ -134,7 +134,7 @@ def test_json_object_primary_recovers_validation_error_weak_goals() -> None:
             return _FakeStructuredLLM()
 
     state = {"messages": [HumanMessage(content="先查待办 + 再看天气")]}
-    plan = graph._build_planner_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
+    plan = _build_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
 
     assert plan["source"] == "model_primary"
     assert [goal["kind"] for goal in plan["goals"]] == ["todo.query", "external.lookup"]
@@ -164,7 +164,7 @@ def test_json_object_primary_unrecoverable_validation_still_fallback() -> None:
             return _FakeStructuredLLM()
 
     state = {"messages": [HumanMessage(content="你好")]}
-    plan = graph._build_planner_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
+    plan = _build_intent_plan(state, llm=_FakeLLM(), mode="model_primary")
 
     assert plan["source"] == "heuristic_fallback"
     assert plan.get("fallback_meta", {}).get("reason_code") == "invalid_output"

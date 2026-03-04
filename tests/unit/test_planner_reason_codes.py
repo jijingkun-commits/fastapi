@@ -1,9 +1,9 @@
-"""planner fallback reason_code 标准化测试。"""
+"""intent fallback reason_code 标准化测试。"""
 
 from langchain_core.messages import HumanMessage
 
 import app.ai.workflow.multi_agent_graph as graph
-from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan
+from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan as _build_intent_plan
 
 
 def _base_state() -> dict:
@@ -30,7 +30,7 @@ def test_reason_code_mapping_from_rule_and_trigger() -> None:
     ) == "legacy"
 
 
-def test_reason_code_written_when_planner_model_failure(monkeypatch) -> None:
+def test_reason_code_written_when_intent_model_failure(monkeypatch) -> None:
     """模型调用失败时，fallback_meta 必须写入 reason_code=model_failure。"""
 
     def _raise_model_failure(_state, _llm):
@@ -39,7 +39,7 @@ def test_reason_code_written_when_planner_model_failure(monkeypatch) -> None:
     monkeypatch.delenv("ENABLE_INTENT_FALLBACK_GATE", raising=False)
     monkeypatch.setattr(graph, "_infer_model_intent_plan_by_strategy", _raise_model_failure)
 
-    plan = _build_planner_intent_plan(_base_state(), llm=object(), mode="model_primary")
+    plan = _build_intent_plan(_base_state(), llm=object(), mode="model_primary")
 
     fallback_meta = plan.get("fallback_meta", {})
     assert plan["source"] == "heuristic_fallback"
@@ -57,7 +57,7 @@ def test_reason_code_written_when_legacy_gate_disabled(monkeypatch) -> None:
     monkeypatch.setenv("ENABLE_INTENT_FALLBACK_GATE", "false")
     monkeypatch.setattr(graph, "_infer_model_intent_plan_by_strategy", _raise_unknown)
 
-    plan = _build_planner_intent_plan(_base_state(), llm=object(), mode="model_primary")
+    plan = _build_intent_plan(_base_state(), llm=object(), mode="model_primary")
 
     fallback_meta = plan.get("fallback_meta", {})
     assert plan["source"] == "heuristic_fallback"

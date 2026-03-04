@@ -94,24 +94,31 @@ export function isContentBlockArray(content: unknown): content is ContentBlock[]
     );
 }
 
-// 流式事件类型定义（与后端 app/ai/events.py 对应）
-export type StreamEventType =
-    | "token"           // AI 文本输出
-    | "thinking"        // 思考过程
-    | "tool_start"      // 工具调用开始
-    | "tool_end"        // 工具调用结束
-    | "status"          // 状态更新
-    | "result"          // 结构化结果（待办列表、图片等）
-    | "plan_ready"      // 问题合同准备完成
-    | "task_started"    // 执行任务开始
-    | "task_finished"   // 执行任务结束
-    | "coverage_check"  // 覆盖率检查
-    | "final_answer"    // 最终答复
-    | "confirmation"    // 确认请求
-    | "clarification"   // 澄清问题
-    | "interrupt"       // 中断等待
-    | "done"            // 完成
-    | "error";          // 错误
+// 流式事件类型定义（与后端 app/services/chat_service.py 转发口径一致）
+export const STREAM_EVENT_TYPES = [
+    "init",            // 流初始化
+    "token",           // AI 文本输出
+    "thinking",        // 思考过程
+    "tool_start",      // 工具调用开始
+    "tool_end",        // 工具调用结束
+    "status",          // 状态更新
+    "result",          // 结构化结果（待办列表、图片等）
+    "plan_ready",      // 问题合同准备完成（兼容期开关）
+    "task_started",    // 执行任务开始
+    "task_finished",   // 执行任务结束
+    "coverage_check",  // 覆盖率检查
+    "final_answer",    // 最终答复
+    "kb_images",       // 知识库图片映射
+    "confirmation",    // 确认请求
+    "clarification",   // 澄清问题
+    "interrupt",       // 中断等待
+    "handoff",         // 智能体切换
+    "stopped",         // 运行时停止
+    "done",            // 完成
+    "error",           // 错误
+] as const;
+
+export type StreamEventType = (typeof STREAM_EVENT_TYPES)[number];
 
 /**
  * 流式事件结构

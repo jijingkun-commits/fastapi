@@ -475,7 +475,7 @@ implementation_readiness:
   execution_contract_ready: true
 ```
 
-## 8. pr_ready_manifest（本轮更新：PR-04）
+## 8. pr_ready_manifest（本轮更新：PR-04 + PR-05）
 
 ```yaml
 pr_ready_manifest:
@@ -507,4 +507,27 @@ pr_ready_manifest:
     acceptance_cmds:
       - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
     rollback_point: ENABLE_PLAN_READY_COMPAT=true
+
+  - task_id: T-08
+    pr_id: PR-04
+    card_id: C04
+    changed_files:
+      - web/src/types/message.ts
+      - web/src/lib/backend.ts
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && pnpm -C web test -- --runInBand
+    rollback_point: 前端类型回退 plan_ready 声明
+
+  - task_id: T-09
+    pr_id: PR-05
+    card_id: C05
+    changed_files:
+      - tests/unit/test_planner_reason_codes.py
+      - tests/unit/test_intent_plan_model_primary.py
+      - tests/unit/test_multi_intent_queue_flow.py
+      - tests/integration/test_intent_shadow_metrics.py
+      - tests/api/test_chat_sse_intent_goal_status.py
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
+    rollback_point: 回退测试迁移提交
 ```

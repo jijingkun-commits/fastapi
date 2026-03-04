@@ -1,3 +1,4 @@
+import { STREAM_EVENT_TYPES } from "@/types/message";
 import type {
   ClarificationEventData,
   DoneEventData,
@@ -8,6 +9,7 @@ import type {
   SqlResultData,
   StatusEventData,
   StatusPhase,
+  StreamEventType,
   TokenEventData,
 } from "@/types/message";
 
@@ -189,6 +191,20 @@ export interface StreamCallbacks {
   onInterrupt?: (data: InterruptData) => void;
   /** 结构化结果（待办列表、图片等） */
   onResult?: (data: ResultEventData) => void;
+  /** 问题合同准备完成（兼容期开关） */
+  onPlanReady?: (data: unknown) => void;
+  /** 覆盖率检查 */
+  onCoverageCheck?: (data: unknown) => void;
+  /** 子任务开始 */
+  onTaskStarted?: (data: unknown) => void;
+  /** 子任务结束 */
+  onTaskFinished?: (data: unknown) => void;
+  /** 确认请求 */
+  onConfirmation?: (data: unknown) => void;
+  /** 智能体切换 */
+  onHandoff?: (data: unknown) => void;
+  /** 运行时停止 */
+  onStopped?: (data: Record<string, unknown>) => void;
   /** 状态更新 */
   onStatus?: (status: StatusEventData) => void;
   /** 澄清问题 */
@@ -228,8 +244,14 @@ export type DecisionType =
   | { type: "edit"; args: Record<string, unknown> };
 
 interface SSEEvent {
-  type: string;
+  type: StreamEventType;
   data: unknown;
+}
+
+const STREAM_EVENT_TYPE_SET: ReadonlySet<string> = new Set(STREAM_EVENT_TYPES);
+
+function isStreamEventType(eventType: string): eventType is StreamEventType {
+  return STREAM_EVENT_TYPE_SET.has(eventType);
 }
 
 function isObjectRecord(data: unknown): data is Record<string, unknown> {
@@ -351,6 +373,11 @@ function parseSSEEventsFromBuffer(buffer: string): {
       continue;
     }
 
+    if (!isStreamEventType(eventType)) {
+      console.warn(`Unknown SSE event type ignored: ${eventType}`);
+      continue;
+    }
+
     try {
       events.push({
         type: eventType,
@@ -378,6 +405,13 @@ function dispatchSSEEvent(
     onToolEnd,
     onInterrupt,
     onResult,
+    onPlanReady,
+    onCoverageCheck,
+    onTaskStarted,
+    onTaskFinished,
+    onConfirmation,
+    onHandoff,
+    onStopped,
     onStatus,
     onClarification,
     onKbImages,
@@ -444,6 +478,30 @@ function dispatchSSEEvent(
       }
       return;
     }
+    case "plan_ready": {
+      onPlanReady?.(event.data);
+      return;
+    }
+    case "coverage_check": {
+      onCoverageCheck?.(event.data);
+      return;
+    }
+    case "task_started": {
+      onTaskStarted?.(event.data);
+      return;
+    }
+    case "task_finished": {
+      onTaskFinished?.(event.data);
+      return;
+    }
+    case "confirmation": {
+      onConfirmation?.(event.data);
+      return;
+    }
+    case "handoff": {
+      onHandoff?.(event.data);
+      return;
+    }
     case "final_answer": {
       const finalAnswerData = normalizeFinalAnswerEventData(event.data);
       if (finalAnswerData) {
@@ -485,6 +543,12 @@ function dispatchSSEEvent(
           }
         }
         onKbImages?.(images);
+      }
+      return;
+    }
+    case "stopped": {
+      if (isObjectRecord(event.data)) {
+        onStopped?.(event.data);
       }
       return;
     }

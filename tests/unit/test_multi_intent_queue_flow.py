@@ -133,12 +133,10 @@ def test_evaluate_handoff_progress_enters_coverage_gate_when_coverage_missing() 
         "multi_intent_mode": True,
         "iteration_count": 0,
         "system_context": "当前时间: 2026-02-27 20:00:00 (Friday)",
-        "intent_plan": {
-            "goals": [
-                {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
-                {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
-            ]
-        },
+        "decomposed_goals": [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
+        ],
     }
 
     decision = _evaluate_handoff_progress(state)

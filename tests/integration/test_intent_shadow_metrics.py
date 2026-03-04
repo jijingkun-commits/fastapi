@@ -3,7 +3,7 @@
 from langchain_core.messages import HumanMessage
 
 import app.ai.workflow.multi_agent_graph as graph
-from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan
+from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan as _build_intent_plan
 from app.services.config_resolver import ConfigResolver
 from app.services.system_config_service import SystemConfigService
 
@@ -24,7 +24,7 @@ def test_intent_shadow_settings_supports_heuristic_only_rollback(monkeypatch) ->
     monkeypatch.setattr(graph, "_infer_model_intent_plan", _raise_if_called)
 
     state = {"messages": [HumanMessage(content="请看下今天的待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode=settings["intent_mode"])
+    plan = _build_intent_plan(state, llm=object(), mode=settings["intent_mode"])
     metrics = graph._build_intent_shadow_metrics(
         state=state,
         intent_plan=plan,
@@ -66,7 +66,7 @@ def test_intent_shadow_compare_outputs_diff_rate(monkeypatch) -> None:
 
     settings = ConfigResolver.get_intent_shadow_settings(default_mode="model_primary")
     state = {"messages": [HumanMessage(content="查看待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode=settings["intent_mode"])
+    plan = _build_intent_plan(state, llm=object(), mode=settings["intent_mode"])
     metrics = graph._build_intent_shadow_metrics(
         state=state,
         intent_plan=plan,
@@ -93,7 +93,7 @@ def test_intent_shadow_metrics_records_fallback_hit_rate(monkeypatch) -> None:
 
     settings = ConfigResolver.get_intent_shadow_settings(default_mode="model_primary")
     state = {"messages": [HumanMessage(content="帮我看下待办")]}
-    plan = _build_planner_intent_plan(state, llm=object(), mode=settings["intent_mode"])
+    plan = _build_intent_plan(state, llm=object(), mode=settings["intent_mode"])
     metrics = graph._build_intent_shadow_metrics(
         state=state,
         intent_plan=plan,

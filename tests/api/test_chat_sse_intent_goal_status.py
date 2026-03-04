@@ -97,7 +97,7 @@ def test_stream_enriches_goal_status_fields_for_plan_and_coverage_events() -> No
                         ]
                     }
                 },
-                "node": "planner",
+                "node": "supervisor",
             },
             {
                 "type": "coverage_check",
@@ -173,7 +173,7 @@ def test_stream_keeps_legacy_payload_when_goal_status_v2_disabled(monkeypatch) -
             {
                 "type": "plan_ready",
                 "data": {"plan": {"goals": [{"goal_id": "GOAL-01", "kind": "todo.query"}]}},
-                "node": "planner",
+                "node": "supervisor",
             },
             {
                 "type": "coverage_check",
@@ -222,3 +222,79 @@ def test_stream_keeps_legacy_payload_when_goal_status_v2_disabled(monkeypatch) -
 
     final_payload = next(payload for event, payload in events if event == "final_answer")
     assert final_payload["meta"] == {"coverage_pass": True, "goal_count": 1}
+
+
+def test_stream_suppresses_plan_ready_when_compat_disabled(monkeypatch) -> None:
+    """关闭 plan_ready 兼容开关后，应仅保留 coverage/final 事件链路。"""
+    monkeypatch.setenv("ENABLE_PLAN_READY_COMPAT", "false")
+    final_text = "兼容关闭后只保留最终链路。"
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                HumanMessage(content="查待办", id="human-no-plan-ready"),
+                AIMessage(content=final_text),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "plan_ready",
+                "data": {"plan": {"goals": [{"goal_id": "GOAL-01", "kind": "todo.query"}]}},
+                "node": "supervisor",
+            },
+            {
+                "type": "coverage_check",
+                "data": {
+                    "report": {
+                        "pass": True,
+                        "total_goals": 1,
+                        "answered_goals": 1,
+                        "missing_goals": [],
+                        "matched_goal_ids": ["GOAL-01"],
+                        "goal_results": {
+                            "GOAL-01": {
+                                "goal_id": "GOAL-01",
+                                "kind": "todo.query",
+                                "matched": True,
+                                "reason": "matched_deliverable",
+                            }
+                        },
+                    }
+                },
+                "node": "coverage_gate",
+            },
+            {
+                "type": "final_answer",
+                "data": {"content": final_text, "meta": {"coverage_pass": True, "goal_count": 1}},
+                "node": "final_composer",
+            },
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message",
+        lambda *args, **kwargs: SimpleNamespace(id=1),
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="查待办", thread_id="thread-plan-ready-off", user_id=1)
+        )
+
+    event_names = [event for event, _payload in events]
+    assert "plan_ready" not in event_names
+
+    coverage_payload = next(payload for event, payload in events if event == "coverage_check")
+    assert coverage_payload["goal_count_initial"] == 1
+    assert coverage_payload["goal_count_confirmed"] == 1
+    assert coverage_payload["missing_goal_count"] == 0
+
+    final_payload = next(payload for event, payload in events if event == "final_answer")
+    assert final_payload["meta"]["goal_count_initial"] == 1
+    assert final_payload["meta"]["goal_count_confirmed"] == 1
+    assert final_payload["meta"]["missing_goal_count"] == 0
