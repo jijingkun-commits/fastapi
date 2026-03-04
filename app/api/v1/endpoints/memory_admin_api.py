@@ -33,6 +33,8 @@ from app.services import document_memory_embedding_service, memory_admin_service
 router = APIRouter(prefix="/memory-admin", tags=["MemoryAdmin"])
 logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_MEMORY_INTENT_ADMIN_ENV = "MEMORY_INTENT_ADMIN_ENABLED"
+_LEGACY_ADMIN_API_ENV = "ENABLE_DOCUMENT_MEMORY_ADMIN_API"
 
 
 class MemorySearchDebugRequest(BaseModel):
@@ -55,6 +57,7 @@ def _is_enabled_env(env_name: str, fallback: bool) -> bool:
 
 
 def _is_document_memory_admin_enabled() -> bool:
+    document_enabled = ENABLE_DOCUMENT_MEMORY
     try:
         from app.services.config_resolver import ConfigResolver
 
@@ -62,9 +65,26 @@ def _is_document_memory_admin_enabled() -> bool:
             "feature.enable_document_memory",
             ENABLE_DOCUMENT_MEMORY,
         )
-        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY", bool(resolved))
+        document_enabled = _is_enabled_env("ENABLE_DOCUMENT_MEMORY", bool(resolved))
     except Exception:
-        return _is_enabled_env("ENABLE_DOCUMENT_MEMORY", ENABLE_DOCUMENT_MEMORY)
+        document_enabled = _is_enabled_env("ENABLE_DOCUMENT_MEMORY", ENABLE_DOCUMENT_MEMORY)
+
+    admin_enabled = True
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved_admin = ConfigResolver.get_bool("memory.intent_admin_enabled", True)
+        resolved_legacy = ConfigResolver.get_bool(
+            "feature.enable_document_memory_admin_api",
+            bool(resolved_admin),
+        )
+        admin_enabled = bool(resolved_admin and resolved_legacy)
+    except Exception:
+        admin_enabled = True
+
+    admin_enabled = _is_enabled_env(_MEMORY_INTENT_ADMIN_ENV, admin_enabled)
+    admin_enabled = _is_enabled_env(_LEGACY_ADMIN_API_ENV, admin_enabled)
+    return bool(document_enabled and admin_enabled)
 
 
 def _embedding_batch_size() -> int:
@@ -97,7 +117,7 @@ def _ensure_admin_api_enabled() -> None:
     if not _is_document_memory_admin_enabled():
         raise HTTPException(
             status_code=409,
-            detail="ENABLE_DOCUMENT_MEMORY 未开启",
+            detail="ENABLE_DOCUMENT_MEMORY 或 MEMORY_INTENT_ADMIN_ENABLED 未开启",
         )
 
 
@@ -120,6 +140,28 @@ def _run_embedding_rebuild_task(
         logger.info("文档记忆向量重建任务完成: %s", summary)
 
 
+def _audit_memory_admin_action(
+    db: Session,
+    *,
+    action: str,
+    target_user_id: int | None,
+    memory_id: int | None,
+    action_payload: dict[str, object],
+    result_status: str,
+    error_message: str | None = None,
+) -> None:
+    memory_admin_service.record_admin_audit(
+        db,
+        operator_user_id=None,
+        target_user_id=target_user_id,
+        memory_id=memory_id,
+        action=action,
+        action_payload=action_payload,
+        result_status=result_status,
+        error_message=error_message,
+    )
+
+
 @router.get(
     "/memories",
     response_model=MemoryListResponse,
@@ -127,6 +169,9 @@ def _run_embedding_rebuild_task(
 def list_memories(
     user_id: int | None = Query(default=None, ge=1),
     doc_kind: str | None = Query(default=None, max_length=32),
+    slot_key: str | None = Query(default=None, max_length=128),
+    category: str | None = Query(default=None, max_length=64),
+    level: str | None = Query(default=None, max_length=32),
     status: str = Query(default=document_memory_repo.ACTIVE_STATUS, max_length=16),
     source: str | None = Query(default=None, max_length=32),
     keyword: str | None = Query(default=None, max_length=200),
@@ -146,6 +191,9 @@ def list_memories(
         db,
         user_id=user_id,
         doc_kind=doc_kind,
+        slot_key=slot_key,
+        category=category,
+        level=level,
         status=status,
         source=source,
         keyword=keyword,
@@ -216,15 +264,43 @@ def search_memory_debug(
 
     _ensure_admin_api_enabled()
     max_results = request.max_results or request.limit or 10
-    return memory_admin_service.run_memory_search_debug(
-        db,
-        user_id=request.user_id,
-        query_text=request.query_text,
-        max_results=max_results,
-        min_score=request.min_score,
-        vector_weight=request.vector_weight,
-        text_weight=request.text_weight,
-    )
+    audit_payload: dict[str, object] = {
+        "user_id": request.user_id,
+        "query_text": request.query_text[:200],
+        "max_results": max_results,
+        "min_score": request.min_score,
+    }
+    try:
+        payload = memory_admin_service.run_memory_search_debug(
+            db,
+            user_id=request.user_id,
+            query_text=request.query_text,
+            max_results=max_results,
+            min_score=request.min_score,
+            vector_weight=request.vector_weight,
+            text_weight=request.text_weight,
+        )
+        audit_payload["total"] = int(payload.get("total") or 0)
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_SEARCH_DEBUG,
+            target_user_id=request.user_id,
+            memory_id=None,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_COMPLETED,
+        )
+        return payload
+    except Exception as exc:
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_SEARCH_DEBUG,
+            target_user_id=request.user_id,
+            memory_id=None,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_FAILED,
+            error_message=str(exc),
+        )
+        raise
 
 
 @router.post("/memories/{memory_id}/archive")
@@ -277,48 +353,102 @@ def rebuild_document_embeddings(
     _ensure_admin_api_enabled()
 
     target_limit = min(int(request.limit), _embedding_batch_size() * 20)
-    candidate_total = document_memory_repo.count_embedding_candidates(
-        db,
-        user_id=request.user_id,
-        doc_id=request.doc_id,
-        statuses=request.status_filter,
-    )
-    if candidate_total <= 0:
-        return DocumentEmbeddingRebuildResponse(status="idle", total=0)
+    audit_payload: dict[str, object] = {
+        "user_id": request.user_id,
+        "doc_id": request.doc_id,
+        "status_filter": list(request.status_filter),
+        "limit": target_limit,
+        "run_async": request.run_async,
+    }
+    try:
+        candidate_total = document_memory_repo.count_embedding_candidates(
+            db,
+            user_id=request.user_id,
+            doc_id=request.doc_id,
+            statuses=request.status_filter,
+        )
+        audit_payload["candidate_total"] = int(candidate_total)
+        if candidate_total <= 0:
+            _audit_memory_admin_action(
+                db,
+                action=memory_admin_service.AUDIT_ACTION_REBUILD_EMBEDDINGS,
+                target_user_id=request.user_id,
+                memory_id=request.doc_id,
+                action_payload=audit_payload,
+                result_status=memory_admin_service.AUDIT_RESULT_COMPLETED,
+            )
+            return DocumentEmbeddingRebuildResponse(status="idle", total=0)
 
-    if request.run_async:
-        background_tasks.add_task(
-            _run_embedding_rebuild_task,
+        if request.run_async:
+            target_async_limit = min(candidate_total, target_limit)
+            background_tasks.add_task(
+                _run_embedding_rebuild_task,
+                user_id=request.user_id,
+                doc_id=request.doc_id,
+                status_filter=request.status_filter,
+                limit=target_async_limit,
+            )
+            audit_payload["accepted_total"] = int(target_async_limit)
+            _audit_memory_admin_action(
+                db,
+                action=memory_admin_service.AUDIT_ACTION_REBUILD_EMBEDDINGS,
+                target_user_id=request.user_id,
+                memory_id=request.doc_id,
+                action_payload=audit_payload,
+                result_status=memory_admin_service.AUDIT_RESULT_ACCEPTED,
+            )
+            return DocumentEmbeddingRebuildResponse(
+                status="processing",
+                total=candidate_total,
+                processed=0,
+                ready=0,
+                failed=0,
+                elapsed_ms=0,
+            )
+
+        summary = document_memory_embedding_service.process_pending_chunks(
+            db,
             user_id=request.user_id,
             doc_id=request.doc_id,
             status_filter=request.status_filter,
             limit=min(candidate_total, target_limit),
+            max_retry=_embedding_max_retry(),
+        )
+        audit_payload.update(
+            {
+                "total": int(summary.get("total", 0) or 0),
+                "processed": int(summary.get("processed", 0) or 0),
+                "ready": int(summary.get("ready", 0) or 0),
+                "failed": int(summary.get("failed", 0) or 0),
+            }
+        )
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_REBUILD_EMBEDDINGS,
+            target_user_id=request.user_id,
+            memory_id=request.doc_id,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_COMPLETED,
         )
         return DocumentEmbeddingRebuildResponse(
-            status="processing",
-            total=candidate_total,
-            processed=0,
-            ready=0,
-            failed=0,
-            elapsed_ms=0,
+            status="completed",
+            total=summary.get("total", 0),
+            processed=summary.get("processed", 0),
+            ready=summary.get("ready", 0),
+            failed=summary.get("failed", 0),
+            elapsed_ms=summary.get("elapsed_ms", 0),
         )
-
-    summary = document_memory_embedding_service.process_pending_chunks(
-        db,
-        user_id=request.user_id,
-        doc_id=request.doc_id,
-        status_filter=request.status_filter,
-        limit=min(candidate_total, target_limit),
-        max_retry=_embedding_max_retry(),
-    )
-    return DocumentEmbeddingRebuildResponse(
-        status="completed",
-        total=summary.get("total", 0),
-        processed=summary.get("processed", 0),
-        ready=summary.get("ready", 0),
-        failed=summary.get("failed", 0),
-        elapsed_ms=summary.get("elapsed_ms", 0),
-    )
+    except Exception as exc:
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_REBUILD_EMBEDDINGS,
+            target_user_id=request.user_id,
+            memory_id=request.doc_id,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_FAILED,
+            error_message=str(exc),
+        )
+        raise
 
 
 @router.get(
@@ -385,43 +515,94 @@ def retry_failed_document_embeddings(
     """重试失败的文档向量。"""
 
     _ensure_admin_api_enabled()
-    reset = document_memory_embedding_service.retry_failed_chunks(
-        db,
-        user_id=request.user_id,
-        doc_id=request.doc_id,
-        limit=request.limit,
-    )
-    if reset <= 0:
-        return DocumentEmbeddingRebuildResponse(status="idle", reset=0, total=0)
+    audit_payload: dict[str, object] = {
+        "user_id": request.user_id,
+        "doc_id": request.doc_id,
+        "limit": request.limit,
+        "run_async": request.run_async,
+    }
+    try:
+        reset = document_memory_embedding_service.retry_failed_chunks(
+            db,
+            user_id=request.user_id,
+            doc_id=request.doc_id,
+            limit=request.limit,
+        )
+        audit_payload["reset"] = int(reset)
+        if reset <= 0:
+            _audit_memory_admin_action(
+                db,
+                action=memory_admin_service.AUDIT_ACTION_RETRY_FAILED_EMBEDDINGS,
+                target_user_id=request.user_id,
+                memory_id=request.doc_id,
+                action_payload=audit_payload,
+                result_status=memory_admin_service.AUDIT_RESULT_COMPLETED,
+            )
+            return DocumentEmbeddingRebuildResponse(status="idle", reset=0, total=0)
 
-    if request.run_async:
-        background_tasks.add_task(
-            _run_embedding_rebuild_task,
+        if request.run_async:
+            background_tasks.add_task(
+                _run_embedding_rebuild_task,
+                user_id=request.user_id,
+                doc_id=request.doc_id,
+                status_filter=[document_memory_repo.EMBEDDING_STATUS_PENDING],
+                limit=request.limit,
+            )
+            _audit_memory_admin_action(
+                db,
+                action=memory_admin_service.AUDIT_ACTION_RETRY_FAILED_EMBEDDINGS,
+                target_user_id=request.user_id,
+                memory_id=request.doc_id,
+                action_payload=audit_payload,
+                result_status=memory_admin_service.AUDIT_RESULT_ACCEPTED,
+            )
+            return DocumentEmbeddingRebuildResponse(
+                status="processing",
+                reset=reset,
+                total=reset,
+            )
+
+        summary = document_memory_embedding_service.process_pending_chunks(
+            db,
             user_id=request.user_id,
             doc_id=request.doc_id,
             status_filter=[document_memory_repo.EMBEDDING_STATUS_PENDING],
             limit=request.limit,
+            max_retry=_embedding_max_retry(),
+        )
+        audit_payload.update(
+            {
+                "total": int(summary.get("total", 0) or 0),
+                "processed": int(summary.get("processed", 0) or 0),
+                "ready": int(summary.get("ready", 0) or 0),
+                "failed": int(summary.get("failed", 0) or 0),
+            }
+        )
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_RETRY_FAILED_EMBEDDINGS,
+            target_user_id=request.user_id,
+            memory_id=request.doc_id,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_COMPLETED,
         )
         return DocumentEmbeddingRebuildResponse(
-            status="processing",
+            status="completed",
+            total=summary.get("total", 0),
+            processed=summary.get("processed", 0),
+            ready=summary.get("ready", 0),
+            failed=summary.get("failed", 0),
+            elapsed_ms=summary.get("elapsed_ms", 0),
             reset=reset,
-            total=reset,
         )
-
-    summary = document_memory_embedding_service.process_pending_chunks(
-        db,
-        user_id=request.user_id,
-        doc_id=request.doc_id,
-        status_filter=[document_memory_repo.EMBEDDING_STATUS_PENDING],
-        limit=request.limit,
-        max_retry=_embedding_max_retry(),
-    )
-    return DocumentEmbeddingRebuildResponse(
-        status="completed",
-        total=summary.get("total", 0),
-        processed=summary.get("processed", 0),
-        ready=summary.get("ready", 0),
-        failed=summary.get("failed", 0),
-        elapsed_ms=summary.get("elapsed_ms", 0),
-        reset=reset,
-    )
+    except Exception as exc:
+        _audit_memory_admin_action(
+            db,
+            action=memory_admin_service.AUDIT_ACTION_RETRY_FAILED_EMBEDDINGS,
+            target_user_id=request.user_id,
+            memory_id=request.doc_id,
+            action_payload=audit_payload,
+            result_status=memory_admin_service.AUDIT_RESULT_FAILED,
+            error_message=str(exc),
+        )
+        raise
