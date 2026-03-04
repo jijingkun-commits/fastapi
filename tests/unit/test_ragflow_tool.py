@@ -642,3 +642,102 @@ def test_knowledge_search_rewrite_should_fallback_to_main_when_rewrite_times_out
 
     assert "来源: 主路文档" in result
     assert calls == ["报销流程", "报销流程 发票规范"]
+
+
+def test_build_retrieval_log_should_include_rollout_fields() -> None:
+    """检索观测日志应包含灰度档位与回滚字段。"""
+
+    payload = ragflow_tool._build_retrieval_log(
+        phase="complete",
+        query="报销流程",
+        datasets=["kb-1"],
+        retrieval_routes=[{"route_id": "main"}, {"route_id": "rewrite_1"}],
+        routed_domain="process",
+        metadata_condition={"operator": "and", "conditions": []},
+        enable_query_rewrite=True,
+        enable_multi_route_rerank=True,
+        enable_domain_routing=True,
+        rollout_stage="g2",
+        rollout_traffic_percent=30,
+        rollback_target_stage="s4",
+        rollback_switch_enabled=True,
+        metrics={"selected_chunks": 2},
+    )
+
+    assert payload["phase"] == "complete"
+    assert payload["route_count"] == 2
+    assert payload["route_ids"] == ["main", "rewrite_1"]
+    assert payload["rollout"] == {
+        "stage": "g2",
+        "traffic_percent": 30,
+        "rollback_target_stage": "s4",
+        "rollback_switch_enabled": True,
+    }
+    assert payload["metrics"] == {"selected_chunks": 2}
+
+
+def test_knowledge_search_retrieval_log_should_track_gray_metrics(monkeypatch, caplog) -> None:
+    """knowledge_search 应输出可追踪灰度字段的 retrieval_log。"""
+
+    def _fake_retrieval(**kwargs) -> dict:
+        return {
+            "code": 0,
+            "data": {
+                "chunks": [
+                    {
+                        "document_id": "doc-a",
+                        "document_keyword": "制度文档",
+                        "content": "报销需先提交申请",
+                        "similarity": 0.91,
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(ragflow_tool, "_call_ragflow_retrieval", _fake_retrieval)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_API_KEY", "test-key")
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_DATASET_IDS", ["kb-default"])
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_SIMILARITY_THRESHOLD", 0.2)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_PAGE_SIZE", 4)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TOP_K", 8)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_VECTOR_WEIGHT", 0.6)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_TIMEOUT_SECONDS", 20)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_QUERY_REWRITE", False, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_MULTI_ROUTE_RERANK", False, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_DOMAIN_ROUTING", False, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_CANDIDATE_DEDUP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_DOC_CAP", True, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_MAX_CHUNKS_PER_DOC", 2, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_EVIDENCE_MAX_CHARS", 120, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ROLLOUT_STAGE", "g2", raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ROLLOUT_TRAFFIC_PERCENT", 30, raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ROLLBACK_TARGET_STAGE", "s4", raising=False)
+    monkeypatch.setattr(ragflow_tool.config, "RAGFLOW_ENABLE_ROLLBACK_SWITCH", True, raising=False)
+
+    with caplog.at_level("INFO", logger=ragflow_tool.__name__):
+        result = ragflow_tool.knowledge_search.func(query="报销流程", dataset_id=None)
+
+    assert "来源: 制度文档" in result
+
+    retrieval_logs: list[dict] = []
+    for record in caplog.records:
+        if record.msg != "RAGFlow 检索观测: %s":
+            continue
+
+        if isinstance(record.args, tuple) and record.args and isinstance(record.args[0], dict):
+            retrieval_logs.append(record.args[0])
+            continue
+
+        if isinstance(record.args, dict):
+            retrieval_logs.append(record.args)
+
+    assert len(retrieval_logs) == 2
+
+    start_log = next(log for log in retrieval_logs if log.get("phase") == "start")
+    complete_log = next(log for log in retrieval_logs if log.get("phase") == "complete")
+
+    assert start_log["rollout"]["stage"] == "g2"
+    assert start_log["rollout"]["traffic_percent"] == 30
+    assert complete_log["metrics"]["selected_chunks"] == 1
+    assert complete_log["metrics"]["selected_document_ids"] == ["doc-a"]
+    assert complete_log["metrics"]["kb_image_count"] == 0

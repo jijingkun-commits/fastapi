@@ -127,6 +127,15 @@ def _to_non_negative_float(value: Any, default: float) -> float:
     return parsed if parsed >= 0 else default
 
 
+def _to_percent_int(value: Any, default: int) -> int:
+    """将配置值转换为 0-100 的百分比整数。"""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(parsed, 100))
+
+
 def _get_config_value(key: str, default: Any) -> Any:
     """优先读取 config 属性，不存在时回退环境变量。"""
     if hasattr(config, key):
@@ -135,6 +144,67 @@ def _get_config_value(key: str, default: Any) -> Any:
     if env_value is None:
         return default
     return env_value
+
+
+def _collect_selected_document_ids(chunks: list[dict[str, Any]]) -> list[str]:
+    """提取去重后的文档 ID 列表，便于检索观测统计。"""
+    document_ids: list[str] = []
+    seen: set[str] = set()
+
+    for chunk in chunks:
+        raw_doc_id = chunk.get("document_id") or chunk.get("doc_id")
+        doc_id = str(raw_doc_id).strip() if raw_doc_id is not None else ""
+        if not doc_id:
+            doc_id = _resolve_chunk_document_key(chunk)
+        if not doc_id or doc_id in seen:
+            continue
+        seen.add(doc_id)
+        document_ids.append(doc_id)
+
+    return document_ids
+
+
+def _build_retrieval_log(
+    *,
+    phase: str,
+    query: str,
+    datasets: list[str],
+    retrieval_routes: list[dict[str, Any]],
+    routed_domain: str | None,
+    metadata_condition: dict[str, Any] | None,
+    enable_query_rewrite: bool,
+    enable_multi_route_rerank: bool,
+    enable_domain_routing: bool,
+    rollout_stage: str,
+    rollout_traffic_percent: int,
+    rollback_target_stage: str,
+    rollback_switch_enabled: bool,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """构建统一检索观测日志，便于灰度追踪与回滚排障。"""
+    route_ids = [str(route.get("route_id") or "unknown") for route in retrieval_routes]
+    payload: dict[str, Any] = {
+        "phase": phase,
+        "query_preview": query[:80],
+        "dataset_count": len(datasets),
+        "datasets": [str(dataset) for dataset in datasets],
+        "route_count": len(route_ids),
+        "route_ids": route_ids,
+        "rewrite_enabled": bool(enable_query_rewrite),
+        "rerank_enabled": bool(enable_multi_route_rerank),
+        "domain_routing_enabled": bool(enable_domain_routing),
+        "metadata_filter_enabled": bool(metadata_condition),
+        "routed_domain": routed_domain,
+        "rollout": {
+            "stage": rollout_stage,
+            "traffic_percent": rollout_traffic_percent,
+            "rollback_target_stage": rollback_target_stage,
+            "rollback_switch_enabled": rollback_switch_enabled,
+        },
+    }
+    if metrics:
+        payload["metrics"] = metrics
+    return payload
 
 
 def _chunk_similarity(chunk: dict) -> float:
@@ -758,6 +828,13 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         rewrite_route_weight = _to_non_negative_float(_get_config_value("RAGFLOW_REWRITE_ROUTE_WEIGHT", 0.7), 0.7)
         similarity_weight = _to_non_negative_float(_get_config_value("RAGFLOW_RERANK_SIMILARITY_WEIGHT", 0.6), 0.6)
         route_weight_weight = _to_non_negative_float(_get_config_value("RAGFLOW_RERANK_ROUTE_WEIGHT", 0.4), 0.4)
+        rollout_stage = str(_get_config_value("RAGFLOW_ROLLOUT_STAGE", "baseline") or "baseline").strip() or "baseline"
+        rollout_traffic_percent = _to_percent_int(_get_config_value("RAGFLOW_ROLLOUT_TRAFFIC_PERCENT", 100), 100)
+        rollback_target_stage = str(_get_config_value("RAGFLOW_ROLLBACK_TARGET_STAGE", "s4") or "s4").strip() or "s4"
+        rollback_switch_enabled = _to_bool_flag(
+            _get_config_value("RAGFLOW_ENABLE_ROLLBACK_SWITCH", True),
+            True,
+        )
 
         retrieval_routes = _build_retrieval_queries(
             query,
@@ -783,14 +860,26 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
                 routed_domain = str(conditions[0].get("value") or "").strip() or None
 
         logger.info(
-            "RAGFlow 检索: query=%s, routes=%d, rewrite=%s, rerank=%s, domain_routing=%s, routed_domain=%s, datasets=%s",
-            query[:50],
-            len(retrieval_routes),
-            enable_query_rewrite,
-            enable_multi_route_rerank,
-            bool(metadata_condition),
-            routed_domain,
-            target_datasets,
+            "RAGFlow 检索观测: %s",
+            _build_retrieval_log(
+                phase="start",
+                query=query,
+                datasets=target_datasets,
+                retrieval_routes=retrieval_routes,
+                routed_domain=routed_domain,
+                metadata_condition=metadata_condition,
+                enable_query_rewrite=enable_query_rewrite,
+                enable_multi_route_rerank=enable_multi_route_rerank,
+                enable_domain_routing=enable_domain_routing,
+                rollout_stage=rollout_stage,
+                rollout_traffic_percent=rollout_traffic_percent,
+                rollback_target_stage=rollback_target_stage,
+                rollback_switch_enabled=rollback_switch_enabled,
+                metrics={
+                    "requested_max_chunks": max_total_chunks,
+                    "per_doc_limit": max_chunks_per_doc,
+                },
+            ),
         )
 
         route_chunks: list[dict[str, Any]] = []
@@ -873,21 +962,36 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
 
         fallback_count = len(retrieval_routes) - success_count
         logger.info(
-            "RAGFlow 检索完成: routes=%d, fallback_routes=%d, raw=%d, merged=%d, selected=%d, rerank=%s, domain_routing=%s, routed_domain=%s, metadata_fallback_routes=%d, per_doc_limit=%d, doc_cap=%s, dedup=%s, 结果长度=%d, 图片映射=%d",
-            len(retrieval_routes),
-            fallback_count,
-            raw_chunks_count,
-            len(merged_chunks),
-            len(selected_chunks),
-            enable_multi_route_rerank,
-            bool(metadata_condition),
-            routed_domain,
-            metadata_fallback_count,
-            max_chunks_per_doc,
-            enable_doc_cap,
-            enable_candidate_dedup,
-            len(result_text),
-            len(kb_images),
+            "RAGFlow 检索观测: %s",
+            _build_retrieval_log(
+                phase="complete",
+                query=query,
+                datasets=target_datasets,
+                retrieval_routes=retrieval_routes,
+                routed_domain=routed_domain,
+                metadata_condition=metadata_condition,
+                enable_query_rewrite=enable_query_rewrite,
+                enable_multi_route_rerank=enable_multi_route_rerank,
+                enable_domain_routing=enable_domain_routing,
+                rollout_stage=rollout_stage,
+                rollout_traffic_percent=rollout_traffic_percent,
+                rollback_target_stage=rollback_target_stage,
+                rollback_switch_enabled=rollback_switch_enabled,
+                metrics={
+                    "fallback_routes": fallback_count,
+                    "raw_chunks": raw_chunks_count,
+                    "merged_chunks": len(merged_chunks),
+                    "selected_chunks": len(selected_chunks),
+                    "selected_document_ids": _collect_selected_document_ids(selected_chunks),
+                    "metadata_fallback_routes": metadata_fallback_count,
+                    "per_doc_limit": max_chunks_per_doc,
+                    "doc_cap_enabled": bool(enable_doc_cap),
+                    "dedup_enabled": bool(enable_candidate_dedup),
+                    "result_chars": len(result_text),
+                    "kb_image_count": len(kb_images),
+                    "route_errors": list(route_errors),
+                },
+            ),
         )
         if route_errors:
             logger.info("RAGFlow 扩展路回退详情: %s", route_errors)

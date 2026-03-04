@@ -2152,6 +2152,38 @@ def _compact_tool_message_for_inference(message: ToolMessage) -> tuple[ToolMessa
     return compacted_message, True, raw_chars, compacted_chars
 
 
+def _is_ragflow_tool_message(message: ToolMessage) -> bool:
+    """判断是否为知识库检索 ToolMessage。"""
+    tool_name = str(getattr(message, "name", "") or "").strip().lower()
+    return tool_name in {"knowledge_search", "knowledge-search"}
+
+
+def _resolve_rollout_stage(default: str = "baseline") -> str:
+    """读取 RAGFlow 当前灰度档位。"""
+    from app.ai import config as ai_config
+
+    raw_stage = getattr(ai_config, "RAGFLOW_ROLLOUT_STAGE", None)
+    if raw_stage is None:
+        raw_stage = os.getenv("RAGFLOW_ROLLOUT_STAGE", default)
+    stage = str(raw_stage or default).strip()
+    return stage or default
+
+
+def _resolve_rollout_traffic_percent(default: int = 100) -> int:
+    """读取 RAGFlow 当前灰度流量比例（0-100）。"""
+    from app.ai import config as ai_config
+
+    raw_value = getattr(ai_config, "RAGFLOW_ROLLOUT_TRAFFIC_PERCENT", None)
+    if raw_value is None:
+        raw_value = os.getenv("RAGFLOW_ROLLOUT_TRAFFIC_PERCENT", default)
+
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(parsed, 100))
+
+
 def _prepare_messages_for_supervisor_inference(
     messages: Sequence[BaseMessage],
     *,
@@ -2163,6 +2195,10 @@ def _prepare_messages_for_supervisor_inference(
     compacted_count = 0
     tool_message_chars_before = 0
     tool_message_chars_after = 0
+    retrieval_tool_message_count = 0
+    retrieval_truncated_tool_message_count = 0
+    retrieval_tool_message_chars_before = 0
+    retrieval_tool_message_chars_after = 0
 
     for message in messages or []:
         if isinstance(message, ToolMessage):
@@ -2172,6 +2208,12 @@ def _prepare_messages_for_supervisor_inference(
                 compacted_count += 1
             tool_message_chars_before += chars_before
             tool_message_chars_after += chars_after
+            if _is_ragflow_tool_message(message):
+                retrieval_tool_message_count += 1
+                retrieval_tool_message_chars_before += chars_before
+                retrieval_tool_message_chars_after += chars_after
+                if truncated:
+                    retrieval_truncated_tool_message_count += 1
             prepared.append(compacted)
             continue
         prepared.append(message)
@@ -2185,6 +2227,11 @@ def _prepare_messages_for_supervisor_inference(
                 "tool_message_chars_before": tool_message_chars_before,
                 "tool_message_chars_after": tool_message_chars_after,
                 "truncation_flag": truncation_flag,
+                "retrieval_tool_message_count": retrieval_tool_message_count,
+                "retrieval_truncated_tool_message_count": retrieval_truncated_tool_message_count,
+                "retrieval_tool_message_chars_before": retrieval_tool_message_chars_before,
+                "retrieval_tool_message_chars_after": retrieval_tool_message_chars_after,
+                "retrieval_truncation_flag": retrieval_truncated_tool_message_count > 0,
             }
         )
 
@@ -3112,6 +3159,19 @@ def _prepare_streaming_inference_state(
             ),
             "tool_message_chars_before": int(inference_diagnostics.get("tool_message_chars_before") or 0),
             "tool_message_chars_after": int(inference_diagnostics.get("tool_message_chars_after") or 0),
+            "retrieval_tool_message_count": int(inference_diagnostics.get("retrieval_tool_message_count") or 0),
+            "retrieval_truncated_tool_message_count": int(
+                inference_diagnostics.get("retrieval_truncated_tool_message_count") or 0
+            ),
+            "retrieval_tool_message_chars_before": int(
+                inference_diagnostics.get("retrieval_tool_message_chars_before") or 0
+            ),
+            "retrieval_tool_message_chars_after": int(
+                inference_diagnostics.get("retrieval_tool_message_chars_after") or 0
+            ),
+            "retrieval_truncation_flag": bool(inference_diagnostics.get("retrieval_truncation_flag", False)),
+            "ragflow_rollout_stage": _resolve_rollout_stage(),
+            "ragflow_rollout_traffic_percent": _resolve_rollout_traffic_percent(),
         }
     )
     pruned_state["delivery_meta"] = delivery_meta

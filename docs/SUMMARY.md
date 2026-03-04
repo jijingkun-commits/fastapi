@@ -147,6 +147,8 @@
 * [目录说明与命名规范](内部参考/迭代需求/README.md)
 * [串行卡片主干状态收敛需求](内部参考/迭代需求/串行卡片主干状态收敛_requirements.md)
 * [串行卡片主干状态收敛实施方案](内部参考/迭代需求/串行卡片主干状态收敛_implementation_plan.md)
+* [知识库检索P2分阶段治理需求](内部参考/迭代需求/知识库检索P2分阶段治理_requirements.md)
+* [知识库检索P2分阶段治理实施方案](内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md)
 * [多任务并行Worktree命名空间与异步收口需求](内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_requirements.md)
 * [多任务并行Worktree命名空间与异步收口实施方案](内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md)
 * [监督者移除Planner重构需求](内部参考/迭代需求/监督者移除Planner重构_requirements.md)

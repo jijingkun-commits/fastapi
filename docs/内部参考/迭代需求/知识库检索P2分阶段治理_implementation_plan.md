@@ -773,6 +773,14 @@ planning_contract:
 | C04 | T-05 | PR-03 | `app/ai/workflow/multi_agent_graph.py` 增加 ToolMessage 压缩诊断写回；`tests/unit/test_multi_agent_streaming_helpers.py` 增加 `truncation_flag` 回归 | `truncation_flag`、`tool_message_count`、`tool_message_chars_before`、`tool_message_chars_after` | `venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message`（实际执行：`/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message`） | PASS（5 passed） | 回退 SUPERVISOR_TOOL_MESSAGE 配置与压缩逻辑 |
 
 
+### 8.2 C07 / T-11,T-12 实施证据（2026-03-04）
+
+| card_id | task_id | pr_id | 代码改动 | 关键诊断字段 | 验证命令 | 结果 | 回滚锚点 |
+|---|---|---|---|---|---|---|---|
+| C07 | T-11 | PR-07 | `app/ai/tools/ragflow_tool.py` 新增 `_build_retrieval_log` 与灰度字段（`rollout.stage/traffic_percent/rollback_target_stage`）；`app/ai/workflow/multi_agent_graph.py` 在 `_prepare_messages_for_supervisor_inference` 与 `delivery_meta` 增加检索链路诊断字段 | `route_ids`、`selected_document_ids`、`retrieval_tool_message_count`、`retrieval_truncated_tool_message_count`、`ragflow_rollout_stage`、`ragflow_rollout_traffic_percent` | `venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log`（工作树无 `venv`，实际执行：`/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log`） | PASS（2 passed） | 回退日志字段扩展并关闭灰度策略开关 |
+| C07 | T-12 | PR-07 | `docs/API文档/外部服务集成.md` 补齐 RAG 参数章节与检索观测字段；`docs/开发文档/快速入门/生产部署手册.md` 增加 S5 灰度放量与回滚 Runbook；`docs/SUMMARY.md` 同步迭代索引入口 | `RAGFLOW_ROLLOUT_STAGE`、`RAGFLOW_ROLLOUT_TRAFFIC_PERCENT`、`RAGFLOW_ENABLE_ROLLBACK_SWITCH` | `python3 scripts/docs_guard.py --strict` | PASS（errors=0, warnings=0） | 回退文档索引变更 |
+
+
 ## 9. implementation_readiness（机读结论）
 
 ```yaml
@@ -788,4 +796,3 @@ implementation_readiness:
 1. 计划已达到工单级 HOW，可进入拆卡阶段。
 2. 因本轮为 `plan-only`，不自动进入实施链路。
 3. 需用户显式发出下一步指令（推荐：`$jjk-vkplan`）。
-
