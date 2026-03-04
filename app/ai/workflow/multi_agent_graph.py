@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple
 from pydantic import BaseModel, Field, ValidationError
 
-from langchain_core.messages import BaseMessage, ToolMessage, trim_messages
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
@@ -547,6 +547,140 @@ def _normalize_intent_plan_allowed_agents(intent_plan: Dict[str, Any]) -> Dict[s
         )
     normalized_plan["goals"] = normalized_goals
     return normalized_plan
+
+
+def _build_default_general_goal() -> Dict[str, Any]:
+    """构造默认兜底目标。"""
+    return {
+        "goal_id": "GOAL-01",
+        "order": 1,
+        "kind": "general.reply",
+        "title": "问题回复",
+        "must_answer": True,
+        "allowed_agents": [],
+    }
+
+
+def _normalize_active_goals(goals: Sequence[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """标准化活动目标列表，统一补齐字段与排序。"""
+    raw_goals: list[Dict[str, Any]] = []
+    for raw_goal in goals or []:
+        if not isinstance(raw_goal, dict):
+            continue
+        kind = _normalize_model_goal_kind(str(raw_goal.get("kind") or "general.reply"))
+        raw_goals.append(
+            {
+                "goal_id": str(raw_goal.get("goal_id") or "").strip(),
+                "order": _parse_non_negative_int(raw_goal.get("order"), default=len(raw_goals) + 1),
+                "kind": kind,
+                "title": str(raw_goal.get("title") or "").strip() or _default_goal_title(kind),
+                "must_answer": bool(raw_goal.get("must_answer", True)),
+                "allowed_agents": raw_goal.get("allowed_agents"),
+            }
+        )
+
+    if not raw_goals:
+        return [_build_default_general_goal()]
+
+    normalized_plan = _normalize_intent_plan_allowed_agents({"goals": raw_goals})
+    normalized_goals = sorted(
+        [goal for goal in list(normalized_plan.get("goals") or []) if isinstance(goal, dict)],
+        key=lambda item: _parse_non_negative_int(item.get("order"), default=10**9),
+    )
+    if not normalized_goals:
+        return [_build_default_general_goal()]
+
+    finalized: list[Dict[str, Any]] = []
+    for index, goal in enumerate(normalized_goals, start=1):
+        kind = _normalize_model_goal_kind(str(goal.get("kind") or "general.reply"))
+        finalized.append(
+            {
+                "goal_id": str(goal.get("goal_id") or f"GOAL-{index:02d}").strip() or f"GOAL-{index:02d}",
+                "order": index,
+                "kind": kind,
+                "title": str(goal.get("title") or "").strip() or _default_goal_title(kind),
+                "must_answer": bool(goal.get("must_answer", True)),
+                "allowed_agents": _normalize_goal_allowed_agents(goal.get("allowed_agents"), kind),
+            }
+        )
+    return finalized
+
+
+def _extract_decomposed_goals_from_messages(messages: Sequence[BaseMessage]) -> list[Dict[str, Any]]:
+    """从 Supervisor 本轮 ToolMessage 中提取 decompose_goals 产物。"""
+    for message in reversed(messages or []):
+        if not isinstance(message, ToolMessage):
+            continue
+
+        tool_name = str(getattr(message, "name", "") or "").strip()
+        content = str(getattr(message, "content", "") or "").strip()
+        if not content:
+            continue
+        if tool_name != "decompose_goals" and "decompose_goals" not in content:
+            continue
+        if not (content.startswith("{") and content.endswith("}")):
+            continue
+
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+        action = str(payload.get("action") or "").strip()
+        if tool_name != "decompose_goals" and action != "decompose_goals":
+            continue
+
+        raw_goals = payload.get("goals")
+        if not isinstance(raw_goals, list):
+            continue
+        return [goal for goal in raw_goals if isinstance(goal, dict)]
+
+    return []
+
+
+def _resolve_active_goals(
+    state: MultiAgentState,
+    *,
+    runtime_goals: Optional[Sequence[Dict[str, Any]]] = None,
+) -> list[Dict[str, Any]]:
+    """统一解析活动目标：decomposed_goals 优先，其次兼容 intent_plan。"""
+    runtime_list = [goal for goal in list(runtime_goals or []) if isinstance(goal, dict)]
+    if runtime_list:
+        return _normalize_active_goals(runtime_list)
+
+    decomposed = state.get("decomposed_goals")
+    if isinstance(decomposed, list) and decomposed:
+        return _normalize_active_goals([goal for goal in decomposed if isinstance(goal, dict)])
+
+    legacy_plan = state.get("intent_plan")
+    if isinstance(legacy_plan, dict):
+        legacy_goals = [goal for goal in list(legacy_plan.get("goals") or []) if isinstance(goal, dict)]
+        if legacy_goals:
+            return _normalize_active_goals(legacy_goals)
+
+    heuristic_plan = _infer_initial_intent_plan(state)
+    heuristic_goals = [goal for goal in list(heuristic_plan.get("goals") or []) if isinstance(goal, dict)]
+    if heuristic_goals:
+        return _normalize_active_goals(heuristic_goals)
+
+    return [_build_default_general_goal()]
+
+
+def _build_active_goal_plan(
+    state: MultiAgentState,
+    *,
+    runtime_goals: Optional[Sequence[Dict[str, Any]]] = None,
+    source: str = "runtime",
+) -> Dict[str, Any]:
+    """基于活动目标构造标准化问题合同载荷。"""
+    return {
+        "version": 1,
+        "source": source,
+        "user_query": _resolve_semantic_user_query(state),
+        "goals": _resolve_active_goals(state, runtime_goals=runtime_goals),
+    }
 
 
 def _build_model_intent_plan_prompt(user_text: str) -> str:
@@ -1260,9 +1394,16 @@ def _goal_kind_bucket(kind: str) -> str:
     return "general"
 
 
-def _count_must_answer_goals(intent_plan: Optional[Dict[str, Any]]) -> int:
-    """统计问题合同中 must_answer 目标数量。"""
-    goals = list((intent_plan or {}).get("goals") or [])
+def _count_must_answer_goals(
+    goal_source: Optional[Sequence[Dict[str, Any]] | Dict[str, Any]],
+) -> int:
+    """统计活动目标中 must_answer 数量。"""
+    if isinstance(goal_source, dict):
+        goals = [goal for goal in list(goal_source.get("goals") or []) if isinstance(goal, dict)]
+    elif isinstance(goal_source, (list, tuple)):
+        goals = [goal for goal in goal_source if isinstance(goal, dict)]
+    else:
+        goals = []
     return sum(1 for goal in goals if bool(goal.get("must_answer", True)))
 
 
@@ -1275,7 +1416,7 @@ def _should_enable_multi_intent_mode(
     """判定是否启用复合任务模式（优先使用问题合同，避免单 handoff 丢目标）。"""
     if handoff_batch_size > 1 or has_direct_lookup:
         return True
-    return _count_must_answer_goals(state.get("intent_plan")) >= 2
+    return _count_must_answer_goals(_resolve_active_goals(state)) >= 2
 
 
 def _build_multi_intent_recovery_system_context(
@@ -1371,9 +1512,13 @@ def _ensure_intent_plan_covers_runtime(
     state: MultiAgentState,
     base_plan: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """根据运行时产物补齐 intent_plan，避免遗漏必答项。"""
-    plan = dict(base_plan or state.get("intent_plan") or {})
-    goals = list(plan.get("goals") or [])
+    """根据运行时产物补齐活动目标，避免遗漏必答项。"""
+    base_goals: Sequence[Dict[str, Any]]
+    if isinstance(base_plan, dict):
+        base_goals = [goal for goal in list(base_plan.get("goals") or []) if isinstance(goal, dict)]
+    else:
+        base_goals = _resolve_active_goals(state)
+    goals = [dict(goal) for goal in _normalize_active_goals(base_goals)]
     seen_buckets = {_goal_kind_bucket(str(goal.get("kind") or "")) for goal in goals}
 
     turn_messages = _slice_messages_from_latest_human(state.get("messages", []))
@@ -1406,23 +1551,13 @@ def _ensure_intent_plan_covers_runtime(
             seen_buckets.add("data")
 
     if not goals:
-        goals = [
-            {
-                "goal_id": "GOAL-01",
-                "order": 1,
-                "kind": "general.reply",
-                "title": "问题回复",
-                "must_answer": True,
-                "allowed_agents": [],
-            }
-        ]
+        goals = [_build_default_general_goal()]
 
-    plan["goals"] = goals
-    if "version" not in plan:
-        plan["version"] = 1
-    if "source" not in plan:
-        plan["source"] = "runtime"
-    return _normalize_intent_plan_allowed_agents(plan)
+    return _build_active_goal_plan(
+        state,
+        runtime_goals=goals,
+        source=str((base_plan or {}).get("source") or "runtime"),
+    )
 
 
 def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
@@ -2256,10 +2391,17 @@ def _normalize_handoff_batch_for_supervisor(
     return normalized
 
 
-def _build_router_dispatch_goal_queue(intent_plan: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    """按 intent_plan.order 构建 Router 待委派目标队列。"""
+def _build_router_dispatch_goal_queue(
+    goals_or_plan: Optional[Sequence[Dict[str, Any]] | Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    """按活动目标顺序构建 Router 待委派目标队列。"""
+    if isinstance(goals_or_plan, dict):
+        source_goals = [goal for goal in list(goals_or_plan.get("goals") or []) if isinstance(goal, dict)]
+    else:
+        source_goals = [goal for goal in list(goals_or_plan or []) if isinstance(goal, dict)]
+
     goals = sorted(
-        [goal for goal in list((intent_plan or {}).get("goals") or []) if isinstance(goal, dict)],
+        source_goals,
         key=lambda item: int(item.get("order") or 0),
     )
     queue: list[Dict[str, Any]] = []
@@ -2315,7 +2457,8 @@ def _apply_router_contract_guard(
     if not _is_router_contract_guard_enabled():
         return normalized_handoffs, [], []
 
-    dispatch_queue = _build_router_dispatch_goal_queue(state.get("intent_plan"))
+    active_goals = _resolve_active_goals(state)
+    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
     if not dispatch_queue:
         return normalized_handoffs, [], []
 
@@ -2387,13 +2530,11 @@ def _build_router_blocked_system_context(
     if not missing_goals:
         return str(state.get("system_context") or "")
 
-    intent_plan = state.get("intent_plan")
-    if not isinstance(intent_plan, dict):
-        return str(state.get("system_context") or "")
+    active_plan = _build_active_goal_plan(state, source="router_guard")
 
     return _build_multi_intent_recovery_system_context(
         str(state.get("system_context") or ""),
-        intent_plan,
+        active_plan,
         missing_goals,
     )
 
@@ -2547,6 +2688,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                     "completed_handoffs": completed_handoffs,
                     "handoff_execution_trace": execution_trace,
                     "intent_plan": intent_plan,
+                    "decomposed_goals": list(intent_plan.get("goals") or []),
                     "deliverables": deliverables,
                     "coverage_report": coverage_preview,
                 }
@@ -2558,6 +2700,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
                 "intent_plan": intent_plan,
+                "decomposed_goals": list(intent_plan.get("goals") or []),
                 "deliverables": deliverables,
                 "coverage_report": coverage_preview,
             }
@@ -2585,6 +2728,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 "completed_handoffs": completed_handoffs,
                 "handoff_execution_trace": execution_trace,
                 "intent_plan": intent_plan,
+                "decomposed_goals": list(intent_plan.get("goals") or []),
                 "deliverables": deliverables,
                 "coverage_report": coverage_preview,
                 "delivery_meta": {
@@ -2603,6 +2747,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
             "completed_handoffs": completed_handoffs,
             "handoff_execution_trace": execution_trace,
             "intent_plan": intent_plan,
+            "decomposed_goals": list(intent_plan.get("goals") or []),
             "deliverables": deliverables,
             "coverage_report": coverage_preview,
             "delivery_meta": {
@@ -2656,7 +2801,16 @@ def _is_partial_gap_delivery_allowed(
     coverage_report: Dict[str, Any],
 ) -> bool:
     """判定是否允许“主问题完成 + 子任务缺口”直接收口输出。"""
-    if not isinstance(intent_plan, dict):
+    if isinstance(intent_plan, dict):
+        active_goals = _resolve_active_goals(
+            {
+                "decomposed_goals": list(intent_plan.get("goals") or []),
+                "intent_plan": intent_plan,
+            }
+        )
+    else:
+        active_goals = []
+    if not active_goals:
         return False
 
     missing_goals = list(coverage_report.get("missing_goals") or [])
@@ -2665,8 +2819,8 @@ def _is_partial_gap_delivery_allowed(
 
     goal_index: Dict[str, Dict[str, Any]] = {
         str(goal.get("goal_id") or ""): goal
-        for goal in list(intent_plan.get("goals") or [])
-        if isinstance(goal, dict) and str(goal.get("goal_id") or "")
+        for goal in active_goals
+        if str(goal.get("goal_id") or "")
     }
     if not goal_index:
         return False
@@ -3083,6 +3237,40 @@ def _dispatch_values_mode_chunk(
     delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
 
     if ctx.node_name == "supervisor":
+        extracted_goals = _extract_decomposed_goals_from_messages(delta_messages_for_scan)
+        if extracted_goals:
+            decompose_plan = _build_active_goal_plan(
+                ctx.state,
+                runtime_goals=extracted_goals,
+                source="decompose_goals",
+            )
+            final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
+            final_state["intent_plan"] = decompose_plan
+
+        runtime_goals = final_state.get("decomposed_goals")
+        if not isinstance(runtime_goals, list):
+            runtime_goals = ctx.state.get("decomposed_goals")
+
+        active_goals = _resolve_active_goals(
+            ctx.state,
+            runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
+        )
+        final_state["decomposed_goals"] = active_goals
+        if not isinstance(final_state.get("intent_plan"), dict):
+            final_state["intent_plan"] = _build_active_goal_plan(
+                ctx.state,
+                runtime_goals=active_goals,
+                source="runtime_active_goals",
+            )
+
+        guard_state = dict(ctx.state)
+        guard_state["decomposed_goals"] = active_goals
+        guard_state["intent_plan"] = _build_active_goal_plan(
+            guard_state,
+            runtime_goals=active_goals,
+            source="router_guard_runtime",
+        )
+
         handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
             normalized_batch = _normalize_handoff_batch_for_supervisor(
@@ -3092,15 +3280,15 @@ def _dispatch_values_mode_chunk(
             )
             direct_findings = _build_direct_lookup_findings(delta_messages_for_scan)
             has_direct_lookup = bool(direct_findings)
-            planned_goal_count = _count_must_answer_goals(ctx.state.get("intent_plan"))
+            planned_goal_count = _count_must_answer_goals(active_goals)
             enable_multi_intent_mode = _should_enable_multi_intent_mode(
                 handoff_batch_size=len(normalized_batch),
                 has_direct_lookup=has_direct_lookup,
-                state=ctx.state,
+                state=guard_state,
             )
             guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
                 normalized_batch,
-                state=ctx.state,
+                state=guard_state,
             )
 
             existing_meta = (
@@ -3133,7 +3321,7 @@ def _dispatch_values_mode_chunk(
                 pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in pending_goals]
                 if pending_titles:
                     final_state["system_context"] = _build_router_blocked_system_context(
-                        state=ctx.state,
+                        state=guard_state,
                         pending_goals=pending_goals,
                     )
                     final_state["delivery_meta"] = {
@@ -3637,6 +3825,30 @@ def _get_supervisor_tools():
     return _apply_tool_governance_policy(entries, agent_name="supervisor")
 
 
+def _build_decomposed_goals_for_query(user_query: str) -> list[Dict[str, Any]]:
+    """根据用户问题做最小规则拆解，生成活动目标。"""
+    state_seed: MultiAgentState = {
+        "messages": [HumanMessage(content=str(user_query or "").strip())],
+    }
+    heuristic_plan = _infer_initial_intent_plan(state_seed)
+    raw_goals = [goal for goal in list(heuristic_plan.get("goals") or []) if isinstance(goal, dict)]
+    return _normalize_active_goals(raw_goals)
+
+
+@tool("decompose_goals", description="将复合请求拆解为结构化目标列表，供 Supervisor 路由与门禁使用")
+def decompose_goals(
+    user_query: Annotated[str, "用户原始请求（可包含复合目标）"],
+) -> str:
+    """将用户请求拆解为 goals，返回标准 JSON。"""
+    goals = _build_decomposed_goals_for_query(str(user_query or ""))
+    payload = {
+        "action": "decompose_goals",
+        "source": "supervisor_rule_based",
+        "goals": goals,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _create_task_handoff_tool(agent_name: str, description: str):
     """创建带任务描述的 Handoff 工具。
     
@@ -3900,7 +4112,7 @@ async def create_multi_agent_graph(
     # 使用 create_react_agent，支持工具返回 Command 对象
     supervisor_agent = create_react_agent(
         llm,
-        handoff_tools + supervisor_simple_tools,
+        handoff_tools + [decompose_goals] + supervisor_simple_tools,
         prompt=SUPERVISOR_PROMPT,
         name="supervisor",
     )
@@ -4022,6 +4234,7 @@ async def create_multi_agent_graph(
 
             # === 交付导向状态 ===
             "intent_plan": None,
+            "decomposed_goals": [],
             "task_graph": None,
             "task_runs": [],
             "deliverables": [],
@@ -4097,6 +4310,7 @@ async def create_multi_agent_graph(
 
         return {
             "intent_plan": intent_plan,
+            "decomposed_goals": list(intent_plan.get("goals") or []),
             "intent_mode": planner_mode,
             "coverage_retry_count": 0,
             "coverage_gate_route": "final_composer",
@@ -4226,6 +4440,7 @@ async def create_multi_agent_graph(
         if route == "supervisor":
             return {
                 "intent_plan": intent_plan,
+                "decomposed_goals": list(intent_plan.get("goals") or []),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
                 "delivery_meta": delivery_meta,
@@ -4254,6 +4469,7 @@ async def create_multi_agent_graph(
             return {
                 "messages": [create_ai_message(blocked_answer)],
                 "intent_plan": intent_plan,
+                "decomposed_goals": list(intent_plan.get("goals") or []),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
                 "final_answer": blocked_answer,
@@ -4267,6 +4483,7 @@ async def create_multi_agent_graph(
 
         return {
             "intent_plan": intent_plan,
+            "decomposed_goals": list(intent_plan.get("goals") or []),
             "deliverables": deliverables,
             "coverage_report": coverage_report,
             "delivery_meta": delivery_meta,
@@ -4301,6 +4518,7 @@ async def create_multi_agent_graph(
             return {
                 "messages": [create_ai_message(blocked_answer)],
                 "intent_plan": intent_plan,
+                "decomposed_goals": list(intent_plan.get("goals") or []),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
                 "final_answer": blocked_answer,
@@ -4347,6 +4565,7 @@ async def create_multi_agent_graph(
         return {
             "messages": [create_ai_message(final_answer)],
             "intent_plan": intent_plan,
+            "decomposed_goals": list(intent_plan.get("goals") or []),
             "deliverables": deliverables,
             "coverage_report": coverage_report,
             "final_answer": final_answer,
