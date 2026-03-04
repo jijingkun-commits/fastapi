@@ -121,7 +121,7 @@ export function HumanMessage({
               // 移除工具调用提示行 "(请使用 analyze_image...)"
               const displayText = contentString.replace(/\(请使用 analyze_image 工具分析此图片:.*?\)\n*/g, '');
               return displayText.trim() ? (
-                <div className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 text-right">
+                <div className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 text-left">
                   <MarkdownText>{displayText}</MarkdownText>
                 </div>
               ) : null;
