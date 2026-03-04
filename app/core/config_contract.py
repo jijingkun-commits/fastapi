@@ -285,6 +285,13 @@ CONFIG_SPECS: Dict[str, ConfigSpec] = {
         default=False,
         env_key="MEMORY_INTENT_ASYNC_ENABLED",
     ),
+    "memory.slot_governance_enabled": ConfigSpec(
+        key="memory.slot_governance_enabled",
+        source="db-dynamic",
+        value_type="boolean",
+        default=True,
+        env_key="MEMORY_SLOT_GOVERNANCE_ENABLED",
+    ),
     "memory.document.admin.default_page_size": ConfigSpec(
         key="memory.document.admin.default_page_size",
         source="db-dynamic",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
@@ -65,6 +66,44 @@ def get_active_document(
     )
 
 
+def get_active_slot(
+    db: Session,
+    *,
+    user_id: int,
+    slot_key: str,
+    doc_kind: str | None = None,
+    source: str = "memory",
+    for_update: bool = False,
+) -> Optional[UserMemoryDocument]:
+    """按槽位查询活跃文档，支持行级锁。"""
+
+    normalized_slot_key = str(slot_key or "").strip()
+    if not normalized_slot_key:
+        return None
+
+    query = db.query(UserMemoryDocument).filter(
+        UserMemoryDocument.user_id == int(user_id),
+        UserMemoryDocument.status == ACTIVE_STATUS,
+        UserMemoryDocument.source == str(source),
+        or_(
+            UserMemoryDocument.slot_key == normalized_slot_key,
+            UserMemoryDocument.doc_key == normalized_slot_key,
+        ),
+    )
+    if doc_kind:
+        query = query.filter(UserMemoryDocument.doc_kind == str(doc_kind))
+    if for_update:
+        query = query.with_for_update()
+
+    return (
+        query.order_by(
+            UserMemoryDocument.update_time.desc(),
+            UserMemoryDocument.id.desc(),
+        )
+        .first()
+    )
+
+
 def upsert_document(
     db: Session,
     *,
@@ -78,6 +117,10 @@ def upsert_document(
     source: str = "memory",
     scope: str = "private",
     scope_ref: str | None = None,
+    slot_key: str | None = None,
+    operation: str | None = None,
+    last_event_time: datetime | None = None,
+    revision: int | None = None,
     source_thread_id: str | None = None,
     source_message_id: int | None = None,
 ) -> UserMemoryDocument:
@@ -96,6 +139,7 @@ def upsert_document(
             user_id=user_id,
             doc_kind=doc_kind,
             doc_key=doc_key,
+            slot_key=slot_key,
             title=title,
             content_md=content_md,
             summary_md=summary_md,
@@ -103,10 +147,12 @@ def upsert_document(
             scope=scope,
             scope_ref=scope_ref,
             status=ACTIVE_STATUS,
-            revision=1,
+            revision=max(1, int(revision or 1)),
+            operation=str(operation or "upsert"),
             content_hash=content_hash,
             source_thread_id=source_thread_id,
             source_message_id=source_message_id,
+            last_event_time=last_event_time,
             create_time=now,
             update_time=now,
         )
@@ -121,14 +167,67 @@ def upsert_document(
     document.source = source
     document.scope = scope
     document.scope_ref = scope_ref
+    if slot_key is not None:
+        document.slot_key = slot_key
+    if operation is not None:
+        document.operation = str(operation)
+    if last_event_time is not None:
+        document.last_event_time = last_event_time
     document.content_hash = content_hash
     document.source_thread_id = source_thread_id
     document.source_message_id = source_message_id
     document.update_time = now
-    if changed:
+    if revision is not None:
+        document.revision = max(1, int(revision))
+    elif changed:
         document.revision = int(document.revision or 1) + 1
     db.flush()
     return document
+
+
+def upsert_slot(
+    db: Session,
+    *,
+    user_id: int,
+    doc_kind: str,
+    slot_key: str,
+    title: str | None,
+    content_md: str,
+    summary_md: str | None = None,
+    source: str = "memory",
+    scope: str = "private",
+    scope_ref: str | None = None,
+    source_thread_id: str | None = None,
+    source_message_id: int | None = None,
+    operation: str = "upsert",
+    last_event_time: datetime | None = None,
+    revision: int | None = None,
+) -> UserMemoryDocument:
+    """按槽位 upsert 文档。"""
+
+    normalized_slot_key = str(slot_key or "").strip()
+    if not normalized_slot_key:
+        raise ValueError("slot_key_required")
+
+    return upsert_document(
+        db,
+        user_id=user_id,
+        doc_kind=doc_kind,
+        doc_key=normalized_slot_key,
+        slot_key=normalized_slot_key,
+        title=title,
+        content_md=content_md,
+        summary_md=summary_md,
+        source=source,
+        scope=scope,
+        scope_ref=scope_ref,
+        content_hash=hashlib.sha256(content_md.encode("utf-8")).hexdigest(),
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+        operation=operation,
+        last_event_time=last_event_time,
+        revision=revision,
+    )
 
 
 def replace_document_chunks(
@@ -983,6 +1082,52 @@ def archive_document(
         "changed": True,
         "status": ARCHIVED_STATUS,
         "update_time": now,
+    }
+
+
+def archive_slot(
+    db: Session,
+    *,
+    doc_id: int,
+    user_id: int | None = None,
+    event_time: datetime | None = None,
+    operation: str = "archive",
+) -> dict[str, Any]:
+    """按文档 ID 归档槽位记录。"""
+
+    result = archive_document(
+        db,
+        doc_id=doc_id,
+        user_id=user_id,
+    )
+    if not result.get("found"):
+        return result
+
+    document = db.query(UserMemoryDocument).filter(UserMemoryDocument.id == int(doc_id)).first()
+    if document is None:
+        return result
+
+    changed = bool(result.get("changed"))
+    changed_state = False
+    if document.operation != str(operation):
+        document.operation = str(operation)
+        changed_state = True
+    if event_time is not None and (
+        document.last_event_time is None or event_time >= document.last_event_time
+    ):
+        document.last_event_time = event_time
+        changed_state = True
+    if changed_state and not changed:
+        document.update_time = datetime.now()
+    if changed_state:
+        db.flush()
+
+    return {
+        **result,
+        "slot_key": str(document.slot_key or document.doc_key or ""),
+        "revision": int(document.revision or 1),
+        "last_event_time": document.last_event_time,
+        "operation": str(document.operation or operation),
     }
 
 

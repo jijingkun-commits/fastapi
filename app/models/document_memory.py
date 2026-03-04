@@ -26,6 +26,11 @@ class UserMemoryDocument(Base):
         comment="文档类型: long_term/daily/session",
     )
     doc_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="文档键")
+    slot_key: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        comment="槽位键（归一化后）",
+    )
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="文档标题")
     content_md: Mapped[str] = mapped_column(Text, nullable=False, comment="文档正文")
     summary_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="文档摘要")
@@ -52,6 +57,12 @@ class UserMemoryDocument(Base):
         default="active",
         comment="状态: active/archived",
     )
+    operation: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="upsert",
+        comment="最近一次写入操作: upsert/archive/drop",
+    )
     revision: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -69,6 +80,11 @@ class UserMemoryDocument(Base):
         nullable=True,
         comment="来源消息ID",
     )
+    last_event_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="最新事件时间（用于乱序保护）",
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
     update_time: Mapped[datetime] = mapped_column(
         DateTime,
@@ -80,6 +96,8 @@ class UserMemoryDocument(Base):
     __table_args__ = (
         Index("idx_user_memory_document_user_update", "user_id", "update_time"),
         Index("idx_user_memory_document_user_scope", "user_id", "source", "scope", "status"),
+        Index("idx_user_memory_document_user_slot", "user_id", "slot_key", "status"),
+        Index("idx_user_memory_document_slot_event", "user_id", "slot_key", "last_event_time"),
         Index(
             "idx_user_memory_document_active_unique",
             "user_id",

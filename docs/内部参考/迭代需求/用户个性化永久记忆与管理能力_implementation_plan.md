@@ -812,4 +812,28 @@ incremental_execution:
       - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q
     verification:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -> 8 passed"
+  - card_id: C04
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-04]
+    pr_id: PR-04
+    pr_branch: codex/user-memory-async-pr-04
+    pr_depends_on: [PR-03]
+    pr_subject: slot_key 治理与冲突覆盖
+    mechanism_summary:
+      - slot_key 归一化后再写库
+      - 同槽位新值覆盖旧值并归档审计
+    changed_files:
+      - app/services/memory_slot_governance_service.py
+      - app/repositories/document_memory_repo.py
+      - app/models/document_memory.py
+      - app/core/config_contract.py
+      - install/scripts/init_postgres.sql/030_user_memory_slot_governance.sql
+      - install/scripts/init_system_config.py
+      - tests/unit/test_memory_slot_governance_service.py
+    rollback_anchors:
+      - slot_governance_enabled=false
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_memory_slot_governance_service.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_slot_governance_service.py -q -> 5 passed"
 ```

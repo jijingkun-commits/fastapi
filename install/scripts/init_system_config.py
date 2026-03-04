@@ -37,6 +37,7 @@ CONFIGS = [
     ("release.prompt_registry_v2_rollout_percentage", "0", "number", "release", "命令注册中心 V2 灰度比例（0-100）"),
     ("feature.enable_document_memory", "false", "boolean", "feature", "用户个性化永久记忆总开关（纯文档）"),
     ("memory.intent_async_enabled", "false", "boolean", "memory", "聊天主链路记忆异步入队开关"),
+    ("memory.slot_governance_enabled", "true", "boolean", "memory", "槽位治理总开关（同槽位覆盖归档）"),
     ("memory.user_preference_bootstrap_template", "{\"assistant.persona\":\"小嘉\"}", "json", "memory", "新用户偏好文档记忆初始化模板（JSON）"),
     
     # MCP 配置
