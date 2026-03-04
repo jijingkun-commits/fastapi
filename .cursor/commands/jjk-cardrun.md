@@ -184,6 +184,7 @@ export WT_FLOW_SESSION_ID="session-2"
 2. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`
 3. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
 4. `docs/内部参考/任务拆解/_active_task.json`
+5. `docs/内部参考/任务拆解/<task_split_dir>/consumption_report.json`（若缺失，必须先执行覆盖校验脚本生成）
 
 硬约束：
 
@@ -192,6 +193,7 @@ export WT_FLOW_SESSION_ID="session-2"
 3. `task_to_pr_mapping` 必须完整，否则 `FAIL_FAST` 输出 `CARDRUN_PR_MAPPING_MISSING`。
 4. `card_id -> WS -> pr_id` 必须唯一可解析，否则 `FAIL_FAST` 输出 `CARDRUN_CARD_MAPPING_BROKEN`。
 5. `mode=once|loop` 时执行 dirty 策略校验：仅 `docs/`、`.cursor/commands/`、`.agents/skills/`、`.claude/commands/` 白名单前缀可放行，其他变更阻断并输出 `CARDRUN_WORKTREE_DIRTY`。
+6. 若 `/jjk-plan -> /jjk-vkplan` 覆盖校验失败（`consumption_report.ok=false`），必须 `FAIL_FAST` 输出 `CARDRUN_PLAN_COVERAGE_FAILED`。
 
 ## 执行流程（强制顺序）
 
@@ -230,6 +232,16 @@ python3 scripts/coder4_scope_guard.py \
 ```
 
 未通过时：`FAIL_FAST` 输出 `CARDRUN_SCOPE_GUARD_FAILED`。
+
+### 0.7) /jjk-plan 全量消费校验（mode=once|loop 必做）
+
+```bash
+python3 scripts/check_plan_vk_coverage.py \
+  --task-split-dir <task_split_dir> \
+  --output docs/内部参考/任务拆解/<task_split_dir>/consumption_report.json
+```
+
+未通过时：`FAIL_FAST` 输出 `CARDRUN_PLAN_COVERAGE_FAILED`。
 
 ### 1) 读取并校验串行契约
 
@@ -295,6 +307,7 @@ python3 scripts/coder4_vk_sync.py --sync-all --strict --output -
 4. 禁止跨 worktree 修改“非当前卡片”文件。
 5. 禁止在 heartbeat/调度周期执行破坏性 git 操作（`reset --hard`、`checkout --`、强推）。
 6. 禁止在未完成 `merge` 时将实现卡标记为 `done`。
+7. 禁止跳过 `scripts/check_plan_vk_coverage.py` 直接进入选卡执行。
 
 ## 推荐链路
 

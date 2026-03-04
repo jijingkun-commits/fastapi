@@ -34,13 +34,16 @@ gate_cards:
     merge_required: false
 
 execution_contract:
-  delivery_mode: staged
-  execution_unit: per_card
-  commit_policy: per_card
-  merge_policy: per_card_to_master
-  stop_boundary: per_card
-  stop_on_blocked: true
+  source: implementation_plan.execution_contract
+  inherit_without_override: true
+  required_fields: [delivery_mode, execution_unit, commit_policy, stop_boundary, stop_on_blocked]
 ```
+
+执行契约继承规则：
+
+1. `/jjk-vkplan` 必须原样继承 `implementation_plan.execution_contract`，禁止默认补齐。
+2. 若缺失或字段不一致，必须输出 `VKPLAN_EXECUTION_CONTRACT_MISMATCH` 并阻断 `/jjk-vktodo` 与 `/jjk-cardrun`。
+3. 并行拆解阶段只允许“展开为卡片维度执行数据”，不允许改写执行语义。
 
 ## 本项目强制追加字段（卡片 PR 归属）
 
@@ -64,6 +67,11 @@ vk_cards:
 mapping_checks:
   pr_mapping_check: PASS
   pr_mapping_errors: []
+  plan_consumption_check: PASS
+  missing_feature_ids: []
+  missing_task_ids: []
+  execution_contract_mismatch: []
+  acceptance_mapping_missing: []
 ```
 
 校验规则：
@@ -71,3 +79,6 @@ mapping_checks:
 1. `cards[*].pr_id` 必须可回查 `implementation_plan.task_to_pr_mapping`。
 2. 禁止“卡片存在但无 PR 归属”。
 3. 若出现映射冲突或缺失，必须输出 `VKPLAN_PR_MAPPING_BROKEN` 并阻断 `/jjk-vktodo`。
+4. 若 `missing_feature_ids` 或 `missing_task_ids` 非空，必须输出 `VKPLAN_CONSUMPTION_GAP` 并阻断下游。
+5. 若 `execution_contract_mismatch` 非空，必须输出 `VKPLAN_EXECUTION_CONTRACT_MISMATCH` 并阻断下游。
+6. 若 `acceptance_mapping_missing` 非空，必须输出 `VKPLAN_ACCEPTANCE_MAPPING_BROKEN` 并阻断下游。

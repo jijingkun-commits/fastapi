@@ -65,6 +65,8 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
    - 否则尝试读取 `docs/内部参考/任务拆解/_active_task.json`（活跃索引）；
    - 仍缺失则 `FAIL_FAST` 输出 `VKPLAN_MISSING_PROJECT_ID`。
 5. `implementation_plan` 必须含 `task_to_pr_mapping`；缺失时 `FAIL_FAST` 输出 `VKPLAN_PR_MAPPING_MISSING`。
+6. `implementation_plan` 必须含 `execution_contract`；缺失时 `FAIL_FAST` 输出 `VKPLAN_EXECUTION_CONTRACT_MISSING`。
+7. `implementation_plan` 必须含 `implementation_tasks`（含 `task_id/feature_id/pr_id/acceptance_cmds`）；缺失时 `FAIL_FAST` 输出 `VKPLAN_TASKS_MISSING`。
 
 ## 执行流程（强制顺序）
 
@@ -110,7 +112,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 7. `cards[].acceptance_checks`
 8. `gate_contract`（如存在）
 9. `task_to_pr_mapping`
-10. `execution_contract`（如存在）
+10. `execution_contract`（必填，来自 `implementation_plan` 顶层，禁止默认补齐）
 
 硬约束：
 
@@ -118,11 +120,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 2. 禁止弱化硬依赖 `depends_on`。
 3. `execution_mode=serial` 时必须保持“单活卡推进”语义。
 4. 每个实现卡必须能映射到唯一 `pr_id`，禁止“卡片存在但无 PR 归属”。
-5. 若 `execution_contract` 缺失，默认补齐：
-   - `delivery_mode=staged`
-   - `execution_unit=per_pr`
-   - `commit_policy=per_pr`
-   并输出标记 `VKPLAN_EXECUTION_CONTRACT_DEFAULTED`。
+5. `execution_contract` 缺失时必须 `FAIL_FAST`：`VKPLAN_EXECUTION_CONTRACT_MISSING`；禁止在 `$jjk-vkplan` 阶段默认补齐。
 6. `delivery_mode=staged` 时，阶段边界停顿属于预期完成态，不得按“异常中断”处理。
 
 ### 2) 产物生成（强制）
@@ -143,7 +141,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
    - `pr_branch`
    - `pr_depends_on`
    - `pr_subject`
-5. `parallel_plan.md` 与 `vk_cards.json` 必须显式写入 `execution_contract`（继承或默认补齐后的最终值）。
+5. `parallel_plan.md` 与 `vk_cards.json` 必须显式写入 `execution_contract`，并与 `implementation_plan.execution_contract` 完全一致。
 6. 当 `delivery_mode=staged` 时，`parallel_plan.md` 必须写明 `stage_boundary_is_expected=true`。
 
 ### 3) Gate 卡片化与映射闭环（强制）
@@ -159,6 +157,28 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
    - reverse：每个 `feature_id` 必须映射到实现卡
    - orphan：无未承载 `feature_id`
    - duplicate：无异常重复映射
+
+### 3.5) 全量消费覆盖校验（强制）
+
+必须执行：
+
+`python3 scripts/check_plan_vk_coverage.py --task-split-dir <YYYY-MM-DD_主题> --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/consumption_report.json`
+
+通过标准：
+
+1. `ok=true`
+2. `missing_feature_ids=[]`
+3. `missing_task_ids=[]`
+4. `execution_contract_mismatch=[]`
+5. `acceptance_mapping_missing=[]`
+
+消费失败标记：
+
+1. `VKPLAN_CONSUMPTION_GAP`
+2. `VKPLAN_EXECUTION_CONTRACT_MISMATCH`
+3. `VKPLAN_ACCEPTANCE_MAPPING_BROKEN`
+
+未通过时禁止执行“真理源写入”与下游衔接。
 
 失败标记：
 
@@ -188,7 +208,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 ### 5) 下游衔接（强制）
 
 1. 推荐链路：`$jjk-plan -> $jjk-vkplan -> $jjk-vktodo -> $jjk-cardrun -> $jjk-imp-ws`
-2. 未通过本命令硬校验时，禁止进入 `$jjk-vktodo`。
+2. 未通过本命令硬校验时，禁止进入 `$jjk-vktodo` 与 `$jjk-cardrun`。
 3. 若本轮停在阶段边界，必须输出 `VKPLAN_STAGE_BOUNDARY_EXPECTED` 并附当前 `pr_id/card_id`。
 
 ---
@@ -200,6 +220,8 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 3. 禁止缺字段卡片“先落卡后补齐”。
 4. 禁止把 Gate 仅保留为文档描述而不实体化。
 5. 禁止在 `task_to_pr_mapping` 缺失时继续生成可执行卡片。
+6. 禁止在 `execution_contract` 缺失时通过默认值兜底继续执行。
+7. 禁止跳过 `scripts/check_plan_vk_coverage.py` 并宣称“已完整消费 $jjk-plan 产物”。
 
 ---
 
