@@ -29,7 +29,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 
 `/jjk-plan` 与插件是互补关系，不是替代关系：
 
-1. `brainstorming`：负责澄清、方案比较、设计审批与 design 文档产出。
+1. `brainstorming`：负责澄清、方案收敛、设计审批与 design 文档产出。
 2. `writing-plans`：负责把设计拆成 2-5 分钟粒度的执行步骤。
 3. `team`（OMX）：负责并行运行时编排（worker、状态、证据）。
 4. `/jjk-plan`：负责项目内“需求/技术方案/机读契约”主产物与下游衔接。
@@ -39,6 +39,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 1. 禁止在 `/jjk-plan` 里复制 `brainstorming` / `writing-plans` 的完整正文。
 2. 插件可用时优先调用；插件不可用时必须显式 fallback，不得静默降级。
 3. `/jjk-plan` 只维护“命令契约与产物桥接”，不重写插件方法论。
+4. `design.md`、`*_requirements.md`、`*_implementation_plan.md` 主文档只保留最终方案，禁止方案 A/B/C（或 1/2/3）对比内容。
 
 ---
 
@@ -65,6 +66,7 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
 2. design 中必须存在审批记录（至少包含：`design_approved: true` 与审批时间/轮次说明）。
 3. 若未找到审批记录，`FAIL_FAST` 并输出标记 `DESIGN_APPROVAL_REQUIRED`，回退到 `/jjk-clarify`。
 4. 若上游来自 `BRAINSTORM_UNAVAILABLE_FALLBACK`，需在本轮明确人工确认后再继续，并标记 `DESIGN_APPROVAL_FALLBACK_ACK`。
+5. design 与后续 requirements/implementation_plan 仅允许保留最终方案；若需说明取舍，只写“决策权衡”，不得写 A/B/C 对比。
 
 ### 0.2) 执行意图门禁（新增，强制）
 
@@ -132,7 +134,8 @@ description: 正式规划：默认产出专题前缀需求与技术方案，可�
    - `rollback_point`（失败回退点）
    - `pr_id`（归属 PR 编号）
 3. 若仅有“架构思路/阶段标题”而无上述字段，必须标记 `HOW_NOT_ACTIONABLE`，并继续细化，不得宣称“可直接实施”。
-4. 文档末尾必须给出机读结论块：
+4. WHAT/HOW 主文档禁止方案 A/B/C（或 1/2/3）并列对比；若需记录放弃路径，仅写“决策权衡”。
+5. 文档末尾必须给出机读结论块：
    - `implementation_ready: true|false`
    - `blocked_by: []`
    - `next_step: /jjk-imp | /jjk-vkplan | /jjk-plan`

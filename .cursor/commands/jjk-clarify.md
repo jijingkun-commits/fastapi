@@ -13,6 +13,7 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 3. 设计未获用户审批前，禁止进入实现阶段。
 4. 标准模式产物统一写入：`docs/plans/YYYY-MM-DD-<topic>-design.md`（轻量模式可不落盘）。
 5. 禁止在本文件复制完整 brainstorming 正文，避免双份维护漂移。
+6. `design.md`、`*_requirements.md`、`*_implementation_plan.md` 仅保留最终方案，禁止输出方案 A/B/C（或 1/2/3）对比内容。
 
 ## 执行意图门禁（新增，强制）
 
@@ -56,7 +57,7 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 
 | 场景 | 推荐命令 |
 |------|----------|
-| 需求模糊，先做高效澄清与方案对比 | `/jjk-clarify` ✅ |
+| 需求模糊，先做高效澄清与方案收敛 | `/jjk-clarify` ✅ |
 | 需要更细粒度领域深挖 | `/jjk-clarify --deep` ✅ |
 | 任务很大，需要并行澄清 | `/jjk-clarify`（自动启用 team） ✅ |
 | 需要进入正式需求与技术方案产出 | `/jjk-plan` |
@@ -89,7 +90,7 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 轻量模式仍需输出：
 
 1. 目标、范围、成功标准；
-2. 至少 2 个方案 + 推荐；
+2. 最终方案 + 决策权衡（仅说明放弃原因，不做并列评分）；
 3. 若澄清中发现边界升级，立即切换为标准模式并落盘 design 文档。
 
 ---
@@ -154,9 +155,9 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 3. 边界条件
 4. 成功标准
 
-### 3) 方案对比（强制）
+### 3) 方案收敛（强制）
 
-必须给出 2-3 个方案，说明优缺点与成本，并明确推荐方案。
+必须只输出最终方案；若需要说明取舍，仅允许在“决策权衡”中简述放弃路径与原因，禁止 A/B/C 并列对比与推荐度打分。
 
 ### 4) 设计审批（强制）
 
@@ -179,7 +180,7 @@ description: 澄清入口（结合 brainstorming）：提高提问效率，产�
 建议结构见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`design 文档结构模板` 段）。  
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
 
-轻量模式可不落盘，但需在回复内给出简版结论与推荐方案。
+轻量模式可不落盘，但需在回复内给出简版结论与最终方案。
 
 ### 6) 执行备注（结构化可观测）
 
@@ -211,7 +212,7 @@ execution_notes:
 
 1. 禁止从 `/jjk-clarify` 直接跳到 `/jjk-imp` 或 `/jjk-feature`。
 2. 禁止未审批设计就进入实现。
-3. 禁止跳过“2-3 方案 + 推荐”。
+3. 禁止在 design/requirements/implementation_plan 主文档中输出方案 A/B/C（或 1/2/3）对比。
 
 ---
 

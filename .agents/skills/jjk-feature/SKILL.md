@@ -51,7 +51,7 @@ description: "Use when you need `jjk-feature` in this repository. Source intent:
 | 场景 | 推荐命令 |
 |---|---|
 | 从需求到交付的一站式执行 | `$jjk-feature` ✅ |
-| 只做澄清与方案对比 | `$jjk-clarify` |
+| 只做澄清与方案收敛 | `$jjk-clarify` |
 | 只做规划（WHAT+工单级 HOW） | `$jjk-plan` |
 | 已有计划，直接实现 | `$jjk-imp` |
 
