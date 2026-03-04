@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from app.ai.prompts.agent_prompts import MEMORY_INTENT_DECISION_PROMPT
+from app.services.memory_sensitive_guard_service import MemorySensitiveGuardService
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ _NONE_DEFAULTS: dict[str, Any] = {
     "reason": "",
     "source_span": "",
     "reverse_intent": False,
+    "sensitive_hit": False,
 }
 _CORE_FIELDS = (
     "level",
@@ -66,10 +68,18 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
     return bool(default)
 
 
-def _build_none_decision(audit_reason: str, *, reason: str = "") -> dict[str, Any]:
+def _build_none_decision(
+    audit_reason: str,
+    *,
+    reason: str = "",
+    reverse_intent: bool = False,
+    sensitive_hit: bool = False,
+) -> dict[str, Any]:
     decision = dict(_NONE_DEFAULTS)
     decision["reason"] = str(reason or "")
     decision["audit_reason"] = str(audit_reason)
+    decision["reverse_intent"] = _safe_bool(reverse_intent, default=False)
+    decision["sensitive_hit"] = bool(sensitive_hit)
     return decision
 
 
@@ -250,19 +260,69 @@ def decide(
     return normalized
 
 
-def apply_reverse_intent(decision: dict[str, Any]) -> dict[str, Any]:
+def apply_reverse_intent(
+    decision: dict[str, Any],
+    *,
+    reverse_intent_enabled: bool = True,
+) -> dict[str, Any]:
     """反向指令基础处理：仅在可定位槽位时转为 archive。"""
 
     result = dict(decision or {})
     if str(result.get("level") or "none") == "none":
         return result
-    if not _safe_bool(result.get("reverse_intent"), default=False):
+    reverse_intent = _safe_bool(result.get("reverse_intent"), default=False)
+    if not reverse_intent:
         return result
 
+    resolved_reverse_intent_enabled = _safe_bool(
+        result.get("reverse_intent_enabled"),
+        default=reverse_intent_enabled,
+    )
+    if not resolved_reverse_intent_enabled:
+        return _build_none_decision(
+            "reverse_intent_disabled",
+            reverse_intent=True,
+        )
+
     if not str(result.get("slot_key") or "").strip():
-        return _build_none_decision("reverse_intent_slot_missing")
+        return _build_none_decision(
+            "reverse_intent_slot_missing",
+            reverse_intent=True,
+        )
 
     result["operation"] = "archive"
     result["audit_reason"] = str(result.get("audit_reason") or "reverse_intent_archive")
+    result["sensitive_hit"] = _safe_bool(result.get("sensitive_hit"), default=False)
     return result
 
+
+def apply_sensitive_guard(
+    decision: dict[str, Any],
+    *,
+    user_text: str,
+    guard_service: MemorySensitiveGuardService | None = None,
+) -> dict[str, Any]:
+    """高敏信息命中时降级为 none，防止沉淀入库。"""
+
+    result = dict(decision or {})
+    if str(result.get("level") or "none") == "none":
+        return result
+
+    sensitive_guard = guard_service or MemorySensitiveGuardService()
+    detected = sensitive_guard.detect(
+        user_text=str(user_text or ""),
+        canonical_text=str(result.get("canonical_text") or ""),
+        source_span=str(result.get("source_span") or ""),
+    )
+    if not _safe_bool(detected.get("sensitive_hit"), default=False):
+        result["sensitive_hit"] = False
+        return result
+
+    blocked = _build_none_decision(
+        "sensitive_info_blocked",
+        reason=str(detected.get("reason") or "sensitive_detected"),
+        reverse_intent=_safe_bool(result.get("reverse_intent"), default=False),
+        sensitive_hit=True,
+    )
+    blocked["slot_key"] = str(result.get("slot_key") or "")
+    return blocked

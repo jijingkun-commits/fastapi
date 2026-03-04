@@ -836,4 +836,24 @@ incremental_execution:
       - venv/bin/python -m pytest tests/unit/test_memory_slot_governance_service.py -q
     verification:
       - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_slot_governance_service.py -q -> 5 passed"
+  - card_id: C05
+    task_key: PP-20260304-USER-MEMORY-LLM-ASYNC
+    feature_ids: [P1-05]
+    pr_id: PR-05
+    pr_branch: codex/user-memory-async-pr-05
+    pr_depends_on: [PR-03]
+    pr_subject: 反向指令与敏感信息拦截
+    mechanism_summary:
+      - reverse_intent 可定位 slot_key 时才执行 archive
+      - 命中证件号/银行卡/密码/验证码等高敏信息直接拒绝沉淀
+    changed_files:
+      - app/services/memory_intent_llm_service.py
+      - app/services/memory_sensitive_guard_service.py
+      - tests/unit/test_memory_sensitive_guard_service.py
+    rollback_anchors:
+      - reverse_intent_enabled=false
+    acceptance_checks:
+      - venv/bin/python -m pytest tests/unit/test_memory_sensitive_guard_service.py -q
+    verification:
+      - "/Users/jijingkun/bojxAI/fastapi/venv/bin/python -m pytest tests/unit/test_memory_sensitive_guard_service.py -q -> 7 passed"
 ```
