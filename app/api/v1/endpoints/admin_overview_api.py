@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterable, Mapping, Optional, Union
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import OpsMetricSnapshotMinute
 from app.schemas.admin_overview import (
-    AdminOverviewStreamDoneData,
     AdminOverviewStreamInterruptData,
     AdminOverviewStreamResultData,
     AdminOverviewSummaryResponse,
@@ -38,6 +37,7 @@ WINDOW_MINUTES: dict[AdminOverviewTrendWindow, int] = {
     "24h": 24 * 60,
 }
 STREAM_RETRY_AFTER_SEC = 10
+STREAM_PUSH_INTERVAL_SEC = 10
 
 
 def _utc_now() -> datetime:
@@ -222,35 +222,41 @@ async def stream_admin_overview(
     trace_id = _normalize_trace_id(request)
 
     async def _event_generator() -> Any:
-        batch_id = f"overview-{uuid4().hex}"
+        while True:
+            if await request.is_disconnected():
+                logger.debug("总览 SSE 客户端已断开，停止推送: trace_id=%s", trace_id)
+                break
 
-        try:
-            snapshot = service.get_overview_snapshot(trace_id=trace_id)
-            snapshot_at = str(snapshot.get("snapshot_at") or _to_iso8601(_utc_now()))
-            patch = dict(snapshot)
-            patch.pop("snapshot_at", None)
+            try:
+                snapshot = service.get_overview_snapshot(trace_id=trace_id)
+                snapshot_at = str(snapshot.get("snapshot_at") or _to_iso8601(_utc_now()))
+                patch = dict(snapshot)
+                patch.pop("snapshot_at", None)
 
-            result_data = AdminOverviewStreamResultData(
-                snapshot_at=snapshot_at,
-                patch=patch,
-                trace_id=trace_id,
-            )
-            yield _format_sse("result", result_data.model_dump(exclude_none=True))
-        except Exception as exc:  # pragma: no cover - 异常分支由 API 单测覆盖
-            logger.exception("管理后台总览 SSE 推送失败")
+                result_data = AdminOverviewStreamResultData(
+                    snapshot_at=snapshot_at,
+                    patch=patch,
+                    trace_id=trace_id,
+                )
+                yield _format_sse("result", result_data.model_dump(exclude_none=True))
+            except Exception as exc:  # pragma: no cover - 异常分支由 API 单测覆盖
+                logger.exception("管理后台总览 SSE 推送失败")
 
-            interrupt_data = AdminOverviewStreamInterruptData(
-                reason="stream_disconnected",
-                level="warning",
-                retry_after_sec=STREAM_RETRY_AFTER_SEC,
-                message="实时流中断，已建议降级到轮询",
-            )
-            yield _format_sse("interrupt", interrupt_data.model_dump(exclude_none=True))
+                interrupt_data = AdminOverviewStreamInterruptData(
+                    reason="stream_disconnected",
+                    level="warning",
+                    retry_after_sec=STREAM_RETRY_AFTER_SEC,
+                    message="实时流中断，已建议降级到轮询",
+                )
+                yield _format_sse("interrupt", interrupt_data.model_dump(exclude_none=True))
 
-            logger.debug("总览流降级原因: %s", type(exc).__name__)
-        finally:
-            done_data = AdminOverviewStreamDoneData(batch_id=batch_id, final=False)
-            yield _format_sse("done", done_data.model_dump(exclude_none=True))
+                logger.debug("总览流降级原因: %s", type(exc).__name__)
+
+            if await request.is_disconnected():
+                logger.debug("总览 SSE 客户端已断开，停止推送: trace_id=%s", trace_id)
+                break
+
+            await asyncio.sleep(STREAM_PUSH_INTERVAL_SEC)
 
     headers = {
         "Cache-Control": "no-cache",

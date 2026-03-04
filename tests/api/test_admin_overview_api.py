@@ -182,8 +182,19 @@ def test_admin_overview_trends_returns_single_window_series(
     assert body["points"][0]["health_score"] == 90.4
 
 
-def test_admin_overview_stream_emits_result_and_done(admin_override):
-    """正常流应输出 result 与 done。"""
+def test_admin_overview_stream_pushes_multiple_results(admin_override, monkeypatch: pytest.MonkeyPatch):
+    """总览流应持续推送 result 事件。"""
+
+    from app.api.v1.endpoints import admin_overview_api as overview_api
+
+    monkeypatch.setattr(overview_api, "STREAM_PUSH_INTERVAL_SEC", 0)
+
+    disconnected_states = iter([False, False, False, False, True])
+
+    async def _is_disconnected(_request):
+        return next(disconnected_states, True)
+
+    monkeypatch.setattr(overview_api.Request, "is_disconnected", _is_disconnected, raising=False)
 
     service_stub = _OverviewServiceStub(
         snapshot={
@@ -212,13 +223,25 @@ def test_admin_overview_stream_emits_result_and_done(admin_override):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: result" in response.text
-    assert "event: done" in response.text
-    assert "snapshot_at" in response.text
+    assert response.text.count("event: result") == 2
 
 
-def test_admin_overview_stream_emits_interrupt_on_error(admin_override):
-    """实时采集异常时应输出 interrupt 与 done。"""
+def test_admin_overview_stream_emits_interrupt_on_error(
+    admin_override,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """实时采集异常时应输出 interrupt 事件。"""
+
+    from app.api.v1.endpoints import admin_overview_api as overview_api
+
+    monkeypatch.setattr(overview_api, "STREAM_PUSH_INTERVAL_SEC", 0)
+
+    disconnected_states = iter([False, True])
+
+    async def _is_disconnected(_request):
+        return next(disconnected_states, True)
+
+    monkeypatch.setattr(overview_api.Request, "is_disconnected", _is_disconnected, raising=False)
 
     service_stub = _OverviewServiceStub(error=RuntimeError("collector timeout"))
     app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
@@ -231,4 +254,3 @@ def test_admin_overview_stream_emits_interrupt_on_error(admin_override):
     assert response.status_code == 200
     assert "event: interrupt" in response.text
     assert "stream_disconnected" in response.text
-    assert "event: done" in response.text
