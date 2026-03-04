@@ -7,6 +7,7 @@ from app.services.result_enrichment_rule_service import (
     ResultEnrichmentRuleService,
     ResultLookupEnrichmentRuleConfig,
     apply_lookup_enrichment_rule,
+    apply_lookup_enrichment_rule_with_status,
 )
 
 
@@ -161,3 +162,41 @@ def test_apply_lookup_enrichment_rule_returns_original_when_target_exists():
 
     assert new_rows == rows
     assert new_columns == columns
+
+
+def test_apply_lookup_enrichment_rule_with_status_marks_no_data_when_lookup_empty():
+    rule = _build_rule("customer_name")
+    rows = [{"ecif_cust_no": "1001", "贷款余额": 88.0, "data_dt": "2025-06-30"}]
+    columns = ["ecif_cust_no", "贷款余额", "data_dt"]
+
+    with patch(
+        "app.services.result_enrichment_rule_service._fetch_lookup_value_map",
+        return_value={},
+    ):
+        new_rows, new_columns, status = apply_lookup_enrichment_rule_with_status(rows, columns, rule)
+
+    assert new_rows == rows
+    assert new_columns == columns
+    assert status.matched is True
+    assert status.enriched is False
+    assert status.no_data is True
+    assert status.reason == "lookup_no_data"
+
+
+def test_apply_lookup_enrichment_rule_with_status_marks_unmatched_when_key_column_missing():
+    rule = _build_rule("customer_name")
+    rows = [{"cust_no": "1001", "贷款余额": 88.0}]
+    columns = ["cust_no", "贷款余额"]
+
+    with patch(
+        "app.services.result_enrichment_rule_service._fetch_lookup_value_map",
+        side_effect=AssertionError("不应触发查表"),
+    ):
+        new_rows, new_columns, status = apply_lookup_enrichment_rule_with_status(rows, columns, rule)
+
+    assert new_rows == rows
+    assert new_columns == columns
+    assert status.matched is False
+    assert status.enriched is False
+    assert status.no_data is False
+    assert status.reason == "missing_key_column"

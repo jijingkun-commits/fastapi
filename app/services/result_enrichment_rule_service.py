@@ -37,6 +37,17 @@ class ResultLookupEnrichmentRuleConfig:
     result_date_column_candidates: Tuple[str, ...] = ("data_dt",)
 
 
+@dataclass(frozen=True)
+class LookupRuleApplyStatus:
+    """单条规则应用状态。"""
+
+    rule_name: str
+    matched: bool
+    enriched: bool
+    no_data: bool
+    reason: str
+
+
 class ResultEnrichmentRuleService:
     """结果增强规则服务（带 TTL 缓存与 fallback）。"""
 
@@ -394,24 +405,64 @@ def apply_lookup_enrichment_rule(
     rule: ResultLookupEnrichmentRuleConfig,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """对结果应用单条查表补齐规则。"""
+    enriched_rows, enriched_columns, _ = apply_lookup_enrichment_rule_with_status(rows, columns, rule)
+    return enriched_rows, enriched_columns
+
+
+def apply_lookup_enrichment_rule_with_status(
+    rows: List[Dict[str, Any]],
+    columns: List[str],
+    rule: ResultLookupEnrichmentRuleConfig,
+) -> Tuple[List[Dict[str, Any]], List[str], LookupRuleApplyStatus]:
+    """对结果应用单条查表补齐规则，并返回命中状态。"""
     if not rows or not columns:
-        return rows, columns
+        return rows, columns, LookupRuleApplyStatus(
+            rule_name=rule.name,
+            matched=False,
+            enriched=False,
+            no_data=False,
+            reason="empty_input",
+        )
 
     if _result_has_column(columns, rule.target_column):
-        return rows, columns
+        return rows, columns, LookupRuleApplyStatus(
+            rule_name=rule.name,
+            matched=False,
+            enriched=False,
+            no_data=False,
+            reason="target_column_exists",
+        )
 
     key_col = _resolve_column(columns, rule.key_column_candidates)
     if not key_col:
-        return rows, columns
+        return rows, columns, LookupRuleApplyStatus(
+            rule_name=rule.name,
+            matched=False,
+            enriched=False,
+            no_data=False,
+            reason="missing_key_column",
+        )
 
     key_values = [str(row.get(key_col) or "").strip() for row in rows if row.get(key_col)]
     if not key_values:
-        return rows, columns
+        return rows, columns, LookupRuleApplyStatus(
+            rule_name=rule.name,
+            matched=False,
+            enriched=False,
+            no_data=False,
+            reason="missing_key_values",
+        )
 
     date_value = _extract_single_date_value(rows, rule.result_date_column_candidates)
     value_map = _fetch_lookup_value_map(rule=rule, key_values=key_values, date_value=date_value)
     if not value_map:
-        return rows, columns
+        return rows, columns, LookupRuleApplyStatus(
+            rule_name=rule.name,
+            matched=True,
+            enriched=False,
+            no_data=True,
+            reason="lookup_no_data",
+        )
 
     enriched_rows: List[Dict[str, Any]] = []
     for row in rows:
@@ -423,4 +474,10 @@ def apply_lookup_enrichment_rule(
     new_columns = list(columns)
     insert_at = new_columns.index(key_col) + 1
     new_columns.insert(insert_at, rule.target_column)
-    return enriched_rows, new_columns
+    return enriched_rows, new_columns, LookupRuleApplyStatus(
+        rule_name=rule.name,
+        matched=True,
+        enriched=True,
+        no_data=False,
+        reason="enriched",
+    )

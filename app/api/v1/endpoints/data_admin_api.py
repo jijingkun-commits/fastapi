@@ -20,7 +20,7 @@ from app.models.user import User
 from app.repositories.result_enrichment_rule_repo import ResultEnrichmentRuleRepo
 from app.services.result_enrichment_rule_service import (
     ResultLookupEnrichmentRuleConfig,
-    apply_lookup_enrichment_rule,
+    apply_lookup_enrichment_rule_with_status,
     get_result_enrichment_rule_service,
 )
 from app.api.deps import get_admin_user
@@ -958,7 +958,10 @@ class EnrichmentRuleTestResponse(BaseModel):
 
     rows: List[Dict[str, Any]]
     columns: List[str]
+    matched_rule_codes: List[str]
     applied_rule_codes: List[str]
+    no_data_rule_codes: List[str]
+    summary_message: str
 
 
 class EnrichmentRuleRefreshResponse(BaseModel):
@@ -1008,6 +1011,27 @@ def _rule_payload_from_request(data: Dict[str, Any]) -> Dict[str, Any]:
         "result_date_column_candidates": data.get("result_date_column_candidates"),
         "description": data.get("description"),
     }
+
+
+def _build_rule_test_summary_message(
+    matched_rule_codes: List[str],
+    applied_rule_codes: List[str],
+    no_data_rule_codes: List[str],
+) -> str:
+    """构建规则测试摘要文案。"""
+    if applied_rule_codes:
+        if no_data_rule_codes:
+            return (
+                f"命中 {len(matched_rule_codes)} 条规则，"
+                f"补齐成功 {len(applied_rule_codes)} 条，"
+                f"{len(no_data_rule_codes)} 条未查询到数据"
+            )
+        return f"命中 {len(matched_rule_codes)} 条规则，补齐成功 {len(applied_rule_codes)} 条"
+
+    if no_data_rule_codes:
+        return "命中规则，但未查询到数据"
+
+    return "未命中规则"
 
 
 def _get_operator(admin_user: User) -> str:
@@ -1158,19 +1182,30 @@ def test_enrichment_rules(
     else:
         rules = _rule_service.get_active_rules(force_refresh=False, fallback_rules=())
 
+    matched_rule_codes: List[str] = []
     applied_rule_codes: List[str] = []
+    no_data_rule_codes: List[str] = []
     enriched_rows = rows
     enriched_columns = columns
     for runtime_rule in rules:
-        before_columns = list(enriched_columns)
-        before_rows = list(enriched_rows)
-        enriched_rows, enriched_columns = apply_lookup_enrichment_rule(
+        enriched_rows, enriched_columns, apply_status = apply_lookup_enrichment_rule_with_status(
             enriched_rows,
             enriched_columns,
             runtime_rule,
         )
-        if enriched_columns != before_columns or enriched_rows != before_rows:
+
+        if apply_status.matched:
+            matched_rule_codes.append(runtime_rule.name)
+        if apply_status.enriched:
             applied_rule_codes.append(runtime_rule.name)
+        if apply_status.no_data:
+            no_data_rule_codes.append(runtime_rule.name)
+
+    summary_message = _build_rule_test_summary_message(
+        matched_rule_codes=matched_rule_codes,
+        applied_rule_codes=applied_rule_codes,
+        no_data_rule_codes=no_data_rule_codes,
+    )
 
     if selected_rule is not None:
         _rule_repo.add_audit(
@@ -1178,7 +1213,14 @@ def test_enrichment_rules(
             rule_id=selected_rule.id,
             op_type="test",
             before_json={"rows": rows, "columns": columns},
-            after_json={"rows": enriched_rows, "columns": enriched_columns, "applied_rule_codes": applied_rule_codes},
+            after_json={
+                "rows": enriched_rows,
+                "columns": enriched_columns,
+                "matched_rule_codes": matched_rule_codes,
+                "applied_rule_codes": applied_rule_codes,
+                "no_data_rule_codes": no_data_rule_codes,
+                "summary_message": summary_message,
+            },
             operator_id=_get_operator(admin_user),
         )
         db.commit()
@@ -1186,7 +1228,10 @@ def test_enrichment_rules(
     return EnrichmentRuleTestResponse(
         rows=enriched_rows,
         columns=enriched_columns,
+        matched_rule_codes=matched_rule_codes,
         applied_rule_codes=applied_rule_codes,
+        no_data_rule_codes=no_data_rule_codes,
+        summary_message=summary_message,
     )
 
 

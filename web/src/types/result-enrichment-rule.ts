@@ -46,7 +46,10 @@ export interface ResultEnrichmentRuleTestRequest {
 export interface ResultEnrichmentRuleTestResponse {
   rows: Record<string, unknown>[];
   columns: string[];
+  matched_rule_codes: string[];
   applied_rule_codes: string[];
+  no_data_rule_codes: string[];
+  summary_message: string;
 }
 
 export interface ResultEnrichmentRuleRefreshResponse {

@@ -441,7 +441,7 @@ export function DataAdminPanel() {
     try {
       const result = await testEnrichmentRules({ rows, columns });
       setTestPreview(result);
-      toast.success(`测试完成，命中 ${result.applied_rule_codes.length} 条规则`);
+      toast.success(`测试完成：${result.summary_message}`);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "规则测试失败";
       toast.error(message);
@@ -719,10 +719,23 @@ export function DataAdminPanel() {
 
               {testPreview && (
                 <div className="space-y-2">
+                  <div className="text-sm">摘要：{testPreview.summary_message}</div>
                   <div className="text-sm">
                     命中规则：
+                    {testPreview.matched_rule_codes.length > 0
+                      ? testPreview.matched_rule_codes.join(", ")
+                      : "无"}
+                  </div>
+                  <div className="text-sm">
+                    补齐成功规则：
                     {testPreview.applied_rule_codes.length > 0
                       ? testPreview.applied_rule_codes.join(", ")
+                      : "无"}
+                  </div>
+                  <div className="text-sm">
+                    命中但无数据规则：
+                    {testPreview.no_data_rule_codes.length > 0
+                      ? testPreview.no_data_rule_codes.join(", ")
                       : "无"}
                   </div>
                   <pre className="text-xs bg-muted p-3 rounded overflow-x-auto max-h-64">
