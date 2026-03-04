@@ -13,6 +13,19 @@ DEFAULT_DATASET_PATH = Path("tests/fixtures/kb_offline_eval_cases.json")
 DEFAULT_BASELINE_PATH = Path("tests/fixtures/kb_offline_eval_baseline.json")
 DEFAULT_OUTPUT_PATH = Path("tests/artifacts/kb_offline_eval_result.json")
 
+STAGE_THRESHOLDS: Dict[str, Dict[str, float]] = {
+    "default": {
+        "min_pass_rate": 0.8,
+        "min_avg_relevance": 0.8,
+        "max_error_citation_rate": 0.05,
+    },
+    "gate": {
+        "min_pass_rate": 0.8,
+        "min_avg_relevance": 0.8,
+        "max_error_citation_rate": 0.05,
+    },
+}
+
 
 def load_json(path: Path) -> Dict[str, Any]:
     """加载 JSON 文件。"""
@@ -358,6 +371,28 @@ def run_evaluation(
     return report
 
 
+def resolve_thresholds(
+    stage: str,
+    min_pass_rate: float | None,
+    min_avg_relevance: float | None,
+    max_error_citation_rate: float | None,
+) -> Dict[str, float]:
+    """根据 stage 与显式入参解析门禁阈值。"""
+
+    profile = STAGE_THRESHOLDS.get(stage, STAGE_THRESHOLDS["default"])
+    return {
+        "min_pass_rate": safe_float(min_pass_rate, profile["min_pass_rate"])
+        if min_pass_rate is not None
+        else profile["min_pass_rate"],
+        "min_avg_relevance": safe_float(min_avg_relevance, profile["min_avg_relevance"])
+        if min_avg_relevance is not None
+        else profile["min_avg_relevance"],
+        "max_error_citation_rate": safe_float(max_error_citation_rate, profile["max_error_citation_rate"])
+        if max_error_citation_rate is not None
+        else profile["max_error_citation_rate"],
+    }
+
+
 def parse_args() -> argparse.Namespace:
     """解析命令行参数。"""
 
@@ -365,24 +400,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET_PATH, help="评测集 JSON 路径")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH, help="评测报告输出路径")
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE_PATH, help="基线 JSON 路径")
+    parser.add_argument(
+        "--stage",
+        choices=sorted(STAGE_THRESHOLDS.keys()),
+        default="default",
+        help="评测阶段；gate 使用统一质量门禁阈值",
+    )
     parser.add_argument("--dry-run", action="store_true", help="仅执行样本内 mock_debug，不连接线上服务")
     parser.add_argument(
         "--min-pass-rate",
         type=float,
-        default=0.8,
-        help="最低通过率阈值，低于阈值时返回非零退出码",
+        default=None,
+        help="最低通过率阈值，低于阈值时返回非零退出码（默认取 stage 配置）",
     )
     parser.add_argument(
         "--min-avg-relevance",
         type=float,
-        default=0.8,
-        help="平均相关性阈值，低于阈值时返回非零退出码",
+        default=None,
+        help="平均相关性阈值，低于阈值时返回非零退出码（默认取 stage 配置）",
     )
     parser.add_argument(
         "--max-error-citation-rate",
         type=float,
-        default=0.05,
-        help="错误引用率阈值，高于阈值时返回非零退出码",
+        default=None,
+        help="错误引用率阈值，高于阈值时返回非零退出码（默认取 stage 配置）",
     )
     parser.add_argument("--update-baseline", action="store_true", help="将本次 summary 回写到 baseline")
     return parser.parse_args()
@@ -392,6 +433,13 @@ def main() -> int:
     """脚本入口。"""
 
     args = parse_args()
+    thresholds = resolve_thresholds(
+        stage=args.stage,
+        min_pass_rate=args.min_pass_rate,
+        min_avg_relevance=args.min_avg_relevance,
+        max_error_citation_rate=args.max_error_citation_rate,
+    )
+
     report = run_evaluation(
         dataset_path=args.dataset,
         output_path=args.output,
@@ -403,6 +451,13 @@ def main() -> int:
     print(
         "[kb-offline-eval] total={total_cases} passed={passed_cases} pass_rate={pass_rate:.2%} "
         "relevance={avg_relevance:.4f} citation_error={error_citation_rate:.4f}".format(**summary)
+    )
+    print(
+        "[kb-offline-eval] stage={stage} thresholds pass_rate>={min_pass_rate:.4f} "
+        "avg_relevance>={min_avg_relevance:.4f} citation_error<={max_error_citation_rate:.4f}".format(
+            stage=args.stage,
+            **thresholds,
+        )
     )
 
     baseline_compare = report.get("baseline_compare")
@@ -430,21 +485,24 @@ def main() -> int:
     avg_relevance = safe_float(summary.get("avg_relevance"), 0.0)
     error_citation_rate = safe_float(summary.get("error_citation_rate"), 1.0)
 
-    if pass_rate < safe_float(args.min_pass_rate, 0.0):
-        print(f"[kb-offline-eval] pass_rate {pass_rate:.4f} < min_pass_rate {args.min_pass_rate:.4f}")
-        return 1
-
-    if avg_relevance < safe_float(args.min_avg_relevance, 0.0):
+    if pass_rate < thresholds["min_pass_rate"]:
         print(
-            "[kb-offline-eval] avg_relevance "
-            f"{avg_relevance:.4f} < min_avg_relevance {args.min_avg_relevance:.4f}"
+            "[kb-offline-eval] pass_rate "
+            f"{pass_rate:.4f} < min_pass_rate {thresholds['min_pass_rate']:.4f}"
         )
         return 1
 
-    if error_citation_rate > safe_float(args.max_error_citation_rate, 1.0):
+    if avg_relevance < thresholds["min_avg_relevance"]:
+        print(
+            "[kb-offline-eval] avg_relevance "
+            f"{avg_relevance:.4f} < min_avg_relevance {thresholds['min_avg_relevance']:.4f}"
+        )
+        return 1
+
+    if error_citation_rate > thresholds["max_error_citation_rate"]:
         print(
             "[kb-offline-eval] error_citation_rate "
-            f"{error_citation_rate:.4f} > max_error_citation_rate {args.max_error_citation_rate:.4f}"
+            f"{error_citation_rate:.4f} > max_error_citation_rate {thresholds['max_error_citation_rate']:.4f}"
         )
         return 1
 
