@@ -142,7 +142,7 @@ npx ai-agent-skills info <skill-name>
 3. `clarify_consistency_check.clarify_phase=approval` 且 `open_questions_count=0`。
 4. 条件采纳（`design_approved=false`）不得进入 `/jjk-plan`。
 5. 修改 `jjk-clarify` 命令/模板后执行：`python3 scripts/check_clarify_contract_consistency.py`。
-6. 建议执行：`python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` 做桥接校验。
+6. 建议执行：`python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path ... --implementation-path ...` 做桥接校验。
 
 ### 2.2 上下文引用策略
 
@@ -458,7 +458,7 @@ description: 命令的简短描述
 | `/jjk-imp` | 实现阶段同步必要文档变更 | `/jjk-imp` |
 | `/jjk-review` | 审查阶段检查文档-代码一致性 | `/jjk-review` |
 | `/jjk-verify` | 验收阶段做最终文档收口确认 | `/jjk-verify` |
-| `python3 scripts/check_clarify_plan_alignment.py ...` | Clarify/Plan 契约一致性校验 | `python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` |
+| `python3 scripts/check_workflow_contract.py --mode clarify_plan ...` | Clarify/Plan 契约一致性校验 | `python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path ... --implementation-path ...` |
 
 ### 7.7 并行与看板协作
 
@@ -470,8 +470,8 @@ description: 命令的简短描述
 | `/jjk-vktodo` | create-only 幂等建卡 - 消费 `vk_cards.json` 落卡，不负责状态推进 | `/jjk-vktodo 2026-02-14_文档治理执行 create` |
 | `/jjk-cardrun` | 串行执行调度 - 消费 `vk_cards.json` 按 `card_order` 单活卡推进并执行 `verify -> merge -> done` | `/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop` |
 | `/jjk-imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/jjk-imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
-| `python3 scripts/check_gate_contract_consistency.py --task-split-dir ...` | G01 契约一致性校验 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>` |
-| `python3 scripts/coder4/check_integration_gate.py --task-split-dir ... --baseline master` | IG01 集成门禁校验 | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master` |
+| `python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir ...` | G01 契约一致性校验 | `python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>` |
+| `python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir ... --baseline master` | IG01 集成门禁校验 | `python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir <任务拆解目录> --baseline master` |
 
 ### 7.8 通用命令补充（非 JJK 主链）
 
