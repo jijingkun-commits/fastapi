@@ -20,6 +20,7 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
+- `scripts/check_workflow_contract.py`
 - `scripts/check_clarify_plan_alignment.py`
 - `scripts/check_plan_vk_coverage.py`
 - `scripts/check_gate_contract_consistency.py`
@@ -50,14 +51,23 @@ card_export:
   soft_depends_on: []
   depends_on: [C02]
   file_whitelist:
+    - scripts/check_workflow_contract.py
     - scripts/check_clarify_plan_alignment.py
     - scripts/check_plan_vk_coverage.py
     - scripts/check_gate_contract_consistency.py
     - scripts/check_integration_gate.py
   mechanism_summary:
     - 4 个 L1 旧脚本 wrapper 化
+    - 统一入口承载 legacy_wrapper_compat 自检
     - 参数兼容与退出码透传
     - 输出 deprecation 提示
+  code_anchor_refs:
+    - scripts/check_workflow_contract.py::MODE_REGISTRY
+    - scripts/check_workflow_contract.py::run_mode
+    - scripts/check_clarify_plan_alignment.py::main
+    - scripts/check_plan_vk_coverage.py::main
+    - scripts/check_gate_contract_consistency.py::main
+    - scripts/check_integration_gate.py::main
   acceptance_checks:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
   rollback_anchors:

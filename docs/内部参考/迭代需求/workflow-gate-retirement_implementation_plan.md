@@ -89,14 +89,17 @@ implementation_tasks:
     depends_on_tasks: [P1-UNIFIED-ENTRY]
     risk_point: wrapper参数透传差异导致旧命令行为漂移
     file_paths:
+      - scripts/check_workflow_contract.py
       - scripts/check_clarify_plan_alignment.py
       - scripts/check_plan_vk_coverage.py
       - scripts/check_gate_contract_consistency.py
       - scripts/check_integration_gate.py
     symbols:
+      - MODE_REGISTRY
+      - run_mode
+      - wrapper_notice
       - main
       - parse_args
-      - wrapper_notice
     acceptance_cmds:
       - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
     rollback_point: WORKFLOW_GATE_DEPRECATION_ENFORCED=false

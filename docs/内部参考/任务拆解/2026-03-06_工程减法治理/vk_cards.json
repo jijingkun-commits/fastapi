@@ -248,10 +248,13 @@
       ],
       "mechanism_summary": [
         "4 个 L1 旧脚本 wrapper 化",
+        "统一入口承载 legacy_wrapper_compat 自检",
         "参数兼容与退出码透传",
         "输出 deprecation 提示"
       ],
       "code_anchor_refs": [
+        "scripts/check_workflow_contract.py::MODE_REGISTRY",
+        "scripts/check_workflow_contract.py::run_mode",
         "scripts/check_clarify_plan_alignment.py::main",
         "scripts/check_plan_vk_coverage.py::main",
         "scripts/check_gate_contract_consistency.py::main",
@@ -270,6 +273,7 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
+        "scripts/check_workflow_contract.py",
         "scripts/check_clarify_plan_alignment.py",
         "scripts/check_plan_vk_coverage.py",
         "scripts/check_gate_contract_consistency.py",
