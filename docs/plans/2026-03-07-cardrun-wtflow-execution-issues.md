@@ -19,7 +19,7 @@
    - `wt-flow verify` 白名单缺少 `rg`，导致 `C01` done_gate 被误阻断；
    - `clarify_consistency_check` 缺字段，导致 `check_plan_vk_coverage.py` 初始校验失败；
    - `vk_cards.json` 顶层缺少 `task_to_pr_mapping`，导致 `cardrun bootstrap` 阻断。
-2. **仍需后续系统性修复**的问题有 9 类：
+2. **仍需后续系统性修复**的问题有 10 类：
    - `wtimp dispatch` JSON 回执/超时机制不稳；
    - `.state` 运行态文件对白名单依赖过强；
    - 中文路径 dirty 检测依赖 `core.quotePath=false` 临时配置；
@@ -28,7 +28,8 @@
    - `logs/` 产物被忽略，usage 观测结果默认不会进入提交证据；
    - `C07` 退役门禁天然依赖 7 天 wall-clock 观测窗口，单轮 `cardrun` 无法自然闭环；
    - `G01` 工作流文档仍引用旧脚本命令，与统一入口迁移后的口径不一致；
-   - `C03` 的 wrapper 完成定义未约束“物理薄壳化”，导致 `C07` 才暴露 legacy 实现仍驻留。
+   - `C03` 的 wrapper 完成定义未约束“物理薄壳化”，导致 `C07` 才暴露 legacy 实现仍驻留；
+   - `wt-flow verify` 在多任务并存时无法稳定自动解析当前 `_active_task.json`。
 
 ---
 
@@ -49,6 +50,7 @@
 | WF-11 | P0 | `C07` 退役门禁依赖 7 天 wall-clock 观测窗口 | 单轮 `jjk-cardrun` 无法在同一执行波次内自然闭环 | 待修复 | 先以 `full-gate` 真实阻断，不跳过 7 天窗口 | 拆分“门禁建设”与“退役放行”两个阶段性完成定义 |
 | WF-12 | P1 | `G01` 工作流文档仍引用旧脚本命令 | 验收文档口径与统一入口迁移结果不一致 | 待修复 | 以 `v3` 退役口径和统一入口实现为准 | 同步 `G01`、命令文档、技能文档的验收命令引用 |
 | WF-13 | P0 | `C03` wrapper 验收未覆盖“物理薄壳化” | `C07` 才首次暴露 legacy 大体量实现仍驻留 | 待修复 | 由 `full-gate` 的 `LEGACY_WRAPPER_NOT_THIN` 真实阻断 | 区分“CLI 兼容完成”与“旧实现已物理退役”两个完成定义 |
+| WF-14 | P0 | `wt-flow verify` 多任务场景下无法自动解析 active task | `C07` verify 直接阻断，无法进入真实 done_gate | 待修复 | 显式设置 `WT_FLOW_ACTIVE_TASK_FILE` 或 `WT_FLOW_TASK_SPLIT_DIR` | 给 `wt-flow` 增加 worktree 上下文优先级与更稳健的 active task 发现逻辑 |
 
 ---
 
@@ -316,11 +318,37 @@
 
 ---
 
+### WF-14 `wt-flow verify` 多任务场景下无法自动解析 active task
+
+**现象**
+- 在 `C07` worktree 执行：
+  - `bash scripts/wt-flow.sh verify C07`
+- 直接报错：
+  - `检测到多个任务级 _active_task.json（5 个），请显式设置 WT_FLOW_ACTIVE_TASK_FILE 或 WT_FLOW_TASK_SPLIT_DIR`
+  - `无法解析任务级 state 目录：请先设置 active_task`
+  - `状态文件不存在: /task-runner-state.json`
+
+**影响**
+- `verify` 阶段还没进入卡片自己的 done_gate，就先被 active task 自动发现逻辑阻断；
+- 多任务并存已经是常态，该问题会直接削弱 `cardrun` 在真实仓库中的可用性。
+
+**现场处理**
+- 本轮改为显式传入：
+  - `WT_FLOW_ACTIVE_TASK_FILE` 或 `WT_FLOW_TASK_SPLIT_DIR`
+- 先让 `wt-flow` 锁定当前任务，再继续验证真实 blocker。
+
+**后续修复建议**
+1. `wt-flow` 优先使用当前 worktree 相邻的任务拆解目录解析 active task；
+2. 当存在多个 `_active_task.json` 时，输出候选列表和推荐值，而不是直接把 state 路径解析成根目录；
+3. 将 `WT_FLOW_ACTIVE_TASK_FILE` 写入 `cardrun`/`wtimp` 派发上下文，避免每轮人工补环境变量。
+
+---
+
 ## 4. 修复优先级建议
 
 | 波次 | 目标 | 建议纳入的问题 |
 |---|---|---|
-| Wave 1 | 恢复工程流稳定执行 | WF-02, WF-03, WF-04, WF-07 |
+| Wave 1 | 恢复工程流稳定执行 | WF-02, WF-03, WF-04, WF-07, WF-14 |
 | Wave 2 | 让退役门禁可持续运行 | WF-10, WF-11, WF-12, WF-13 |
 | Wave 3 | 降低误操作与调试成本 | WF-05, WF-06 |
 | Wave 4 | 强化契约与回归测试 | WF-01, WF-08, WF-09 |
@@ -336,9 +364,10 @@
 5. **P1**：`workflow-gate usage 日志产物策略治理`
 6. **P1**：`G01/命令/技能文档统一入口再同步`
 7. **P0**：`C03 CLI 兼容 vs 物理薄壳 双层验收建模`
-8. **P1**：`git porcelain 中文路径稳健解析`
-9. **P1**：`wrapper/实体脚本单一真理源治理`
-10. **P1**：`clarify/vk_cards schema 回归测试`
+8. **P0**：`wt-flow active task 自动发现稳健化`
+9. **P1**：`git porcelain 中文路径稳健解析`
+10. **P1**：`wrapper/实体脚本单一真理源治理`
+11. **P1**：`clarify/vk_cards schema 回归测试`
 
 ---
 
