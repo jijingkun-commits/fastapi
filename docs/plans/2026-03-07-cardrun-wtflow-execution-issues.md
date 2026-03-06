@@ -19,7 +19,7 @@
    - `wt-flow verify` 白名单缺少 `rg`，导致 `C01` done_gate 被误阻断；
    - `clarify_consistency_check` 缺字段，导致 `check_plan_vk_coverage.py` 初始校验失败；
    - `vk_cards.json` 顶层缺少 `task_to_pr_mapping`，导致 `cardrun bootstrap` 阻断。
-2. **仍需后续系统性修复**的问题有 8 类：
+2. **仍需后续系统性修复**的问题有 9 类：
    - `wtimp dispatch` JSON 回执/超时机制不稳；
    - `.state` 运行态文件对白名单依赖过强；
    - 中文路径 dirty 检测依赖 `core.quotePath=false` 临时配置；
@@ -27,7 +27,8 @@
    - `C03` 卡片契约本身自冲突，无法在不违约的前提下继续执行；
    - `logs/` 产物被忽略，usage 观测结果默认不会进入提交证据；
    - `C07` 退役门禁天然依赖 7 天 wall-clock 观测窗口，单轮 `cardrun` 无法自然闭环；
-   - `G01` 工作流文档仍引用旧脚本命令，与统一入口迁移后的口径不一致。
+   - `G01` 工作流文档仍引用旧脚本命令，与统一入口迁移后的口径不一致；
+   - `C03` 的 wrapper 完成定义未约束“物理薄壳化”，导致 `C07` 才暴露 legacy 实现仍驻留。
 
 ---
 
@@ -47,6 +48,7 @@
 | WF-10 | P1 | `logs/` 被 `.gitignore` 忽略 | `C05` usage 观测证据默认不会随提交落库 | 待修复 | 提交时需 `git add -f logs/workflow-gate-usage.jsonl` | 明确日志产物策略，避免证据与代码分离 |
 | WF-11 | P0 | `C07` 退役门禁依赖 7 天 wall-clock 观测窗口 | 单轮 `jjk-cardrun` 无法在同一执行波次内自然闭环 | 待修复 | 先以 `full-gate` 真实阻断，不跳过 7 天窗口 | 拆分“门禁建设”与“退役放行”两个阶段性完成定义 |
 | WF-12 | P1 | `G01` 工作流文档仍引用旧脚本命令 | 验收文档口径与统一入口迁移结果不一致 | 待修复 | 以 `v3` 退役口径和统一入口实现为准 | 同步 `G01`、命令文档、技能文档的验收命令引用 |
+| WF-13 | P0 | `C03` wrapper 验收未覆盖“物理薄壳化” | `C07` 才首次暴露 legacy 大体量实现仍驻留 | 待修复 | 由 `full-gate` 的 `LEGACY_WRAPPER_NOT_THIN` 真实阻断 | 区分“CLI 兼容完成”与“旧实现已物理退役”两个完成定义 |
 
 ---
 
@@ -289,12 +291,37 @@
 
 ---
 
+### WF-13 `C03` wrapper 验收未覆盖“物理薄壳化”
+
+**现象**
+- `C03` 已完成旧命令 wrapper 化，CLI 入口可正常转发到统一入口；
+- 但 `C07` 新增 `full-gate` 后，`wrapper_shell` 检查显示以下文件仍保留大量旧实现代码：
+  - `scripts/check_clarify_plan_alignment.py`
+  - `scripts/check_plan_vk_coverage.py`
+  - `scripts/check_gate_contract_consistency.py`
+- 真实 blocker 为：
+  - `LEGACY_WRAPPER_NOT_THIN`
+
+**影响**
+- `C03` 可以在“命令兼容”意义上完成，但并不代表“旧实现已经足够薄壳化，可进入物理退役阶段”；
+- 若执行器没有把这两个完成定义拆开，团队容易误以为 wrapper 卡完成后即可进入删除阶段。
+
+**结论**
+- 这是卡片完成定义层面的缺口：`C03` 更像“兼容入口迁移完成”，而不是“legacy 实现已物理退役完成”。
+
+**后续修复建议**
+1. 为 `C03` 增加“CLI 兼容完成”与“代码体量收敛完成”的双层验收；
+2. 允许 `C07` 继续承担最终物理退役判定，但必须在计划中显式声明；
+3. 将 `LEGACY_WRAPPER_NOT_THIN` 写入退役前置条件，避免后续再次口径漂移。
+
+---
+
 ## 4. 修复优先级建议
 
 | 波次 | 目标 | 建议纳入的问题 |
 |---|---|---|
 | Wave 1 | 恢复工程流稳定执行 | WF-02, WF-03, WF-04, WF-07 |
-| Wave 2 | 让退役门禁可持续运行 | WF-10, WF-11, WF-12 |
+| Wave 2 | 让退役门禁可持续运行 | WF-10, WF-11, WF-12, WF-13 |
 | Wave 3 | 降低误操作与调试成本 | WF-05, WF-06 |
 | Wave 4 | 强化契约与回归测试 | WF-01, WF-08, WF-09 |
 
@@ -308,9 +335,10 @@
 4. **P0**：`time-gated retirement blocker 显式建模`
 5. **P1**：`workflow-gate usage 日志产物策略治理`
 6. **P1**：`G01/命令/技能文档统一入口再同步`
-7. **P1**：`git porcelain 中文路径稳健解析`
-8. **P1**：`wrapper/实体脚本单一真理源治理`
-9. **P1**：`clarify/vk_cards schema 回归测试`
+7. **P0**：`C03 CLI 兼容 vs 物理薄壳 双层验收建模`
+8. **P1**：`git porcelain 中文路径稳健解析`
+9. **P1**：`wrapper/实体脚本单一真理源治理`
+10. **P1**：`clarify/vk_cards schema 回归测试`
 
 ---
 
