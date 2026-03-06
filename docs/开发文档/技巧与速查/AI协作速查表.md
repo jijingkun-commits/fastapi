@@ -30,8 +30,8 @@
      -> /jjk-vktodo <任务拆解目录> create（create-only）
      -> /jjk-cardrun <任务拆解目录> loop
         （主控自动：选卡 -> 真实调用 /jjk-wtimp(cardrun_dispatch) -> verify -> merge -> 下一卡）
-     -> python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>
-     -> python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master
+     -> python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>
+     -> python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir <任务拆解目录> --baseline master
      -> /jjk-verify -> 验收
                        （或 /jjk-review -> /jjk-test -> 验收）
 ```
@@ -58,7 +58,7 @@
 推荐在 `requirements + implementation_plan` 产出后执行：
 
 ```bash
-python3 scripts/check_clarify_plan_alignment.py \
+python3 scripts/check_workflow_contract.py --mode clarify_plan \
   --requirements-path docs/内部参考/迭代需求/<topic>_requirements.md \
   --implementation-path docs/内部参考/迭代需求/<topic>_implementation_plan.md
 ```
@@ -73,8 +73,8 @@ python3 scripts/check_clarify_plan_alignment.py \
 | 2. 并行拆解 | `/jjk-vkplan` | `parallel_plan.md` + `workstreams/WS-*.md` + `vk_cards.json` | 有 `WS-00`，每个 WS 含 `card_export`；VK 落卡默认不含 `WS-00` |
 | 3. 看板建卡 | `/jjk-vktodo <任务拆解目录> create` | VK 卡片（按 `vk_cards.json`） | create-only 幂等建卡成功 |
 | 4. 串行执行收口 | `/jjk-cardrun <任务拆解目录> loop` | 每卡执行证据 + merge 证据 | 当前卡 `verify -> merge -> done` 后才激活下一卡 |
-| 5. Gate 一致性 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>` | G01 校验结果 | `vk_cards/parallel_plan/implementation_plan` 契约一致 |
-| 6. 集成门禁 | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master` | IG01 校验结果 | 实现卡 merge 证据齐全且 `master` 可见 |
+| 5. Gate 一致性 | `python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>` | G01 校验结果 | `vk_cards/parallel_plan/implementation_plan` 契约一致 |
+| 6. 集成门禁 | `python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir <任务拆解目录> --baseline master` | IG01 校验结果 | 实现卡 merge 证据齐全且 `master` 可见 |
 
 ---
 
@@ -87,8 +87,8 @@ python3 scripts/check_clarify_plan_alignment.py \
 | 规划 + 并行拆解（推荐） | `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`） | 含 G0 冻结与落卡前产物 |
 | 看板落卡（推荐） | `/jjk-vktodo <任务拆解目录> create` | create-only 幂等建卡（不负责状态推进） |
 | 串行卡片执行（推荐） | `/jjk-cardrun <任务拆解目录> loop` | 主控按 `card_order` 串行执行并执行每卡 merge 收口 |
-| G01 契约一致性 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>` | 校验三文档 Gate 契约一致 |
-| IG01 集成门禁 | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master` | 校验实现卡合并证据与主干可见性 |
+| G01 契约一致性 | `python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>` | 校验三文档 Gate 契约一致 |
+| IG01 集成门禁 | `python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir <任务拆解目录> --baseline master` | 校验实现卡合并证据与主干可见性 |
 | 执行单个 WS | `/jjk-imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/jjk-imp` | 不走并行流程时使用 |
 | Worktree 隔离实现 | `/jjk-wtimp` | 大任务隔离分支执行，降低并发污染 |

@@ -134,7 +134,7 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 ### 3) 执行承接校验（必做）
 
 ```bash
-python3 scripts/check_clarify_plan_alignment.py \
+python3 scripts/check_workflow_contract.py --mode clarify_plan \
   --requirements-path docs/内部参考/迭代需求/<topic>_requirements.md \
   --implementation-path docs/内部参考/迭代需求/<topic>_implementation_plan.md \
   --output docs/内部参考/迭代需求/<topic>_clarify_plan_alignment.json
@@ -188,7 +188,7 @@ python3 scripts/docs_guard.py --strict
 1. 禁止在无审批设计时进入规划。
 2. 禁止 requirements / implementation_plan 主文档写 A/B/C 对比。
 3. 禁止 `implementation_tasks` 缺关键字段就宣称“可执行”。
-4. 禁止跳过 `check_clarify_plan_alignment.py` 直接进入下游。
+4. 禁止跳过 `check_workflow_contract.py --mode clarify_plan` 直接进入下游。
 5. 禁止篡改上游 `task_id/feature_id` 的语义映射。
 
 ---

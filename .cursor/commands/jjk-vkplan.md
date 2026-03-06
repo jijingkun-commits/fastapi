@@ -83,7 +83,7 @@ description: 并行拆解入口：消费 /jjk-plan 产物并生成可执行卡�
 ### 3) 全量消费覆盖校验（必做）
 
 ```bash
-python3 scripts/check_plan_vk_coverage.py \
+python3 scripts/check_workflow_contract.py --mode plan_vk_coverage \
   --task-split-dir <YYYY-MM-DD_主题> \
   --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/consumption_report.json
 ```
@@ -152,7 +152,7 @@ python3 scripts/set_active_task.py \
 ## 禁止项（强制）
 
 1. 禁止缺 `planning_contract` 就生成卡片。
-2. 禁止跳过 `check_plan_vk_coverage.py`。
+2. 禁止跳过 `check_workflow_contract.py --mode plan_vk_coverage`。
 3. 禁止缺失 `task_ids` 的卡片“先生成后补齐”。
 4. 禁止只写文档 Gate、不实体化 Gate 卡。
 5. 禁止 `execution_contract` 缺失时用默认值继续执行。

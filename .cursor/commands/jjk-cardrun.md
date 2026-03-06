@@ -71,7 +71,7 @@ git status --porcelain --untracked-files=no
 ### 1) 轻量校验（mode=once|loop 推荐）
 
 ```bash
-python3 scripts/check_plan_vk_coverage.py --task-split-dir <task_split_dir> --output -
+python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir <task_split_dir> --output -
 ```
 
 硬约束：

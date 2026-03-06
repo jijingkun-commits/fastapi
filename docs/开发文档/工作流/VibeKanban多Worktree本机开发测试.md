@@ -103,8 +103,8 @@ bash scripts/vk_dev.sh up
 /jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
         -> /jjk-vktodo <任务拆解目录> create（create-only）
         -> /jjk-cardrun <任务拆解目录> loop
-        -> python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>
-        -> python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master
+        -> python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>
+        -> python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir <任务拆解目录> --baseline master
         -> /jjk-review -> /jjk-test（或 /jjk-verify）
 ```
 
