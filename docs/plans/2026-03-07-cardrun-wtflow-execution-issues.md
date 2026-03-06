@@ -19,12 +19,15 @@
    - `wt-flow verify` 白名单缺少 `rg`，导致 `C01` done_gate 被误阻断；
    - `clarify_consistency_check` 缺字段，导致 `check_plan_vk_coverage.py` 初始校验失败；
    - `vk_cards.json` 顶层缺少 `task_to_pr_mapping`，导致 `cardrun bootstrap` 阻断。
-2. **仍需后续系统性修复**的问题有 5 类：
+2. **仍需后续系统性修复**的问题有 8 类：
    - `wtimp dispatch` JSON 回执/超时机制不稳；
    - `.state` 运行态文件对白名单依赖过强；
    - 中文路径 dirty 检测依赖 `core.quotePath=false` 临时配置；
    - `scripts/wt-flow.sh` wrapper 脱离仓库路径后不可移植；
-   - `C03` 卡片契约本身自冲突，无法在不违约的前提下继续执行。
+   - `C03` 卡片契约本身自冲突，无法在不违约的前提下继续执行；
+   - `logs/` 产物被忽略，usage 观测结果默认不会进入提交证据；
+   - `C07` 退役门禁天然依赖 7 天 wall-clock 观测窗口，单轮 `cardrun` 无法自然闭环；
+   - `G01` 工作流文档仍引用旧脚本命令，与统一入口迁移后的口径不一致。
 
 ---
 
@@ -41,6 +44,9 @@
 | WF-07 | P0 | `C03` 卡片契约自冲突 | 不能“干净地”继续 wrapper 卡 | 待修复 | 暂停执行 `C03` | 先修 `C03` 契约/白名单，再继续 cardrun |
 | WF-08 | P1 | `clarify_consistency_check` 缺字段导致 coverage 检查误报 | `cardrun` 前置校验初始失败 | 已现场修复 | 已补 4 个缺失字段 | 给契约字段完整性补回归测试 |
 | WF-09 | P1 | `vk_cards.json` 顶层缺少 `task_to_pr_mapping` | `bootstrap` 报 `CARDRUN_PR_MAPPING_MISSING` | 已现场修复 | 已补顶层映射 | 给 `vkplan` 产物增加 schema 级校验 |
+| WF-10 | P1 | `logs/` 被 `.gitignore` 忽略 | `C05` usage 观测证据默认不会随提交落库 | 待修复 | 提交时需 `git add -f logs/workflow-gate-usage.jsonl` | 明确日志产物策略，避免证据与代码分离 |
+| WF-11 | P0 | `C07` 退役门禁依赖 7 天 wall-clock 观测窗口 | 单轮 `jjk-cardrun` 无法在同一执行波次内自然闭环 | 待修复 | 先以 `full-gate` 真实阻断，不跳过 7 天窗口 | 拆分“门禁建设”与“退役放行”两个阶段性完成定义 |
+| WF-12 | P1 | `G01` 工作流文档仍引用旧脚本命令 | 验收文档口径与统一入口迁移结果不一致 | 待修复 | 以 `v3` 退役口径和统一入口实现为准 | 同步 `G01`、命令文档、技能文档的验收命令引用 |
 
 ---
 
@@ -216,13 +222,81 @@
 
 ---
 
+### WF-10 `logs/` 被 `.gitignore` 忽略导致 usage 证据默认不入提交
+
+**现象**
+- `C05` 新增的 usage 观测文件位于：
+  - `logs/workflow-gate-usage.jsonl`
+- 该路径被 `.gitignore` 忽略，常规 `git add` 不会纳入提交。
+
+**影响**
+- `C05` 已完成“代码能力”，但若忘记 `git add -f`，提交中会缺失观测基线，导致后续 `C07`/`G01` 只能看到能力看不到证据。
+
+**现场处理**
+- 本轮通过人工约定：提交 usage 观测卡时必须显式执行：
+  - `git add -f logs/workflow-gate-usage.jsonl`
+
+**后续修复建议**
+1. 为 workflow-gate usage 日志单独定义产物策略：提交基线样本 / 运行态滚动日志二选一；
+2. 若保留提交样本，建议迁到非忽略目录或提供导出命令；
+3. 在 `C05`/`C07` 验收命令中增加“观测证据文件存在性”提示。
+
+---
+
+### WF-11 `C07` 退役门禁依赖 7 天 wall-clock 观测窗口
+
+**现象**
+- `C07` 新增 `full-gate` 后，真实 blocker 为：
+  - `ZERO_CALL_WINDOW_NOT_MATURE`
+- 当前 usage 最早观测时间约为：
+  - `2026-03-06T19:58:13Z`
+- 依 7 天窗口，最早放行时间约为：
+  - `2026-03-13T19:58:13Z` 之后。
+
+**影响**
+- `jjk-cardrun` 的“同轮串行执行”可以完成 `C01-C06`，但无法在同一轮自然完成 `C07 -> G01` 的最终放行；
+- 若工程流没有区分“门禁建设完成”和“时间窗放行完成”，执行器容易被误判为卡死。
+
+**结论**
+- 这是**设计上正确但调度上未显式建模**的问题：`C07` 不应为了收尾而绕过 7 天窗口，而应输出真实阻断并等待时间成熟。
+
+**后续修复建议**
+1. 将 `C07` 拆成“门禁能力建设完成”和“时间窗成熟后退役放行”两个阶段状态；
+2. 在 `cardrun`/`wt-flow verify` 中显式支持 time-gated blocker，避免误判为普通失败；
+3. 在任务文档中记录 `eligible_after_utc`，作为后续恢复执行的唯一放行时刻。
+
+---
+
+### WF-12 `G01` 工作流文档仍引用旧脚本命令
+
+**现象**
+- 当前 `WS-G01_G01_全链路验收门禁.md` 仍要求执行：
+  - `python3 scripts/check_clarify_plan_alignment.py ...`
+  - `python3 scripts/check_plan_vk_coverage.py ...`
+- 但 `C04` 已把命令/技能/文档口径迁移到统一入口 `scripts/check_workflow_contract.py`。
+
+**影响**
+- 实际实现已统一入口，验收文档却仍按旧命令表述，造成“实现收敛、文档回退”的双口径；
+- 后续若继续推进 legacy wrapper 退役，`G01` 会把过时命令继续固化到验收链路。
+
+**现场结论**
+- 本轮以统一入口与 `v3` 退役口径为准，`G01` 文档需要在后续卡片中补迁移，而不应倒逼代码回退。
+
+**后续修复建议**
+1. 更新 `WS-G01` 的 acceptance / check_cmd 为统一入口调用；
+2. 同步 `.cursor/commands/`、`.agents/skills/` 与任务拆解文档，保持同一口径；
+3. 为“文档命令仍引用 legacy entry”增加回归检查，避免再次漂移。
+
+---
+
 ## 4. 修复优先级建议
 
 | 波次 | 目标 | 建议纳入的问题 |
 |---|---|---|
 | Wave 1 | 恢复工程流稳定执行 | WF-02, WF-03, WF-04, WF-07 |
-| Wave 2 | 降低误操作与调试成本 | WF-05, WF-06 |
-| Wave 3 | 强化契约与回归测试 | WF-01, WF-08, WF-09 |
+| Wave 2 | 让退役门禁可持续运行 | WF-10, WF-11, WF-12 |
+| Wave 3 | 降低误操作与调试成本 | WF-05, WF-06 |
+| Wave 4 | 强化契约与回归测试 | WF-01, WF-08, WF-09 |
 
 ---
 
@@ -231,9 +305,12 @@
 1. **P0**：`cardrun_dispatch JSON 回执与超时治理`
 2. **P0**：`wt-flow dirty policy active-task 白名单内建化`
 3. **P0**：`修正 C03 契约与 legacy_wrapper_compat 验收路径`
-4. **P1**：`git porcelain 中文路径稳健解析`
-5. **P1**：`wrapper/实体脚本单一真理源治理`
-6. **P1**：`clarify/vk_cards schema 回归测试`
+4. **P0**：`time-gated retirement blocker 显式建模`
+5. **P1**：`workflow-gate usage 日志产物策略治理`
+6. **P1**：`G01/命令/技能文档统一入口再同步`
+7. **P1**：`git porcelain 中文路径稳健解析`
+8. **P1**：`wrapper/实体脚本单一真理源治理`
+9. **P1**：`clarify/vk_cards schema 回归测试`
 
 ---
 
@@ -250,4 +327,9 @@
   - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/.state/PP-20260306-workflow-gate-retirement/`
 - 当前卡片契约：
   - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C03_P1_L1旧脚本wrapper兼容壳.md`
+  - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C07_P3_删除旧实现与兼容壳收口.md`
+  - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-G01_G01_全链路验收门禁.md`
+- 退役门禁观测证据：
+  - `logs/workflow-gate-usage.jsonl`
+  - `python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -`
 
