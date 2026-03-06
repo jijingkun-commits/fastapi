@@ -274,6 +274,10 @@ clarify_handoff_contract:
 ## 9. 一致性自检（机读）
 ```yaml
 clarify_consistency_check:
+  clarify_phase: approval
+  current_round: 1
+  question_mode: package
+  open_questions_count: 0
   product_contract_ready: true
   semantic_frozen: true
   contract_source_decided: true

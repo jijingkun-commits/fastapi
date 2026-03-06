@@ -1,8 +1,8 @@
 # 用户意图优化（v2：运行态契约收敛）设计说明
 
 > 文档版本：v2.0  
-> 更新时间：2026-03-06  
-> 设计状态：`frozen_pending_approval`
+> 更新时间：2026-03-07  
+> 设计状态：`approved`
 
 ## 0. 结论先行
 
@@ -10,6 +10,25 @@
 - `intent_plan` 仅在 `decompose_goals` 规划阶段内部保留，避免直接删除带来的稳定性回归。
 - 所有阻塞/异常/覆盖缺口统一回流 `supervisor`，禁止专家节点承担兜底。
 - 本文档满足 `$jjk-clarify` v3.2 冻结结构，并冻结“契约源唯一化”：运行态只读只写 `additional_kwargs.router_result_v2`。
+
+## 0.1 可审批摘要
+
+| 维度 | 冻结结论 |
+|---|---|
+| 运行态目标源 | 仅 `decomposed_goals` |
+| 运行态委派字段 | 仅 `handoff.target_agent` |
+| 运行态结构化结果 | 仅 `additional_kwargs.router_result_v2` |
+| 规划阶段中间对象 | 保留 `intent_plan`，但仅限 `decompose_goals` 内部 |
+| 兜底责任 | 仅 `supervisor`，专家节点不兜底 |
+| 规划输入 | `user_query` + 最近 5 轮已落库、面向用户的 `chat_message` 对话 |
+| 窗口计数 | 仅统计 `user/assistant`；`tool/system` 与内部结构化产物不计入 |
+| 当前输入是否入窗 | 否；当前未落库输入只作为独立 `user_query` |
+| 窗口不足处理 | 允许短列表/空列表，不因不足 5 轮触发澄清 |
+| 指代无法消解 | 产出 `clarify_needed -> supervisor`，禁止猜测 |
+
+- 审批重点 1：运行态不再读取 `state.intent_plan`，彻底消除双轨语义。
+- 审批重点 2：`decompose_goals` 只消费“当前用户输入 + 已落库用户可见对话视图”，不读取 `tool/system/内部中间态`。
+- 审批重点 3：本方案不引入开关、不做旧版兼容，回退仅允许代码级回退。
 
 ## 1. scope_contract
 
@@ -380,17 +399,15 @@ clarify_consistency_check:
 
 ## 11. 审批记录
 
-- design_approved: false
-- approved_at: ""
-- approved_round: round-0
-- approval_evidence: ""
-- approval_mode: pending
-- go_no_go: NO_GO
-- blocking_issues:
-  - WAITING_USER_APPROVAL
+- design_approved: true
+- approved_at: 2026-03-07 03:01 CST
+- approved_round: round-1
+- approval_evidence: "确认"
+- approval_mode: approved
+- go_no_go: GO
+- blocking_issues: []
 
-## 12. 审批动作（必须）
+## 12. 审批动作（完成）
 
-以上设计已完全冻结。  
-请回复：**确认 / 需要修改XX点 / 否**  
-（回复“确认”或“是”且门禁全部通过即视为审批通过，可进入 `$jjk-plan`；否则记录条件采纳并继续澄清）
+- 审批结果：已于 2026-03-07 03:01 CST 完成审批。
+- 下游状态：可进入 `$jjk-plan`。

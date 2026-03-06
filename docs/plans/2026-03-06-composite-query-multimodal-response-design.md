@@ -488,13 +488,13 @@ clarify_handoff_contract:
         - fallback 可见且有 warning
         - 断线重连去重与多结果回放保序通过
     requirement_seeds:
-      - D-01
-      - D-02
-      - D-03
-      - D-04
-      - D-05
-      - D-06
-      - D-07
+      - design_item: D-01
+      - design_item: D-02
+      - design_item: D-03
+      - design_item: D-04
+      - design_item: D-05
+      - design_item: D-06
+      - design_item: D-07
     implementation_seeds:
       - task_id: T-01
         file_paths:

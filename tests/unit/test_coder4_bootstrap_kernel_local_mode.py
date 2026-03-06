@@ -23,6 +23,7 @@ def _load_kernel_module():
     module = module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
+    module._run_coverage_gate = lambda **_kwargs: {"ok": True}
     return module
 
 
@@ -58,6 +59,8 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
             "card_id": "C01",
             "title": "C01 preflight",
             "hard_depends_on": [],
+            "task_ids": ["T01"],
+            "pr_id": "PR-001",
             "task_mode": "implementation-card",
             "merge_required": True,
         },
@@ -65,6 +68,8 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
             "card_id": "C02",
             "title": "C02 kernel",
             "hard_depends_on": ["C01"],
+            "task_ids": ["T02"],
+            "pr_id": "PR-002",
             "task_mode": "implementation-card",
             "merge_required": True,
         },
@@ -72,12 +77,26 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
             "card_id": "C03",
             "title": "C03 follow-up",
             "hard_depends_on": ["C02"],
+            "task_ids": ["T03"],
+            "pr_id": "PR-003",
             "task_mode": "implementation-card",
             "merge_required": True,
         },
     ]
     vk_cards_path = active_task_path.parent / TASK_SPLIT_DIR / "vk_cards.json"
-    _write_json(vk_cards_path, {"card_order": card_order, "cards": cards})
+    _write_json(
+        vk_cards_path,
+        {
+            "execution_mode": "serial",
+            "card_order": card_order,
+            "cards": cards,
+            "task_to_pr_mapping": [
+                {"task_id": "T01", "pr_id": "PR-001"},
+                {"task_id": "T02", "pr_id": "PR-002"},
+                {"task_id": "T03", "pr_id": "PR-003"},
+            ],
+        },
+    )
 
     state_path = tmp_path / ".omc" / "state" / "task-runner-state.json"
     if state_payload is None:
