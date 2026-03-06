@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
+import subprocess
+import sys
 from pathlib import Path
-import runpy
 
 
-def main() -> int:
-    target = (Path(__file__).resolve().parent / "coder4" / "check_integration_gate.py").resolve()
-    runpy.run_path(str(target), run_name="__main__")
-    return 0
+def wrapper_notice() -> str:
+    return "[DEPRECATED] check_integration_gate.py 已降级为 wrapper，请改用 python3 scripts/check_workflow_contract.py --mode integration_gate"
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    print(wrapper_notice(), file=sys.stderr)
+    command = [
+        sys.executable,
+        str((Path(__file__).resolve().parent / "check_workflow_contract.py").resolve()),
+        "--mode",
+        "integration_gate",
+        *args,
+    ]
+    completed = subprocess.run(command, check=False)
+    return completed.returncode
 
 
 if __name__ == "__main__":
