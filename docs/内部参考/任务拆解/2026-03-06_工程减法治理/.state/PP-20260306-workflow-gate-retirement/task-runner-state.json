@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0.0",
+  "task_key": "PP-20260306-workflow-gate-retirement",
+  "card_order": [
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C07",
+    "G01"
+  ],
+  "card_status_map": {
+    "C01": "done",
+    "C02": "done"
+  },
+  "card_status": {
+    "C01": "done",
+    "C02": "done"
+  },
+  "last_updated": "2026-03-06T19:35:39Z",
+  "created_at": "2026-03-06T19:12:26.315918+00:00",
+  "current_card": "C02",
+  "last_action": "merge",
+  "last_action_result": "merged_to_base",
+  "gate_results": {
+    "C01": {
+      "passed": true,
+      "checked_at": "2026-03-06T19:29:59Z",
+      "worktree_path": "/Users/jijingkun/bojxAI/fastapi/.worktrees/PP-20260306-workflow-gate-retirement/C01/1772824637-594b",
+      "evidence": [
+        {
+          "check": "cd /Users/jijingkun/bojxAI/fastapi && rg -n \"NO-GO|rm scripts/check_\\\\*\\\\.py\" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md",
+          "normalized_check": "rg -n \"NO-GO|rm scripts/check_\\\\*\\\\.py\" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md",
+          "run_check": "rg -n \"NO-GO|rm scripts/check_\\\\*\\\\.py\" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md",
+          "prefix": "rg",
+          "result": "pass",
+          "output": "docs/内部参考/工程减法体检报告_2026-03-06.md:200:### 3.1 冻结执行（NO-GO）\ndocs/内部参考/工程减法体检报告_2026-03-06.md:205:- **团队执行禁令**：停止直接执行 `rm scripts/check_*.py`，统一按 `v3` 退役流程推进。\ndocs/内部参考/工程减法体检报告_2026-03-06.md:209:| 直接删除 5 个门禁脚本 | `NO-GO` | 先统一入口与 wrapper，再软退役 |\ndocs/内部参考/工程减法体检报告_2026-03-06.md:210:| 全量删除过程报告文件 | `NO-GO` | 按任务生命周期与 TTL 归档 |\ndocs/内部参考/工程减法体检报告_2026-03-06.md:211:| 整体清空 `gate_results/merge_results` | `NO-GO` | 仅按 `card_id + 时间窗` 裁剪内联证据键 |\ndocs/内部参考/工程减法体检报告_2026-03-06_v3.md:42:- 退役动作必须满足 NO-GO 门禁（调用链清零、兼容壳在线、dry-run/验收通过）。  \ndocs/内部参考/工程减法体检报告_2026-03-06_v3.md:114:## 5. NO-GO 门禁（阻断条件）\ndocs/内部参考/工程减法体检报告_2026-03-06_v3.md:116:| 阶段 | GO 条件（全部满足） | NO-GO（任一命中即阻断） |\ndocs/内部参考/工程减法体检报告_2026-03-06_v3.md:131:| 冻结原报告 `3.1` 删除命令 | 标注 `NO-GO` | 团队不再执行 `rm scripts/check_*.py` |\ndocs/内部参考/工程减法体检报告_2026-03-06_v3.md:134:> 执行说明：人工命令、命令模板、技能引用三类入口统一停用 `rm scripts/check_*.py`，仅允许按本 `v3` 流程推进。"
+        }
+      ]
+    },
+    "C02": {
+      "passed": true,
+      "checked_at": "2026-03-06T19:35:38Z",
+      "worktree_path": "/Users/jijingkun/bojxAI/fastapi/.worktrees/PP-20260306-workflow-gate-retirement/C02/1772825485-7c56",
+      "evidence": [
+        {
+          "check": "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
+          "normalized_check": "python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
+          "run_check": "python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
+          "prefix": "python3",
+          "result": "pass",
+          "output": "{\n  \"ok\": true,\n  \"task_split_dir\": \"\",\n  \"design\": \"/Users/jijingkun/bojxAI/fastapi/.worktrees/PP-20260306-workflow-gate-retirement/C02/1772825485-7c56/docs/plans/2026-03-06-workflow-gate-retirement-design.md\",\n  \"requirements\": \"/Users/jijingkun/bojxAI/fastapi/.worktrees/PP-20260306-workflow-gate-retirement/C02/1772825485-7c56/docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md\",\n  \"implementation_plan\": \"/Users/jijingkun/bojxAI/fastapi/.worktrees/PP-20260306-workflow-gate-retirement/C02/1772825485-7c56/docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md\",\n  \"summary\": {\n    \"traceability_rows\": 7,\n    \"implementation_tasks\": 7,\n    \"tasks_missing_required_details\": 0\n  },\n  \"errors\": []\n}"
+        }
+      ]
+    }
+  },
+  "no_increment_count": 0,
+  "merge_results": {
+    "C01": {
+      "merged": true,
+      "merged_at": "2026-03-06T19:30:10Z",
+      "branch": "feature/PP-20260306-workflow-gate-retirement/C01/1772824637-594b",
+      "base_branch": "master",
+      "merge_commit": "27c2396afe5538e0c8cdf22a679d05e94ac6692a"
+    },
+    "C02": {
+      "merged": true,
+      "merged_at": "2026-03-06T19:35:39Z",
+      "branch": "feature/PP-20260306-workflow-gate-retirement/C02/1772825485-7c56",
+      "base_branch": "master",
+      "merge_commit": "dbed6bf194a4e5090bbd1090294dbb476412398b"
+    }
+  }
+}
