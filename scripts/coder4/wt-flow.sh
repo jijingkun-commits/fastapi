@@ -820,7 +820,7 @@ cmd_next() {
   while IFS= read -r card; do
     [[ -z "$card" ]] && continue
     status="$(_normalize_status "$(_state_status_value "$state_file" "$card")")"
-    if [[ "$status" == "in_progress" || "$status" == "in_review" ]]; then
+    if [[ "$status" == "in_progress" || "$status" == "in_review" || "$status" == "verified" ]]; then
       if [[ -n "$active_cards" ]]; then
         active_cards="${active_cards},${card}"
       else
@@ -830,7 +830,7 @@ cmd_next() {
   done < <(jq -r '.card_order[]?' "$state_file")
 
   if [[ "$execution_mode" == "serial" && -n "$active_cards" ]]; then
-    _log "BLOCKED: 串行模式存在进行中卡片: ${active_cards}"
+    _log "BLOCKED: 串行模式存在未收口卡片: ${active_cards}"
     return 2
   fi
 
@@ -952,8 +952,8 @@ cmd_merge() {
 
       current_status="$(_state_status_value "$task_state_file" "$merge_card_id")"
       normalized_status="$(_normalize_status "$current_status")"
-      if [[ "$normalized_status" != "verified" && "$normalized_status" != "done" ]]; then
-        _die "卡片 ${merge_card_id} 当前状态=${normalized_status}，未通过 done_gate verify，禁止 merge"
+      if [[ "$normalized_status" != "verified" ]]; then
+        _die "卡片 ${merge_card_id} 当前状态=${normalized_status}，未处于 verified，禁止 merge"
       fi
     fi
   fi

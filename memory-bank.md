@@ -5,8 +5,10 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 - 2026-03-05｜规则分层落地（ACTIVE）→ `AGENTS.md`
+- 2026-03-06｜MCP 权威配置收敛（ACTIVE）→ `docs/plans/2026-03-06-mcp-governance-design.md`
 - 2026-03-06｜复合提问多模态响应契约收敛（ACTIVE）→ `docs/plans/2026-03-06-composite-query-multimodal-response-design.md`
 - 2026-03-06｜Clarify 发散/冻结分流口径调整（ACTIVE）→ `.cursor/commands/jjk-clarify.md`
+- 2026-03-07｜`/ask` 退化为 clarify 兼容壳（ACTIVE）→ `.cursor/commands/ask.md`
 - 2026-03-06｜cardrun 默认执行器切换至 wtimp（ACTIVE）→ `docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`
 - 2026-03-06｜工程减法退役流程冻结（ACTIVE）→ `docs/plans/2026-03-06-workflow-gate-retirement-design.md`
 
@@ -28,6 +30,16 @@
 - 历史记录按月归档至 `docs/内部参考/决策归档/`，本文件保留近期生效与关键里程碑。
 
 ## 决策记录
+
+### 2026-03-06 MCP 权威配置收敛
+- 状态：ACTIVE
+- 决策主题：Codex MCP 配置统一以用户本地运行时配置为权威源，项目内 `.mcp.json` 退化为协作镜像
+- 背景与问题：`/Users/jijingkun/.codex/config.toml` 与仓库内 `.mcp.json` 并存且不一致，导致 GitHub MCP 缺 Token、`vibe_kanban` 启动命令漂移、排障口径不统一
+- 最终决策：当前会话统一以 `/Users/jijingkun/.codex/config.toml` 为权威配置；`.mcp.json` 只保留无敏感信息的镜像；新增项目体检脚本在业务使用前暴露缺 Token、缺本地二进制、缺运行态等根因
+- 取舍理由：先修配置治理层而不是继续堆补丁，既消除双源漂移，也避免将敏感信息继续留在仓库
+- 影响范围：`/Users/jijingkun/.codex/config.toml`、`.mcp.json`、MCP 使用流程、工作流文档、体检脚本
+- 回退/失效条件：若后续 Codex 支持项目级单一 MCP 权威源且可安全管理密钥，可将镜像与全局配置再收敛为单源
+- 关联文档/代码：`docs/plans/2026-03-06-mcp-governance-design.md`、`docs/plans/2026-03-06-mcp-governance-plan.md`、`docs/开发文档/工作流/开发工作流.md`
 
 ### 2026-03-05 规则分层落地
 - 状态：ACTIVE
@@ -73,11 +85,21 @@
 - 状态：ACTIVE
 - 决策主题：`/jjk-clarify` 采用单指令闭环（命令内完成探索与冻结）
 - 背景与问题：原口径要求“可用时必须先走 brainstorming”，与 `/jjk-clarify` 的单方案冻结目标冲突，导致执行时频繁输出“规则冲突声明”，降低可用性
-- 最终决策：`/jjk-clarify` 默认在命令内执行“探索轮 + 冻结轮”；仅当用户明确要求头脑风暴且能力不可用时才标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`；新增禁止项，禁止把“brainstorming 冲突”作为固定话术，且禁止默认建议切换 `/ask`
-- 取舍理由：保留探索能力且不增加命令切换成本，确保你可只用一个命令完成可审批设计
+- 最终决策：`/jjk-clarify` 默认在命令内执行“探索轮 + 冻结轮”；默认提问模式统一为问题包（`question_mode=package`），歧义场景降级为单题追问；审批前必须写出 `clarify_consistency_check`，并满足 `clarify_phase=approval`、`open_questions_count=0`；同时新增 `python3 scripts/check_clarify_contract_consistency.py` 体检命令
+- 取舍理由：保留探索能力且不增加命令切换成本，并用显式状态机与自动体检降低命令/模板/镜像漂移
 - 影响范围：`.cursor/commands/jjk-clarify.md`、`.agents/skills/jjk-clarify/SKILL.md`、命令速查文档与 Codex prompts 镜像
 - 回退/失效条件：若后续统一流程框架强制探索与冻结命令解耦，可回退为“两阶段命令链”
 - 关联文档/代码：`.cursor/commands/jjk-clarify.md`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/技巧与速查/AI协作速查表.md`、`docs/开发文档/技巧与速查/vibe-coding开发技巧.md`
+
+### 2026-03-07 `/ask` 退化为 clarify 兼容壳
+- 状态：ACTIVE
+- 决策主题：`/ask` 从独立发散入口降级为 `/jjk-clarify` 兼容别名
+- 背景与问题：`/ask` 与 `/jjk-clarify` 同时被描述为主入口，导致工作流主链、状态归属与用户心智出现双源漂移
+- 最终决策：默认研发链路统一以 `/jjk-clarify` 起步；收到 `/ask` 时在当前会话内立即并入 `/jjk-clarify`，不再维护独立 `brainstorm.md` 或独立下游门禁；仅保留历史兼容说明
+- 取舍理由：以最小兼容成本换取单一状态机、单一权威产物与更低命令切换负担
+- 影响范围：`.cursor/commands/ask.md`、工作流手册、速查表、Codex prompts 镜像
+- 回退/失效条件：若后续平台必须恢复独立“仅发散不冻结”命令，应以新命令或新契约恢复，而不是回滚旧 `/ask` 双入口语义
+- 关联文档/代码：`.cursor/commands/ask.md`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`、`docs/开发文档/技巧与速查/vibe-coding开发技巧.md`
 
 ### 2026-03-06 cardrun 默认执行器切换至 wtimp
 - 状态：ACTIVE

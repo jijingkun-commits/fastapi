@@ -1,0 +1,20 @@
+{
+  "preflight_required": "C00",
+  "card_id": "C00",
+  "task_key": "PP-20260306-workflow-gate-retirement",
+  "passed": true,
+  "status": "ready",
+  "allow_enter": "C01/P0-freeze-governance",
+  "checked_at": "2026-03-06",
+  "updated_at": "2026-03-06T20:43:00+08:00",
+  "required_done_gate": [
+    "planning_contract.cards 与 vk_cards.cards 一致",
+    "Gate 卡片化完整且字段齐全",
+    "active_task 作用域三元组已绑定"
+  ],
+  "evidence": [
+    "implementation_plan 已补齐 planning_contract.cards",
+    "vk_cards 含 task_ids/pr_id/execution_contract/source_files",
+    "进入 C01 前已冻结 task_key 与 preflight_required"
+  ]
+}

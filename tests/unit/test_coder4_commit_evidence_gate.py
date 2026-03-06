@@ -33,7 +33,12 @@ def _build_ctx(module, *, dispatch_executor: str = "wtimp"):
         preflight_ok=True,
         preflight_reason="preflight_card_done",
         card_order=["C01"],
-        cards_by_id={"C01": {"card_id": "C01"}},
+        cards_by_id={
+            "C01": {
+                "card_id": "C01",
+                "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            }
+        },
         scoped_tasks=[],
         unscoped_tasks=[],
         card_status_map={"C01": "inprogress"},
@@ -51,9 +56,34 @@ def _build_ctx(module, *, dispatch_executor: str = "wtimp"):
     )
 
 
-def test_dispatch_requires_commit_sha_evidence():
+def test_dispatch_requires_commit_sha_evidence(monkeypatch, tmp_path):
     module = _load_kernel_module()
     ctx = _build_ctx(module)
+
+    monkeypatch.setattr(
+        module,
+        "build_wtimp_dispatch_request",
+        lambda *_args, **_kwargs: module.wtimp_dispatch_bridge.WtimpDispatchRequest(
+            task_key=ctx.task_key,
+            card_id="C01",
+            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            worktree_path=str((tmp_path / "wt-C01").resolve()),
+            executor_mode="cardrun_dispatch",
+        ),
+    )
+
+    def _raise_missing_commit(_request):
+        raise module.CardrunContractError(
+            "CARDRUN_NO_COMMIT_EVIDENCE",
+            "card_id=C01 dispatch 缺少 commit_sha 证据",
+            {
+                "card_id": "C01",
+                "action": "dispatch",
+                "dispatch_executor": "wtimp",
+            },
+        )
+
+    monkeypatch.setattr(module, "run_wtimp_dispatch", _raise_missing_commit)
 
     with pytest.raises(module.CardrunContractError) as exc_info:
         module.apply_action(
@@ -62,8 +92,7 @@ def test_dispatch_requires_commit_sha_evidence():
             "dispatch",
             "C01",
             "task-c01",
-            active_task_path=Path("/tmp/active-task.json"),
-            commit_sha="",
+            active_task_path=tmp_path / "active-task.json",
         )
 
     assert exc_info.value.code == "CARDRUN_NO_COMMIT_EVIDENCE"
@@ -83,7 +112,6 @@ def test_dispatch_rejects_unsupported_executor():
             "C01",
             "task-c01",
             active_task_path=Path("/tmp/active-task.json"),
-            commit_sha="abc123",
         )
 
     assert exc_info.value.code == "CARDRUN_EXECUTOR_UNSUPPORTED"

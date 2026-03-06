@@ -64,6 +64,7 @@ product_contract:
     - 不提供离线 token 逐条回放能力
     - 不提供多窗口实时协同状态同步
     - 不新增复杂抢占调度算法
+    - P0 不为 `t_chat_message` 新增 `run_id` 字段，消息层不建立 run 硬关联
   acceptance_gates:
     - MSC-CL-001: A/B 并发提交后均完成且状态分离
     - MSC-CL-002: 仅停止目标会话
@@ -89,6 +90,7 @@ product_contract:
 | 模块边界 | 前端 `RuntimeBucketRegistry`（展示与交互）/ 后端 `RunControlService`（生命周期与门禁）/ `t_chat_run`（一致性真理源）三层解耦。 |
 | 依赖方向 | `UI -> API -> Service -> DB` 单向依赖；禁止 UI 直接依赖内部 run 内存态。 |
 | 状态归属 | 跨请求、跨 worker 的 active 列表状态归属 DB；单请求流式取消判停归属内存态。 |
+| 消息归属 | P0 运行态真理源为 `t_chat_run`；`t_chat_message` 仅存消息内容，不承担 run 生命周期与 active 判定。 |
 | 错误责任 | 后端负责 4xx/5xx 语义裁决与日志上下文；前端仅负责可读提示与重试引导。 |
 
 ### 3.2 端到端数据流
@@ -106,7 +108,7 @@ flowchart LR
   INIT["Sidebar cold start"] --> AR["GET /api/v1/chat/runs/active"]
   AR --> DB
   AR --> DEC{"active_count > 0 ?"}
-  DEC -->|yes| POLL["every 2s poll /chat/runs/active"]
+  DEC -->|yes| POLL["poll success=2s; failure backoff=5s/10s"]
   DEC -->|no| UI["Merge badges + stop entries"]
   POLL --> DB
   POLL --> DEC
@@ -119,9 +121,93 @@ flowchart LR
 | run 状态机 | `running -> stopping -> stopped/completed/failed` |
 | 同线程提交 | 若同 `thread_id` 已有 active run，返回 `409 active_run_exists`，不做隐式替换 |
 | 用户并发上限 | 默认 3（`MAX_PARALLEL_STREAMS_PER_USER`，范围 1-10），超限返回 `429` |
-| active 列表刷新 | 冷启动拉取后，`active_count>0` 时每 2 秒轮询；`active_count=0` 立即停止轮询 |
+| active 列表刷新 | 冷启动拉取后，`active_count>0` 时成功固定 2 秒轮询；失败后退避到 5 秒、10 秒；任意一次成功立即恢复 2 秒；`active_count=0` 立即停止轮询；仅连续 3 次失败时显示轻提示 |
+| poll_hint_seconds 策略 | 健康态返回 `2`；失败退避态返回 `5` 或 `10`；由后端决定，前端不硬编码 |
+| active 接口顶层字段 | `items`、`active_count`、`poll_hint_seconds`、`server_time` |
+| active 接口 item 字段 | `run_id`、`thread_id`、`status`、`updated_at`、`last_activity_at` |
+| active 接口排序 | `last_activity_at DESC` -> `updated_at DESC` -> `run_id DESC` |
+| last_activity_at 策略 | 持久化在 `t_chat_run`；关键事件立即写；流式事件最多每 2 秒落库一次；读取时为空可回退 `updated_at` |
+| active 接口状态枚举 | `status` 仅允许 `running`、`stopping` |
+| active 接口禁止返回 | 不返回 `messages`、`prompt`、`user_id`、`error_detail` |
+| cancel 成功响应 | 必须返回最新 `run_id`、`thread_id`、`status`、`accepted`、`idempotent` |
+| cancel 失败错误码 | 固定为 `400`、`403`、`404` |
 | 停止幂等 | 目标 run 已处于 `stopping/stopped/completed/failed` 时，返回 `accepted=true,idempotent=true` |
 | 桶清理策略 | 终态保留 30 秒后清理，最多保留 10 个 bucket，超限按 LRU 清理非运行态 |
+
+
+### 3.3.1 `/chat/runs/active` 响应契约（P0 冻结）
+```yaml
+active_runs_response_contract:
+  top_level_required_fields:
+    - items
+    - active_count
+    - poll_hint_seconds
+    - server_time
+  poll_hint_semantics:
+    healthy_seconds: 2
+    failure_backoff_seconds: [5, 10]
+    ownership: server_driven
+  item_required_fields:
+    - run_id
+    - thread_id
+    - status
+    - updated_at
+    - last_activity_at
+  item_sort_order:
+    - last_activity_at DESC
+    - updated_at DESC
+    - run_id DESC
+  item_allowed_statuses:
+    - running
+    - stopping
+  excluded_fields:
+    - messages
+    - prompt
+    - user_id
+    - error_detail
+  rationale:
+    - `poll_hint_seconds` 由后端下发，避免前端硬编码轮询节奏
+    - P0 正常返回 `2`；失败退避时返回 `5` 或 `10`
+    - `last_activity_at` 用于判断 run 是否长时间无活动，不要求等同于 token 时间
+    - active 接口只服务运行态恢复与同步，不承担消息内容查询
+    - 默认按最近活动优先排序，保证用户先看到“最近还在动”的会话
+    - `updated_at` 与 `run_id` 作为次级排序键，避免列表抖动
+    - terminal 状态（`completed`、`failed`、`stopped`）不进入 active 列表，避免前端把终态误识别为可 stop
+```
+
+### 3.3.2 `last_activity_at` 持久化策略（P0 冻结）
+```yaml
+last_activity_persistence_contract:
+  truth_source: t_chat_run.last_activity_at
+  read_semantics:
+    primary: last_activity_at
+    fallback: updated_at
+  write_policy:
+    immediate_events:
+      - create_run_success
+      - first_visible_output
+      - interrupt
+      - result
+      - final_answer
+      - cancel_accepted
+      - completed
+      - failed
+      - stopped
+    throttled_events:
+      - token_stream
+      - visible_status_progress
+    throttle_rule:
+      max_db_write_frequency: once_per_2_seconds_per_run
+      in_memory_heartbeat: allowed
+  excluded_events:
+    - active_runs_query
+    - normal_list_read
+    - background_cleanup_scan
+  rationale:
+    - 保留用户可感知活动心跳，支撑排序、黄灯提示与刷新后恢复
+    - 避免 token 级高频写库把 `t_chat_run` 变成写热点
+    - 兼容过渡期数据：读取时允许回退到 `updated_at`
+```
 
 ### 3.4 异常语义（单策略冻结）
 | 错误码 | 触发条件 | 前端语义 |
@@ -132,6 +218,36 @@ flowchart LR
 | 409 | 同线程重复提交 | “当前会话仍在运行，请先停止或等待完成” |
 | 429 | 用户并发数超限 | “当前运行会话数已达上限，请稍后重试” |
 | 503 | active runs 查询不可用 | “运行态暂不可用，请稍后重试” |
+
+
+### 3.4.1 `/chat/runs/{run_id}/cancel` 响应契约（P0 冻结）
+```yaml
+cancel_run_response_contract:
+  request_required_fields:
+    - run_id
+    - thread_id
+  request_server_fixed_fields:
+    reason: user_cancelled
+    cancel_mode: hard
+  client_excluded_fields:
+    - reason
+    - cancel_mode
+  success_required_fields:
+    - accepted
+    - idempotent
+    - run_id
+    - thread_id
+    - status
+  failure_status_codes:
+    - 400
+    - 403
+    - 404
+  semantics:
+    - 产品语义收敛为单一“用户取消”动作；客户端不暴露自定义 reason 与 cancel_mode
+    - 成功响应必须返回最新 `thread_id` 与最新 `status`，供前端立即更新目标会话运行态
+    - terminal 状态与 stopping 状态走幂等成功响应，不返回 `409`
+    - 失败语义固定为参数不合法 `400`、权限不足 `403`、目标不存在 `404`
+```
 
 ### 3.5 契约源唯一化（强制）
 ```yaml
@@ -159,6 +275,22 @@ replay_canonical_contract:
     - 读取时若 additional_kwargs 缺失，则降级读 metadata
 ```
 
+### 3.7 消息持久化边界（P0 冻结）
+```yaml
+message_persistence_boundary:
+  p0_decision:
+    - run_id 的持久化真理源为 t_chat_run
+    - 前端内存仅缓存实时运行态，不作为跨刷新真理源
+    - t_chat_message 本轮不新增 run_id 字段
+    - 消息层暂不建立 run-to-message 硬关联
+  rationale:
+    - 本轮目标是并发运行态恢复、停止隔离与多 worker 一致性
+    - 上述目标仅依赖 t_chat_run + /chat/runs/active 即可成立
+    - 将 run_id 注入消息表属于审计/回放增强，不是 P0 阻断项
+  future_upgrade:
+    - 若后续需要 run 级审计、回放、精确消息追溯，可在 P1/P2 为 t_chat_message 增加 nullable run_id
+```
+
 ---
 
 ## 4. `requirement_seeds`（字段级需求原子）
@@ -174,14 +306,30 @@ requirement_seeds:
     title: 活跃会话恢复与停留同步
     trigger: 页面冷启动后 active_count>0 时周期拉取
     input_fields: [jwt_token, optional_limit, poll_interval_seconds]
-    output_fields: [run_id, thread_id, status, updated_at]
-    failure_semantics: [503 active_runs_unavailable]
+    output_fields:
+      - items.run_id
+      - items.thread_id
+      - items.status
+      - items.updated_at
+      - items.last_activity_at
+      - active_count
+      - poll_hint_seconds
+      - server_time
+    failure_semantics: [503 active_runs_unavailable, poll_backoff_5s_10s, show_soft_notice_after_3_failures]
+    freshness_contract:
+      source_field: items.last_activity_at
+      fallback_field: items.updated_at
+      stale_hint_threshold_seconds: 60
   - seed_id: RS-003
     title: 停止隔离
     trigger: 用户点击 stop
-    input_fields: [run_id, thread_id, optional_reason, optional_cancel_mode]
+    input_fields: [run_id, thread_id]
+    server_fixed_fields:
+      reason: user_cancelled
+      cancel_mode: hard
     output_fields: [accepted, idempotent, run_id, thread_id, status]
     failure_semantics: [400 thread_id_missing_or_mismatch, 403 forbidden, 404 run_not_found]
+    failure_status_codes: [400, 403, 404]
   - seed_id: RS-004
     title: 同线程冲突阻断
     trigger: create_run 前校验
@@ -342,8 +490,8 @@ risk_rollback_contract:
 
     - risk_id: RK-005
       title: 页面停留时运行态不同步
-      mitigation: active_count>0 条件轮询（2s）+ active=0 自动停轮询
-      observability: [active_poll_latency_ms, active_poll_error_rate, stale_badge_count]
+      mitigation: active_count>0 条件轮询（success=2s, failure backoff=5s/10s）+ active=0 自动停轮询 + 连续 3 次失败后轻提示
+      observability: [active_poll_latency_ms, active_poll_error_rate, stale_badge_count, active_poll_consecutive_failures]
 ```
 
 ---
@@ -471,6 +619,7 @@ clarify_handoff_contract:
       - active_count
       - parallel_limit_reject_count
       - active_poll_latency_ms
+      - active_poll_consecutive_failures
     risk_counterexample_map:
       - risk_id: RK-001
         counterexample: 两个并发请求同时通过计数检查
@@ -486,6 +635,8 @@ clarify_handoff_contract:
       - 当前数据库支持用户级并发门禁所需锁语义
       - 前端可在 Sidebar 与 ChatInput 共用 thread 上下文
       - 运行态恢复要求会话级即时可见，不要求 token 级回放
+      - `last_activity_at` 持久化在 `t_chat_run`，并采用关键事件立即写 + 流式 2 秒节流写
+      - P0 不修改 `t_chat_message` 表结构，run 与消息的硬关联留待 P1/P2 评估
 ```
 
 ---

@@ -167,4 +167,5 @@ bash scripts/vk_cleanup.sh     # 清理进程
 | 新增项目脚本 | 直接放 `scripts/` 根目录或对应子目录（`db/`、`data/`） |
 | 新增 Cursor 规则/命令 | 在 `.cursor/rules/` 或 `.cursor/commands/` 新增文件，然后 `python3 scripts/sync_rules_to_cc.py`（同时镜像 `AGENTS.md -> CLAUDE.md`，同步到 `.claude/*`，并将命令同步到 `~/.codex/prompts/`） |
 | 生成 JJK Skills 镜像 | 执行 `python3 scripts/sync_rules_to_cc.py --only commands`，将 `.cursor/commands/jjk-*.md` 生成到 `.agents/skills/jjk-*/SKILL.md`（仅同步 SKILL.md，不注入 prompt 注册） |
+| Clarify 命令体检 | 执行 `python3 scripts/check_clarify_contract_consistency.py`，校验 `.cursor/commands/jjk-clarify.md`、模板、Skill 镜像与 `~/.codex/prompts/jjk-clarify.md` 是否一致 |
 | 新增 CC 手工规则 | 创建 `.claude/rules/xxx.md`，在 sync 脚本 `MANUAL_FILES` 中注册文件名 |

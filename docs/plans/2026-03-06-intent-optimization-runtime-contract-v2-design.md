@@ -80,6 +80,12 @@
 ### 3.3 状态归属（冻结）
 
 - 规划态唯一中间对象：`intent_plan`（仅 `S1_PLAN`）。
+- 规划输入采用最小显式字段契约：`user_query`、`messages`（`chat_message` 落库的最近 5 轮 `user/assistant` 对话），禁止使用 opaque context bag。
+- 轮次计数规则：1 轮 = 1 条落库 `user` 消息 + 紧随其后的 1 条落库 `assistant` 消息；若当前轮尚未产生 `assistant` 输出，则保留该未完成轮。
+- 轮次计数排除项：仅统计 `chat_message` 中已落库的面向用户 `user/assistant` 消息；`tool`、`system`、内部结构化产物以及未落库运行态消息不进入 `decompose_goals` 输入视图。
+- 当前输入规则：本次尚未落库的当前用户输入仅作为独立 `user_query` 参与本次意图识别，不计入 `messages` 的 5 轮窗口。
+- assistant 取值规则：仅纳入最终面向用户展示并已落库的 `assistant` 回复；中间推理、内部草稿、结构化中间产物不纳入 5 轮窗口。
+- 窗口不足规则：若历史不足 5 轮，允许使用短列表或空列表进入 `decompose_goals`；不得因“未凑满 5 轮”单独触发澄清。
 - 运行态唯一目标源：`decomposed_goals`（`S2+` 全阶段）。
 - 运行态唯一委派字段：`handoff.target_agent`。
 - 重放幂等键：`turn_id + goal_id`。
@@ -89,6 +95,7 @@
 - 单策略：任意运行态合同异常均 `block -> supervisor_fallback`，不进入专家兜底。
 - 单策略：`target_not_in_allowed_agents` 一律进入 `supervisor` 重新组织答复，不采用“专家侧自行修复”。
 - 单策略：planner 失败仅触发 `heuristic_fallback`，不终止主链路。
+- 单策略：若仅靠 `user_query + messages` 仍无法消解指代，则产出 `clarify_needed` 并回流 `supervisor`，禁止猜测用户意图。
 
 ### 3.5 端到端数据流
 
@@ -120,7 +127,7 @@ C --> O[Final Answer]
 | 运行态目标源单轨化 | FR-01 | 进入路由与分发路径 | `decomposed_goals` | `additional_kwargs.router_result_v2.route_decisions` | 缺失目标触发 `no_pending_goal` 并回流 supervisor | `revert:T01~T03` |
 | handoff 契约强校验 | FR-02 | 生成 handoff | `target_agent/task_description/frame` | `blocked_records` | 字段缺失触发 `invalid_*` 并回流 supervisor | `revert:T02` |
 | fallback 主体唯一化 | FR-03 | block/coverage 缺口/运行异常 | `blocked_handoffs` | `supervisor_fallback_activated` | 不允许专家兜底 | `revert:T03~T04` |
-| planner 规划能力保留 | FR-04 | 调用 `decompose_goals` | `user_query + planner_runtime_context` | `goals(source=...)` | `planner_model_failed -> heuristic_fallback` | `revert:planner-preservation-delta` |
+| planner 规划能力保留 | FR-04 | 调用 `decompose_goals` | `user_query + messages(last_5_persisted_user_visible_chat_turns)` | `goals(source=...)` | `planner_model_failed -> heuristic_fallback`；指代无法消解时 `clarify_needed -> supervisor` | `revert:planner-preservation-delta` |
 | 回放字段归一 | FR-05 | 记录结构化路由结果 | `additional_kwargs.router_result_v2` | `additional_kwargs.router_result_v2(version=v2)` | 检测到 `legacy_field_detected` 或 `canonical_missing` 时 fail-fast 并记观测事件 | `revert:canonical-router-result-v2` |
 
 ## 5. implementation_seeds（任务原子）
@@ -246,10 +253,17 @@ clarify_handoff_contract:
         fr_id: FR-04
         trigger: decompose_goals 调用
         input_contract:
-          required_fields: [user_query, planner_runtime_context]
+          required_fields: [user_query, messages]
+          constraints:
+            messages_window: recent_5_persisted_user_visible_chat_turns
+            included_roles: [user, assistant]
+            message_source: persisted_user_visible_chat_message_view
+            assistant_message_scope: final_user_visible_reply_only
+            current_user_query_counted_in_window: false
+            allow_short_or_empty_window: true
         output_contract:
           required_fields: [goals, source]
-        failure_semantics: planner_model_failed -> heuristic_fallback
+        failure_semantics: planner_model_failed -> heuristic_fallback; unresolved_reference -> clarify_needed
         observability_fields: [planner_mode, source, fallback_hit_rate]
         rollback_anchor: revert:planner-preservation-delta
         acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
@@ -348,6 +362,7 @@ clarify_handoff_contract:
       - 本轮允许新增单测文件以固化“运行态不读 intent_plan”回归。
       - 本轮不引入 feature flag，不提供双轨兼容层。
       - 不涉及前端协议变更，后端直接统一到 v2 字段契约。
+      - `messages` 默认取 `chat_message` 落库的最近 5 轮面向用户 `user/assistant` 对话；运行态临时消息与内部结构化产物不作为 `decompose_goals` 输入。
 ```
 
 ## 10. 一致性自检（机读）

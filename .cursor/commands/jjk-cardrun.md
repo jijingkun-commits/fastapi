@@ -91,10 +91,11 @@ python3 scripts/check_plan_vk_coverage.py --task-split-dir <task_split_dir> --ou
 ### 3) 主控调度子代理
 
 1. 必须把当前卡对应 `WS-*.md` 全量上下文交给子代理。
-2. 子代理入口固定：`/jjk-wtimp @<ws_file>`（`executor_mode=cardrun_dispatch`）。
-3. 仅允许“卡内并行”，禁止“跨卡并行”。
-4. 子代理失败立即阻断：`CARDRUN_SUBAGENT_FAILED`。
-5. 子代理回执必须包含当前卡片对应的 `commit_sha` 证据；缺失时阻断：`CARDRUN_NO_COMMIT_EVIDENCE`。
+2. 子代理入口固定：`/jjk-wtimp @<ws_file>`（`executor_mode=cardrun_dispatch`），并由 cardrun 在 `dispatch` 阶段真实调用。
+3. `wtimp` 必须以结构化 JSON 回执 `executor/subagent_id/ws_file/commit_sha/merge_sha`，禁止只靠人工口头回填。
+4. 仅允许“卡内并行”，禁止“跨卡并行”。
+5. 子代理失败立即阻断：`CARDRUN_SUBAGENT_FAILED`。
+6. 子代理回执必须包含当前卡片对应的 `commit_sha` 证据；缺失时阻断：`CARDRUN_NO_COMMIT_EVIDENCE`。
 
 ### 4) done_gate + merge 收口（强制）
 

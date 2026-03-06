@@ -7,6 +7,8 @@ import uuid
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = Path("scripts/coder4/coder4_bootstrap_kernel.py")
 
@@ -31,7 +33,12 @@ def _build_ctx(module, *, dispatch_executor: str = "wtimp", dispatch_executor_mo
         preflight_ok=True,
         preflight_reason="preflight_card_done",
         card_order=["C01"],
-        cards_by_id={"C01": {"card_id": "C01"}},
+        cards_by_id={
+            "C01": {
+                "card_id": "C01",
+                "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            }
+        },
         scoped_tasks=[],
         unscoped_tasks=[],
         card_status_map={"C01": "inprogress"},
@@ -73,9 +80,39 @@ def test_resolve_dispatch_executor_uses_active_then_default_then_cli_override():
     assert mode == "cardrun_dispatch"
 
 
-def test_apply_dispatch_action_returns_executor_evidence_and_executed_result():
+def test_apply_dispatch_action_returns_executor_evidence_and_executed_result(monkeypatch, tmp_path):
     module = _load_kernel_module()
     ctx = _build_ctx(module)
+
+    expected_request = module.wtimp_dispatch_bridge.WtimpDispatchRequest(
+        task_key=ctx.task_key,
+        card_id="C01",
+        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+        worktree_path=str((tmp_path / "wt-C01").resolve()),
+        executor_mode="cardrun_dispatch",
+    )
+
+    def _fake_build_request(*_args, **_kwargs):
+        return expected_request
+
+    def _fake_run_dispatch(request):
+        assert request == expected_request
+        return module.wtimp_dispatch_bridge.WtimpDispatchResult(
+            ok=True,
+            executor="wtimp",
+            executor_mode="cardrun_dispatch",
+            card_id="C01",
+            ws_file=expected_request.ws_file,
+            subagent_id="wtimp-C01-1",
+            commit_sha="abc123",
+            merge_sha=None,
+            changed_files=["scripts/coder4/coder4_bootstrap_kernel.py"],
+            acceptance_results=[{"cmd": "pytest -q", "exit_code": 0, "summary": "1 passed"}],
+            worktree_path=expected_request.worktree_path,
+        )
+
+    monkeypatch.setattr(module, "build_wtimp_dispatch_request", _fake_build_request)
+    monkeypatch.setattr(module, "run_wtimp_dispatch", _fake_run_dispatch)
 
     payload = module.apply_action(
         "http://127.0.0.1:3001",
@@ -83,11 +120,9 @@ def test_apply_dispatch_action_returns_executor_evidence_and_executed_result():
         "dispatch",
         "C01",
         "task-c01",
-        active_task_path=Path("/tmp/active-task.json"),
-        commit_sha="abc123",
-        merge_sha="def456",
-        subagent_id="agent-1",
-        ws_file="workstreams/WS-01.md",
+        active_task_path=tmp_path / "active-task.json",
+        commit_sha="manual-should-be-ignored",
+        merge_sha="manual-should-be-ignored",
     )
 
     assert payload["performed"] is True
@@ -95,8 +130,50 @@ def test_apply_dispatch_action_returns_executor_evidence_and_executed_result():
     assert payload["executor_mode"] == "wtimp"
     assert payload["executor_dispatch_mode"] == "cardrun_dispatch"
     assert payload["merge_owner"] == "wt_flow"
+    assert payload["subagent_id"] == "wtimp-C01-1"
+    assert payload["ws_file"] == expected_request.ws_file
     assert payload["commit_sha"] == "abc123"
-    assert payload["merge_sha"] == "def456"
+    assert payload["merge_sha"] is None
+    assert payload["worktree_path"] == expected_request.worktree_path
 
     assert module._derive_attempt_result("dispatch", applied_performed=True) == "dispatch_executed"
     assert module._derive_attempt_result("dispatch", applied_performed=False) == "dispatch_pending"
+
+
+def test_apply_dispatch_action_maps_bridge_error_to_subagent_failed(monkeypatch, tmp_path):
+    module = _load_kernel_module()
+    ctx = _build_ctx(module)
+
+    monkeypatch.setattr(
+        module,
+        "build_wtimp_dispatch_request",
+        lambda *_args, **_kwargs: module.wtimp_dispatch_bridge.WtimpDispatchRequest(
+            task_key=ctx.task_key,
+            card_id="C01",
+            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            worktree_path=str((tmp_path / "wt-C01").resolve()),
+            executor_mode="cardrun_dispatch",
+        ),
+    )
+
+    def _raise_subagent_failed(_request):
+        raise module.CardrunContractError(
+            "CARDRUN_SUBAGENT_FAILED",
+            "wtimp exec failed",
+            {"card_id": "C01", "dispatch_executor": "wtimp"},
+        )
+
+    monkeypatch.setattr(module, "run_wtimp_dispatch", _raise_subagent_failed)
+
+    with pytest.raises(module.CardrunContractError) as exc_info:
+        module.apply_action(
+            "http://127.0.0.1:3001",
+            ctx,
+            "dispatch",
+            "C01",
+            "task-c01",
+            active_task_path=tmp_path / "active-task.json",
+        )
+
+    assert exc_info.value.code == "CARDRUN_SUBAGENT_FAILED"
+    assert exc_info.value.details["card_id"] == "C01"

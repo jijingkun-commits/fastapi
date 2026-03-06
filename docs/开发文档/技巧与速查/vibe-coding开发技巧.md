@@ -120,7 +120,7 @@ npx ai-agent-skills info <skill-name>
                                                 （或 /jjk-review → /jjk-test → 验收）
 ```
 
-`/jjk-clarify` 支持在同一命令内完成探索与冻结（不强制前置 `brainstorming`）；`/ask` 仅用于你明确希望拆分探索会话的场景。
+`/jjk-clarify` 支持在同一命令内完成探索与冻结（不强制前置 `brainstorming`）。
 
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
@@ -139,8 +139,10 @@ npx ai-agent-skills info <skill-name>
 
 1. `product_contract`（PRD-Lite）完整：`target_users/core_scenarios/business_goals/non_goals/acceptance_gates`。
 2. `design_freeze_summary.product_contract_ready=true`。
-3. 条件采纳（`design_approved=false`）不得进入 `/jjk-plan`。
-4. 建议执行：`python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` 做桥接校验。
+3. `clarify_consistency_check.clarify_phase=approval` 且 `open_questions_count=0`。
+4. 条件采纳（`design_approved=false`）不得进入 `/jjk-plan`。
+5. 修改 `jjk-clarify` 命令/模板后执行：`python3 scripts/check_clarify_contract_consistency.py`。
+6. 建议执行：`python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` 做桥接校验。
 
 ### 2.2 上下文引用策略
 
@@ -375,8 +377,8 @@ description: 命令的简短描述
 ```
 你的场景是什么？
 │
-├─ 需求还模糊，先发散方案
-│   └─ /ask -> /jjk-clarify
+├─ 需求还模糊，也直接进入澄清
+│   └─ /jjk-clarify （命令内先探索再冻结；历史 /ask 会重定向到这里）
 │
 ├─ 需要冻结边界与验收口径
 │   └─ /jjk-clarify
@@ -407,7 +409,7 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
-| `/ask` | 发散澄清入口（探索优先），推荐收敛到 `/jjk-clarify` | 方案探索快照（可选） |
+| `/ask` | 兼容入口（已降级），触发后立即并入 `/jjk-clarify` | 无独立权威产物 |
 | `/jjk-clarify` | 设计冻结入口（默认收敛），沉淀 `design_freeze_summary + clarify_handoff_contract` | `design.md` |
 | `/jjk-plan` | 正式规划入口（`core/parallel`），产出需求与实现方案 | `requirements.md` + `implementation_plan.md` |
 | `/jjk-imp` | 标准实现入口，按计划改码并同步必要文档 | 代码 + 文档 |
@@ -492,7 +494,7 @@ npx ai-agent-skills update --all    # 更新全部
 # === Commands（在聊天中输入）===
 
 # 发散与冻结
-/ask               # 先发散方案，再收敛到 /jjk-clarify
+/ask               # 兼容别名（已降级），会立即转入 /jjk-clarify
 /jjk-clarify       # 设计冻结 + handoff 契约（含 PRD-Lite）
 /jjk-plan          # 生成 requirements + implementation_plan（core/parallel）
 
@@ -547,7 +549,7 @@ npx ai-agent-skills update --all    # 更新全部
 
 ```
 .cursor/commands/
-├── ask.md                 # 发散澄清入口（探索优先）
+├── ask.md                 # 兼容入口（已降级，立即并入 jjk-clarify）
 ├── do.md                  # 通用执行实施
 ├── jjk-cardrun.md         # 串行卡片执行调度
 ├── jjk-clarify.md         # 设计冻结 + handoff 契约

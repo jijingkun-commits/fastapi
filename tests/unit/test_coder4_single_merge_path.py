@@ -31,7 +31,12 @@ def _build_ctx(module):
         preflight_ok=True,
         preflight_reason="preflight_card_done",
         card_order=["C01"],
-        cards_by_id={"C01": {"card_id": "C01"}},
+        cards_by_id={
+            "C01": {
+                "card_id": "C01",
+                "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            }
+        },
         scoped_tasks=[],
         unscoped_tasks=[],
         card_status_map={"C01": "inprogress"},
@@ -49,7 +54,7 @@ def _build_ctx(module):
     )
 
 
-def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypatch):
+def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypatch, tmp_path):
     module = _load_kernel_module()
     ctx = _build_ctx(module)
 
@@ -57,6 +62,34 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
         raise AssertionError("dispatch 模式不应直接调用 HTTP merge/seed 接口")
 
     monkeypatch.setattr(module, "http_json", _unexpected_http)
+    monkeypatch.setattr(
+        module,
+        "build_wtimp_dispatch_request",
+        lambda *_args, **_kwargs: module.wtimp_dispatch_bridge.WtimpDispatchRequest(
+            task_key=ctx.task_key,
+            card_id="C01",
+            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            worktree_path=str((tmp_path / "wt-C01").resolve()),
+            executor_mode="cardrun_dispatch",
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "run_wtimp_dispatch",
+        lambda _request: module.wtimp_dispatch_bridge.WtimpDispatchResult(
+            ok=True,
+            executor="wtimp",
+            executor_mode="cardrun_dispatch",
+            card_id="C01",
+            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            subagent_id="wtimp-C01-1",
+            commit_sha="abc123",
+            merge_sha=None,
+            changed_files=[],
+            acceptance_results=[],
+            worktree_path=str((tmp_path / "wt-C01").resolve()),
+        ),
+    )
 
     payload = module.apply_action(
         "http://127.0.0.1:3001",
@@ -64,8 +97,7 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
         "dispatch",
         "C01",
         "task-c01",
-        active_task_path=Path("/tmp/active-task.json"),
-        commit_sha="abc123",
+        active_task_path=tmp_path / "active-task.json",
     )
 
     assert payload["performed"] is True

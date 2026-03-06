@@ -1,43 +1,37 @@
 # `/jjk-clarify` 项目主模板（v3）
 
-## 1) 默认提问模板（一问一答）
+## 1) 默认提问模板（问题包）
+
+```markdown
+## 当前澄清问题包（默认）
+
+- clarify_phase: explore
+- current_round: <round>
+- question_mode: package
+- open_questions_count: <1~5>
+
+请一次回答下面最多 5 个关键问题：
+
+A. <问题1>
+B. <问题2>
+C. <问题3>
+
+回答后我将继续收敛，直到冻结 `design_freeze_summary`、`clarify_handoff_contract`、`clarify_consistency_check`。
+```
+
+## 2) 降级模板（单题追问）
 
 ```markdown
 ## 当前澄清问题（单题）
 
+- clarify_phase: explore
+- current_round: <round>
+- question_mode: single
+- open_questions_count: 1
+
 请仅回答下面 1 个关键问题：
 
 <问题正文>
-
-回答后我将继续下一题，直到冻结 `design_freeze_summary` 与 `clarify_handoff_contract`。
-```
-
-## 2) 提速模板（仅用户显式要求时启用）
-
-```markdown
-## 本轮澄清主题：<主题名>
-
-A. 目标优先级（单选）
-1) 先可用 2) 先稳定 3) 先性能
-
-B. 范围边界（多选）
-1) 仅后端 2) 前后端都改 3) 含工作流/编排
-
-C. 交付约束（单选）
-1) 本周交付 2) 可分阶段 3) 本轮只冻结设计
-
-D. 关键证据（自由文本，必填）
-- 现状证据:
-- 失败样例（至少 1 条）:
-- 不可做项/依赖约束:
-
-E. 轻量实现落点（自由文本，必填）
-- task_id（至少 1 条）:
-- file_paths:
-- symbols:
-- change_type:
-
-请回复 `A?/B?/C?`，并补充 `D/E`。
 ```
 
 ## 3) design 文档结构模板
@@ -200,12 +194,16 @@ clarify_handoff_contract:
 - blocking_issues: []
 ```
 
-## 9) 一致性自检模板（建议强制）
+## 9) 一致性自检模板（强制）
 
 ````markdown
 ## 9. 一致性自检（机读）
 ```yaml
 clarify_consistency_check:
+  clarify_phase: approval
+  current_round: 2
+  question_mode: package
+  open_questions_count: 0
   product_contract_ready: true
   semantic_frozen: true
   contract_source_decided: true

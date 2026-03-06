@@ -1,87 +1,45 @@
 ---
-description: 发散澄清入口（探索优先）：沉淀方案快照并回传 /jjk-clarify 收敛
+description: 兼容入口（已降级）：收到 /ask 时立即转入 /jjk-clarify
 ---
 
-# Ask - 发散澄清与方案探索
+# Ask - 兼容入口（Deprecated）
 
-`/ask` 用于“需求还很模糊、先要打开思路”的场景。  
-它不是执行链入口，标准收敛出口是 `/jjk-clarify`。
+`/ask` 已降级为历史兼容入口。  
+默认工作流不再推荐使用它；收到 `/ask` 时，应在当前会话内立即转入 `/jjk-clarify`，由 `/jjk-clarify` 完成“探索 -> 冻结 -> 审批”的完整闭环。
 
-## 何时使用
+## 定位
 
-1. 需求刚出现，约束还不完整；
-2. 需要先看 2-3 个方向再选；
-3. 用户明确要求“先头脑风暴，不急着落地”。
+1. 只用于兼容历史习惯、旧文档或用户显式输入 `/ask`。
+2. 不再作为独立主链阶段，不再维护独立的“探索快照 -> 再切换命令”流程。
+3. 默认单一权威产物仍是 `design.md` 及其中的 `design_freeze_summary`、`clarify_handoff_contract`、`clarify_consistency_check`。
 
-## 与 `/jjk-clarify` 的边界
+## 入口行为（强制）
 
-1. `/ask`：发散探索，输出“探索快照”。
-2. `/jjk-clarify`：冻结设计，输出 `design_freeze_summary + clarify_handoff_contract`。
-3. 若用户在 `/ask` 阶段直接要求落地，必须切换到 `/jjk-clarify` 再进入下游。
+1. 首句明确：`/ask` 已降级，当前将按 `/jjk-clarify` 继续。
+2. 若需求模糊，在当前会话内先执行探索轮，但探索内容只服务于最终单方案冻结。
+3. 禁止要求用户再手动切换 `/jjk-clarify`；兼容重定向应在命令内部完成。
 
----
+## 输出与状态归属
 
-## 执行流程（简化）
-
-### 1) 理解问题
-
-聚焦三件事：
-1. 真实目标；
-2. 硬约束（时间/风险/兼容）；
-3. 可量化成功标准。
-
-### 2) 方案发散（可取点保留）
-
-提出 2-3 个候选方向（不超过 3 个）：
-1. 稳健方案（低风险）；
-2. 平衡方案（默认推荐）；
-3. 激进方案（高收益高改动，可选）。
-
-每个方向仅保留：
-1. 核心思路；
-2. 优势；
-3. 主要风险；
-4. 预估工作量。
-
-### 3) 收敛结论
-
-输出单一推荐方向，并明确：
-1. 为什么选它；
-2. 为什么放弃其余方向（简述）；
-3. 下一步建议切换 `/jjk-clarify` 进行冻结。
-
----
-
-## 输出产物（探索快照）
-
-默认不强制落盘；用户要求落盘时可写入 `docs/plans/YYYY-MM-DD-<topic>-brainstorm.md`，内容仅含：
-
-```yaml
-ask_output:
-  topic: "<topic>"
-  selected_direction: "<direction>"
-  alternatives_considered: ["A", "B"]
-  key_constraints: []
-  open_questions: []
-  recommended_next_command: "/jjk-clarify"
-```
-
----
+1. 探索/冻结/审批状态统一归 `clarify_phase` 管理。
+2. 默认不再产出独立 `brainstorm.md`。
+3. 如用户明确要求保留探索记录，可附加非权威探索附录，但不得替代 `design.md`，且不得作为下游输入。
 
 ## 完成门禁（强制）
 
-1. 至少讨论 2 个候选方向，否则输出 `ASK_BRAINSTORM_INSUFFICIENT`。
-2. 必须有单一推荐方向，否则输出 `ASK_DECISION_MISSING`。
-3. 若用户要求直接执行，必须先切换 `/jjk-clarify`，否则输出 `ASK_TO_CLARIFY_REQUIRED`。
+1. 必须落到 `/jjk-clarify` 的冻结门禁：`clarify_phase=approval`、`open_questions_count=0`。
+2. 必须输出 `clarify_consistency_check`。
+3. 任何进入 `/jjk-plan`、`/jjk-imp`、`/jjk-vkplan` 的行为，都以 `/jjk-clarify` 契约为准，而不是 `/ask` 自定义结果。
 
----
+## 错误处理（强制）
+
+1. 若执行中仍试图维护独立 `/ask` 状态或独立交接物，输出 `ASK_DEPRECATED_REDIRECT_REQUIRED` 并收敛回 `/jjk-clarify`。
+2. 若用户只想讨论不想冻结，可停在探索轮，但必须明确“尚未形成可进入 `/jjk-plan` 的冻结设计”。
 
 ## 禁止项（强制）
 
-1. 禁止在 `/ask` 阶段直接进入 `/jjk-imp` 或 `/jjk-vkplan`。
-2. 禁止把探索对比表直接写入 `design.md`、`*_requirements.md`、`*_implementation_plan.md`。
-3. 禁止以“发散讨论”替代字段级契约冻结。
+1. 禁止把 `/ask` 写成默认推荐入口。
+2. 禁止把 `/ask` 作为 `/jjk-plan`、`/jjk-imp`、`/jjk-vkplan` 的前置门禁。
+3. 禁止新增长期依赖 `/ask` 的模板、脚本或文档链路。
 
----
-
-*使用 `/ask` 触发。目标是“高质量发散”，并把收敛动作交给 `/jjk-clarify`。*
+*使用 `/ask` 触发时，目标不是继续扩展独立流程，而是兼容性地并入 `/jjk-clarify` 单指令闭环。*

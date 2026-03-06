@@ -88,7 +88,8 @@ git worktree list
 1. 默认模式：`executor_mode=standalone`，执行完整闭环（`create -> implement -> verify -> merge`）。
 2. 被 `$jjk-cardrun` 调用时必须使用：`executor_mode=cardrun_dispatch`。
 3. `cardrun_dispatch` 下仅执行“实现 + 提交 + 证据回传”，不得重复执行 `create` 与 `merge`。
-4. `cardrun_dispatch` 必须回传 `commit_sha`，否则输出 `WTIMP_EVIDENCE_MISSING`。
+4. `cardrun_dispatch` 必须最终只输出一段结构化 JSON，至少包含 `executor/executor_mode/card_id/ws_file/subagent_id/commit_sha/merge_sha/changed_files/acceptance_results`。
+5. `cardrun_dispatch` 缺少 `commit_sha` 时必须输出 `WTIMP_EVIDENCE_MISSING`。
 
 ### 1) 创建隔离 worktree
 

@@ -20,8 +20,8 @@
 ```
 
 补充分流：
-1. 默认可只用 `/jjk-clarify` 完成“探索 + 冻结”闭环。
-2. `/ask` 仅在你明确希望分离探索会话时使用（非必需）。
+1. 默认只用 `/jjk-clarify` 完成“探索 + 冻结”闭环。
+2. 若需要额外探索轮，也在当前 `/jjk-clarify` 会话内完成。
 
 ### 1.2 并行开发（多 AI / 多 worktree）
 
@@ -29,7 +29,7 @@
 想法 -> /jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
      -> /jjk-vktodo <任务拆解目录> create（create-only）
      -> /jjk-cardrun <任务拆解目录> loop
-        （主控自动：选卡 -> /jjk-imp-ws -> verify -> merge -> 下一卡）
+        （主控自动：选卡 -> 真实调用 /jjk-wtimp(cardrun_dispatch) -> verify -> merge -> 下一卡）
      -> python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>
      -> python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master
      -> /jjk-verify -> 验收
@@ -51,7 +51,9 @@
 2. `design.md` 包含 `product_contract`（PRD-Lite）：
    - `target_users/core_scenarios/business_goals/non_goals/acceptance_gates`
 3. `design_freeze_summary.product_contract_ready=true`。
-4. `clarify_handoff_contract.required.product_contract_summary` 完整。
+4. `clarify_consistency_check.clarify_phase=approval` 且 `open_questions_count=0`。
+5. `clarify_handoff_contract.required.product_contract_summary` 完整。
+6. 修改 `jjk-clarify` 命令/模板后执行：`python3 scripts/check_clarify_contract_consistency.py`。
 
 推荐在 `requirements + implementation_plan` 产出后执行：
 

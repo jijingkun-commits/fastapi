@@ -391,6 +391,54 @@ def _parse_design_freeze_summary(block: str) -> dict[str, Any]:
     return summary
 
 
+def _parse_clarify_consistency_check(block: str) -> dict[str, Any]:
+    lines = block.splitlines()
+    try:
+        start_idx = next(
+            idx for idx, line in enumerate(lines) if line.strip().startswith("clarify_consistency_check:")
+        )
+    except StopIteration as exc:
+        raise AlignmentCheckError("clarify_consistency_check 解析失败：缺少 clarify_consistency_check") from exc
+
+    summary: dict[str, Any] = {}
+    current_list_key = ""
+    idx = start_idx + 1
+    while idx < len(lines):
+        line = lines[idx]
+        stripped = line.strip()
+        indent = _indent(line)
+
+        if not stripped:
+            idx += 1
+            continue
+        if indent < 2:
+            break
+
+        if indent == 2:
+            key, value = _split_key_value(stripped)
+            current_list_key = ""
+            if key in {"fail_fast_codes"}:
+                values = _parse_inline_list(value)
+                summary[key] = values
+                if value == "":
+                    current_list_key = key
+            else:
+                summary[key] = _parse_scalar_literal(value)
+            idx += 1
+            continue
+
+        if indent >= 4 and current_list_key and stripped.startswith("- "):
+            summary.setdefault(current_list_key, [])
+            summary[current_list_key].append(_normalize_text(stripped[2:]))
+            idx += 1
+            continue
+
+        idx += 1
+
+    summary.setdefault("fail_fast_codes", [])
+    return summary
+
+
 def _parse_clarify_handoff_contract(block: str) -> dict[str, Any]:
     version_match = re.search(r"(?m)^\s{2}version:\s*(.+?)\s*$", block)
     topic_match = re.search(r"(?m)^\s{2}topic:\s*(.+?)\s*$", block)
@@ -861,6 +909,13 @@ def run_alignment_check(
     design_freeze_summary = _parse_design_freeze_summary(design_freeze_block)
     design_approval = _parse_design_approval(design_path)
     design_product_contract = _parse_design_product_contract(design_path)
+    clarify_consistency_check: dict[str, Any] = {}
+    try:
+        clarify_consistency_block = _find_block(design_blocks, "clarify_consistency_check:", design_path)
+    except AlignmentCheckError:
+        clarify_consistency_block = ""
+    if clarify_consistency_block:
+        clarify_consistency_check = _parse_clarify_consistency_check(clarify_consistency_block)
     handoff_contract: dict[str, Any] = {}
     try:
         handoff_block = _find_block(design_blocks, "clarify_handoff_contract:", design_path)
@@ -936,6 +991,57 @@ def run_alignment_check(
             "requirements_contract.design_approved 必须为 true",
             {"design_approved": requirements_contract.get("design_approved")},
         )
+
+    if not clarify_consistency_block:
+        add_error(
+            "CLARIFY_CONSISTENCY_CHECK_MISSING",
+            "design 缺少 clarify_consistency_check 机读区块",
+            {},
+        )
+    else:
+        clarify_phase = _normalize_text(clarify_consistency_check.get("clarify_phase")).lower()
+        if clarify_phase != "approval":
+            add_error(
+                "CLARIFY_DESIGN_STATE_INVALID",
+                "clarify_consistency_check.clarify_phase 必须为 approval",
+                {"clarify_phase": clarify_consistency_check.get("clarify_phase")},
+            )
+        question_mode = _normalize_text(clarify_consistency_check.get("question_mode")).lower()
+        if question_mode not in {"package", "single"}:
+            add_error(
+                "CLARIFY_QUESTION_MODE_INVALID",
+                "clarify_consistency_check.question_mode 仅允许 package|single",
+                {"question_mode": clarify_consistency_check.get("question_mode")},
+            )
+        current_round_raw = clarify_consistency_check.get("current_round")
+        try:
+            current_round = int(current_round_raw)
+        except Exception:
+            current_round = 0
+        if current_round < 1:
+            add_error(
+                "CLARIFY_ROUND_INVALID",
+                "clarify_consistency_check.current_round 必须 >= 1",
+                {"current_round": current_round_raw},
+            )
+        open_questions_raw = clarify_consistency_check.get("open_questions_count")
+        try:
+            open_questions_count = int(open_questions_raw)
+        except Exception:
+            open_questions_count = -1
+        if open_questions_count != 0:
+            add_error(
+                "CLARIFY_OPEN_QUESTIONS_REMAIN",
+                "clarify_consistency_check.open_questions_count 必须为 0",
+                {"open_questions_count": open_questions_raw},
+            )
+        fail_fast_codes = [code for code in _as_list(clarify_consistency_check.get("fail_fast_codes")) if _normalize_text(code)]
+        if fail_fast_codes:
+            add_error(
+                "CLARIFY_CONSISTENCY_FAIL_FAST",
+                "clarify_consistency_check.fail_fast_codes 必须为空",
+                {"fail_fast_codes": fail_fast_codes},
+            )
 
     if not handoff_block:
         add_error(

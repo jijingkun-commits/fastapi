@@ -45,10 +45,13 @@ def detect_repo_root(start: Path) -> Path:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PARENT_SCRIPTS_DIR = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 if str(PARENT_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(PARENT_SCRIPTS_DIR))
 
 from check_plan_vk_coverage import CoverageCheckError, run_check as run_plan_vk_coverage_check
+import wtimp_dispatch_bridge
 
 
 DEFAULT_REPO_ROOT = detect_repo_root(Path(__file__))
@@ -91,11 +94,12 @@ EVENT_VK_SYNC_FAILED = "VK_SYNC_FAILED"
 STATUS_ORDER = {
     "inprogress": 0,
     "inreview": 1,
-    "todo": 2,
-    "done": 3,
-    "cancelled": 4,
+    "verified": 2,
+    "todo": 3,
+    "done": 4,
+    "cancelled": 5,
 }
-COUNT_STATUSES = ("todo", "inprogress", "inreview", "done")
+COUNT_STATUSES = ("todo", "inprogress", "inreview", "verified", "done")
 
 
 @dataclass
@@ -270,6 +274,8 @@ def _derive_attempt_result(action: str, *, applied_performed: bool, reason: str 
         return "card_activated" if applied_performed else "activate_pending_apply"
     if action == "dispatch":
         return "dispatch_executed" if applied_performed else "dispatch_pending"
+    if action == "awaiting_merge":
+        return "verified_waiting_merge"
     if action == "blocked_depends":
         return "blocked_depends"
     if action == "preflight_blocked":
@@ -1241,6 +1247,12 @@ def resolve_runtime_file_path(active_task_path: Path, raw_path: str) -> Path:
     return (Path.cwd() / target_path).resolve()
 
 
+def sanitize_task_key_segment(task_key: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(task_key or "").strip())
+    normalized = normalized.strip("._")
+    return normalized or "unknown_task"
+
+
 def resolve_state_file_path(active_task_path: Path, raw_state_file: str) -> Path:
     return resolve_runtime_file_path(active_task_path, raw_state_file)
 
@@ -1263,6 +1275,149 @@ def resolve_task_scoped_active_task_path(active_task_path: Path, active_payload:
             f"active task must be task-scoped: file_dir={active_task_path.parent.name} task_split_dir={task_split_dir}"
         )
     return active_task_path.resolve()
+
+
+def resolve_card_source_ws_file(
+    active_task_path: Path,
+    *,
+    target_card_id: str,
+    card: dict[str, Any],
+    ws_file_override: str | None = None,
+) -> str:
+    raw_ws_file = str(ws_file_override or card.get("source_ws_file") or "").strip()
+    if not raw_ws_file:
+        raise CardrunContractError(
+            "CARDRUN_WS_MAPPING_BROKEN",
+            f"card_id={target_card_id} 缺少 source_ws_file 映射",
+            {"card_id": target_card_id},
+        )
+
+    repo_root = resolve_repo_root(active_task_path)
+    ws_path = Path(raw_ws_file)
+    resolved = ws_path.resolve() if ws_path.is_absolute() else (repo_root / ws_path).resolve()
+    if not resolved.exists():
+        raise CardrunContractError(
+            "CARDRUN_WS_MAPPING_BROKEN",
+            f"card_id={target_card_id} source_ws_file 不存在: {raw_ws_file}",
+            {"card_id": target_card_id, "ws_file": raw_ws_file},
+        )
+
+    try:
+        return str(resolved.relative_to(repo_root))
+    except ValueError:
+        return str(resolved)
+
+
+def resolve_active_session_state_file(active_task_path: Path, *, task_key: str) -> Path:
+    session_dir = active_task_path.parent / ".state" / sanitize_task_key_segment(task_key)
+    session_id = str(os.getenv("WT_FLOW_SESSION_ID") or "").strip()
+    if session_id:
+        candidate = session_dir / f"active-session-{session_id}.json"
+        if not candidate.exists():
+            raise CardrunContractError(
+                "CARDRUN_CONTEXT_INVALID",
+                f"未找到指定会话状态文件: {candidate}",
+                {"task_key": task_key, "session_id": session_id, "session_dir": str(session_dir)},
+            )
+        return candidate.resolve()
+
+    session_files = sorted(session_dir.glob("active-session-*.json"))
+    if len(session_files) == 1:
+        return session_files[0].resolve()
+    if len(session_files) > 1:
+        raise CardrunContractError(
+            "CARDRUN_CONTEXT_INVALID",
+            f"检测到多个会话状态文件（{len(session_files)} 个），请显式设置 WT_FLOW_SESSION_ID",
+            {"task_key": task_key, "session_dir": str(session_dir), "session_files": [str(path) for path in session_files]},
+        )
+    raise CardrunContractError(
+        "CARDRUN_CONTEXT_INVALID",
+        f"未找到会话状态文件: {session_dir}",
+        {"task_key": task_key, "session_dir": str(session_dir)},
+    )
+
+
+def resolve_active_session_worktree_path(active_task_path: Path, *, task_key: str, expected_card_id: str) -> str:
+    session_file = resolve_active_session_state_file(active_task_path, task_key=task_key)
+    payload = load_json(session_file)
+    worktree_path = str(payload.get("worktree") or "").strip()
+    branch = str(payload.get("branch") or "").strip()
+    if not worktree_path:
+        raise CardrunContractError(
+            "CARDRUN_CONTEXT_INVALID",
+            f"会话状态缺少 worktree: {session_file}",
+            {"task_key": task_key, "session_file": str(session_file)},
+        )
+
+    match = re.fullmatch(r"feature/(.+)/(.+)/(.+)", branch)
+    if match:
+        branch_task_key = sanitize_task_key_segment(match.group(1))
+        branch_card_id = _normalize_contract_id(match.group(2))
+        expected_task_key = sanitize_task_key_segment(task_key)
+        normalized_expected_card_id = _normalize_contract_id(expected_card_id)
+        if branch_task_key != expected_task_key or branch_card_id != normalized_expected_card_id:
+            raise CardrunContractError(
+                "CARDRUN_CONTEXT_INVALID",
+                "会话分支卡片与当前 dispatch 卡片不一致",
+                {
+                    "task_key": task_key,
+                    "expected_card_id": normalized_expected_card_id,
+                    "branch": branch,
+                    "session_file": str(session_file),
+                },
+            )
+
+    resolved_worktree_path = Path(worktree_path).expanduser().resolve()
+    if not resolved_worktree_path.exists():
+        raise CardrunContractError(
+            "CARDRUN_CONTEXT_INVALID",
+            f"会话 worktree 不存在: {resolved_worktree_path}",
+            {"task_key": task_key, "expected_card_id": expected_card_id, "session_file": str(session_file)},
+        )
+    return str(resolved_worktree_path)
+
+
+def build_wtimp_dispatch_request(
+    ctx: KernelContext,
+    target_card_id: str,
+    *,
+    active_task_path: Path,
+    ws_file_override: str | None = None,
+) -> wtimp_dispatch_bridge.WtimpDispatchRequest:
+    if not target_card_id:
+        raise CardrunContractError(
+            "CARDRUN_WS_MAPPING_BROKEN",
+            "dispatch 缺少 card_id，无法构建 wtimp request",
+            {},
+        )
+    card = ctx.cards_by_id.get(target_card_id) or {}
+    ws_file = resolve_card_source_ws_file(
+        active_task_path,
+        target_card_id=target_card_id,
+        card=card,
+        ws_file_override=ws_file_override,
+    )
+    worktree_path = resolve_active_session_worktree_path(
+        active_task_path,
+        task_key=ctx.task_key,
+        expected_card_id=target_card_id,
+    )
+    return wtimp_dispatch_bridge.WtimpDispatchRequest(
+        task_key=ctx.task_key,
+        card_id=target_card_id,
+        ws_file=ws_file,
+        worktree_path=worktree_path,
+        executor_mode=str(ctx.dispatch_executor_mode or DEFAULT_DISPATCH_EXECUTOR_MODE),
+    )
+
+
+def run_wtimp_dispatch(
+    request: wtimp_dispatch_bridge.WtimpDispatchRequest,
+) -> wtimp_dispatch_bridge.WtimpDispatchResult:
+    try:
+        return wtimp_dispatch_bridge.run_dispatch(request)
+    except wtimp_dispatch_bridge.WtimpDispatchError as exc:
+        raise CardrunContractError(exc.code, str(exc), exc.details) from exc
 
 
 def parse_dirty_whitelist(raw: str | None) -> list[str]:
@@ -1336,7 +1491,7 @@ def evaluate_scope_guard(
     unscoped_tasks: list[dict[str, Any]],
     single_active_card: bool,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
-    active_statuses = {"inprogress", "inreview"}
+    active_statuses = {"inprogress", "inreview", "verified"}
     unscoped_active = [
         task for task in unscoped_tasks if normalize_status(task.get("status")) in active_statuses
     ]
@@ -1664,6 +1819,15 @@ def decide_action(ctx: KernelContext) -> tuple[str, str | None, str | None, str 
             return ("blocked_depends", cid, target_task_id, status, blocked_details)
         if status in {"inprogress", "inreview"}:
             return ("dispatch", cid, target_task_id, status, blocked_details)
+        if status == "verified":
+            blocked_details.append(
+                {
+                    "card_id": cid,
+                    "status": status,
+                    "reason": "verified_waiting_merge",
+                }
+            )
+            return ("awaiting_merge", cid, target_task_id, status, blocked_details)
         blocked_details.append({"card_id": cid, "status": status, "reason": "unsupported_status"})
         return ("blocked_depends", cid, target_task_id, status, blocked_details)
 
@@ -1876,7 +2040,14 @@ def apply_action(
                 },
             )
 
-        normalized_commit_sha = str(commit_sha or "").strip()
+        dispatch_request = build_wtimp_dispatch_request(
+            ctx,
+            target_card_id,
+            active_task_path=active_task_path,
+            ws_file_override=str(ws_file or "").strip() or None,
+        )
+        dispatch_result = run_wtimp_dispatch(dispatch_request)
+        normalized_commit_sha = str(dispatch_result.commit_sha or "").strip()
         if not normalized_commit_sha:
             raise CardrunContractError(
                 "CARDRUN_NO_COMMIT_EVIDENCE",
@@ -1895,11 +2066,12 @@ def apply_action(
             "task_id": target_task_id,
             "executor_mode": executor_mode,
             "executor_dispatch_mode": str(ctx.dispatch_executor_mode or DEFAULT_DISPATCH_EXECUTOR_MODE),
-            "subagent_id": str(subagent_id or "").strip() or None,
-            "ws_file": str(ws_file or "").strip() or None,
+            "subagent_id": dispatch_result.subagent_id,
+            "ws_file": dispatch_result.ws_file,
             "commit_sha": normalized_commit_sha,
-            "merge_sha": str(merge_sha or "").strip() or None,
+            "merge_sha": dispatch_result.merge_sha,
             "merge_owner": "wt_flow",
+            "worktree_path": dispatch_result.worktree_path,
         }
 
     return {"performed": False}
@@ -2134,8 +2306,8 @@ def main() -> int:
                             card_id=done_card,
                         )
 
-            worktree_path = None
-            if first_not_done:
+            worktree_path = str(applied.get("worktree_path") or "").strip() or None
+            if not worktree_path and first_not_done:
                 worktree_path = str((Path.cwd() / ".worktrees" / first_not_done).resolve())
             attempt_result = _derive_attempt_result(
                 action,

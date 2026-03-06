@@ -185,10 +185,127 @@ implementation_tasks:
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 ```
 
-## 3. task_to_pr_mapping（机读）
+## 3. planning_contract（机读）
 
 ```yaml
 planning_contract:
+  execution_mode: serial
+  strict_single_active_card: true
+  card_order: [C01, C02, C03, C04, C05, C06, C07, G01]
+  auto_done_policy:
+    implementation-card: hard_gate
+    inspection-card: policy_gate
+  gate_contract:
+    mode: as_cards
+    gate_ids: [G01]
+    depends_on:
+      G01: [C07]
+  cards:
+    - card_id: C01
+      wave: P0
+      feature_ids: [P0-freeze-governance]
+      depends_on: []
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - NO-GO 删除口径冻结完成
+        - 团队停用 rm scripts/check_*.py
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C02
+      wave: P1
+      feature_ids: [P1-unified-entry]
+      depends_on: [C01]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - check_workflow_contract 统一入口可执行
+        - clarify_plan 模式输出等价结果
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C03
+      wave: P1
+      feature_ids: [P1-legacy-wrapper]
+      depends_on: [C02]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - 4 个 L1 旧脚本改为 wrapper
+        - 旧命令参数兼容且退出码透传
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C04
+      wave: P1
+      feature_ids: [P1-reference-migration]
+      depends_on: [C03]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - 命令 技能 文档引用完成迁移
+        - 不再直接依赖旧实现脚本
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C05
+      wave: P2
+      feature_ids: [P2-usage-observability]
+      depends_on: [C04]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - workflow-gate-usage 日志开始落盘
+        - 支持 7 天零调用聚合判定
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C06
+      wave: P2
+      feature_ids: [P2-ttl-archive]
+      depends_on: [C05]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - TTL 归档仅作用于 done/archived
+        - 活跃任务与真理源文件零误伤
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: C07
+      wave: P3
+      feature_ids: [P3-retire-legacy]
+      depends_on: [C06]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - 旧实现删除或收敛为极薄兼容壳
+        - 删除后主链路验收通过
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+      evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+
+    - card_id: G01
+      wave: Gate
+      feature_ids: [G-01]
+      depends_on: [C07]
+      task_mode: inspection-card
+      merge_required: false
+      done_gate:
+        - clarify->plan->vkplan 三段契约全绿
+        - cardrun 可安全进入 C01
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_plan_vk_coverage.py --task-split-dir 2026-03-06_工程减法治理 --output -
+      evidence_entry: docs/内部参考/任务拆解/2026-03-06_工程减法治理/consumption_report.json
+
   task_to_pr_mapping:
     - task_id: P0-FREEZE-COMMANDS
       pr_id: PR-01
@@ -197,7 +314,6 @@ planning_contract:
       pr_subject: "P0冻结口径 + P1统一入口骨架"
       acceptance_cmds:
         - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P1-UNIFIED-ENTRY
@@ -307,7 +423,6 @@ execution_contract:
 implementation_readiness:
   implementation_ready: true
   blocked_by: []
-  next_step: /jjk-imp
+  next_step: /jjk-vkplan
   execution_contract_ready: true
 ```
-

@@ -191,7 +191,7 @@ venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务�
 
 ## 推荐链路
 
-`主链: $jjk-plan -> $jjk-vkplan -> $jjk-cardrun -> $jjk-imp-ws -> $jjk-review -> $jjk-verify`
+`主链: $jjk-plan -> $jjk-vkplan -> $jjk-cardrun -> $jjk-wtimp(executor_mode=cardrun_dispatch) -> $jjk-review -> $jjk-verify`
 
 `可选分支: 需要远端 PR 交付时，在 $jjk-review 前插入 $jjk-create-pr`
 

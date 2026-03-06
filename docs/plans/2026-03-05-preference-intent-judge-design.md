@@ -8,7 +8,7 @@ scope_contract:
     - "后端记忆判定链：chat_service -> memory_intent_llm_service -> document_memory_service。"
     - "后台可观测：memory_admin 展示“命中/拒绝原因、判定来源、置信度”。"
     - "判定质量门禁：误记/漏记评估与拒绝原因标准化。"
-    - "关键词仅用于拒绝门禁与低成本预筛，不作为正向入库必要条件。"
+    - "规则仅用于 schema/安全/幂等校验，不参与 preference 的正向语义识别。"
   boundaries:
     - "本轮只冻结设计与 handoff 契约（C3 + I3），不进入实现。"
     - "不改前端交互与提示文案，仅补后台数据面。"
@@ -37,10 +37,10 @@ product_contract:
       statement: "管理员可在后台看到每次判定的 detector/result/reason_code/confidence。"
     - id: SC-04
       name: "无触发词身份偏好识别"
-      statement: "用户说“我叫jjk”时，即使未出现“记住”，也应进入主判定链并按合同决定入库。"
+      statement: "用户说“我叫jjk”时，即使未出现“记住”，也应由模型直接判定是否属于长期身份记忆。"
     - id: SC-05
       name: "风格偏好结构化沉淀"
-      statement: "用户说“以后先给结论、回答简短一点”后，应映射到结构化槽位并可被稳定召回。"
+      statement: "用户说“以后先给结论、回答简短一点”后，应由模型输出结构化槽位和值，并可被稳定召回。"
   business_goals:
     - metric: "memory_false_positive_rate"
       target: "<=0.5%"
@@ -59,8 +59,9 @@ product_contract:
     - "误记反例集通过：翻译/引用/否定表达不落 preference。"
     - "显式偏好样例通过：用户称呼、答复风格、长度等可落库。"
     - "后台查询接口返回判定审计字段且口径一致。"
-    - "无触发词身份样例通过：`我叫jjk` 不再依赖关键词门控。"
-    - "风格映射样例通过：同义表达映射到统一 slot_key/value。"
+    - "无触发词身份样例通过：`我叫jjk` 不依赖任何正向关键词规则。"
+    - "风格映射样例通过：同义表达由模型归一到统一 slot_key/value。"
+    - "多记忆句原子写入：任一 item 非法则整句不写入。"
   release_constraints:
     - "默认全量开启，不做灰度。"
     - "仅允许紧急熔断开关回退。"
@@ -74,11 +75,11 @@ architecture_contract:
       responsibility: "编排与写后 recall 触发，不做语义判定。"
       not_responsible: "偏好关键词硬编码规则。"
     - module: "app/services/memory_intent_llm_service.py"
-      responsibility: "输出 DecisionContract(level/category/slot_key/canonical_text/confidence)。"
+      responsibility: "输出 DecisionContract(decision/reason_code/confidence/memories[])。"
       not_responsible: "文档写入与分块持久化。"
     - module: "app/services/user_preference_memory_service.py"
-      responsibility: "结构化槽位映射与有限规则补偿（强身份表达、风格枚举映射）。"
-      not_responsible: "主判定链最终裁决。"
+      responsibility: "preference recall 文本渲染、展示标签映射与 legacy 兼容。"
+      not_responsible: "新输入的正向偏好识别与是否写入判定。"
     - module: "app/services/document_memory_service.py"
       responsibility: "统一落库、查询、recall 拼装。"
       not_responsible: "业务判定规则。"
@@ -89,32 +90,58 @@ architecture_contract:
       responsibility: "判定结果审计查询与后台可观测视图。"
       not_responsible: "判定决策。"
 
+  decision_contract_schema:
+    required_fields: [decision, reason_code, confidence, memories]
+    optional_fields: [audit]
+    decision_enum: [accept, reject]
+    reject_contract:
+      decision: "reject"
+      memories: []
+    memories_item_contract:
+      required_fields: [memory_kind, operation, slot_key, normalized_value, canonical_text, evidence_span]
+      optional_fields: [durability]
+      memory_kind_enum: [user_identity, response_preference, assistant_persona, profile_fact]
+      operation_enum: [upsert, archive]
+
+  batch_persistence_contract:
+    mode: "atomic_batch"
+    validation_order:
+      - "decision=accept 才进入 item 校验"
+      - "逐 item 执行 schema/slot taxonomy/冲突校验"
+      - "任一 item 校验失败 -> 整批 rejected，不做部分写入"
+      - "全部通过后单事务批量 upsert"
+    reject_reason_code: "memory_batch_atomic_reject"
+    reason_code_layering:
+      batch_level: "top-level reason_code 固定为 memory_batch_atomic_reject"
+      item_level: "item_errors[*].reason_code 记录逐 item 的具体失败原因"
+    reject_payload:
+      required_fields: [rejected_items_count, item_errors]
+      item_error_contract:
+        required_fields: [item_index, slot_key, reason_code]
+        optional_fields: [memory_kind, normalized_value, canonical_text]
+
   end_to_end_data_flow:
     - step: 1
       action: "接收 user_text + context"
       output: "judging_input"
     - step: 2
-      action: "预门禁（翻译/引用/否定）+ 强身份表达预检测"
-      output: "precheck_result"
-    - step: 3
       action: "LLM 判定（主）"
       output: "DecisionContract"
-    - step: 4
-      action: "合同/置信/敏感门禁校验"
+    - step: 3
+      action: "合同/schema/置信/敏感/slot taxonomy 校验"
       output: "accepted|rejected + reason_code"
-    - step: 5
+    - step: 4
       action: "accepted 才进入 document_memory 写入；rejected 仅审计"
       output: "persisted|skipped"
-    - step: 6
+    - step: 5
       action: "本轮 recall 注入 memory_context（非 messages 持久）"
       output: "runtime_context"
-    - step: 7
+    - step: 6
       action: "后台查询展示 detector/result/reason_code/confidence"
       output: "auditable_records"
 
   state_lifecycle:
     - "received"
-    - "prechecked"
     - "judged"
     - "accepted|rejected"
     - "persisted|skipped"
@@ -122,16 +149,14 @@ architecture_contract:
     - "audited"
 
   exception_semantics:
-    - code: "llm_invoke_failed_fallback_rule"
-      strategy: "降级规则兜底"
+    - code: "llm_invoke_failed"
+      strategy: "不写入，仅审计，可异步重试"
     - code: "task_intent_translation_or_quote"
-      strategy: "拒绝入库并记录审计"
+      strategy: "由模型识别后拒绝入库并记录审计"
     - code: "contract_parse_failed"
       strategy: "拒绝入库并记录审计"
     - code: "negated_memory_intent"
-      strategy: "拒绝入库并记录审计"
-    - code: "display_name_parse_failed"
-      strategy: "拒绝入库并记录审计"
+      strategy: "由模型识别后拒绝入库并记录审计"
     - code: "persist_failed"
       strategy: "事务回滚 + 返回统一错误语义"
 
@@ -154,8 +179,8 @@ requirement_seeds:
       defaults:
         context: {}
     output_contract:
-      required_fields: [result, level, category, slot_key, confidence, reason_code, detector]
-      optional_fields: [canonical_text, durability_score]
+      required_fields: [decision, reason_code, confidence, memories]
+      optional_fields: [audit]
     failure_semantics: "判定失败统一 rejected 并输出 reason_code"
     observability_fields: [trace_id, decision_id, detector, result, reason_code, confidence, latency_ms]
     rollback_anchor: "feature.memory_preference_llm_judge_enabled=false"
@@ -179,36 +204,35 @@ requirement_seeds:
 
   - design_item: "D-03"
     fr_id: "FR-03"
-    trigger: "用户输入命中强身份表达（我叫/叫我/称呼我/你叫）"
+    trigger: "模型识别用户身份/称呼类长期记忆"
     input_contract:
-      required_fields: [user_id, user_text, precheck_result]
+      required_fields: [user_id, user_text, context]
       optional_fields: [source_thread_id, source_message_id, context]
       defaults:
-        precheck_result:
-          strong_identity_hit: false
+        context: {}
     output_contract:
-      required_fields: [result, slot_key, canonical_text, detector, reason_code]
-      optional_fields: [confidence, reverse_intent]
-    failure_semantics: "命中强身份表达但解析失败时统一 rejected + reason_code=display_name_parse_failed"
-    observability_fields: [trace_id, decision_id, strong_identity_hit, detector, reason_code, confidence]
-    rollback_anchor: "feature.memory_identity_pattern_bypass_enabled=false"
-    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q"
+      required_fields: [decision, reason_code, confidence, memories]
+      optional_fields: [audit]
+    failure_semantics: "模型无法稳定抽取时统一 rejected + reason_code=identity_semantic_unresolved"
+    observability_fields: [trace_id, decision_id, detector, reason_code, confidence, memories_count, "memories[*].memory_kind"]
+    rollback_anchor: "feature.memory_identity_semantic_judge_enabled=false"
+    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q"
 
   - design_item: "D-04"
     fr_id: "FR-04"
-    trigger: "用户输入表达风格偏好（语气/长度/结构）"
+    trigger: "模型识别回答风格/结构/长度类偏好"
     input_contract:
-      required_fields: [user_id, user_text, decision_contract]
-      optional_fields: [source_thread_id, source_message_id]
+      required_fields: [user_id, user_text, context]
+      optional_fields: [source_thread_id, source_message_id, context]
       defaults:
-        decision_contract: {}
+        context: {}
     output_contract:
-      required_fields: [result, slot_key, normalized_value, detector, reason_code]
-      optional_fields: [raw_value, confidence]
-    failure_semantics: "不支持的风格表达统一 rejected + reason_code=style_expression_unsupported"
-    observability_fields: [trace_id, decision_id, slot_key, normalized_value, reason_code, confidence]
-    rollback_anchor: "feature.memory_style_taxonomy_enabled=false"
-    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_memory_slot_governance_service.py -q"
+      required_fields: [decision, reason_code, confidence, memories]
+      optional_fields: [audit]
+    failure_semantics: "模型无法稳定归一时统一 rejected + reason_code=style_semantic_unresolved"
+    observability_fields: [trace_id, decision_id, reason_code, confidence, memories_count, "memories[*].slot_key", "memories[*].normalized_value"]
+    rollback_anchor: "feature.memory_style_semantic_judge_enabled=false"
+    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q"
 
   - design_item: "D-05"
     fr_id: "FR-05"
@@ -219,12 +243,12 @@ requirement_seeds:
       defaults:
         async_mode: false
     output_contract:
-      required_fields: [result, persist_action, decision_id, detector, reason_code, confidence]
-      optional_fields: [slot_key, operation, audit_payload]
-    failure_semantics: "任一判定步骤失败必须写 rejected 审计，主对话不中断"
-    observability_fields: [trace_id, decision_id, detector, reason_code, confidence, pipeline_stage, latency_ms]
+      required_fields: [decision, persist_action, decision_id, detector, reason_code, confidence, memories_count]
+      optional_fields: [memory_ids, audit_payload]
+    failure_semantics: "模型失败、任一 item 无效或批量写入失败时必须 rejected 审计且整批不写入，audit_payload.item_errors 记录逐 item 原因，主对话不中断"
+    observability_fields: [trace_id, decision_id, detector, reason_code, confidence, pipeline_stage, latency_ms, persist_mode, memories_count, rejected_items_count, item_errors]
     rollback_anchor: "feature.memory_llm_primary_pipeline_enabled=false"
-    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py tests/unit/test_memory_intent_worker_service.py -q"
+    acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py tests/unit/test_memory_intent_worker_service.py -q && venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch"
 ```
 
 ## 5. `implementation_seeds`
@@ -267,29 +291,30 @@ implementation_seeds:
 
   - task_id: "T-04"
     file_paths:
-      - "app/services/user_preference_memory_service.py"
-      - "app/services/document_memory_service.py"
-      - "tests/unit/test_user_preference_memory_service.py"
-      - "tests/unit/test_document_memory_service.py"
+      - "app/ai/prompts/agent_prompts.py"
+      - "app/services/memory_intent_llm_service.py"
+      - "tests/unit/test_memory_intent_llm_service.py"
     symbols:
-      - "_USER_DISPLAY_NAME_PATTERN"
-      - "extract_explicit_preference_candidates"
-      - "upsert_preference_documents_from_input"
+      - "MEMORY_INTENT_DECISION_PROMPT"
+      - "decide"
+      - "test_*_identity_semantic_should_accept_without_trigger"
+      - "test_*_multi_memory_items_should_return_array"
     change_type: "modify"
     blocked_by: ["T-01"]
 
   - task_id: "T-05"
     file_paths:
-      - "app/services/user_preference_memory_service.py"
+      - "app/services/memory_intent_llm_service.py"
       - "app/services/memory_slot_governance_service.py"
-      - "tests/unit/test_user_preference_memory_service.py"
+      - "tests/unit/test_memory_intent_llm_service.py"
       - "tests/unit/test_memory_slot_governance_service.py"
     symbols:
-      - "_DISPLAY_MAPPING"
-      - "_normalize_controlled_memory_value"
+      - "decide"
       - "normalize_slot_key"
+      - "test_*_style_semantic_should_normalize"
+      - "test_*_multi_preference_sentence_should_emit_two_memories"
     change_type: "modify"
-    blocked_by: ["T-01", "T-04"]
+    blocked_by: ["T-01"]
 
   - task_id: "T-06"
     file_paths:
@@ -329,15 +354,16 @@ execution_chain_seed:
       done_gate:
         - "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q"
     - card_id: "T-04"
-      title: "强身份表达绕过关键词门控"
+      title: "身份语义与 memories[] 合同化"
       blocked_by: ["T-01"]
       done_gate:
-        - "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q"
+        - "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q"
     - card_id: "T-05"
-      title: "风格偏好 taxonomy 归一化"
-      blocked_by: ["T-01", "T-04"]
+      title: "风格语义归一与多记忆项校验"
+      blocked_by: ["T-01"]
       done_gate:
-        - "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_memory_slot_governance_service.py -q"
+        - "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q"
+        - "venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch"
     - card_id: "T-06"
       title: "后台审计字段合同化"
       blocked_by: ["T-01"]
@@ -358,7 +384,7 @@ risk_rollback_contract:
     feature_flag: "feature.memory_preference_llm_judge_enabled"
     default: true
     rollback_value: false
-    fallback_behavior: "回退至规则兜底；保留审计，不写入 preference 文档。"
+    fallback_behavior: "停止自动沉淀；保留审计与人工复盘，不再使用规则兜底写入。"
 
   key_risks:
     - risk_id: "R-01"
@@ -376,11 +402,11 @@ risk_rollback_contract:
     - risk_id: "R-04"
       description: "无触发词的强身份表达漏记，导致用户称呼体验不稳定。"
       counterexample: "我叫jjk"
-      mitigation: "强身份表达预检测 + 不依赖触发词进入主判定链。"
+      mitigation: "由模型直接识别身份类长期记忆，不允许关键词规则决定是否入库。"
     - risk_id: "R-05"
       description: "风格表达变体漂移，导致相同偏好落在不同槽位。"
       counterexample: "以后回答狠一点，别太官方"
-      mitigation: "风格 taxonomy 归一化 + 不支持表达统一 rejected。"
+      mitigation: "由模型先归一，再做 slot taxonomy 校验；无法归一时 rejected。"
 ```
 
 ## 8. 工程流一致性冻结结论
@@ -388,12 +414,14 @@ risk_rollback_contract:
 consistency_gate_contract:
   product_contract_ready: true
   semantic_frozen: true
-  semantic_single_strategy:
+  semantic_reject_strategy:
     missing_required_field: "统一返回 rejected + reason_code=contract_missing_required"
     low_confidence: "统一返回 rejected + reason_code=low_confidence"
-    translation_or_quote: "统一返回 rejected + reason_code=task_intent_translation_or_quote"
-    negated_memory_intent: "统一返回 rejected + reason_code=negated_memory_intent"
-    style_expression_unsupported: "统一返回 rejected + reason_code=style_expression_unsupported"
+    translation_or_quote: "由模型识别后统一 rejected + reason_code=task_intent_translation_or_quote"
+    negated_memory_intent: "由模型识别后统一 rejected + reason_code=negated_memory_intent"
+    identity_semantic_unresolved: "统一返回 rejected + reason_code=identity_semantic_unresolved"
+    style_semantic_unresolved: "统一返回 rejected + reason_code=style_semantic_unresolved"
+    memory_batch_atomic_reject: "统一返回 rejected + reason_code=memory_batch_atomic_reject"
   contract_source_decided: true
   contract_source:
     canonical_source: "app/services/memory_intent_llm_service.py::DecisionContract"
@@ -417,7 +445,7 @@ design_freeze_summary:
   design_actionable: true
   missing_blocks: []
   risk_level: medium
-  risk_counterexamples_count: 5
+  risk_counterexamples_count: 7
   handoff_contract_ready: true
   product_contract_ready: true
   implementation_seed_count: 6
@@ -460,8 +488,9 @@ clarify_handoff_contract:
         - "翻译/引用/否定不落 preference"
         - "显式偏好能落库"
         - "后台审计字段完整"
-        - "我叫jjk 不依赖触发词门控"
-        - "风格同义表达映射统一 slot_key/value"
+        - "我叫jjk 不依赖任何正向关键词规则"
+        - "风格同义表达由模型归一到统一 slot_key/value"
+        - "多记忆句原子写入：任一 item 非法则整句不写入"
 
     requirement_seeds:
       - design_item: "D-01"
@@ -473,7 +502,7 @@ clarify_handoff_contract:
           defaults:
             context: {}
         output_contract:
-          required_fields: [result, level, category, slot_key, confidence, reason_code, detector]
+          required_fields: [decision, reason_code, confidence, memories]
         failure_semantics: "判定失败统一 rejected 并输出 reason_code"
         observability_fields: [trace_id, decision_id, detector, result, reason_code, confidence, latency_ms]
         rollback_anchor: "feature.memory_preference_llm_judge_enabled=false"
@@ -497,36 +526,35 @@ clarify_handoff_contract:
 
       - design_item: "D-03"
         fr_id: "FR-03"
-        trigger: "用户输入命中强身份表达（我叫/叫我/称呼我/你叫）"
+        trigger: "模型识别用户身份/称呼类长期记忆"
         input_contract:
-          required_fields: [user_id, user_text, precheck_result]
+          required_fields: [user_id, user_text, context]
           optional_fields: [source_thread_id, source_message_id, context]
           defaults:
-            precheck_result:
-              strong_identity_hit: false
+            context: {}
         output_contract:
-          required_fields: [result, slot_key, canonical_text, detector, reason_code]
-          optional_fields: [confidence, reverse_intent]
-        failure_semantics: "命中强身份表达但解析失败时统一 rejected + reason_code=display_name_parse_failed"
-        observability_fields: [trace_id, decision_id, strong_identity_hit, detector, reason_code, confidence]
-        rollback_anchor: "feature.memory_identity_pattern_bypass_enabled=false"
-        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q"
+          required_fields: [decision, reason_code, confidence, memories]
+          optional_fields: [audit]
+        failure_semantics: "模型无法稳定抽取时统一 rejected + reason_code=identity_semantic_unresolved"
+        observability_fields: [trace_id, decision_id, detector, reason_code, confidence, memories_count, "memories[*].memory_kind"]
+        rollback_anchor: "feature.memory_identity_semantic_judge_enabled=false"
+        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q"
 
       - design_item: "D-04"
         fr_id: "FR-04"
-        trigger: "用户输入表达风格偏好（语气/长度/结构）"
+        trigger: "模型识别回答风格/结构/长度类偏好"
         input_contract:
-          required_fields: [user_id, user_text, decision_contract]
-          optional_fields: [source_thread_id, source_message_id]
+          required_fields: [user_id, user_text, context]
+          optional_fields: [source_thread_id, source_message_id, context]
           defaults:
-            decision_contract: {}
+            context: {}
         output_contract:
-          required_fields: [result, slot_key, normalized_value, detector, reason_code]
-          optional_fields: [raw_value, confidence]
-        failure_semantics: "不支持的风格表达统一 rejected + reason_code=style_expression_unsupported"
-        observability_fields: [trace_id, decision_id, slot_key, normalized_value, reason_code, confidence]
-        rollback_anchor: "feature.memory_style_taxonomy_enabled=false"
-        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_user_preference_memory_service.py tests/unit/test_memory_slot_governance_service.py -q"
+          required_fields: [decision, reason_code, confidence, memories]
+          optional_fields: [audit]
+        failure_semantics: "模型无法稳定归一时统一 rejected + reason_code=style_semantic_unresolved"
+        observability_fields: [trace_id, decision_id, reason_code, confidence, memories_count, "memories[*].slot_key", "memories[*].normalized_value"]
+        rollback_anchor: "feature.memory_style_semantic_judge_enabled=false"
+        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q"
 
       - design_item: "D-05"
         fr_id: "FR-05"
@@ -537,12 +565,12 @@ clarify_handoff_contract:
           defaults:
             async_mode: false
         output_contract:
-          required_fields: [result, persist_action, decision_id, detector, reason_code, confidence]
-          optional_fields: [slot_key, operation, audit_payload]
-        failure_semantics: "任一判定步骤失败必须写 rejected 审计，主对话不中断"
-        observability_fields: [trace_id, decision_id, detector, reason_code, confidence, pipeline_stage, latency_ms]
+          required_fields: [decision, persist_action, decision_id, detector, reason_code, confidence, memories_count]
+          optional_fields: [memory_ids, audit_payload]
+        failure_semantics: "模型失败、任一 item 无效或批量写入失败时必须 rejected 审计且整批不写入，audit_payload.item_errors 记录逐 item 原因，主对话不中断"
+        observability_fields: [trace_id, decision_id, detector, reason_code, confidence, pipeline_stage, latency_ms, persist_mode, memories_count, rejected_items_count, item_errors]
         rollback_anchor: "feature.memory_llm_primary_pipeline_enabled=false"
-        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py tests/unit/test_memory_intent_worker_service.py -q"
+        acceptance_cmd_ref: "venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py tests/unit/test_memory_intent_worker_service.py -q && venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch"
 
     implementation_seeds:
       - task_id: "T-01"
@@ -576,25 +604,26 @@ clarify_handoff_contract:
         change_type: "modify"
       - task_id: "T-04"
         file_paths:
-          - "app/services/user_preference_memory_service.py"
-          - "app/services/document_memory_service.py"
-          - "tests/unit/test_user_preference_memory_service.py"
-          - "tests/unit/test_document_memory_service.py"
+          - "app/ai/prompts/agent_prompts.py"
+          - "app/services/memory_intent_llm_service.py"
+          - "tests/unit/test_memory_intent_llm_service.py"
         symbols:
-          - "_USER_DISPLAY_NAME_PATTERN"
-          - "extract_explicit_preference_candidates"
-          - "upsert_preference_documents_from_input"
+          - "MEMORY_INTENT_DECISION_PROMPT"
+          - "decide"
+          - "test_*_identity_semantic_should_accept_without_trigger"
+          - "test_*_multi_memory_items_should_return_array"
         change_type: "modify"
       - task_id: "T-05"
         file_paths:
-          - "app/services/user_preference_memory_service.py"
+          - "app/services/memory_intent_llm_service.py"
           - "app/services/memory_slot_governance_service.py"
-          - "tests/unit/test_user_preference_memory_service.py"
+          - "tests/unit/test_memory_intent_llm_service.py"
           - "tests/unit/test_memory_slot_governance_service.py"
         symbols:
-          - "_DISPLAY_MAPPING"
-          - "_normalize_controlled_memory_value"
+          - "decide"
           - "normalize_slot_key"
+          - "test_*_style_semantic_should_normalize"
+          - "test_*_multi_preference_sentence_should_emit_two_memories"
         change_type: "modify"
       - task_id: "T-06"
         file_paths:
@@ -623,7 +652,7 @@ clarify_handoff_contract:
         - card_id: "T-04"
           blocked_by: ["T-01"]
         - card_id: "T-05"
-          blocked_by: ["T-01", "T-04"]
+          blocked_by: ["T-01"]
         - card_id: "T-06"
           blocked_by: ["T-01"]
       execution_contract_hint:
@@ -644,11 +673,13 @@ clarify_handoff_contract:
       - "所有 rejected 记录必须输出 reason_code 与 detector。"
       - "memory_admin 查询返回 confidence，便于误记复盘。"
       - "memory_admin 列表/详情返回 decision_id，支持一次判定全链路追踪。"
+      - "memory_admin 需展示 memories_count 与 memories[*].slot_key，便于复盘多记忆项判定。"
+      - "memory_admin 需展示 rejected_items_count 与 item_errors，便于复盘 atomic_batch 拒绝。"
       - "审计口径以 DecisionContract 字段镜像为唯一来源，禁止后台二次推导。"
     risk_counterexample_map:
       - risk_id: "R-01"
         counterexample: "翻译一下：我叫jjk"
-        guard: "task_intent_translation -> rejected"
+        guard: "llm reason_code=task_intent_translation_or_quote -> rejected"
       - risk_id: "R-02"
         counterexample: "不要记住我刚才说的话"
         guard: "negated_memory_intent -> rejected"
@@ -657,16 +688,40 @@ clarify_handoff_contract:
         guard: "reason_code required 校验"
       - risk_id: "R-04"
         counterexample: "我叫jjk（无记住触发词）"
-        guard: "strong_identity_hit -> 进入主判定链"
+        guard: "llm 直接识别为 identity memory 或 rejected(identity_semantic_unresolved)"
       - risk_id: "R-05"
         counterexample: "以后回答狠一点，别太官方"
-        guard: "style taxonomy normalize or rejected(style_expression_unsupported)"
+        guard: "llm 先归一，再 taxonomy 校验或 rejected(style_semantic_unresolved)"
+      - risk_id: "R-06"
+        counterexample: "以后先给结论，回答简短一点"
+        guard: "llm 返回 memories[] 多项结果，禁止仅落第一条"
+      - risk_id: "R-07"
+        counterexample: "以后先给结论，回答简短一点，但其中一项 slot 非法"
+        guard: "atomic_batch：任一 item 非法则整批 rejected + item_errors"
     assumptions:
-      - "LLM 判定服务可用，失败时可稳定降级到规则兜底。"
+      - "LLM 判定服务可用，失败时进入 rejected 审计与异步重试，不做规则兜底写入。"
+      - "单次判定允许返回 0..N 条 memories，落库层需支持批量 upsert。"
+      - "多记忆句落库采用 atomic_batch，不允许部分成功部分失败。"
       - "memory_admin 接口允许扩展审计字段且向后兼容。"
 ```
 
-## 11. 审批记录
+## 11. `clarify_consistency_check`
+```yaml
+clarify_consistency_check:
+  clarify_phase: "freeze"
+  current_round: 8
+  question_mode: "single"
+  open_questions_count: 0
+  product_contract_ready: true
+  semantic_frozen: true
+  contract_source_decided: true
+  handoff_seed_alignment_ok: true
+  parallel_dependency_ready: true
+  replay_canonical_field_set: true
+  fail_fast_codes: []
+```
+
+## 12. 审批记录
 ```yaml
 design_approval:
   design_approved: false

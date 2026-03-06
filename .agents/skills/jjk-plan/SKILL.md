@@ -43,14 +43,20 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
    - `target_users/core_scenarios/business_goals/non_goals/acceptance_gates`
 4. design 必须有 `clarify_handoff_contract`：
    - 固定使用：`required.requirement_seeds/implementation_seeds/execution_chain_seed`
-5. 若 `implementation_seeds` 为轻量输入（仅 `task_id/file_paths/symbols/change_type`），必须在本命令补齐可执行字段再进入下游。
+5. design 必须有 `clarify_consistency_check`：
+   - `clarify_phase=approval`
+   - `open_questions_count=0`
+   - `question_mode in {package,single}`
+6. 若 `implementation_seeds` 为轻量输入（仅 `task_id/file_paths/symbols/change_type`），必须在本命令补齐可执行字段再进入下游。
 
 失败时：
 
 1. 审批缺失：`DESIGN_APPROVAL_REQUIRED`
 2. 产品契约缺失：`CLARIFY_PRODUCT_CONTRACT_MISSING`
 3. handoff 缺失：`CLARIFY_HANDOFF_CONTRACT_MISSING`
-4. 桥接不完整：`CLARIFY_PLAN_BRIDGE_BROKEN`
+4. 澄清状态缺失：`CLARIFY_CONSISTENCY_CHECK_MISSING`
+5. 澄清状态无效：`CLARIFY_DESIGN_STATE_INVALID` / `CLARIFY_OPEN_QUESTIONS_REMAIN`
+6. 桥接不完整：`CLARIFY_PLAN_BRIDGE_BROKEN`
 
 ---
 

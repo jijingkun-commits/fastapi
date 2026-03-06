@@ -18,21 +18,32 @@ description: 单指令澄清冻结入口：在 /jjk-clarify 内完成探索与�
 
 1. 设计未审批前，禁止进入任何下游命令。
 2. 标准产物：`docs/plans/YYYY-MM-DD-<topic>-design.md`。
-3. 每份 `design.md` 必须包含 `design_freeze_summary` 和 `clarify_handoff_contract` 两个 YAML 区块。
+3. 每份 `design.md` 必须包含 `design_freeze_summary`、`clarify_handoff_contract`、`clarify_consistency_check` 三个 YAML 区块。
 4. 仅当用户明确要求 `brainstorming` 且该能力不可用时，走 fallback 并在执行备注标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
 5. 使用联网搜索和github搜索工具，以及上下文理解能力，确保设计符合用户意图。
+6. 修改本命令/模板/镜像后，必须执行 `python3 scripts/check_clarify_contract_consistency.py` 做一致性体检。
 
 ---
 
 ## 提问原则
 
-1. **默认批量提问**：边界清晰时，单轮最多 5 个关键问题
+1. **默认问题包提问**：边界清晰时，`question_mode=package`，单轮最多 5 个关键问题
 2. **先锁定目标/边界，再锁定契约/实现落点**
 3. **不做并列方案打分**
-4. **遇到以下情况切换为逐个提问**：
+4. **遇到以下情况切换为单题追问（`question_mode=single`）**：
    - 用户回答模糊或存在矛盾
    - 涉及跨模块状态契约（需先确认边界再问细节）
-   - 连续 2 轮批量提问仍不清晰
+   - 连续 2 轮问题包仍不清晰
+
+---
+
+## 澄清阶段状态机（强制）
+
+1. `clarify_phase=explore`：仍存在未冻结信息，允许继续提问；`open_questions_count >= 1`。
+2. `clarify_phase=freeze`：最终单方案与机读区块已成型，准备做门禁自检；`open_questions_count = 0`。
+3. `clarify_phase=approval`：全部门禁通过，等待用户明确确认；`open_questions_count = 0`。
+4. 每一轮都必须显式维护：`clarify_phase/current_round/question_mode/open_questions_count`。
+5. `clarify_phase != approval` 或 `open_questions_count > 0` 时，禁止发起正式审批。
 
 ---
 
@@ -126,7 +137,7 @@ design_freeze_summary:
 
 ## 设计审批（v3 自然版）
 
-冻结后必须主动发起确认：
+进入 `clarify_phase=approval` 后必须主动发起确认：
 
 > 以上设计已完全冻结。  
 > 请回复：**确认 / 需要修改XX点 / 否**  
@@ -134,10 +145,11 @@ design_freeze_summary:
 
 审批规则：
 
-1. 仅当所有门禁通过且用户回复肯定语义（如“确认”“是”“OK”“走这个”）时，审批通过（`design_approved=true`）。
-2. 若用户肯定但仍存在阻断项，记录“条件采纳”并保持 `design_approved=false`，输出 `CONDITIONAL_APPROVAL_BLOCKED`，不得进入下游。
-3. 非肯定语义或存在修改点时，继续澄清，不进入下游。
-4. 审批动作后，自动在 `design.md` 追加审批记录：`design_approved/approved_at/approved_round/approval_evidence`；若为条件采纳，建议补充 `approval_mode=conditional` 与 `go_no_go=NO_GO`。
+1. 仅当 `clarify_consistency_check.clarify_phase=approval` 且 `open_questions_count=0` 时，才可发起正式审批。
+2. 仅当所有门禁通过且用户回复肯定语义（如“确认”“是”“OK”“走这个”）时，审批通过（`design_approved=true`）。
+3. 若用户肯定但仍存在阻断项，记录“条件采纳”并保持 `design_approved=false`，输出 `CONDITIONAL_APPROVAL_BLOCKED`，不得进入下游。
+4. 非肯定语义或存在修改点时，继续澄清，不进入下游。
+5. 审批动作后，自动在 `design.md` 追加审批记录：`design_approved/approved_at/approved_round/approval_evidence`；若为条件采纳，建议补充 `approval_mode=conditional` 与 `go_no_go=NO_GO`。
 
 ---
 
@@ -182,6 +194,34 @@ clarify_handoff_contract:
 
 ---
 
+## clarify_consistency_check（v3，强制）
+
+每份 `design.md` 必须包含以下机读区块，用于记录澄清阶段状态与审批前最后自检：
+
+```yaml
+clarify_consistency_check:
+  clarify_phase: explore|freeze|approval
+  current_round: <int>
+  question_mode: package|single
+  open_questions_count: <int>
+  product_contract_ready: true|false
+  semantic_frozen: true|false
+  contract_source_decided: true|false
+  handoff_seed_alignment_ok: true|false
+  parallel_dependency_ready: true|false
+  replay_canonical_field_set: true|false
+  fail_fast_codes: []
+```
+
+门禁规则：
+
+1. `clarify_phase=approval` 且 `open_questions_count=0` 后，才可发起正式审批。
+2. `current_round<1`：输出 `CLARIFY_ROUND_INVALID`。
+3. `question_mode` 仅允许 `package|single`。
+4. `fail_fast_codes` 非空时，禁止审批。
+
+---
+
 ## Team 策略
 
 默认单代理。满足 `>=2` 条时建议升级：
@@ -207,7 +247,7 @@ execution_notes:
   template:
     missing: false
     source: "docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md"
-  question_mode: "single|package"
+  question_mode: "package|single"
   degrade_reason: ""
   alternative_tool: ""
   verification: ""
@@ -220,7 +260,7 @@ execution_notes:
 1. 禁止未审批直接跳实现。
 2. 禁止在主文档输出 A/B/C 对比。
 3. 禁止把“brainstorming 与 clarify 冲突”作为固定话术输出（仅在用户明确要求排查冲突时说明）。
-4. 禁止在未被用户要求时默认建议切换到 `/ask`。
+4. 禁止在未被用户要求时默认建议切换到其他探索命令。
 
 ---
 
