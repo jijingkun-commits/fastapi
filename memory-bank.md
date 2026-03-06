@@ -6,6 +6,9 @@
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 - 2026-03-05｜规则分层落地（ACTIVE）→ `AGENTS.md`
 - 2026-03-06｜复合提问多模态响应契约收敛（ACTIVE）→ `docs/plans/2026-03-06-composite-query-multimodal-response-design.md`
+- 2026-03-06｜Clarify 发散/冻结分流口径调整（ACTIVE）→ `.cursor/commands/jjk-clarify.md`
+- 2026-03-06｜cardrun 默认执行器切换至 wtimp（ACTIVE）→ `docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`
+- 2026-03-06｜工程减法退役流程冻结（ACTIVE）→ `docs/plans/2026-03-06-workflow-gate-retirement-design.md`
 
 ## 记录模板
 - 日期：YYYY-MM-DD
@@ -65,3 +68,33 @@
 - 影响范围：`app/ai/*`、`app/services/chat_service.py`、`web/src/lib/backend.ts`、`web/src/hooks/useSSEStream.ts`、`web/src/components/chat/messages/ai.tsx`、契约文档与 CI 门禁
 - 回退/失效条件：若 OAS 3.2 工具链全面稳定并可直接覆盖 SSE 代码生成，可将过渡期 AsyncAPI 文档收敛回单一 OAS3.2 契约
 - 关联文档/代码：`docs/plans/2026-03-06-composite-query-multimodal-response-design.md`
+
+### 2026-03-06 Clarify 发散/冻结分流口径调整
+- 状态：ACTIVE
+- 决策主题：`/jjk-clarify` 采用单指令闭环（命令内完成探索与冻结）
+- 背景与问题：原口径要求“可用时必须先走 brainstorming”，与 `/jjk-clarify` 的单方案冻结目标冲突，导致执行时频繁输出“规则冲突声明”，降低可用性
+- 最终决策：`/jjk-clarify` 默认在命令内执行“探索轮 + 冻结轮”；仅当用户明确要求头脑风暴且能力不可用时才标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`；新增禁止项，禁止把“brainstorming 冲突”作为固定话术，且禁止默认建议切换 `/ask`
+- 取舍理由：保留探索能力且不增加命令切换成本，确保你可只用一个命令完成可审批设计
+- 影响范围：`.cursor/commands/jjk-clarify.md`、`.agents/skills/jjk-clarify/SKILL.md`、命令速查文档与 Codex prompts 镜像
+- 回退/失效条件：若后续统一流程框架强制探索与冻结命令解耦，可回退为“两阶段命令链”
+- 关联文档/代码：`.cursor/commands/jjk-clarify.md`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/技巧与速查/AI协作速查表.md`、`docs/开发文档/技巧与速查/vibe-coding开发技巧.md`
+
+### 2026-03-06 cardrun 默认执行器切换至 wtimp
+- 状态：ACTIVE
+- 决策主题：`cardrun` dispatch 主链统一到 `jjk-wtimp`（`executor_mode=cardrun_dispatch`）
+- 背景与问题：`cardrun` 原链路默认分派 `imp-ws`，导致“编排层强约束”与“执行层 worktree 生命周期”分离，commit 证据门禁难以在同一收口链上落地
+- 最终决策：主链改为 `/jjk-plan -> /jjk-vkplan -> /jjk-cardrun -> /jjk-wtimp`；kernel 默认执行器设为 `wtimp`，dispatch 阶段缺失 `commit_sha` 直接 `CARDRUN_NO_COMMIT_EVIDENCE` 阻断；`wtimp` 在 `cardrun_dispatch` 模式禁止重复 merge
+- 取舍理由：以最小改造统一“调度→执行→证据→收口”责任边界，降低双 merge 与伪完成风险
+- 影响范围：`scripts/coder4/coder4_bootstrap_kernel.py`、`.cursor/commands/jjk-cardrun.md`、`.cursor/commands/jjk-wtimp.md`、`.cursor/commands/jjk-vkplan.md`、`.cursor/commands/jjk-create-pr.md` 及对应 skills
+- 回退/失效条件：若 `wtimp` 执行链异常，可通过 `--dispatch-executor`/`CODER4_DISPATCH_EXECUTOR` 临时切回兼容执行器；若后续出现统一执行编排器，应将本决策升级为平台级执行契约
+- 关联文档/代码：`docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md`
+
+### 2026-03-06 工程减法退役流程冻结
+- 状态：ACTIVE
+- 决策主题：L1 门禁脚本退役执行口径统一为“迁移入口 -> 兼容壳 -> 零调用观测 -> 再删除”
+- 背景与问题：`工程减法体检报告_2026-03-06.md` 中存在“候选可删”与“3.1 NO-GO 冻结”并存，团队执行口径易漂移
+- 最终决策：以 `工程减法体检报告_2026-03-06_v3.md` 作为唯一执行基线；先建统一入口 `check_workflow_contract.py`，旧 L1 脚本先 wrapper 化并完成引用迁移，连续 7 天零调用后再删除旧实现
+- 取舍理由：在减法目标下优先保证设计合理性与主干流程完整性，避免“先删后补”的架构级故障
+- 影响范围：`scripts/check_*` L1 门禁脚本、`.cursor/commands/*`、`.agents/skills/*`、工作流与治理文档
+- 回退/失效条件：若统一入口兼容性或验收矩阵失败，回退为“旧脚本主入口 + wrapper 反向代理”，并暂停删除阶段
+- 关联文档/代码：`docs/plans/2026-03-06-workflow-gate-retirement-design.md`、`docs/内部参考/工程减法体检报告_2026-03-06_v3.md`

@@ -31,7 +31,7 @@ description: "Use when you need `jjk-create-pr` in this repository. Source inten
 必须可解析以下输入之一：
 
 1. `pr_ready_manifest`（来自 `$jjk-imp`）
-2. `pr_ready_manifest_ws`（来自 `$jjk-imp-ws`）
+2. `pr_ready_manifest_ws`（来自 `$jjk-wtimp`，兼容历史 `$jjk-imp-ws`）
 
 最小字段：
 
@@ -141,7 +141,7 @@ PR 描述至少包含：
 
 ## 推荐链路
 
-`主链: $jjk-imp | $jjk-imp-ws -> $jjk-review -> $jjk-verify`
+`主链: $jjk-imp | $jjk-wtimp -> $jjk-review -> $jjk-verify`
 
 `可选分支: 需要远端 PR 交付时，在 $jjk-review 前插入 $jjk-create-pr`
 

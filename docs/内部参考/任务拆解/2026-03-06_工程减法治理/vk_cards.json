@@ -1,0 +1,178 @@
+{
+  "task_key": "PP-20260306-ENGINEERING-LEAN-GOV",
+  "task_split_dir": "2026-03-06_工程减法治理",
+  "plan_title": "工程减法治理可执行卡片包",
+  "generated_at": "2026-03-06",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "auto_done_policy": {
+    "implementation-card": "hard_gate",
+    "inspection/question-card": "policy_gate"
+  },
+  "execution_contract": {
+    "delivery_mode": "card_only",
+    "execution_unit": "single_card",
+    "commit_policy": "per_card",
+    "stop_boundary": "hard_gate",
+    "stop_on_blocked": true
+  },
+  "automation_contract": {
+    "source_of_truth": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/_active_task.json",
+    "required_fields": [
+      "project_id",
+      "task_split_dir",
+      "task_key",
+      "execution_mode",
+      "single_active_card",
+      "auto_done_policy",
+      "preflight_required"
+    ],
+    "scope_match_rule": [
+      "title_contains_[task_key]",
+      "labels_contains_task_key",
+      "card_key_prefix_task_key"
+    ]
+  },
+  "card_order": ["C01", "C02", "C03", "C04", "G01"],
+  "task_to_pr_mapping": {
+    "C01": "PR-GOV-001",
+    "C02": "PR-GOV-002",
+    "C03": "PR-GOV-003",
+    "C04": "PR-GOV-004",
+    "G01": "PR-GOV-G01"
+  },
+  "gate_contract": {
+    "mode": "as_cards",
+    "gate_ids": ["G01"],
+    "depends_on": {
+      "G01": ["C04"]
+    }
+  },
+  "preflight": {
+    "card_id": "C00",
+    "feature_ids": ["P0-00"],
+    "required_done_gate": [
+      "治理目标冻结",
+      "NO-GO 门禁冻结",
+      "可回退路径可执行"
+    ],
+    "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-00_G0_治理协议冻结.md"
+  },
+  "source_files": {
+    "parallel_plan": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/parallel_plan.md",
+    "workstreams": [
+      "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C01_P0_治理基线快照.md",
+      "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C02_P0_脚本依赖台账.md",
+      "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C03_P0_NO_GO门禁冻结.md",
+      "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C04_P0_退役验收矩阵.md",
+      "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-G01_G0_首轮治理验收.md"
+    ]
+  },
+  "cards": [
+    {
+      "id": "PP-20260306-ENGINEERING-LEAN-GOV::WS-C01",
+      "card_id": "C01",
+      "title": "C01 P0 治理基线快照 [PP-20260306-ENGINEERING-LEAN-GOV]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": ["PP-20260306-ENGINEERING-LEAN-GOV", "2026-03-06_工程减法治理", "serial", "lane-governance"],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "depends_on": [],
+      "feature_ids": ["P0-01"],
+      "mechanism_summary": ["固化当前文件/依赖/体积基线", "提供后续减法的对比真理源"],
+      "code_anchor_refs": ["docs/内部参考/工程减法体检报告_2026-03-06_v3.md::核验基线"],
+      "example_refs": ["docs/内部参考/工程减法治理看板模板_2026-03-06.md#3-建议首批治理卡按优先级"],
+      "acceptance_checks": ["rg -n \"核验基线\" docs/内部参考/工程减法体检报告_2026-03-06_v3.md"],
+      "rollback_anchors": ["git checkout -- docs/内部参考/工程减法体检报告_2026-03-06_v3.md"],
+      "evidence_entry": "docs/内部参考/工程减法体检报告_2026-03-06_v3.md#2-核验基线2026-03-06-实测",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C01_P0_治理基线快照.md"
+    },
+    {
+      "id": "PP-20260306-ENGINEERING-LEAN-GOV::WS-C02",
+      "card_id": "C02",
+      "title": "C02 P0 脚本依赖台账 [PP-20260306-ENGINEERING-LEAN-GOV]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": ["PP-20260306-ENGINEERING-LEAN-GOV", "2026-03-06_工程减法治理", "serial", "lane-governance"],
+      "hard_depends_on": ["C01"],
+      "soft_depends_on": [],
+      "depends_on": ["C01"],
+      "feature_ids": ["P0-02"],
+      "mechanism_summary": ["为关键脚本补齐 owner/trigger/replacement", "建立可审计依赖台账"],
+      "code_anchor_refs": ["docs/内部参考/工程减法治理看板模板_2026-03-06.md::卡片模板"],
+      "example_refs": ["docs/内部参考/工程减法治理看板模板_2026-03-06.md#2-卡片模板复制即用"],
+      "acceptance_checks": ["rg -n \"owner / trigger / replacement\" docs/内部参考/工程减法治理看板模板_2026-03-06.md"],
+      "rollback_anchors": ["git checkout -- docs/内部参考/工程减法治理看板模板_2026-03-06.md"],
+      "evidence_entry": "docs/内部参考/工程减法治理看板模板_2026-03-06.md#2-卡片模板复制即用",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C02_P0_脚本依赖台账.md"
+    },
+    {
+      "id": "PP-20260306-ENGINEERING-LEAN-GOV::WS-C03",
+      "card_id": "C03",
+      "title": "C03 P0 NO-GO门禁冻结 [PP-20260306-ENGINEERING-LEAN-GOV]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": ["PP-20260306-ENGINEERING-LEAN-GOV", "2026-03-06_工程减法治理", "serial", "lane-governance"],
+      "hard_depends_on": ["C02"],
+      "soft_depends_on": [],
+      "depends_on": ["C02"],
+      "feature_ids": ["P0-03"],
+      "mechanism_summary": ["冻结高风险直接删除动作", "建立 NO-GO 阻断条件"],
+      "code_anchor_refs": ["docs/内部参考/工程减法体检报告_2026-03-06.md::3.1 冻结执行"],
+      "example_refs": ["docs/内部参考/工程减法体检报告_2026-03-06_v3.md#5-no-go-门禁阻断条件"],
+      "acceptance_checks": ["rg -n \"NO-GO|冻结执行\" docs/内部参考/工程减法体检报告_2026-03-06.md"],
+      "rollback_anchors": ["git checkout -- docs/内部参考/工程减法体检报告_2026-03-06.md"],
+      "evidence_entry": "docs/内部参考/工程减法体检报告_2026-03-06.md#31-冻结执行no-go",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C03_P0_NO_GO门禁冻结.md"
+    },
+    {
+      "id": "PP-20260306-ENGINEERING-LEAN-GOV::WS-C04",
+      "card_id": "C04",
+      "title": "C04 P0 退役验收矩阵 [PP-20260306-ENGINEERING-LEAN-GOV]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": ["PP-20260306-ENGINEERING-LEAN-GOV", "2026-03-06_工程减法治理", "serial", "lane-governance"],
+      "hard_depends_on": ["C03"],
+      "soft_depends_on": [],
+      "depends_on": ["C03"],
+      "feature_ids": ["P0-04"],
+      "mechanism_summary": ["统一退役验收命令与通过标准", "形成可重复执行的验收矩阵"],
+      "code_anchor_refs": ["docs/内部参考/工程减法体检报告_2026-03-06_v3.md::8. 验收矩阵"],
+      "example_refs": ["docs/内部参考/工程减法治理看板模板_2026-03-06.md#7-最小验收命令清单模板"],
+      "acceptance_checks": ["rg -n \"验收矩阵\" docs/内部参考/工程减法体检报告_2026-03-06_v3.md"],
+      "rollback_anchors": ["git checkout -- docs/内部参考/工程减法体检报告_2026-03-06_v3.md"],
+      "evidence_entry": "docs/内部参考/工程减法体检报告_2026-03-06_v3.md#8-验收矩阵执行完成前必跑",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C04_P0_退役验收矩阵.md"
+    },
+    {
+      "id": "PP-20260306-ENGINEERING-LEAN-GOV::WS-G01",
+      "card_id": "G01",
+      "title": "G01 G0 首轮治理验收 [PP-20260306-ENGINEERING-LEAN-GOV]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": ["PP-20260306-ENGINEERING-LEAN-GOV", "2026-03-06_工程减法治理", "serial", "lane-gate"],
+      "hard_depends_on": ["C04"],
+      "soft_depends_on": [],
+      "depends_on": ["C04"],
+      "feature_ids": ["G0-01"],
+      "mechanism_summary": ["校验 P0 四卡产物齐备", "校验建卡契约可被 create-only 消费"],
+      "code_anchor_refs": ["scripts/coder4/coder4_vk_sync.py::sync_all_cards"],
+      "example_refs": ["docs/内部参考/工程减法治理看板模板_2026-03-06.md#8-启动说明你现在就可以做"],
+      "acceptance_checks": ["python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/2026-03-06_工程减法治理/_active_task.json --sync-all --dry-run"],
+      "rollback_anchors": ["仅保留文档治理，不执行远端落卡"],
+      "evidence_entry": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/.state/PP-20260306-ENGINEERING-LEAN-GOV/vktodo_dryrun_result.json",
+      "task_mode": "inspection/question-card",
+      "merge_required": false,
+      "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-G01_G0_首轮治理验收.md"
+    }
+  ]
+}

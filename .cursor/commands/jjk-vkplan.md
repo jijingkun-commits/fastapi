@@ -128,7 +128,7 @@ python3 scripts/set_active_task.py \
 
 主链路：
 
-`/jjk-plan -> /jjk-vkplan -> /jjk-cardrun -> /jjk-imp-ws`
+`/jjk-plan -> /jjk-vkplan -> /jjk-cardrun -> /jjk-wtimp(executor_mode=cardrun_dispatch)`
 
 可选建卡链路（只做可见性）：
 

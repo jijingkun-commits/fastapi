@@ -62,6 +62,8 @@ IDEMPOTENCY_RETENTION_MULTIPLIER = 3
 STATE_LOCK_SUFFIX = ".lock"
 STATE_BACKUP_SUFFIX = ".bak"
 DEFAULT_DIRTY_POLICY_VERSION = "v1_docs_templates"
+DEFAULT_DISPATCH_EXECUTOR = "wtimp"
+DEFAULT_DISPATCH_EXECUTOR_MODE = "cardrun_dispatch"
 DEFAULT_DIRTY_WHITELIST = (
     "docs/plans/",
     "docs/内部参考/迭代需求/",
@@ -121,6 +123,8 @@ class KernelContext:
     main_repo_error: str | None = None
     dirty_policy_version: str = DEFAULT_DIRTY_POLICY_VERSION
     dirty_whitelist: list[str] = field(default_factory=lambda: list(DEFAULT_DIRTY_WHITELIST))
+    dispatch_executor: str = DEFAULT_DISPATCH_EXECUTOR
+    dispatch_executor_mode: str = DEFAULT_DISPATCH_EXECUTOR_MODE
 
 
 class CardrunContractError(RuntimeError):
@@ -148,6 +152,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ws-file", default="")
     parser.add_argument("--commit-sha", default="")
     parser.add_argument("--merge-sha", default="")
+    parser.add_argument("--dispatch-executor", default=os.getenv("CODER4_DISPATCH_EXECUTOR", ""))
     parser.add_argument("--dirty-whitelist", default=os.getenv(DIRTY_WHITELIST_ENV, ""))
     parser.add_argument("--dirty-policy-version", default=DEFAULT_DIRTY_POLICY_VERSION)
     parser.add_argument("--output", default="")
@@ -264,7 +269,7 @@ def _derive_attempt_result(action: str, *, applied_performed: bool, reason: str 
     if action == "activate":
         return "card_activated" if applied_performed else "activate_pending_apply"
     if action == "dispatch":
-        return "dispatch_pending"
+        return "dispatch_executed" if applied_performed else "dispatch_pending"
     if action == "blocked_depends":
         return "blocked_depends"
     if action == "preflight_blocked":
@@ -295,6 +300,7 @@ def record_attempt_evidence(
     merge_sha: str | None = None,
     subagent_id: str | None = None,
     ws_file: str | None = None,
+    executor_mode: str | None = None,
 ) -> dict[str, Any]:
     normalized_card_id = _normalize_attempt_card_id(card_id)
 
@@ -310,6 +316,17 @@ def record_attempt_evidence(
     if not ws_file and isinstance(applied, dict):
         raw_ws_file = str(applied.get("ws_file") or "").strip()
         ws_file = raw_ws_file or None
+    if not executor_mode and isinstance(applied, dict):
+        raw_executor_mode = str(applied.get("executor_mode") or "").strip()
+        executor_mode = raw_executor_mode or None
+
+    execution_evidence = {
+        "executor_mode": executor_mode,
+        "subagent_id": subagent_id,
+        "ws_file": ws_file,
+        "commit_sha": commit_sha,
+        "merge_sha": merge_sha,
+    }
 
     evidence = {
         "target_status": target_status,
@@ -334,6 +351,7 @@ def record_attempt_evidence(
         "merge_sha": merge_sha,
         "subagent_id": subagent_id,
         "ws_file": ws_file,
+        "execution_evidence": execution_evidence,
         "execution_mode": str(execution_mode or "serial"),
         "trigger": str(trigger_source or "manual"),
         "duration_seconds": duration_seconds,
@@ -355,6 +373,7 @@ def record_attempt_evidence(
         "merge_sha": merge_sha,
         "subagent_id": subagent_id,
         "ws_file": ws_file,
+        "execution_evidence": execution_evidence,
         "evidence": evidence,
     }
     append_jsonl(ledger_file, ledger_entry)
@@ -931,6 +950,17 @@ def _normalize_contract_cmd(raw: Any) -> str:
     return " ".join(str(raw or "").strip().split())
 
 
+def resolve_dispatch_executor(*, active_payload: dict[str, Any], cli_override: str = "") -> tuple[str, str]:
+    raw_executor = str(cli_override or "").strip().lower()
+    if not raw_executor:
+        raw_executor = str(active_payload.get("dispatch_executor") or "").strip().lower()
+    executor = raw_executor or DEFAULT_DISPATCH_EXECUTOR
+
+    raw_mode = str(active_payload.get("dispatch_executor_mode") or "").strip().lower()
+    mode = raw_mode or DEFAULT_DISPATCH_EXECUTOR_MODE
+    return executor, mode
+
+
 def _validate_vk_cards_contract(vk_cards: dict[str, Any], *, task_split_dir: str) -> None:
     execution_mode = str(vk_cards.get("execution_mode") or "").strip().lower()
     if execution_mode != "serial":
@@ -1409,8 +1439,13 @@ def build_kernel_context(
     state_path: Path | None = None,
     dirty_whitelist: list[str] | None = None,
     dirty_policy_version: str = DEFAULT_DIRTY_POLICY_VERSION,
+    dispatch_executor_override: str = "",
 ) -> KernelContext:
     active = load_json(active_task_path)
+    dispatch_executor, dispatch_executor_mode = resolve_dispatch_executor(
+        active_payload=active,
+        cli_override=dispatch_executor_override,
+    )
     project_id = str(active.get("project_id") or "").strip()
     task_split_dir = str(active.get("task_split_dir") or "").strip()
     task_key = str(active.get("task_key") or "").strip()
@@ -1568,6 +1603,8 @@ def build_kernel_context(
         main_repo_error=main_repo_error,
         dirty_policy_version=str(dirty_policy_version or DEFAULT_DIRTY_POLICY_VERSION),
         dirty_whitelist=effective_dirty_whitelist,
+        dispatch_executor=dispatch_executor,
+        dispatch_executor_mode=dispatch_executor_mode,
     )
 
 
@@ -1684,6 +1721,10 @@ def apply_action(
     local_mode: bool = False,
     state_path: Path | None = None,
     sync_vk_in_local_mode: bool = False,
+    commit_sha: str | None = None,
+    merge_sha: str | None = None,
+    subagent_id: str | None = None,
+    ws_file: str | None = None,
 ) -> dict[str, Any]:
     if action == "seed":
         if not target_card_id:
@@ -1821,6 +1862,46 @@ def apply_action(
             "vk_sync": vk_sync,
         }
 
+    if action == "dispatch":
+        if not target_card_id:
+            raise RuntimeError("dispatch action missing target identifiers")
+        executor_mode = str(ctx.dispatch_executor or DEFAULT_DISPATCH_EXECUTOR).strip().lower()
+        if executor_mode != "wtimp":
+            raise CardrunContractError(
+                "CARDRUN_EXECUTOR_UNSUPPORTED",
+                f"不支持的 dispatch 执行器: {executor_mode}",
+                {
+                    "dispatch_executor": executor_mode,
+                    "expected": DEFAULT_DISPATCH_EXECUTOR,
+                },
+            )
+
+        normalized_commit_sha = str(commit_sha or "").strip()
+        if not normalized_commit_sha:
+            raise CardrunContractError(
+                "CARDRUN_NO_COMMIT_EVIDENCE",
+                f"card_id={target_card_id} dispatch 缺少 commit_sha 证据",
+                {
+                    "card_id": target_card_id,
+                    "action": "dispatch",
+                    "dispatch_executor": executor_mode,
+                },
+            )
+
+        return {
+            "performed": True,
+            "action": "dispatch",
+            "card_id": target_card_id,
+            "task_id": target_task_id,
+            "executor_mode": executor_mode,
+            "executor_dispatch_mode": str(ctx.dispatch_executor_mode or DEFAULT_DISPATCH_EXECUTOR_MODE),
+            "subagent_id": str(subagent_id or "").strip() or None,
+            "ws_file": str(ws_file or "").strip() or None,
+            "commit_sha": normalized_commit_sha,
+            "merge_sha": str(merge_sha or "").strip() or None,
+            "merge_owner": "wt_flow",
+        }
+
     return {"performed": False}
 
 
@@ -1906,6 +1987,7 @@ def main() -> int:
                 state_path=state_path,
                 dirty_whitelist=dirty_whitelist,
                 dirty_policy_version=dirty_policy_version,
+                dispatch_executor_override=str(getattr(args, "dispatch_executor", "") or ""),
             )
             action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
 
@@ -2000,6 +2082,7 @@ def main() -> int:
                         ws_file=ws_file,
                         commit_sha=commit_sha,
                         merge_sha=merge_sha,
+                        executor_mode=ctx.dispatch_executor,
                     )
                     result.update(
                         {
@@ -2015,7 +2098,7 @@ def main() -> int:
                     return 0
 
             applied = {"performed": False}
-            if args.apply_bootstrap and action in {"seed", "activate"}:
+            if args.apply_bootstrap and action in {"seed", "activate", "dispatch"}:
                 applied = apply_action(
                     args.vk_api_base,
                     ctx,
@@ -2026,6 +2109,10 @@ def main() -> int:
                     local_mode=args.local_mode,
                     state_path=state_path,
                     sync_vk_in_local_mode=args.sync_vk_in_local_mode,
+                    commit_sha=commit_sha,
+                    merge_sha=merge_sha,
+                    subagent_id=subagent_id,
+                    ws_file=ws_file,
                 )
 
             auto_wake = {
@@ -2074,6 +2161,7 @@ def main() -> int:
                 ws_file=ws_file,
                 commit_sha=commit_sha or str(applied.get("commit_sha") or "").strip() or None,
                 merge_sha=merge_sha or str(applied.get("merge_sha") or "").strip() or None,
+                executor_mode=ctx.dispatch_executor,
             )
 
             scoped_counts = count_statuses(ctx.scoped_tasks)
@@ -2083,6 +2171,8 @@ def main() -> int:
                 "project_id": ctx.project_id,
                 "task_key": ctx.task_key,
                 "execution_mode": ctx.execution_mode,
+                "dispatch_executor": ctx.dispatch_executor,
+                "dispatch_executor_mode": ctx.dispatch_executor_mode,
                 "single_active_card": ctx.single_active_card,
                 "preflight_required": ctx.preflight_required,
                 "preflight_ok": ctx.preflight_ok,
@@ -2134,6 +2224,9 @@ def main() -> int:
                     "result": attempt_result,
                 },
                 "execution_evidence": {
+                    "executor_mode": attempt_evidence["attempt"]
+                    .get("execution_evidence", {})
+                    .get("executor_mode"),
                     "subagent_id": attempt_evidence["attempt"].get("subagent_id"),
                     "ws_file": attempt_evidence["attempt"].get("ws_file"),
                     "commit_sha": attempt_evidence["attempt"].get("commit_sha"),

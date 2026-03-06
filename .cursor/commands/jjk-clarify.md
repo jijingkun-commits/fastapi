@@ -1,16 +1,16 @@
 ---
-description: 澄清入口（兼容 brainstorming，保留发散能力）：冻结可执行设计并产出标准 handoff 契约
+description: 单指令澄清冻结入口：在 /jjk-clarify 内完成探索与设计冻结
 ---
 
 # 任务澄清（Clarify Task）
 
 `/jjk-clarify` 是 `jjk-*` 执行链的设计冻结入口，目标是把模糊想法变成“可直接进入 `/jjk-plan`”的基线。
 
-## 与 brainstorming 的关系
+## 与 `brainstorming` 的关系
 
-1. 能用 `brainstorming` 时必须先走其流程。
-2. 本指令仅负责设计冻结与 handoff，不复制 `brainstorming` 的发散流程。
-3. 主文档永远只保留最终方案。
+1. `/jjk-clarify` 默认直接执行“设计冻结 + handoff”，不强制前置 `brainstorming`。
+2. 若用户明确要求“先头脑风暴/多方案比较”，在 `/jjk-clarify` 内先执行探索轮再收敛，不强制切换命令。
+3. 进入 `/jjk-clarify` 冻结态后，主文档永远只保留最终单方案。
 
 ---
 
@@ -19,7 +19,7 @@ description: 澄清入口（兼容 brainstorming，保留发散能力）：冻�
 1. 设计未审批前，禁止进入任何下游命令。
 2. 标准产物：`docs/plans/YYYY-MM-DD-<topic>-design.md`。
 3. 每份 `design.md` 必须包含 `design_freeze_summary` 和 `clarify_handoff_contract` 两个 YAML 区块。
-4. 若 `brainstorming` 不可用，走 fallback 并在执行备注标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
+4. 仅当用户明确要求 `brainstorming` 且该能力不可用时，走 fallback 并在执行备注标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
 5. 使用联网搜索和github搜索工具，以及上下文理解能力，确保设计符合用户意图。
 
 ---
@@ -219,6 +219,8 @@ execution_notes:
 
 1. 禁止未审批直接跳实现。
 2. 禁止在主文档输出 A/B/C 对比。
+3. 禁止把“brainstorming 与 clarify 冲突”作为固定话术输出（仅在用户明确要求排查冲突时说明）。
+4. 禁止在未被用户要求时默认建议切换到 `/ask`。
 
 ---
 

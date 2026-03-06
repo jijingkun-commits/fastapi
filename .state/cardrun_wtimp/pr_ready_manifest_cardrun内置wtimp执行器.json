@@ -1,0 +1,68 @@
+{
+  "topic": "cardrun内置wtimp执行器",
+  "generated_at": "2026-03-06T22:00:00+08:00",
+  "source": {
+    "requirements": "docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md",
+    "implementation_plan": "docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md"
+  },
+  "verify_status": "WARN",
+  "verify_reason": "核心验收通过，但当前执行上下文为 master，与 task_to_pr_mapping 目标分支未一一对齐",
+  "pr_ready_manifest": [
+    {
+      "pr_id": "PR-01",
+      "pr_branch": "codex/cardrun-wtimp-pr-01",
+      "task_ids": ["T-01", "T-02"],
+      "card_id": "C02",
+      "changed_files": [
+        "scripts/coder4/coder4_bootstrap_kernel.py",
+        ".cursor/commands/jjk-cardrun.md",
+        ".agents/skills/jjk-cardrun/SKILL.md",
+        "tests/unit/test_coder4_dispatch_executor.py",
+        "tests/unit/test_coder4_commit_evidence_gate.py"
+      ],
+      "acceptance_cmds": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q --no-cov",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q --no-cov"
+      ],
+      "rollback_point": "ENABLE_CARDRUN_WTIMP_EXECUTOR=false"
+    },
+    {
+      "pr_id": "PR-02",
+      "pr_branch": "codex/cardrun-wtimp-pr-02",
+      "task_ids": ["T-03", "T-04"],
+      "card_id": "C03",
+      "changed_files": [
+        "scripts/coder4/coder4_bootstrap_kernel.py",
+        ".cursor/commands/jjk-wtimp.md",
+        ".agents/skills/jjk-wtimp/SKILL.md",
+        "tests/unit/test_coder4_single_merge_path.py",
+        "tests/unit/test_coder4_executor_config_source.py"
+      ],
+      "acceptance_cmds": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q --no-cov",
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q --no-cov"
+      ],
+      "rollback_point": "ENABLE_CARDRUN_WTIMP_EXECUTOR=false"
+    },
+    {
+      "pr_id": "PR-03",
+      "pr_branch": "codex/cardrun-wtimp-pr-03",
+      "task_ids": ["T-05", "T-06"],
+      "card_id": "G01",
+      "changed_files": [
+        "scripts/coder4/coder4_bootstrap_kernel.py",
+        ".cursor/commands/jjk-vkplan.md",
+        ".agents/skills/jjk-vkplan/SKILL.md",
+        ".cursor/commands/jjk-create-pr.md",
+        ".agents/skills/jjk-create-pr/SKILL.md",
+        "memory-bank.md"
+      ],
+      "acceptance_cmds": [
+        "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q --no-cov",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_point": "ENABLE_CARDRUN_EXECUTION_EVIDENCE_V2=false"
+    }
+  ]
+}

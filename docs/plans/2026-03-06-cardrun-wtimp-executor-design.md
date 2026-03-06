@@ -22,33 +22,23 @@
   - 兼容旧证据字段读取，新增 canonical 结构字段写入，保证可回放与可审计。
 
 ## 2. product_contract（PRD-Lite）
-product_contract:
-  target_users:
-    - 平台工程负责人（维护 cardrun/coder4 工程流）
-    - 任务执行代理维护者（维护 `jjk-*` 技能链）
-    - 质量与验收负责人（依赖 ledger 证据判定）
-  core_scenarios:
-    - 串行卡片执行时，dispatch 自动调用 `wtimp` 完成单卡实现并返回提交证据。
-    - 卡片收口时，仅存在一条 `verify -> merge` 路径，避免重复收口。
-    - 出现缺失提交证据、上下文错配、映射缺失时，系统明确 fail-fast 并给可追踪错误码。
-  business_goals:
-    - KPI-1: dispatch 自动执行闭环率 `>= 95%`（不再停留 pending）
-    - KPI-2: 无 `commit_sha` 仍推进到 merge 的事件数 `= 0`
-    - KPI-3: 双重 merge 事故数 `= 0`
-    - KPI-4: 失败轮次 100% 具备结构化阻断证据（可回溯）
-  non_goals:
-    - 本轮不重构 `jjk-plan/jjk-vkplan` 的卡片拆解算法。
-    - 本轮不改造具体业务模块（AI、前端、数据库逻辑）。
-    - 本轮不引入新的项目管理后端接口。
-  acceptance_gates:
-    - AG-01: `cardrun` 默认执行器切换为 `wtimp` 且可开关回退。
-    - AG-02: dispatch 成功轮次必须输出 canonical `execution_evidence`，含 `executor_mode/commit_sha`。
-    - AG-03: 缺失 `commit_sha` 命中 `CARDRUN_NO_COMMIT_EVIDENCE`，且状态不推进。
-    - AG-04: `verify -> merge` 只执行一次，不存在重复 merge 日志。
-    - AG-05: 文档链路（cardrun/wtimp/vkplan/create-pr）主链口径一致。
-  release_constraints:
-    - 项目未上线，优先消除结构性债务与执行不确定性。
-    - 必须保留回退锚点（开关默认 `true`，回退时置 `false`）。
+- target_users:
+  - 平台工程负责人（维护 cardrun/coder4 工程流）
+  - 任务执行代理维护者（维护 `jjk-*` 技能链）
+  - 质量与验收负责人（依赖 ledger 证据判定）
+- core_scenarios:
+  - 串行卡片执行时，dispatch 自动调用 `wtimp` 完成单卡实现并返回提交证据。
+  - 卡片收口时，仅存在一条 `verify -> merge` 路径，避免重复收口。
+  - 出现缺失提交证据、上下文错配、映射缺失时，系统明确 fail-fast 并给可追踪错误码。
+- business_goals: KPI-1 dispatch 自动执行闭环率 >=95%（不再停留 pending）；KPI-2 无 commit_sha 仍推进到 merge 的事件数 =0；KPI-3 双重 merge 事故数 =0；KPI-4 失败轮次结构化阻断证据覆盖率 =100%
+- non_goals:
+  - 本轮不重构 `jjk-plan/jjk-vkplan` 的卡片拆解算法。
+  - 本轮不改造具体业务模块（AI、前端、数据库逻辑）。
+  - 本轮不引入新的项目管理后端接口。
+- acceptance_gates: AG-01 默认执行器切换为 wtimp 且可回退；AG-02 dispatch 成功轮次必须输出 canonical execution_evidence；AG-03 commit_sha 缺失触发 CARDRUN_NO_COMMIT_EVIDENCE；AG-04 verify->merge 只执行一次；AG-05 文档链路主链口径一致
+- release_constraints:
+  - 项目未上线，优先消除结构性债务与执行不确定性。
+  - 必须保留回退锚点（开关默认 `true`，回退时置 `false`）。
 
 ## 3. architecture_contract
 - 模块边界与职责:
@@ -536,12 +526,12 @@ clarify_handoff_contract:
 ```
 
 ## 13. 审批记录
-- design_approved: false
-- approved_at: ""
-- approved_round: ""
-- approval_evidence: ""
-- approval_mode: pending
-- go_no_go: NO_GO
+- design_approved: true
+- approved_at: "2026-03-06 20:05 +08:00"
+- approved_round: "round-2-final"
+- approval_evidence: "用户回复：确认"
+- approval_mode: approved
+- go_no_go: GO
 - blocking_issues: []
 
 ## 14. 执行备注（机读）

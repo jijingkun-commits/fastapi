@@ -1,0 +1,12 @@
+{
+  "task_key": "PP-20260306-ENGINEERING-LEAN-GOV",
+  "card_status_map": {
+    "C01": "todo",
+    "C02": "todo",
+    "C03": "todo",
+    "C04": "todo",
+    "G01": "todo"
+  },
+  "updated_at": "2026-03-06T21:00:00+08:00",
+  "updated_by": "codex-session"
+}

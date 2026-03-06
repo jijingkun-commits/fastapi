@@ -120,6 +120,8 @@ npx ai-agent-skills info <skill-name>
                                                 （或 /jjk-review → /jjk-test → 验收）
 ```
 
+`/jjk-clarify` 支持在同一命令内完成探索与冻结（不强制前置 `brainstorming`）；`/ask` 仅用于你明确希望拆分探索会话的场景。
+
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
 | **澄清冻结** | `/jjk-clarify` | `design.md` + `design_freeze_summary` + `clarify_handoff_contract` | 开发前冻结边界/语义/回退口径 |
@@ -406,7 +408,7 @@ description: 命令的简短描述
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
 | `/ask` | 发散澄清入口（探索优先），推荐收敛到 `/jjk-clarify` | 方案探索快照（可选） |
-| `/jjk-clarify` | 设计冻结入口，沉淀 `design_freeze_summary + clarify_handoff_contract` | `design.md` |
+| `/jjk-clarify` | 设计冻结入口（默认收敛），沉淀 `design_freeze_summary + clarify_handoff_contract` | `design.md` |
 | `/jjk-plan` | 正式规划入口（`core/parallel`），产出需求与实现方案 | `requirements.md` + `implementation_plan.md` |
 | `/jjk-imp` | 标准实现入口，按计划改码并同步必要文档 | 代码 + 文档 |
 | `/jjk-wtimp` | worktree 隔离实现入口，适合中大改动 | 隔离实现证据 + 合并结果 |

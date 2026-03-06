@@ -11,7 +11,7 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 
 `$jjk-cardrun` 负责主控调度与单卡串行推进，默认链路：
 
-`$jjk-plan -> $jjk-vkplan -> $jjk-cardrun(loop) -> $jjk-imp-ws`
+`$jjk-plan -> $jjk-vkplan -> $jjk-cardrun(loop) -> $jjk-wtimp(executor_mode=cardrun_dispatch)`
 
 > **中文主导**：思考与输出统一中文。
 
@@ -94,7 +94,7 @@ python3 scripts/check_plan_vk_coverage.py --task-split-dir <task_split_dir> --ou
 ### 3) 主控调度子代理
 
 1. 必须把当前卡对应 `WS-*.md` 全量上下文交给子代理。
-2. 子代理入口固定：`$jjk-imp-ws @<ws_file>`。
+2. 子代理入口固定：`$jjk-wtimp @<ws_file>`（`executor_mode=cardrun_dispatch`）。
 3. 仅允许“卡内并行”，禁止“跨卡并行”。
 4. 子代理失败立即阻断：`CARDRUN_SUBAGENT_FAILED`。
 5. 子代理回执必须包含当前卡片对应的 `commit_sha` 证据；缺失时阻断：`CARDRUN_NO_COMMIT_EVIDENCE`。
@@ -115,6 +115,7 @@ bash scripts/wt-flow.sh merge
 5. `merge` 前必须满足“会话分支卡片 == 当前激活卡片”且状态为 `verified`；不满足即阻断（防止误合并到错误卡片）。
 6. `merge` 时若目标分支相对基线 `ahead=0`，必须阻断：`MERGE_NO_COMMITS`（禁止“无提交也标记完成”）。
 7. 门禁/编排类卡片若无文件改动，允许空提交进入 `merge`，但必须有 `commit_sha` 与原因证据。
+8. `cardrun` 是唯一 merge 主路径；`wtimp` 在 `executor_mode=cardrun_dispatch` 下不得重复执行 merge。
 
 ### 5) 循环推进（仅 loop）
 

@@ -80,11 +80,19 @@ git worktree list
 3. 抽检未通过的工作项不得推进到下一阶段，必须先复核并补齐证据。
 4. 阶段汇报至少包含：`结论`、`证据`、`剩余风险`。
 
+### 0.7) 执行模式（新增）
+
+1. 默认模式：`executor_mode=standalone`，执行完整闭环（`create -> implement -> verify -> merge`）。
+2. 被 `/jjk-cardrun` 调用时必须使用：`executor_mode=cardrun_dispatch`。
+3. `cardrun_dispatch` 下仅执行“实现 + 提交 + 证据回传”，不得重复执行 `create` 与 `merge`。
+4. `cardrun_dispatch` 必须回传 `commit_sha`，否则输出 `WTIMP_EVIDENCE_MISSING`。
+
 ### 1) 创建隔离 worktree
 
-1. 根据主题生成 slug（`YYYYMMDD-<topic-slug>`）。
-2. 执行 `bash scripts/wt-flow.sh create <slug>`。
-3. 记录输出的 `worktree_path` 与 `feature/<slug>` 分支。
+1. `executor_mode=standalone`：根据主题生成 slug（`YYYYMMDD-<topic-slug>`）。
+2. `executor_mode=standalone`：执行 `bash scripts/wt-flow.sh create <slug>`。
+3. `executor_mode=standalone`：记录输出的 `worktree_path` 与 `feature/<slug>` 分支。
+4. `executor_mode=cardrun_dispatch`：复用 cardrun 已创建的 worktree 上下文，禁止再次 create。
 
 ### 2) 切换并校验 worktree 上下文
 
@@ -107,8 +115,9 @@ git worktree list
 ### 5) 提交、合并与清理
 
 1. 在 worktree 内按 `implementation_plan.task_to_pr_mapping` 与 `execution_contract.commit_policy` 完成提交。
-2. 执行 `bash scripts/wt-flow.sh merge`（可选 `--no-cleanup`）。
-3. 若冲突或脚本中断，保留 worktree 并输出下一步处理建议。
+2. `executor_mode=standalone`：执行 `bash scripts/wt-flow.sh merge`（可选 `--no-cleanup`）。
+3. `executor_mode=cardrun_dispatch`：禁止 merge，由 cardrun done_gate 主路径统一收口。
+4. 若冲突或脚本中断，保留 worktree 并输出下一步处理建议。
 
 ### 6) 交付产物（强制）
 

@@ -1,0 +1,68 @@
+{
+  "mode": "sync_all_cards",
+  "task_key": "PP-20260306-ENGINEERING-LEAN-GOV",
+  "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0",
+  "state_file": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-06_工程减法治理/.state/PP-20260306-ENGINEERING-LEAN-GOV/task-runner-state.json",
+  "dry_run": true,
+  "disabled": false,
+  "total_cards": 5,
+  "results": [
+    {
+      "card_id": "C01",
+      "desired_status": "todo",
+      "current_status": "",
+      "task_id": "",
+      "sync_result": "dry_run_create",
+      "last_sync_at": "2026-03-06T12:10:26.262733+00:00",
+      "dry_run": true,
+      "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0"
+    },
+    {
+      "card_id": "C02",
+      "desired_status": "todo",
+      "current_status": "",
+      "task_id": "",
+      "sync_result": "dry_run_create",
+      "last_sync_at": "2026-03-06T12:10:26.263032+00:00",
+      "dry_run": true,
+      "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0"
+    },
+    {
+      "card_id": "C03",
+      "desired_status": "todo",
+      "current_status": "",
+      "task_id": "",
+      "sync_result": "dry_run_create",
+      "last_sync_at": "2026-03-06T12:10:26.263066+00:00",
+      "dry_run": true,
+      "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0"
+    },
+    {
+      "card_id": "C04",
+      "desired_status": "todo",
+      "current_status": "",
+      "task_id": "",
+      "sync_result": "dry_run_create",
+      "last_sync_at": "2026-03-06T12:10:26.263085+00:00",
+      "dry_run": true,
+      "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0"
+    },
+    {
+      "card_id": "G01",
+      "desired_status": "todo",
+      "current_status": "",
+      "task_id": "",
+      "sync_result": "dry_run_create",
+      "last_sync_at": "2026-03-06T12:10:26.263100+00:00",
+      "dry_run": true,
+      "project_id": "2ea99dca-a111-43bb-ae73-f836bafe0fb0"
+    }
+  ],
+  "counts": {
+    "dry_run_create": 5
+  },
+  "has_failed": false,
+  "last_sync_at": "2026-03-06T12:10:26.263132+00:00",
+  "ok": true,
+  "strict_mode": false
+}

@@ -19,6 +19,10 @@
                                                   （或 /jjk-review -> /jjk-test -> 验收）
 ```
 
+补充分流：
+1. 默认可只用 `/jjk-clarify` 完成“探索 + 冻结”闭环。
+2. `/ask` 仅在你明确希望分离探索会话时使用（非必需）。
+
 ### 1.2 并行开发（多 AI / 多 worktree）
 
 ```text
@@ -76,7 +80,7 @@ python3 scripts/check_clarify_plan_alignment.py \
 
 | 场景 | 推荐命令 | 说明 |
 |---|---|---|
-| 快速澄清需求 | `/jjk-clarify` | 设计冻结入口，产出 `design_freeze_summary + clarify_handoff_contract` |
+| 快速澄清需求 | `/jjk-clarify` | 设计冻结入口（默认收敛），产出 `design_freeze_summary + clarify_handoff_contract` |
 | 规划（不拆卡） | `/jjk-plan` 或 `/jjk-plan core` | 只产出需求与技术方案 |
 | 规划 + 并行拆解（推荐） | `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`） | 含 G0 冻结与落卡前产物 |
 | 看板落卡（推荐） | `/jjk-vktodo <任务拆解目录> create` | create-only 幂等建卡（不负责状态推进） |
