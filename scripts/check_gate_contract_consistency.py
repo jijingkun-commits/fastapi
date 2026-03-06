@@ -20,6 +20,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -503,5 +504,23 @@ def main() -> int:
     return 1
 
 
+def wrapper_notice() -> str:
+    return "[DEPRECATED] check_gate_contract_consistency.py 已降级为 wrapper，请改用 python3 scripts/check_workflow_contract.py --mode gate_contract"
+
+
+def _run_legacy_wrapper(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    print(wrapper_notice(), file=sys.stderr)
+    command = [
+        sys.executable,
+        str((Path(__file__).resolve().parent / "check_workflow_contract.py").resolve()),
+        "--mode",
+        "gate_contract",
+        *args,
+    ]
+    completed = subprocess.run(command, check=False)
+    return completed.returncode
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(_run_legacy_wrapper())
