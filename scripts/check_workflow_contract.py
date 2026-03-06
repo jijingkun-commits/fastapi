@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 USAGE_LOG_PATH = ROOT / "logs" / "workflow-gate-usage.jsonl"
 USAGE_OBSERVED_MODES = {"clarify_plan", "clarify_consistency", "plan_vk_coverage", "gate_contract", "integration_gate"}
+TRUTH_SOURCE_FILENAMES = {"_active_task.json", "task-ledger.jsonl", "coder4-idempotency.json", "task-runner-state.json", "task-runner-state.json.lock"}
+
 
 
 def _utc_now() -> datetime:
@@ -479,6 +481,98 @@ def _run_legacy_wrapper_compat(passthrough_args: Sequence[str]) -> int:
     return 0 if all_ok else 1
 
 
+def _task_lifecycle(task_state_dir: Path) -> str:
+    state_file = task_state_dir / "task-runner-state.json"
+    if not state_file.exists():
+        return "unknown"
+    try:
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "unknown"
+    statuses = list((payload.get("card_status_map") or payload.get("card_status") or {}).values())
+    normalized = {str(item or "").strip().lower().replace("-", "_") for item in statuses}
+    if normalized and normalized.issubset({"done", "skipped"}):
+        return "done"
+    return "active"
+
+
+def should_archive_entry(path: Path, *, lifecycle: str, ttl_days: int, now: datetime) -> tuple[bool, str]:
+    if path.name in TRUTH_SOURCE_FILENAMES or path.name.startswith("active-session-"):
+        return False, "truth_source"
+    if lifecycle not in {"done", "archived"}:
+        return False, f"lifecycle_{lifecycle}"
+    last_modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    age_days = (now - last_modified).days
+    if age_days < ttl_days:
+        return False, f"ttl_not_expired:{age_days}"
+    return True, "ttl_expired"
+
+
+def archive_audit_report(task_split_root: Path, ttl_days: int) -> dict[str, Any]:
+    now = _utc_now()
+    task_dirs = [item for item in task_split_root.iterdir() if item.is_dir() and not item.name.startswith("_")]
+    reports: list[dict[str, Any]] = []
+    candidates = 0
+    protected = 0
+    for task_dir in sorted(task_dirs):
+        state_root = task_dir / ".state"
+        if not state_root.exists():
+            continue
+        task_entries: list[dict[str, Any]] = []
+        for task_state_dir in sorted([item for item in state_root.iterdir() if item.is_dir()]):
+            lifecycle = _task_lifecycle(task_state_dir)
+            for file_path in sorted([item for item in task_state_dir.rglob("*") if item.is_file()]):
+                archive_ok, reason = should_archive_entry(file_path, lifecycle=lifecycle, ttl_days=ttl_days, now=now)
+                last_modified = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
+                item = {
+                    "path": str(file_path.relative_to(ROOT)),
+                    "task_split_dir": task_dir.name,
+                    "task_key": task_state_dir.name,
+                    "lifecycle": lifecycle,
+                    "last_modified": last_modified.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "decision": "archive_candidate" if archive_ok else "protected",
+                    "reason": reason,
+                }
+                task_entries.append(item)
+                if archive_ok:
+                    candidates += 1
+                else:
+                    protected += 1
+        if task_entries:
+            reports.append({"task_split_dir": task_dir.name, "entries": task_entries})
+
+    return {
+        "ok": True,
+        "ttl_days": ttl_days,
+        "task_split_root": str(task_split_root),
+        "summary": {
+            "archive_candidates": candidates,
+            "protected_entries": protected,
+            "active_truth_source_harmed": 0,
+        },
+        "tasks": reports,
+    }
+
+
+def ttl_archive_runner(task_split_root: Path, ttl_days: int) -> dict[str, Any]:
+    return archive_audit_report(task_split_root, ttl_days)
+
+
+def _run_ttl_audit(passthrough_args: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description="TTL 归档审计")
+    parser.add_argument("--task-split-dir", required=True, help="任务拆解根目录或单个任务拆解目录")
+    parser.add_argument("--ttl-days", type=int, default=14, help="TTL 天数")
+    parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
+    parser.add_argument("--output", default="-", help="输出路径；默认 stdout")
+    args = parser.parse_args(list(passthrough_args))
+
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    task_split_root = _resolve_task_split_dir_arg(repo_root, args.task_split_dir)
+    payload = ttl_archive_runner(task_split_root, args.ttl_days)
+    _emit_payload(payload, args.output)
+    return 0 if payload.get("ok") else 1
+
+
 def _run_usage_report(passthrough_args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="旧入口调用观测报告")
     parser.add_argument("--window-days", type=int, default=7, help="统计窗口（天）")
@@ -530,8 +624,7 @@ MODE_REGISTRY: dict[str, ModeSpec] = {
     "ttl-audit": ModeSpec(
         mode="ttl-audit",
         description="过程文件 TTL 审计",
-        available=False,
-        planned_card="C06",
+        runner=_run_ttl_audit,
     ),
     "full-gate": ModeSpec(
         mode="full-gate",
