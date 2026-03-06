@@ -558,6 +558,191 @@ def ttl_archive_runner(task_split_root: Path, ttl_days: int) -> dict[str, Any]:
     return archive_audit_report(task_split_root, ttl_days)
 
 
+def _workflow_usage_log_path(repo_root: Path) -> Path:
+    return (repo_root / "logs" / "workflow-gate-usage.jsonl").resolve()
+
+
+def _resolve_repo_relative(path_str: str, *, repo_root: Path = ROOT) -> Path:
+    path = Path(path_str)
+    if path.is_absolute():
+        return path.resolve()
+    return (repo_root / path).resolve()
+
+
+def _wrapper_shell_report(*, repo_root: Path) -> dict[str, Any]:
+    wrapper_targets = [
+        ("scripts/check_clarify_plan_alignment.py", "clarify_plan"),
+        ("scripts/check_plan_vk_coverage.py", "plan_vk_coverage"),
+        ("scripts/check_gate_contract_consistency.py", "gate_contract"),
+        ("scripts/check_integration_gate.py", "integration_gate"),
+    ]
+    entries = []
+    for rel_path, mode in wrapper_targets:
+        path = _resolve_repo_relative(rel_path, repo_root=repo_root)
+        text = path.read_text(encoding="utf-8")
+        line_count = len(text.splitlines())
+        has_wrapper = "def wrapper_notice" in text and 'check_workflow_contract.py' in text and f'"{mode}"' in text
+        thin_shell = line_count <= 80
+        entries.append({
+            "path": rel_path,
+            "mode": mode,
+            "line_count": line_count,
+            "has_wrapper_notice": has_wrapper,
+            "thin_shell": thin_shell,
+            "ok": has_wrapper and thin_shell,
+        })
+    return {
+        "ok": all(item["ok"] for item in entries),
+        "entries": entries,
+    }
+
+
+def retirement_guard(*, wrapper_report: dict[str, Any], usage_report: dict[str, Any], ttl_report: dict[str, Any], checked_at: datetime, window_days: int) -> dict[str, Any]:
+    blockers: list[dict[str, Any]] = []
+    if not wrapper_report.get("ok"):
+        blockers.append({
+            "code": "LEGACY_WRAPPER_NOT_THIN",
+            "files": [item["path"] for item in wrapper_report.get("entries", []) if not item.get("ok")],
+        })
+
+    events = usage_report.get("events") or []
+    legacy_calls = int(((usage_report.get("summary") or {}).get("legacy_calls") or 0))
+    if legacy_calls > 0:
+        blockers.append({
+            "code": "LEGACY_USAGE_DETECTED",
+            "legacy_calls": legacy_calls,
+        })
+
+    if events:
+        recorded_ats = []
+        for event in events:
+            raw = str(event.get("recorded_at") or "").strip()
+            if not raw:
+                continue
+            try:
+                recorded_ats.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+            except ValueError:
+                continue
+        if recorded_ats:
+            oldest = min(recorded_ats)
+            eligible_after = oldest + timedelta(days=window_days)
+            if checked_at < eligible_after:
+                blockers.append({
+                    "code": "ZERO_CALL_WINDOW_NOT_MATURE",
+                    "oldest_observed_at_utc": oldest.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "eligible_after_utc": eligible_after.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "window_days": window_days,
+                })
+        else:
+            blockers.append({"code": "USAGE_WINDOW_EMPTY", "window_days": window_days})
+    else:
+        blockers.append({"code": "USAGE_WINDOW_EMPTY", "window_days": window_days})
+
+    if int(((ttl_report.get("summary") or {}).get("active_truth_source_harmed") or 0)) != 0:
+        blockers.append({
+            "code": "TTL_GUARD_VIOLATION",
+            "summary": ttl_report.get("summary"),
+        })
+
+    return {
+        "ok": len(blockers) == 0,
+        "blockers": blockers,
+    }
+
+
+def _run_full_gate(passthrough_args: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description="全链路门禁验收")
+    parser.add_argument("--task-split-dir", required=True, help="任务拆解目录名或绝对路径")
+    parser.add_argument("--baseline", default="master", help="主干基线")
+    parser.add_argument("--window-days", type=int, default=7, help="零调用观测窗口")
+    parser.add_argument("--ttl-days", type=int, default=14, help="TTL 审计窗口")
+    parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
+    parser.add_argument("--output", default="-", help="输出路径；默认 stdout")
+    args = parser.parse_args(list(passthrough_args))
+
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    task_split_dir = _resolve_task_split_dir_arg(repo_root, args.task_split_dir)
+    source_files = _load_task_source_files(task_split_dir)
+
+    import check_clarify_plan_alignment as clarify_module
+    import check_plan_vk_coverage as vk_module
+    import check_gate_contract_consistency as gate_module
+    from coder4 import check_integration_gate as integration_module
+
+    checked_at = _utc_now()
+    requirements = str(source_files.get("requirements") or "").strip()
+    implementation = str(source_files.get("implementation_plan") or "").strip()
+    clarify_ok = False
+    clarify_payload: dict[str, Any]
+    try:
+        clarify_payload = clarify_module.run_alignment_check(
+            repo_root=repo_root,
+            task_split_dir_raw=None,
+            requirements_path_raw=requirements,
+            implementation_path_raw=implementation,
+            design_path_raw=None,
+        )
+        clarify_ok = bool(clarify_payload.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        clarify_payload = {"ok": False, "error": str(exc)}
+
+    try:
+        vk_payload = vk_module.run_check(repo_root=repo_root, task_split_dir_raw=str(task_split_dir))
+        vk_ok = bool(vk_payload.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        vk_payload = {"ok": False, "error": str(exc)}
+        vk_ok = False
+
+    try:
+        gate_payload = gate_module.run_check(task_split_dir, repo_root)
+        gate_ok = bool(gate_payload.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        gate_payload = {"ok": False, "error": str(exc)}
+        gate_ok = False
+
+    try:
+        integration_payload = integration_module.run_check(
+            repo_root=repo_root,
+            task_split_dir=task_split_dir,
+            state_dir=(task_split_dir / '.state').resolve(),
+            baseline=args.baseline,
+        )
+        integration_ok = bool(integration_payload.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        integration_payload = {"ok": False, "error": str(exc)}
+        integration_ok = False
+
+    usage_payload = aggregate_usage_window(args.window_days, log_path=_workflow_usage_log_path(repo_root))
+    ttl_payload = ttl_archive_runner(task_split_dir.parent, args.ttl_days)
+    wrapper_payload = _wrapper_shell_report(repo_root=repo_root)
+    guard_payload = retirement_guard(
+        wrapper_report=wrapper_payload,
+        usage_report=usage_payload,
+        ttl_report=ttl_payload,
+        checked_at=checked_at,
+        window_days=args.window_days,
+    )
+
+    payload = {
+        "ok": all([clarify_ok, vk_ok, gate_ok, integration_ok, usage_payload.get("ok"), ttl_payload.get("ok"), guard_payload.get("ok")]),
+        "checked_at": checked_at.replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+        "task_split_dir": str(task_split_dir),
+        "baseline": args.baseline,
+        "checks": {
+            "clarify_plan": clarify_payload,
+            "plan_vk_coverage": vk_payload,
+            "gate_contract": gate_payload,
+            "integration_gate": integration_payload,
+            "usage_report": usage_payload,
+            "ttl_audit": ttl_payload,
+            "wrapper_shell": wrapper_payload,
+        },
+        "retirement_guard": guard_payload,
+    }
+    _emit_payload(payload, args.output)
+    return 0 if payload.get("ok") else 1
+
+
 def _run_ttl_audit(passthrough_args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="TTL 归档审计")
     parser.add_argument("--task-split-dir", required=True, help="任务拆解根目录或单个任务拆解目录")
@@ -629,8 +814,7 @@ MODE_REGISTRY: dict[str, ModeSpec] = {
     "full-gate": ModeSpec(
         mode="full-gate",
         description="全链路门禁验收",
-        available=False,
-        planned_card="G01",
+        runner=_run_full_gate,
     ),
 }
 
@@ -679,7 +863,7 @@ def run_mode(mode: str, passthrough_args: Sequence[str]) -> int:
         )
         return 3
 
-    if normalized_mode in USAGE_OBSERVED_MODES:
+    if normalized_mode in USAGE_OBSERVED_MODES and os.environ.get("WORKFLOW_GATE_DISABLE_USAGE_LOG") != "1":
         emit_usage_log(
             mode=normalized_mode,
             caller=os.environ.get("WORKFLOW_GATE_CALLER", "unified_entry"),
