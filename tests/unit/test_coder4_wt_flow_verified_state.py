@@ -104,6 +104,59 @@ def test_wt_flow_next_blocks_when_verified_card_exists(tmp_path: Path):
     assert "C01" in result.stdout
 
 
+def test_wt_flow_verify_allows_rg_acceptance_check(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "inprogress", "C02": "todo"},
+        },
+    )
+
+    cards_file = tmp_path / "docs" / "内部参考" / "任务拆解" / TASK_SPLIT_DIR / "vk_cards.json"
+    cards_payload = json.loads(cards_file.read_text(encoding="utf-8"))
+    cards_payload["cards"][0]["acceptance_checks"] = ['rg -n "fixture" README.md']
+    _write_json(cards_file, cards_payload)
+
+    sanitized = _sanitize_task_key_segment(TASK_KEY)
+    session_id = "session-verify-rg"
+    worktree_path = tmp_path / ".worktrees" / sanitized / "C01" / session_id
+    worktree_path.mkdir(parents=True, exist_ok=True)
+    (worktree_path / "README.md").write_text("fixture\n", encoding="utf-8")
+    _write_json(
+        task_state_root / f"active-session-{session_id}.json",
+        {
+            "branch": f"feature/{sanitized}/C01/{session_id}",
+            "worktree": str(worktree_path),
+            "base_branch": "master",
+            "task_key": TASK_KEY,
+            "session_id": session_id,
+        },
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path), "verify", "C01", f"--state-dir={task_state_root.parent}"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+            "WT_FLOW_SESSION_ID": session_id,
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state_payload["card_status_map"]["C01"] == "verified"
+    assert state_payload["gate_results"]["C01"]["passed"] is True
+    assert state_payload["gate_results"]["C01"]["evidence"][0]["prefix"] == "rg"
+
+
 def test_wt_flow_merge_requires_verified_state_not_done(tmp_path: Path):
     script_path, active_task_path, task_state_root, _ = _prepare_task_fixture(
         tmp_path,

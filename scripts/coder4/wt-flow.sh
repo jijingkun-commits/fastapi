@@ -25,6 +25,7 @@ ALLOWED_PREFIXES=(
   "pytest"
   "ruff"
   "grep"
+  "rg"
   "cat"
   "jq"
   "wc"
