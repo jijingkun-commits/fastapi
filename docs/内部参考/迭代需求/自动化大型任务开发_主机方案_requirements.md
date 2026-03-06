@@ -38,8 +38,8 @@
 
 ### 3.2 范围内
 
-1. `scripts/coder4_bootstrap_kernel.py` 本地模式强化；
-2. `scripts/wt-flow.sh` 扩展与串行门禁强化；
+1. `scripts/coder4/coder4_bootstrap_kernel.py` 本地模式强化；
+2. `scripts/coder4/wt-flow.sh` 扩展与串行门禁强化；
 3. `task-runner-state.json` / attempts / ledger 本地化收敛；
 4. `WORKFLOW_AUTO.md`、`VK_AGENT_PROMPTS.md` 等仓外规则清理；
 5. VK 降级为只读展示层（fire-and-forget）。

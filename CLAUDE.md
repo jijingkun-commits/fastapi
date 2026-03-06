@@ -2,94 +2,86 @@
 
 # 项目代理工作指南（Claude 镜像）
 
-本文件由 `AGENTS.md` 自动镜像生成，供 Claude Code 使用。
+本文件是`/Users/jijingkun/bojxAI/fastapi` 下的主规则。
 作用域覆盖当前目录及所有子目录；若子目录存在更深层 `AGENTS.md`，以更深层文件为准。
 
-## 全局原则
-0. **独立思考**: 说人话优先，对用户提出的问题要进行独立思考，不要顺着用户的思路走，要勇于指出现有项目的问题和错误，不要盲目执行。
-1. **中文主导**: 思考过程和输出永远使用中文
-2. **审慎修改**: 修改前逐行审查源代码；不确定时先查文档/测试/调用链，仍无法判断再一次性提问
-3. **工程质量优先**: 优先结构清晰、命名一致、可读、可测试、可维护的方案
-4. **严禁屎山**: 尽量降低代码行数，不要每次都引入大量新代码。
-5. **纯净注释**: NEVER 在注释中使用 emoji，NEVER 添加"修复/优化"过程注释
-6. **架构优先**: 独立思考，勇于指出现有项目的问题和错误，不要顺着用户的思路走；无论是需求开发、缺陷修复还是性能调整，都先确认模块边界、状态契约与职责归属；跨层改动必须先梳理端到端数据流与状态生命周期，避免策略散落到多个节点造成隐性耦合
-7. **拒绝补丁**: 禁止以临时条件分支、硬编码或重复逻辑掩盖问题；必须先定位根因，并在正确层级进行系统性修复，必要时先做适度重构以降低复杂度与后续维护成本
-8. **文档同步**: 涉及架构/API/表结构/配置变更时，先更新文档再改代码
-9. **智能体优先**: 本项目为智能体项目，涉及智能体流程（如 `app/ai/**`）的功能实现时，优先采用流程编排、策略配置、工具抽象与状态管理方案；禁止优先通过硬编码业务分支或固定决策路径实现功能
-10. **OpenClaw 对标优先**: 长期参考项目为 `/Users/jijingkun/bojxAI/bot/openclaw`，涉及智能体架构、流程编排、工具抽象、状态管理与关键实现方案时，优先对齐其设计理念与实现方式；若与本项目约束冲突，需先说明差异再给出落地方案
-11. **开关默认开启**: 新功能/新链路配置开关默认值应为开启（`true`）；除非用户明确要求灰度，禁止采用“默认关闭 + 分阶段放量”作为默认口径。回退路径统一写为“关闭开关或触发降级策略”。
+## 层级与优先级（强制）
+1. 系统/开发者硬约束 > 当次用户目标 > Layer1（本文件）> Layer2（`.cursor/rules/*.mdc`）> Layer3（Skills / tools）> Layer4（`memory-bank.md`）> 代理默认习惯。
+2. 同层规则冲突时，优先“更具体路径、更强约束、更可验证”的规则。
+3. 出现规则冲突时，先说明冲突点、取舍理由与风险，再执行。
+4. Layer1 只保留治理口径与交付门禁；技术细则与场景化规范统一落在 Layer2，避免重复维护。
 
-## 技术栈
-- 后端：FastAPI + LangGraph + SQLAlchemy 2.0
-- 前端：Next.js 15 + React 19 + TypeScript
-- AI：涉及 LangChain/LangGraph 时用 context7 MCP 查询最新 API
+## Layer1 执行治理（强制）
+1. **工作模式默认 `lean`**：优先做减法（删冗余、收敛重复、缩短调用链）；根因在结构层时用 `refactor`；`patch` 仅用于明确 hotfix 且需附治理计划。
+2. **架构评审门禁**：任何改动前必须提交“模块边界、依赖方向、状态归属、错误处理责任”四段式结论；原则解释统一引用 `.cursor/rules/core.mdc` 第 6 条。
+3. **根因修复门禁**：禁止以多层 fallback、重复分支、硬编码开关掩盖问题；修复说明必须包含根因定位与修复层级，技术细则统一引用 `.cursor/rules/core.mdc` 第 7 条。
+4. **变更量约束**：在 `bugfix/refactor` 中若 `新增行数 > 删除行数`，必须说明架构必要性；新功能可豁免但必须说明原因。
+5. **文档变更门禁**：涉及架构/API/表结构/配置变更时，先更新文档再改代码；同步细则统一引用 `.cursor/rules/doc_sync.mdc` 与 `.cursor/rules/core.mdc` 第 8 条。
+6. **证据化交付**：未给出瘦身证据（删除清单、重复收敛、复杂度变化、验证结果）不得宣称 `lean/refactor` 完成。
+7. **去重约束**：Layer1 只保留治理口径与交付门禁，不复述 Layer2 技术细则；同主题仅保留“门禁 + 引用”。
 
-## 双数据库
-- `chat_db` (`DATABASE_URL`)：主应用库（`t_user`, `t_chat_message` 等）
-- `data_db` (`ANALYTICS_DATABASE_URL`)：分析库只读（`fdmdata.*`, `sdmdata.*`）
-- `mcp__postgres__query` -> `chat_db`
-- `mcp__postgres-data-db__query` -> `data_db`
-- 代码中 `analytics_engine` 连接 `data_db`
-
-## MCP 工具路由（优先 + 可观测降级）
-
-以下场景默认优先使用对应 MCP 工具；当 MCP 未配置、不可用或权限受限时，允许降级到 CLI/脚本，不阻塞任务。
-
-| 场景 | 优先 MCP 工具 | 降级方式（MCP 不可用时） |
-|------|---------------|-------------------------|
-| 查询 `chat_db` 数据/表结构 | `mcp__postgres__query` | `psql`（需在输出说明 SQL 与目标库） |
-| 查询 `data_db` 数据/表结构 | `mcp__postgres-data-db__query` | `psql`（需在输出说明 SQL 与目标库） |
-| LangChain/LangGraph/任何第三方库 API 用法不确定时 | context7（先 `mcp__context7__resolve-library-id` 再 `mcp__context7__query-docs`） | 官方文档 + 版本说明（禁止纯记忆猜测） |
-| GitHub 操作（PR/Issue/代码搜索） | `github-mcp-server` 系列工具 | `gh` CLI 或 Web 操作记录 |
-| E2E 测试/浏览器交互/截图 | `playwright` 系列工具 | 本地 Playwright CLI / 浏览器手动复现 |
-| 任务管理/看板操作 | `vibe_kanban` 系列工具 | 项目内任务文档 + 明确状态变更记录 |
-| 对象存储操作 | `minio` 系列工具 | `mc` CLI / SDK 脚本（需记录桶与对象路径） |
-
-### 触发规则
-1. 涉及数据库查询时，先判断目标库（`chat_db` vs `data_db`），优先调用对应 MCP。
-2. 涉及第三方库 API 且不是 100% 确定用法时，优先用 context7 查文档再写代码。
-3. 涉及 GitHub 操作时，先检测是否有 GitHub MCP；若不可用则降级到 `gh` CLI。
-4. 需要浏览器测试时，优先用 playwright MCP；不可用时可改用 Playwright CLI。
-5. 发生降级时，回复中必须包含：`原因`、`替代工具`、`验证结果`。
-
-## 输出展现规范（默认）
-- `docs/plans/*-design.md` 仅保留最终方案与决策理由，禁止写方案 A/B/C 对比表
-- `docs/内部参考/迭代需求/*_requirements.md` 与 `*_implementation_plan.md` 仅保留最终决策，禁止写方案 A/B/C、方案 1/2/3 之类对比内容
-- 如需记录取舍，只能在“决策权衡”中简述放弃原因，不做并列评分或推荐度打分
-- 涉及流程、架构、调用链时，选择直观的展示方式
-
-## 端口
-- 前端：3000
-- 后端：8000
+## `patch` 模式附加门槛（强制）
+- 必须包含：影响范围、临时性说明、回退路径、后续治理任务。
 
 ## 执行上下文校验（强制）
-修改代码/运行测试前必须校验以下信息，不一致时立即停止：
+### A. 基础观测（每次执行前）
+修改代码或运行测试前必须先输出：
 1. `pwd`
 2. `git branch --show-current`
 3. `git worktree list`
 
-## 详细规则
-领域规则（代码风格、LangGraph、文档同步等）见 `.cursor/rules/` 目录。
+### B. 期望上下文比对（`jjk-verify` / 测试前强制）
+仅做基础观测不足以保证“测对分支/测对 worktree”，必须做“期望值比对”：
+1. 从输入证据中提取期望上下文（至少其一）：`task_id/pr_id`、目标分支、目标 worktree 路径、目标提交 SHA。
+2. 采集实际上下文：`pwd`、`git rev-parse --show-toplevel`、`git branch --show-current`、`git rev-parse HEAD`。
+3. 比对“期望 vs 实际”；任一关键项不一致，`FAIL_FAST` 输出 `VERIFY_CONTEXT_MISMATCH` 并停止测试执行。
+4. `jjk-verify` 报告必须包含：目标上下文、实际上下文、比对结论、阻断/放行原因。
+5. 若输入证据无法提供可比对的期望上下文，`FAIL_FAST` 输出 `VERIFY_INPUT_INCOMPLETE`，禁止进入测试阶段。
 
-## 规则与脚本速查
-- 改规则/命令：CC 侧 PostToolUse hook 自动同步（也可手动 `python3 scripts/sync_rules_to_cc.py`）
-- 加工作流脚本：放 `.cursor/scripts/` + 在 `scripts/` 补 symlink
-- 加项目脚本：直接放 `scripts/` 或子目录
-- 建立新约定/流程：必须同步写入操作手册（本文件或对应 docs）
+## 运行态校验（按需强制）
+以下场景必须补充运行态校验，不得只做静态命令验证：
+1. 端口/服务启动相关问题；
+2. API 联调、E2E/UAT、回归关键链路；
+3. 用户明确要求“确认服务是否启动/端口是否可用”。
 
-## 规则维护
+推荐最小校验集（按需选择）：
+1. 先基于当前分支/工作树计算端口：`eval "$(bash scripts/vk_ports.sh --export)"`
+2. 端口监听：`lsof -nP -iTCP:${VK_BACKEND_PORT} -sTCP:LISTEN`、`lsof -nP -iTCP:${VK_FRONTEND_PORT} -sTCP:LISTEN`
+3. 后端健康：`curl -sf "http://127.0.0.1:${VK_BACKEND_PORT}/health"`
+4. 前端可达：`curl -I "http://127.0.0.1:${VK_FRONTEND_PORT}"`
+5. 浏览器/E2E 验证必须使用 `VK_FRONTEND_BASE_URL`（或 `PLAYWRIGHT_BASE_URL`）与 `VK_BACKEND_BASE_URL`，禁止硬编码 `3000/8000`。
+
+未执行运行态校验时，必须在交付中写明：未触发原因、替代证据、残余风险。
+
+## Layer2 规则入口（唯一源）
 - 规则唯一源：`.cursor/rules/*.mdc`
 - 命令唯一源：`.cursor/commands/*.md`
-- 指南唯一源：`AGENTS.md`（`CLAUDE.md` 由同步脚本自动镜像生成，禁止手改）
-- 生成产物（禁止手改）：`.claude/rules/*.md`、`.claude/commands/*.md`（手改会在下次同步被覆盖）
-- 同步到 CC：`python3 scripts/sync_rules_to_cc.py`（同步 `AGENTS.md -> CLAUDE.md`，rules 去 frontmatter 生成 `.claude/rules/*.md`，commands 直接复制到 `.claude/commands/*.md`）
-- 自动同步：CC 侧 PostToolUse hook 在编辑 `.cursor/rules/*.mdc` 或 `.cursor/commands/*.md` 时自动触发 sync
-- 新增规则：在 `.cursor/rules/` 创建 `.mdc` 文件，编辑保存后自动同步
-- 新增命令：在 `.cursor/commands/` 创建 `.md` 文件，编辑保存后自动同步
-- Codex 读取规则入口：当前仓库下的 `AGENTS.md`（即本文件）
+- 详细技术约束以 Layer2 为准（不在本文件重复）：
+  - 核心原则与技术栈：`.cursor/rules/core.mdc`
+  - MCP 路由与联网/GitHub 检索：`.cursor/rules/mcp-routing.mdc`
+  - 双数据库约束：`.cursor/rules/dual-database.mdc`
+  - 文档同步与映射：`.cursor/rules/doc_sync.mdc`
+  - LangGraph 约束：`.cursor/rules/langgraph.mdc`
+  - 语言风格：`.cursor/rules/python_style.mdc`、`.cursor/rules/typescript_style.mdc`
 
-## 脚本目录
-- 个人工作流脚本实体在 `.cursor/scripts/`，`scripts/` 下为 symlink
-- 项目脚本直接放 `scripts/` 及其子目录（`db/`、`data/`）
-- 新增个人工作流脚本：文件放 `.cursor/scripts/`，然后 `ln -s ../.cursor/scripts/xxx scripts/xxx` 建 symlink
-- 新增项目脚本：直接放 `scripts/` 或对应子目录，无需额外操作
+## Layer3 技能入口（功能级）
+- Skills / tools 用于功能级执行策略。
+- 命中技能触发条件时必须使用；缺失或不可用时说明原因并降级，不得阻塞任务。
+
+## Layer4 项目记忆（历史决策）
+- 决策记录文件：`memory-bank.md`（本仓库根目录）。
+- 机器扫描快照（如 `.omc/project-memory.json`）不替代人工决策记录。
+- 任何会影响后续实现的长期决策，都应更新 `memory-bank.md`。
+- 仅记录“长期有效决策”，不记录一次性执行日志。
+- 单条记录建议控制在 8~12 行，必须包含：日期、主题、最终决策、取舍理由、影响范围、失效条件、关联链接。
+- 记录状态必须显式标注：`ACTIVE` / `SUPERSEDED` / `DEPRECATED`。
+- 文件顶部维护“生效决策索引”（建议最多 20 条）；超出部分按月归档到 `docs/内部参考/决策归档/`。
+
+## 规则维护与同步
+- 指南唯一源：`AGENTS.md`（`CLAUDE.md` 由同步脚本镜像生成，禁止手改）。
+- 生成产物（禁止手改）：`.claude/rules/*.md`、`.claude/commands/*.md`。
+- 同步命令：`python3 scripts/sync_rules_to_cc.py`。
+
+## 脚本目录约定
+- 个人工作流脚本实体在 `.cursor/scripts/`，`scripts/` 下为 symlink。
+- 项目脚本直接放 `scripts/` 及其子目录（`db/`、`data/`）。

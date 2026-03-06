@@ -21,15 +21,15 @@
 
 ### 1.1 功能机制
 
-  - 每轮执行生成结构化 attempt 记录
+  - 每轮执行将 gate/merge 证据内联写入 task-runner-state
   - ledger 追加写入完整推进证据
-  - attempt 文件按 task_key/card_id 归档并可清理
+  - 证据按 task_key/card_id 键归档并可按窗口清理
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_bootstrap_kernel.py::record_attempt_evidence
-  - scripts/coder4_bootstrap_kernel.py::advance_card
-  - .omc/state/task-ledger.jsonl
+  - scripts/coder4/coder4_bootstrap_kernel.py::record_attempt_evidence
+  - scripts/coder4/coder4_bootstrap_kernel.py::advance_card
+  - .state/<task_key>/task-ledger.jsonl
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#72-attempt-json-schema
@@ -37,8 +37,8 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - .omc/state/attempts/
-  - .omc/state/task-ledger.jsonl
+  - .state/<task_key>/task-runner-state.json
+  - .state/<task_key>/task-ledger.jsonl
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -52,8 +52,8 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - test -d .omc/state/attempts || true
-  - test -f .omc/state/task-ledger.jsonl || true
+  - test -f .state/<task_key>/task-runner-state.json || true
+  - test -f .state/<task_key>/task-ledger.jsonl || true
 
 ## 5. 风险与回滚
 
@@ -76,23 +76,23 @@ card_export:
   hard_depends_on: ['C04']
   depends_on: ['C04']
   file_whitelist:
-  - .omc/state/attempts/
-  - .omc/state/task-ledger.jsonl
+  - .state/<task_key>/task-runner-state.json
+  - .state/<task_key>/task-ledger.jsonl
   mechanism_summary:
-  - 每轮执行生成结构化 attempt 记录
+  - 每轮执行将 gate/merge 证据内联写入 task-runner-state
   - ledger 追加写入完整推进证据
-  - attempt 文件按 task_key/card_id 归档并可清理
+  - 证据按 task_key/card_id 键归档并可按窗口清理
   code_anchor_refs:
-  - scripts/coder4_bootstrap_kernel.py::record_attempt_evidence
-  - scripts/coder4_bootstrap_kernel.py::advance_card
-  - .omc/state/task-ledger.jsonl
+  - scripts/coder4/coder4_bootstrap_kernel.py::record_attempt_evidence
+  - scripts/coder4/coder4_bootstrap_kernel.py::advance_card
+  - .state/<task_key>/task-ledger.jsonl
   acceptance_checks:
-  - test -d .omc/state/attempts || true
-  - test -f .omc/state/task-ledger.jsonl || true
+  - test -f .state/<task_key>/task-runner-state.json || true
+  - test -f .state/<task_key>/task-ledger.jsonl || true
   rollback_anchors:
   - restore_attempts_archive
   evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p1-04-attemptledger-本地化
   done_gate:
-  - attempt 与 ledger 均可追溯
+  - 内联证据与 ledger 均可追溯
   - 单卡至少生成一条可核验证据记录
 ```

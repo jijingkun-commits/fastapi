@@ -28,9 +28,9 @@
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_bootstrap_kernel.py::with_run_lock
-  - scripts/coder4_bootstrap_kernel.py::build_idempotency_key
-  - scripts/coder4_bootstrap_kernel.py::should_skip_duplicate
+  - scripts/coder4/coder4_bootstrap_kernel.py::with_run_lock
+  - scripts/coder4/coder4_bootstrap_kernel.py::build_idempotency_key
+  - scripts/coder4/coder4_bootstrap_kernel.py::should_skip_duplicate
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键
@@ -38,7 +38,7 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/coder4_bootstrap_kernel.py
+  - scripts/coder4/coder4_bootstrap_kernel.py
   - docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md
 
 ### 禁止修改（黑名单）
@@ -53,7 +53,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - python3 scripts/coder4_bootstrap_kernel.py --help
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --help
   - python3 scripts/docs_guard.py --strict
 
 ## 5. 风险与回滚
@@ -78,18 +78,18 @@ card_export:
   hard_depends_on: []
   depends_on: []
   file_whitelist:
-  - scripts/coder4_bootstrap_kernel.py
+  - scripts/coder4/coder4_bootstrap_kernel.py
   - docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md
   mechanism_summary:
   - 执行级互斥锁保证同一时间窗口仅一轮推进
   - 幂等键窗口过滤重复 wake/agent/cron 触发
   - 重复事件统一记录 SKIP_DUPLICATE_EVENT 并不阻断主链路
   code_anchor_refs:
-  - scripts/coder4_bootstrap_kernel.py::with_run_lock
-  - scripts/coder4_bootstrap_kernel.py::build_idempotency_key
-  - scripts/coder4_bootstrap_kernel.py::should_skip_duplicate
+  - scripts/coder4/coder4_bootstrap_kernel.py::with_run_lock
+  - scripts/coder4/coder4_bootstrap_kernel.py::build_idempotency_key
+  - scripts/coder4/coder4_bootstrap_kernel.py::should_skip_duplicate
   acceptance_checks:
-  - python3 scripts/coder4_bootstrap_kernel.py --help
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --help
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - DISABLE_RUN_LOCK

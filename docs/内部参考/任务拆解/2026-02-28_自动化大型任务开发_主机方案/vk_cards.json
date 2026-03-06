@@ -10,7 +10,7 @@
     "inspection/question-card": "policy_gate"
   },
   "automation_contract": {
-    "source_of_truth": "docs/内部参考/任务拆解/_active_task.json",
+    "source_of_truth": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json",
     "required_fields": [
       "project_id",
       "task_split_dir",
@@ -153,15 +153,15 @@
         "重复事件统一记录 SKIP_DUPLICATE_EVENT 并不阻断主链路"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_bootstrap_kernel.py::with_run_lock",
-        "scripts/coder4_bootstrap_kernel.py::build_idempotency_key",
-        "scripts/coder4_bootstrap_kernel.py::should_skip_duplicate"
+        "scripts/coder4/coder4_bootstrap_kernel.py::with_run_lock",
+        "scripts/coder4/coder4_bootstrap_kernel.py::build_idempotency_key",
+        "scripts/coder4/coder4_bootstrap_kernel.py::should_skip_duplicate"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_bootstrap_kernel.py --help",
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --help",
         "python3 scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
@@ -172,7 +172,7 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "scripts/coder4_bootstrap_kernel.py",
+        "scripts/coder4/coder4_bootstrap_kernel.py",
         "docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md"
       ],
       "done_gate": [
@@ -186,7 +186,7 @@
         "docs_guard 严格校验通过"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_bootstrap_kernel.py --help",
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --help",
         "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C01_P0hooks互斥与幂等治理.md"
@@ -219,15 +219,15 @@
         "写入失败可回退 .bak 保障状态可恢复"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_bootstrap_kernel.py::atomic_write_json",
-        "scripts/coder4_bootstrap_kernel.py::load_local_state",
-        "scripts/coder4_bootstrap_kernel.py::update_local_card_status"
+        "scripts/coder4/coder4_bootstrap_kernel.py::atomic_write_json",
+        "scripts/coder4/coder4_bootstrap_kernel.py::load_local_state",
+        "scripts/coder4/coder4_bootstrap_kernel.py::update_local_card_status"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#46-原子写入实现"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json",
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json",
         "python3 scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
@@ -237,8 +237,8 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "scripts/coder4_bootstrap_kernel.py",
-        ".omc/state/task-runner-state.json"
+        "scripts/coder4/coder4_bootstrap_kernel.py",
+        ".state/<task_key>/task-runner-state.json"
       ],
       "done_gate": [
         "状态文件中断写入后仍可恢复并解析",
@@ -249,7 +249,7 @@
         "并发写场景无 JSON 损坏"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json",
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json",
         "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C02_P1状态文件原子写与锁保护.md"
@@ -282,15 +282,15 @@
         "卡片完成后 trigger_next_round 立即唤醒下一轮"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_bootstrap_kernel.py::build_kernel_context",
-        "scripts/coder4_bootstrap_kernel.py::apply_action",
-        "scripts/coder4_bootstrap_kernel.py::main"
+        "scripts/coder4/coder4_bootstrap_kernel.py::build_kernel_context",
+        "scripts/coder4/coder4_bootstrap_kernel.py::apply_action",
+        "scripts/coder4/coder4_bootstrap_kernel.py::main"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json"
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json"
       ],
       "rollback_anchors": [
         "DISABLE_AUTO_WAKE"
@@ -299,7 +299,7 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "scripts/coder4_bootstrap_kernel.py"
+        "scripts/coder4/coder4_bootstrap_kernel.py"
       ],
       "done_gate": [
         "local-mode 路径不依赖 VK 读取",
@@ -310,7 +310,7 @@
         "CARD_DONE 后可自动触发下一轮 wake"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json"
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C03_P1kernel本地模式收口.md"
     },
@@ -342,16 +342,16 @@
         "主仓 dirty 默认 fail-fast，禁止自动污染主线"
       ],
       "code_anchor_refs": [
-        "scripts/wt-flow.sh::cmd_create",
-        "scripts/wt-flow.sh::cmd_merge",
-        "scripts/wt-flow.sh::main"
+        "scripts/coder4/wt-flow.sh::cmd_create",
+        "scripts/coder4/wt-flow.sh::cmd_merge",
+        "scripts/coder4/wt-flow.sh::main"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#63-next-子命令"
       ],
       "acceptance_checks": [
-        "bash scripts/wt-flow.sh status",
-        "bash scripts/wt-flow.sh guard"
+        "bash scripts/coder4/wt-flow.sh status",
+        "bash scripts/coder4/wt-flow.sh guard"
       ],
       "rollback_anchors": [
         "WT_FLOW_ALLOW_AUTOCOMMIT=0"
@@ -360,7 +360,7 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "scripts/wt-flow.sh"
+        "scripts/coder4/wt-flow.sh"
       ],
       "done_gate": [
         "wt-flow 新命令可用",
@@ -371,8 +371,8 @@
         "主仓 dirty 时 merge 路径 fail-fast 生效"
       ],
       "check_cmd": [
-        "bash scripts/wt-flow.sh status",
-        "bash scripts/wt-flow.sh guard"
+        "bash scripts/coder4/wt-flow.sh status",
+        "bash scripts/coder4/wt-flow.sh guard"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C04_P1wt-flow扩展与done_gate白名单.md"
     },
@@ -399,21 +399,21 @@
         "P1-04"
       ],
       "mechanism_summary": [
-        "每轮执行生成结构化 attempt 记录",
+        "每轮执行将 gate/merge 证据内联写入 task-runner-state",
         "ledger 追加写入完整推进证据",
-        "attempt 文件按 task_key/card_id 归档并可清理"
+        "证据按 task_key/card_id 键归档并可按窗口清理"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_bootstrap_kernel.py::record_attempt_evidence",
-        "scripts/coder4_bootstrap_kernel.py::advance_card",
-        ".omc/state/task-ledger.jsonl"
+        "scripts/coder4/coder4_bootstrap_kernel.py::record_attempt_evidence",
+        "scripts/coder4/coder4_bootstrap_kernel.py::advance_card",
+        ".state/<task_key>/task-ledger.jsonl"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#72-attempt-json-schema"
       ],
       "acceptance_checks": [
-        "test -d .omc/state/attempts || true",
-        "test -f .omc/state/task-ledger.jsonl || true"
+        "test -f .state/<task_key>/task-runner-state.json || true",
+        "test -f .state/<task_key>/task-ledger.jsonl || true"
       ],
       "rollback_anchors": [
         "restore_attempts_archive"
@@ -422,20 +422,20 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        ".omc/state/attempts/",
-        ".omc/state/task-ledger.jsonl"
+        ".state/<task_key>/task-runner-state.json",
+        ".state/<task_key>/task-ledger.jsonl"
       ],
       "done_gate": [
-        "attempt 与 ledger 均可追溯",
+        "内联证据与 ledger 均可追溯",
         "单卡至少生成一条可核验证据记录"
       ],
       "dod": [
-        "attempt 与 ledger 均可追溯",
+        "内联证据与 ledger 均可追溯",
         "单卡至少生成一条可核验证据记录"
       ],
       "check_cmd": [
-        "test -d .omc/state/attempts || true",
-        "test -f .omc/state/task-ledger.jsonl || true"
+        "test -f .state/<task_key>/task-runner-state.json || true",
+        "test -f .state/<task_key>/task-ledger.jsonl || true"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C05_P1attempt与ledger本地化.md"
     },
@@ -530,15 +530,15 @@
         "每小时全量对账保证最终一致性"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_vk_sync.py::sync_to_vk",
-        "scripts/coder4_vk_sync.py::sync_all_cards",
-        "scripts/coder4_bootstrap_kernel.py::_try_sync_vk"
+        "scripts/coder4/coder4_vk_sync.py::sync_to_vk",
+        "scripts/coder4/coder4_vk_sync.py::sync_all_cards",
+        "scripts/coder4/coder4_bootstrap_kernel.py::_try_sync_vk"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_vk_sync.py --dry-run"
+        "python3 scripts/coder4/coder4_vk_sync.py --dry-run"
       ],
       "rollback_anchors": [
         "DISABLE_VK_SYNC"
@@ -547,7 +547,7 @@
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "scripts/coder4_vk_sync.py"
+        "scripts/coder4/coder4_vk_sync.py"
       ],
       "done_gate": [
         "VK 断连演练时主链路不中断",
@@ -558,7 +558,7 @@
         "全量同步任务可完成状态对账"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_vk_sync.py --dry-run"
+        "python3 scripts/coder4/coder4_vk_sync.py --dry-run"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-C07_P3VK只读同步与对账.md"
     },
@@ -645,14 +645,14 @@
         "核验单活串行策略与 done_gate 收口一致"
       ],
       "code_anchor_refs": [
-        "scripts/coder4_bootstrap_kernel.py::decide_action",
-        "scripts/wt-flow.sh::main"
+        "scripts/coder4/coder4_bootstrap_kernel.py::decide_action",
+        "scripts/coder4/wt-flow.sh::main"
       ],
       "example_refs": [
         "docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json"
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json"
       ],
       "rollback_anchors": [
         "FREEZE_ON_CHAIN_FAIL"
@@ -661,8 +661,8 @@
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "scripts/coder4_bootstrap_kernel.py",
-        "scripts/wt-flow.sh"
+        "scripts/coder4/coder4_bootstrap_kernel.py",
+        "scripts/coder4/wt-flow.sh"
       ],
       "done_gate": [
         "链路闭环验证通过且无重复推进"
@@ -671,7 +671,7 @@
         "链路闭环验证通过且无重复推进"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json"
+        "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-G02_G-2执行链路闭环.md"
     },

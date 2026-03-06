@@ -30,6 +30,28 @@ def test_extract_explicit_preference_candidates_supports_ai_persona():
     assert candidate_map["assistant.persona"] == "小哈"
 
 
+def test_extract_explicit_preference_candidates_supports_user_display_name():
+    """命中触发词并包含“我叫”时，应提取用户称呼偏好。"""
+
+    text = "请永远记住，我叫jjk"
+    candidates = memory_service.extract_explicit_preference_candidates(text)
+
+    candidate_map = {item.memory_key: item.memory_value for item in candidates}
+
+    assert candidate_map["user.display_name"] == "jjk"
+
+
+def test_extract_explicit_preference_candidates_supports_yongyuan_trigger():
+    """“永远”应作为触发词，支持详细回复偏好提取。"""
+
+    text = "永远给我详细的回答"
+    candidates = memory_service.extract_explicit_preference_candidates(text)
+
+    candidate_map = {item.memory_key: item.memory_value for item in candidates}
+
+    assert candidate_map["response.length"] == "detailed"
+
+
 def test_extract_explicit_preference_candidates_ignores_non_trigger_text():
     """未命中触发词时，不应写入偏好。"""
 

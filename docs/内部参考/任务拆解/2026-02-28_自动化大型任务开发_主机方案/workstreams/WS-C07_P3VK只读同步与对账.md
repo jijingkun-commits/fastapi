@@ -27,9 +27,9 @@
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_vk_sync.py::sync_to_vk
-  - scripts/coder4_vk_sync.py::sync_all_cards
-  - scripts/coder4_bootstrap_kernel.py::_try_sync_vk
+  - scripts/coder4/coder4_vk_sync.py::sync_to_vk
+  - scripts/coder4/coder4_vk_sync.py::sync_all_cards
+  - scripts/coder4/coder4_bootstrap_kernel.py::_try_sync_vk
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账
@@ -37,7 +37,7 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/coder4_vk_sync.py
+  - scripts/coder4/coder4_vk_sync.py
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -51,7 +51,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - python3 scripts/coder4_vk_sync.py --dry-run
+  - python3 scripts/coder4/coder4_vk_sync.py --dry-run
 
 ## 5. 风险与回滚
 
@@ -74,17 +74,17 @@ card_export:
   hard_depends_on: ['C06']
   depends_on: ['C06']
   file_whitelist:
-  - scripts/coder4_vk_sync.py
+  - scripts/coder4/coder4_vk_sync.py
   mechanism_summary:
   - 状态变更后异步 fire-and-forget 推送 VK
   - 同步失败只记录告警，不阻断执行链路
   - 每小时全量对账保证最终一致性
   code_anchor_refs:
-  - scripts/coder4_vk_sync.py::sync_to_vk
-  - scripts/coder4_vk_sync.py::sync_all_cards
-  - scripts/coder4_bootstrap_kernel.py::_try_sync_vk
+  - scripts/coder4/coder4_vk_sync.py::sync_to_vk
+  - scripts/coder4/coder4_vk_sync.py::sync_all_cards
+  - scripts/coder4/coder4_bootstrap_kernel.py::_try_sync_vk
   acceptance_checks:
-  - python3 scripts/coder4_vk_sync.py --dry-run
+  - python3 scripts/coder4/coder4_vk_sync.py --dry-run
   rollback_anchors:
   - DISABLE_VK_SYNC
   evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账

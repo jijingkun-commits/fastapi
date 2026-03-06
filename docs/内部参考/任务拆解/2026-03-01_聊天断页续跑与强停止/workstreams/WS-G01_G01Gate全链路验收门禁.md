@@ -28,7 +28,7 @@
 ### 1.2 代码锚点与样例（必填）
 
 - 代码锚点（函数/类级）:
-  - `docs/内部参考/任务拆解/_active_task.json::scope`
+  - `docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/_active_task.json::scope`
   - `scripts/docs_guard.py::strict`
   - `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
@@ -124,7 +124,7 @@ card_export:
     - 校验 docs_guard 与关键测试，阻断带病进入 vktodo
     - 核验 active_task 作用域三元组一致
   code_anchor_refs:
-    - docs/内部参考/任务拆解/_active_task.json::scope
+    - docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/_active_task.json::scope
     - scripts/docs_guard.py::strict
     - docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract
   acceptance_checks:

@@ -127,6 +127,7 @@ class MultiAgentState(BaseAgentState, total=False):
     
     # 系统上下文
     system_context: str           # 系统级上下文信息（当前时间、用户信息等）
+    memory_context: str           # 记忆注入上下文（本轮动态构造，不持久化入消息序列）
 
     # 运行时恢复（P5 稳态增强）
     runtime_recovery_state: RuntimeRecoveryState

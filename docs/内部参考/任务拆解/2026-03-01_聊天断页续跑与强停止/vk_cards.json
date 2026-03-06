@@ -10,7 +10,7 @@
     "inspection/question-card": "policy_gate"
   },
   "automation_contract": {
-    "source_of_truth": "docs/内部参考/任务拆解/_active_task.json",
+    "source_of_truth": "docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/_active_task.json",
     "required_fields": [
       "project_id",
       "task_split_dir",
@@ -305,7 +305,7 @@
         "核验 active_task 作用域三元组一致"
       ],
       "code_anchor_refs": [
-        "docs/内部参考/任务拆解/_active_task.json::scope",
+        "docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/_active_task.json::scope",
         "scripts/docs_guard.py::strict",
         "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract"
       ],

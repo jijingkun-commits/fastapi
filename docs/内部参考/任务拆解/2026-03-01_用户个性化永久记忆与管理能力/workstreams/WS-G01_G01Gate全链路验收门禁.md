@@ -28,7 +28,7 @@
 ### 1.2 代码锚点与样例（必填）
 
 - 代码锚点（函数/类级）:
-  - `docs/内部参考/任务拆解/_active_task.json::scope`
+  - `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/_active_task.json::scope`
   - `scripts/docs_guard.py::strict mode`
   - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
@@ -130,7 +130,7 @@ card_export:
     - 校验 docs_guard、关键测试、active_task 作用域一致性
     - 门禁失败时禁止进入 /jjk-vktodo 自动落卡执行
   code_anchor_refs:
-    - docs/内部参考/任务拆解/_active_task.json::scope
+    - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/_active_task.json::scope
     - scripts/docs_guard.py::strict mode
     - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
   example_refs:

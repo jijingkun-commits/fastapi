@@ -11,48 +11,17 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `/jjk-vkplan`：提供 `WS-*.md`、`vk_cards.json`、`parallel_plan.md` 执行契约。
-2. `/jjk-vktodo`：负责卡片创建与状态推进（Doing/Review/Gate/Done）。
-3. `test-driven-development`：负责测试先行方法（可用时优先）。
-4. `verification-before-completion`：负责完成前证据校验（可用时优先）。
-5. `systematic-debugging`：仅在 WS 执行异常时用于根因定位。
-6. `team`（OMX）：当单个 WS 规模过大时并行执行与汇总。
-7. `/jjk-imp-ws`：负责单 WS 边界控制、任务落地、证据回填与 PR 对齐。
-
-约束：
-
-1. 禁止在 `/jjk-imp-ws` 重写 `/jjk-vkplan` 的卡片与依赖语义。
-2. 禁止把 `/jjk-imp-ws` 当“自由编码入口”；必须消费 WS 契约字段。
-3. `/jjk-team-imp-ws` 不再作为主入口，由本命令按规模自动升级 Team。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`/jjk-imp-ws`
-2. Codex：`/prompts:jjk-imp-ws`
-
-> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `/jjk-imp-ws` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_imp_ws_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_imp_ws_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_imp_ws_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 已有并行拆解，执行某个 WS 实现 | `/jjk-imp-ws` ✅ |
-| 没有 WS 文档，执行整体实现 | `/jjk-imp` |
-| 仅做落卡/状态推进，不改代码 | `/jjk-vktodo` |
-
----
 
 ## 输入前置（强制）
 
@@ -72,6 +41,7 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 3. 若 `hard_depends_on` 未满足，`FAIL_FAST` 输出 `IMP_WS_DEPENDENCY_NOT_READY`。
 4. 若当前 `WS` 与 `_active_task.json.task_split_dir` 不一致，`FAIL_FAST` 输出 `IMP_WS_ACTIVE_TASK_MISMATCH`。
 5. 若卡片状态不在可执行集合（`Doing` 或已批准的 `Backlog` 应急执行），`FAIL_FAST` 输出 `IMP_WS_CARD_NOT_EXECUTABLE`。
+6. 本轮必须产出可追溯提交证据（`commit_sha`）；若无文件改动且属于门禁/编排类 WS，必须生成带理由的空提交，否则 `FAIL_FAST` 输出 `IMP_WS_NO_COMMIT`。
 
 ## 执行约束（强制）
 
@@ -119,7 +89,7 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 1. **有 Team 能力时**：并行执行子分片，Leader 汇总单 WS 回执。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，轻量）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下必须启用抽检互审：至少抽检 `20%` 工作项（向上取整，最少 `1` 项）。
 2. 每个抽检项必须包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
@@ -157,10 +127,17 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
    - `pr_branch`
    - `pr_depends_on`
    - `changed_files`
+   - `commit_sha`
    - `acceptance_cmds`
    - `rollback_point`
 3. Gate WS 必须回填 TC-ID 映射表。
 4. 命中浏览器测试触发条件时，回填命令、结果与证据路径。
+
+提交门禁：
+
+1. 合并前必须保证当前 WS 分支存在新提交（可通过 `git rev-parse HEAD` + `git rev-list --count <base>..HEAD` 佐证）。
+2. 若属于门禁/编排类 WS 且无文件变更，允许 `--allow-empty` 空提交，但必须在 WS 回填中说明“空提交原因”。
+3. 未回填 `commit_sha` 或无法证明提交归属当前 WS，`FAIL_FAST` 输出 `IMP_WS_NO_COMMIT`。
 
 ### 5) Gate 自动回填（WS-G1/WS-G2 必做）
 
@@ -197,7 +174,7 @@ venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务�
 
 ## 输出模板（推荐）
 
-见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_imp_ws_templates.md`（`输出模板` 段）。
+见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_imp_ws_templates.md`（`输出模板` 段）。
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_imp_ws_templates.md`。
 
 ## 禁止项（强制）
@@ -207,10 +184,13 @@ venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务�
 3. 禁止在 `IMP_WS_PR_MAPPING_MISSING` 或 `IMP_WS_DEPENDENCY_NOT_READY` 时继续编码。
 4. 禁止跳过 `acceptance_checks` 直接宣称完成。
 5. 禁止 Gate 结果手工改写而不经脚本回填。
+6. 禁止无 `commit_sha` 证据结束 `/jjk-imp-ws`。
 
 ## 推荐链路
 
-`/jjk-vkplan -> /jjk-vksync -> /jjk-vktodo -> /jjk-imp-ws -> /jjk-create-pr`
+`主链: /jjk-plan -> /jjk-vkplan -> /jjk-cardrun -> /jjk-imp-ws -> /jjk-review -> /jjk-verify`
+
+`可选分支: 需要远端 PR 交付时，在 /jjk-review 前插入 /jjk-create-pr`
 
 ## 使用示例
 

@@ -6,7 +6,7 @@
 > **版本**: v2.1（P0 修正版，关键引用已校验）
 > **问题优先级**: P1（阻塞多任务并行开发）
 > **涉及组件**: `jjk-cardrun`, `wt-flow.sh`, `jjk-vkplan`
-> **权威源**: `.cursor/commands/jjk-cardrun.md`, `.cursor/commands/jjk-vkplan.md`, `scripts/wt-flow.sh`
+> **权威源**: `.cursor/commands/jjk-cardrun.md`, `.cursor/commands/jjk-vkplan.md`, `scripts/coder4/wt-flow.sh`
 
 ---
 
@@ -50,14 +50,14 @@
   └─ 5) 循环推进策略 (mode=loop)
 ```
 
-**Worktree 隔离机制**（参考 `scripts/wt-flow.sh`）：
+**Worktree 隔离机制**（参考 `scripts/coder4/wt-flow.sh`）：
 - 每个卡片在独立的 worktree 中开发
 - 分支命名：`feature/<card_id>`（如 `feature/C03`）
 - 工作目录：`${WT_BASE}/<card_id>`（`WT_BASE` 定义在第 20 行）
-- 会话状态文件：`STATE_FILE=.omc/state/wt-flow-state.json`（第 21 行，记录当前 worktree 会话）
+- 会话状态文件：`STATE_FILE=docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json`（第 21 行，记录当前 worktree 会话）
 - 卡片状态文件：`task-runner-state.json`（第 211 行 `_task_state_file` 函数，记录卡片执行状态）
 - Dirty 白名单：`docs/`, `.cursor/commands/`, `.agents/skills/`, `.claude/commands/`（第 43-47 行）
-- Active 任务索引：`ACTIVE_TASK_FILE=docs/内部参考/任务拆解/_active_task.json`（第 22 行）
+- Active 任务索引：`ACTIVE_TASK_FILE=docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`（第 22 行）
 
 **关键约束**（参考 `docs/内部参考/任务拆解/README.md:64`）：
 - 一次只允许一个 active 索引（根目录 `_active_task.json`）
@@ -76,9 +76,9 @@
 | **类型1：分支名冲突** | Git 分支命名空间 | `feature/C01` 被多个任务复用 | `wt-flow.sh:434-439`（分支名解析） |
 | **类型2：Worktree 目录冲突** | `${WT_BASE}/<card_id>` | 目录路径被多个任务复用 | `wt-flow.sh:20`（WT_BASE 定义）<br>`wt-flow.sh:387`（路径匹配） |
 | **类型3：状态冲突**（分两个子类） | | | |
-| 　└ **3a：会话状态冲突** | `STATE_FILE=.omc/state/wt-flow-state.json` | 当前 worktree 会话被覆盖 | `wt-flow.sh:21`（STATE_FILE 定义）<br>`wt-flow.sh:406-417`（_save_state） |
+| 　└ **3a：会话状态冲突** | `STATE_FILE=docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` | 当前 worktree 会话被覆盖 | `wt-flow.sh:21`（STATE_FILE 定义）<br>`wt-flow.sh:406-417`（_save_state） |
 | 　└ **3b：卡片状态冲突** | `task-runner-state.json` | 卡片执行状态被覆盖 | `wt-flow.sh:211`（_task_state_file）<br>`wt-flow.sh:431-459`（_mark_card_done_after_merge） |
-| **类型4：Active 索引冲突** | `docs/内部参考/任务拆解/_active_task.json` | 单一 active 索引被多个任务争抢 | `wt-flow.sh:22`（ACTIVE_TASK_FILE）<br>`README.md:64`（单 active 约束）<br>`set_active_task.py:132`（写入逻辑） |
+| **类型4：Active 索引冲突** | `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json` | 单一 active 索引被多个任务争抢 | `wt-flow.sh:22`（ACTIVE_TASK_FILE）<br>`README.md:64`（单 active 约束）<br>`set_active_task.py:132`（写入逻辑） |
 
 ### 2.2 问题1：分支名冲突（类型1）
 
@@ -86,7 +86,7 @@
 
 当前分支命名格式为 `feature/<card_id>`，缺少任务上下文前缀。当多个任务并行时，如果卡片编号相同（如任务A的C01和任务B的C01），会导致分支名冲突。
 
-**根因分析**（`scripts/wt-flow.sh:434-439`）：
+**根因分析**（`scripts/coder4/wt-flow.sh:434-439`）：
 
 ```bash
 # _mark_card_done_after_merge 函数中的分支名解析
@@ -109,7 +109,7 @@ git branch
   feature/C02  # State 合同调整
 
 # 任务B：待办优化 (task_key=todo-enhance)（并行开发）
-bash scripts/wt-flow.sh next
+bash scripts/coder4/wt-flow.sh next
 # ❌ 错误：fatal: a branch named 'feature/C01' already exists
 ```
 
@@ -123,7 +123,7 @@ bash scripts/wt-flow.sh next
 
 Worktree 目录路径 `${WT_BASE}/<card_id>` 也缺少任务前缀，导致多个任务的同编号卡片无法共存。
 
-**根因分析**（`scripts/wt-flow.sh:20, 387`）：
+**根因分析**（`scripts/coder4/wt-flow.sh:20, 387`）：
 
 ```bash
 # 第 20 行：WT_BASE 定义
@@ -144,13 +144,13 @@ fi
 
 **问题描述**：
 
-`wt-flow.sh` 使用单一会话状态文件 `STATE_FILE=.omc/state/wt-flow-state.json` 记录当前 worktree 会话（branch/worktree/base_branch），多个任务并行时会相互覆盖。
+`wt-flow.sh` 使用单一会话状态文件 `STATE_FILE=docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` 记录当前 worktree 会话（branch/worktree/base_branch），多个任务并行时会相互覆盖。
 
-**根因分析**（`scripts/wt-flow.sh:21, 406-417`）：
+**根因分析**（`scripts/coder4/wt-flow.sh:21, 406-417`）：
 
 ```bash
 # 第 21 行：STATE_FILE 定义
-STATE_FILE="${REPO_ROOT}/.omc/state/wt-flow-state.json"
+STATE_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json"
 
 # 第 406-417 行：_save_state 函数
 _save_state() {
@@ -177,7 +177,7 @@ EOF
 
 卡片执行状态文件 `task-runner-state.json` 通过 `_task_state_file` 函数定位，但如果多个任务共享同一 state_dir，会导致状态覆盖。
 
-**根因分析**（`scripts/wt-flow.sh:211, 431-459`）：
+**根因分析**（`scripts/coder4/wt-flow.sh:211, 431-459`）：
 
 ```bash
 # 第 211 行：_task_state_file 函数
@@ -214,7 +214,7 @@ _mark_card_done_after_merge() {
 
 ```bash
 # wt-flow.sh:22
-ACTIVE_TASK_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/_active_task.json"
+ACTIVE_TASK_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/_active_task.json"
 
 # README.md:64
 # 一次只允许一个 active 索引；但每个任务目录都保留自己的 _active_task.json
@@ -237,9 +237,9 @@ write_json(active_index_path, active_index_payload)  # 覆盖写入
 ```
 ### 4) done_gate + merge 串行收口（强制）
 
-1. 执行：`bash scripts/wt-flow.sh verify <card_id>`。
+1. 执行：`bash scripts/coder4/wt-flow.sh verify <card_id>`。
 2. `verify` 通过后，当前卡状态只能进入 `verified`，不得直接写 `done`。
-3. `verify` 通过后必须执行：`bash scripts/wt-flow.sh merge`。
+3. `verify` 通过后必须执行：`bash scripts/coder4/wt-flow.sh merge`。
 4. `merge` 成功后状态写回 `done`，并清理当前 worktree，才允许推进下一卡。
 ```
 
@@ -258,21 +258,21 @@ write_json(active_index_path, active_index_payload)  # 覆盖写入
   ├─ C01 (串行) → C02 (串行) → C03 (串行)
   └─ 独立分支命名空间：feature/planner-refactor/*
      独立 worktree 目录：${WT_BASE}/planner-refactor/*
-     独立会话状态：.omc/state/wt-flow-state-planner-refactor.json
-     独立卡片状态：.omc/state/planner-refactor/task-runner-state.json
+     独立会话状态：docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-planner-refactor.json
+     独立卡片状态：docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/planner-refactor/task-runner-state.json
 
 任务B (task_key=todo-enhance) ← 并行开发
   ├─ C01 (串行) → C02 (串行)
   └─ 独立分支命名空间：feature/todo-enhance/*
      独立 worktree 目录：${WT_BASE}/todo-enhance/*
-     独立会话状态：.omc/state/wt-flow-state-todo-enhance.json
-     独立卡片状态：.omc/state/todo-enhance/task-runner-state.json
+     独立会话状态：docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-todo-enhance.json
+     独立卡片状态：docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/todo-enhance/task-runner-state.json
 ```
 
 **设计约束**（继承自 `jjk-cardrun`）：
 1. 保持 `execution_mode=serial` 的单活卡语义（`.cursor/commands/jjk-cardrun.md:25`）
 2. 保持 verify → merge → done 的强制闭环（`.cursor/commands/jjk-cardrun.md:133-147`）
-3. 保持 dirty whitelist 策略（`scripts/wt-flow.sh:43-47`）
+3. 保持 dirty whitelist 策略（`scripts/coder4/wt-flow.sh:43-47`）
 4. **接受单 active 索引约束**（`README.md:64`）：通过流程规范而非技术改造解决
 
 ### 3.2 方案对比（v2.1）
@@ -298,7 +298,7 @@ write_json(active_index_path, active_index_payload)  # 覆盖写入
 
 #### 修改点1：分支命名（解决类型1冲突）
 
-**修改位置**：`scripts/wt-flow.sh`（需要在 `cmd_create` 函数中添加）
+**修改位置**：`scripts/coder4/wt-flow.sh`（需要在 `cmd_create` 函数中添加）
 
 **当前问题**：分支名解析在 `wt-flow.sh:434-439` 的 `_mark_card_done_after_merge` 函数中硬编码为 `^feature/(.+)$`
 
@@ -328,7 +328,7 @@ fi
 
 #### 修改点2：Worktree 目录（解决类型2冲突）
 
-**修改位置**：`scripts/wt-flow.sh`（`cmd_create` 函数中，WT_BASE 定义在第 20 行）
+**修改位置**：`scripts/coder4/wt-flow.sh`（`cmd_create` 函数中，WT_BASE 定义在第 20 行）
 
 **修改后逻辑**：
 ```bash
@@ -345,11 +345,11 @@ fi
 
 #### 修改点3：会话状态文件（解决类型3a冲突）
 
-**修改位置**：`scripts/wt-flow.sh:21, 406-417`
+**修改位置**：`scripts/coder4/wt-flow.sh:21, 406-417`
 
 **当前定义**（第 21 行）：
 ```bash
-STATE_FILE="${REPO_ROOT}/.omc/state/wt-flow-state.json"
+STATE_FILE="${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json"
 ```
 
 **修改策略**：将 STATE_FILE 从全局常量改为动态函数，根据 task_key 返回不同路径
@@ -364,9 +364,9 @@ _session_state_file() {
   fi
 
   if [[ -n "$task_key" ]]; then
-    echo "${REPO_ROOT}/.omc/state/wt-flow-state-${task_key}.json"
+    echo "${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-${task_key}.json"
   else
-    echo "${REPO_ROOT}/.omc/state/wt-flow-state.json"  # 向后兼容
+    echo "${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json"  # 向后兼容
   fi
 }
 
@@ -375,7 +375,7 @@ _session_state_file() {
 
 #### 修改点4：卡片状态文件（解决类型3b冲突）
 
-**修改位置**：`scripts/wt-flow.sh:211`（`_task_state_file` 函数）
+**修改位置**：`scripts/coder4/wt-flow.sh:211`（`_task_state_file` 函数）
 
 **当前实现**：
 ```bash
@@ -412,15 +412,15 @@ _task_state_file() {
 |  | `feature/C01` ❌ 冲突 | `feature/todo-enhance/C01` ✅ 隔离 |
 | **Worktree 目录** | `${WT_BASE}/C01` | `${WT_BASE}/planner-refactor/C01` |
 |  | `${WT_BASE}/C01` ❌ 冲突 | `${WT_BASE}/todo-enhance/C01` ✅ 隔离 |
-| **会话状态** | `.omc/state/wt-flow-state.json` | `.omc/state/wt-flow-state-planner-refactor.json` |
-|  | 单例 ❌ 覆盖 | `.omc/state/wt-flow-state-todo-enhance.json` ✅ 隔离 |
-| **卡片状态** | `.omc/state/task-runner-state.json` | `.omc/state/planner-refactor/task-runner-state.json` |
-|  | 单例 ❌ 覆盖 | `.omc/state/todo-enhance/task-runner-state.json` ✅ 隔离 |
+| **会话状态** | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-planner-refactor.json` |
+|  | 单例 ❌ 覆盖 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-todo-enhance.json` ✅ 隔离 |
+| **卡片状态** | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json` | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/planner-refactor/task-runner-state.json` |
+|  | 单例 ❌ 覆盖 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/todo-enhance/task-runner-state.json` ✅ 隔离 |
 
 
 **联动影响清单**（必须检查）：
-- `scripts/coder4_bootstrap_kernel.py`：可能依赖 task-runner-state.json 路径
-- `scripts/coder4_vk_sync.py`：可能依赖 task-runner-state.json 路径
+- `scripts/coder4/coder4_bootstrap_kernel.py`：可能依赖 task-runner-state.json 路径
+- `scripts/coder4/coder4_vk_sync.py`：可能依赖 task-runner-state.json 路径
 - 其他脚本：搜索硬编码的 `task-runner-state.json` 或 `wt-flow-state.json` 路径
 
 **实施成本**：中（1 天，包含联动检查与测试）
@@ -442,7 +442,7 @@ _task_state_file() {
 # （wt-flow.sh 会自动保存会话状态和卡片状态）
 
 # 2. 切换到新任务
-bash scripts/set_active_task.py \
+bash scripts/coder4/set_active_task.py \
   --task-split-dir 2026-03-03_todo-enhance \
   --project-id 124
 
@@ -450,7 +450,7 @@ bash scripts/set_active_task.py \
 /jjk-cardrun 2026-03-03_todo-enhance once
 
 # 4. 切换回原任务
-bash scripts/set_active_task.py \
+bash scripts/coder4/set_active_task.py \
   --task-split-dir 2026-03-03_planner-refactor \
   --project-id 123
 
@@ -482,13 +482,13 @@ bash scripts/set_active_task.py \
 ```bash
 # 验收命令：任务切换流程
 # 1. 启动任务A
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
-cat docs/内部参考/任务拆解/_active_task.json | jq '.task_key'
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
+cat docs/内部参考/任务拆解/<task_split_dir>/_active_task.json | jq '.task_key'
 # 预期："planner-refactor"
 
 # 2. 切换到任务B
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_todo-enhance --project-id 124
-cat docs/内部参考/任务拆解/_active_task.json | jq '.task_key'
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_todo-enhance --project-id 124
+cat docs/内部参考/任务拆解/<task_split_dir>/_active_task.json | jq '.task_key'
 # 预期："todo-enhance"
 
 # 3. 验证任务A的状态未丢失
@@ -496,8 +496,8 @@ cat docs/内部参考/任务拆解/2026-03-03_planner-refactor/_active_task.json
 # 预期："planner-refactor"
 
 # 4. 切换回任务A
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
-cat docs/内部参考/任务拆解/_active_task.json | jq '.task_key'
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
+cat docs/内部参考/任务拆解/<task_split_dir>/_active_task.json | jq '.task_key'
 # 预期："planner-refactor"
 ```
 
@@ -525,10 +525,10 @@ cat docs/内部参考/任务拆解/_active_task.json | jq '.task_key'
 ```bash
 # 现有分支：feature/C01
 # 现有 worktree：.worktrees/C01
-# 现有状态：.omc/state/wt-flow-state.json
+# 现有状态：docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json
 
 # 行为：继续使用原命名（向后兼容）
-bash scripts/wt-flow.sh next
+bash scripts/coder4/wt-flow.sh next
 # 预期：仍然创建 feature/C02（不强制迁移）
 ```
 
@@ -536,8 +536,8 @@ bash scripts/wt-flow.sh next
 
 ```bash
 # 新任务：task_key=planner-refactor
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
-bash scripts/wt-flow.sh next
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
+bash scripts/coder4/wt-flow.sh next
 # 预期：创建 feature/planner-refactor/C01（新命名）
 ```
 
@@ -549,7 +549,7 @@ bash scripts/wt-flow.sh next
 # 2. 重命名现有分支和 worktree
 git branch -m feature/C01 feature/legacy-task/C01
 mv .worktrees/C01 .worktrees/legacy-task/C01
-mv .omc/state/wt-flow-state.json .omc/state/wt-flow-state-legacy-task.json
+mv docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-legacy-task.json
 ```
 
 #### 兼容性检查清单
@@ -666,14 +666,14 @@ bash scripts/wt-flow-conflict-check.sh
 - [ ] 多个任务并行时，三类资源不冲突
 - [ ] 分支名格式：`feature/<task_key>/<card_id>`
 - [ ] Worktree 目录：`.worktrees/<task_key>/<card_id>`
-- [ ] 状态文件：`.omc/state/wt-flow-state-<task_key>.json`
+- [ ] 状态文件：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-<task_key>.json`
 - [ ] 向后兼容（没有 `task_key` 时仍使用原命名）
 - [ ] 通过验收命令（见 5.4 节）
 
 **回滚策略**：
 ```bash
 # 如果出现问题，回滚到修改前版本
-git checkout HEAD -- scripts/wt-flow.sh
+git checkout HEAD -- scripts/coder4/wt-flow.sh
 ```
 
 ---
@@ -755,8 +755,8 @@ git checkout HEAD -- scripts/wt-flow.sh
 |------|------|---------|
 | `.cursor/commands/jjk-cardrun.md` | 串行卡片执行入口（权威源） | 133-147（merge 流程） |
 | `.cursor/commands/jjk-vkplan.md` | 并行拆解入口（权威源） | 99-110（契约继承） |
-| `scripts/wt-flow.sh` | Worktree 生命周期管理脚本 | 20（WT_BASE）<br>21（STATE_FILE）<br>22（ACTIVE_TASK_FILE）<br>43-47（dirty whitelist）<br>211（_task_state_file）<br>406-417（_save_state）<br>434-439（分支名解析）<br>387（路径匹配） |
-| `docs/内部参考/任务拆解/_active_task.json` | 活跃任务索引 | - |
+| `scripts/coder4/wt-flow.sh` | Worktree 生命周期管理脚本 | 20（WT_BASE）<br>21（STATE_FILE）<br>22（ACTIVE_TASK_FILE）<br>43-47（dirty whitelist）<br>211（_task_state_file）<br>406-417（_save_state）<br>434-439（分支名解析）<br>387（路径匹配） |
+| `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json` | 活跃任务索引 | - |
 | `docs/内部参考/任务拆解/<task_key>/_active_task.json` | 任务级配置 | - |
 | `docs/内部参考/任务拆解/<task_key>/vk_cards.json` | 卡片契约 | - |
 
@@ -783,33 +783,33 @@ git checkout HEAD -- scripts/wt-flow.sh
 **三类冲突**：
 1. 分支名冲突：`feature/C01` 被多个任务复用
 2. Worktree 目录冲突：`.worktrees/C01` 被多个任务复用
-3. 全局状态冲突：`.omc/state/wt-flow-state.json` 被多个任务覆盖
+3. 全局状态冲突：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` 被多个任务覆盖
 
 ### 9.2 核心方案
 
 **task_key 命名空间隔离**：
 - 分支名：`feature/<task_key>/<card_id>`
 - Worktree 目录：`.worktrees/<task_key>/<card_id>`
-- 状态文件：`.omc/state/wt-flow-state-<task_key>.json`
+- 状态文件：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state-<task_key>.json`
 
 ### 9.3 验收命令
 
 ```bash
 # 1. 创建两个并行任务
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
-bash scripts/wt-flow.sh next
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_planner-refactor --project-id 123
+bash scripts/coder4/wt-flow.sh next
 
-bash scripts/set_active_task.py --task-split-dir 2026-03-03_todo-enhance --project-id 124
-bash scripts/wt-flow.sh next
+bash scripts/coder4/set_active_task.py --task-split-dir 2026-03-03_todo-enhance --project-id 124
+bash scripts/coder4/wt-flow.sh next
 
 # 2. 检查资源隔离
 git branch | grep feature/
 ls -la .worktrees/
-ls -la .omc/state/
+ls -la docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/
 
 # 3. 验证完整流程
-bash scripts/wt-flow.sh verify C01
-bash scripts/wt-flow.sh merge
+bash scripts/coder4/wt-flow.sh verify C01
+bash scripts/coder4/wt-flow.sh merge
 ```
 
 ---
@@ -863,7 +863,7 @@ bash scripts/wt-flow.sh merge
 
 1. **分支名冲突**（类型1）：`feature/C01` 被多个任务复用
 2. **Worktree 目录冲突**（类型2）：`${WT_BASE}/C01` 被多个任务复用  
-3. **会话状态冲突**（类型3a）：`.omc/state/wt-flow-state.json` 被多个任务覆盖
+3. **会话状态冲突**（类型3a）：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` 被多个任务覆盖
 4. **卡片状态冲突**（类型3b）：`task-runner-state.json` 被多个任务覆盖
 5. **Active 索引冲突**（类型4）：单一 `_active_task.json` 被多个任务争抢
 

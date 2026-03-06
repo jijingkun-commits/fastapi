@@ -473,6 +473,7 @@ def _build_preference_context(
     lines = [header]
     budget = max(120, int(max_chars))
     current_len = len(header)
+    has_assistant_persona = False
 
     for item in documents:
         summary = str(item.get("summary_md") or "").strip()
@@ -481,6 +482,8 @@ def _build_preference_context(
             continue
 
         display_key = doc_key.split(":", 1)[-1] if ":" in doc_key else doc_key
+        if display_key == "assistant.persona":
+            has_assistant_persona = True
         citation = f"memory://user/{user_id}/{_DEFAULT_PREFERENCE_DOC_KIND}/{doc_key}#L1-L5"
         line = f"- {display_key}: {summary}\n  引用: {citation}"
         next_len = current_len + len(line) + 1
@@ -488,6 +491,18 @@ def _build_preference_context(
             break
         lines.append(line)
         current_len = next_len
+
+    if has_assistant_persona:
+        guidance_lines = (
+            "执行要求：当用户未另行指定时，按 AI 人设进行自称。",
+            "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
+        )
+        for guidance in guidance_lines:
+            next_len = current_len + len(guidance) + 1
+            if next_len > budget:
+                break
+            lines.append(guidance)
+            current_len = next_len
 
     return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -611,6 +626,64 @@ def bootstrap_preference_documents(
 
     db.commit()
     return len(template_payload)
+
+
+def upsert_preference_documents_from_input(
+    db: Session,
+    *,
+    user_id: int,
+    user_text: str,
+    source_thread_id: str | None = None,
+    source_message_id: int | None = None,
+    scope: str = _DEFAULT_PREFERENCE_SCOPE,
+) -> int:
+    """从用户输入提取显式偏好并写入 preference 文档。"""
+
+    if not user_id:
+        return 0
+
+    normalized_text = _normalize_text(user_text)
+    if not normalized_text:
+        return 0
+
+    try:
+        from app.services.user_preference_memory_service import extract_explicit_preference_candidates
+    except Exception as import_error:
+        logger.warning("加载偏好候选提取器失败，跳过 preference 文档写入: error=%s", import_error)
+        return 0
+
+    candidates = extract_explicit_preference_candidates(normalized_text)
+    if not candidates:
+        return 0
+
+    persisted = 0
+    try:
+        for candidate in candidates:
+            memory_key = str(getattr(candidate, "memory_key", "") or "").strip()
+            memory_value = str(getattr(candidate, "memory_value", "") or "").strip()
+            if not memory_key or not memory_value:
+                continue
+            _upsert_preference_document(
+                db,
+                user_id=user_id,
+                memory_key=memory_key,
+                memory_value=memory_value,
+                scope=scope,
+                source_thread_id=source_thread_id,
+                source_message_id=source_message_id,
+                updated_time=None,
+            )
+            persisted += 1
+
+        if persisted > 0:
+            db.commit()
+        return persisted
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        logger.exception("从输入同步 preference 文档失败: user_id=%s", user_id)
+        return 0
 
 
 def migrate_legacy_preference_kv(

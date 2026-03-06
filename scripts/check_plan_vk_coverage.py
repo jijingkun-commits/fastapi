@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from check_clarify_plan_alignment import AlignmentCheckError, run_alignment_check
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
@@ -592,7 +594,10 @@ def _collect_vk_cards(vk_cards: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if card_id in cards:
             duplicates.add(card_id)
 
-        task_ids_raw = _as_list(item.get("task_ids")) + _as_list(item.get("task_id"))
+        task_ids_field = item.get("task_ids")
+        task_ids_raw = _as_list(task_ids_field)
+        task_ids_present = "task_ids" in item
+        task_ids = {_normalize_id(task) for task in task_ids_raw if _normalize_id(task)}
         cards[card_id] = {
             "card_id": card_id,
             "feature_ids": {
@@ -600,7 +605,8 @@ def _collect_vk_cards(vk_cards: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 for feature in _as_list(item.get("feature_ids"))
                 if _normalize_id(feature)
             },
-            "task_ids": {_normalize_id(task) for task in task_ids_raw if _normalize_id(task)},
+            "task_ids": task_ids,
+            "task_ids_present": task_ids_present,
             "pr_id": _normalize_id(item.get("pr_id")),
             "acceptance_checks": {
                 _normalize_cmd(cmd)
@@ -688,6 +694,24 @@ def _check_coverage(*, contracts: dict[str, Any], vk_cards_payload: dict[str, An
             missing_plan_cards,
         )
 
+    missing_task_id_fields = sorted(
+        card["card_id"] for card in vk_cards.values() if not card.get("task_ids_present")
+    )
+    empty_task_id_fields = sorted(
+        card["card_id"]
+        for card in vk_cards.values()
+        if card.get("task_ids_present") and not card.get("task_ids")
+    )
+    if missing_task_id_fields or empty_task_id_fields:
+        add_error(
+            "VKPLAN_TASK_IDS_REQUIRED",
+            "vk_cards.cards[*].task_ids 必填且不能为空",
+            {
+                "missing_task_ids_field": missing_task_id_fields,
+                "empty_task_ids": empty_task_id_fields,
+            },
+        )
+
     missing_feature_ids = sorted((impl_feature_ids | plan_feature_ids) - vk_feature_ids)
     if missing_feature_ids:
         add_error(
@@ -729,40 +753,42 @@ def _check_coverage(*, contracts: dict[str, Any], vk_cards_payload: dict[str, An
             pr_mapping_mismatch,
         )
 
+    expected_acceptance_by_task = {
+        task_id: set(task["acceptance_cmds"]) | set(task_to_pr.get(task_id, {}).get("acceptance_cmds") or set())
+        for task_id, task in implementation_tasks.items()
+    }
+
     acceptance_mapping_missing: list[dict[str, Any]] = []
-    for task_id, task in implementation_tasks.items():
-        expected_cmds = set(task["acceptance_cmds"])
-        expected_cmds.update(task_to_pr.get(task_id, {}).get("acceptance_cmds") or set())
-        if not expected_cmds:
+    for card in vk_cards.values():
+        card_task_ids = sorted(task_id for task_id in card["task_ids"] if task_id in implementation_tasks)
+        if not card_task_ids:
             continue
 
-        cards_by_task = [card for card in vk_cards.values() if task_id in card["task_ids"]]
-        cards_by_feature = [
-            card
-            for card in vk_cards.values()
-            if card["feature_ids"].intersection(task["feature_ids"])
-        ]
-        selected_cards = cards_by_task if cards_by_task else cards_by_feature
-
-        actual_cmds = {
-            cmd for card in selected_cards for cmd in card["acceptance_checks"] if cmd
+        expected_cmds = {
+            cmd
+            for task_id in card_task_ids
+            for cmd in expected_acceptance_by_task.get(task_id, set())
+            if cmd
         }
+        actual_cmds = {cmd for cmd in card["acceptance_checks"] if cmd}
         missing_cmds = sorted(cmd for cmd in expected_cmds if cmd not in actual_cmds)
-        if not missing_cmds:
+        extra_cmds = sorted(cmd for cmd in actual_cmds if cmd not in expected_cmds)
+        if not missing_cmds and not extra_cmds:
             continue
 
         acceptance_mapping_missing.append(
             {
-                "task_id": task_id,
+                "card_id": card["card_id"],
+                "task_ids": card_task_ids,
                 "missing_cmds": missing_cmds,
-                "candidate_cards": [card["card_id"] for card in selected_cards],
+                "extra_cmds": extra_cmds,
             }
         )
 
     if acceptance_mapping_missing:
         add_error(
             "VKPLAN_ACCEPTANCE_MAPPING_BROKEN",
-            "acceptance_cmds 未完整映射到卡片 acceptance_checks",
+            "acceptance_cmds 与卡片 acceptance_checks 不一致",
             acceptance_mapping_missing,
         )
 
@@ -814,6 +840,8 @@ def _check_coverage(*, contracts: dict[str, Any], vk_cards_payload: dict[str, An
         "execution_contract_mismatch": execution_contract_mismatch,
         "acceptance_mapping_missing": acceptance_mapping_missing,
         "missing_plan_card_ids": missing_plan_cards,
+        "missing_task_id_fields": missing_task_id_fields,
+        "empty_task_ids": empty_task_id_fields,
         "summary": {
             "implementation_tasks": len(implementation_tasks),
             "task_to_pr_mapping": len(task_to_pr),
@@ -837,10 +865,56 @@ def run_check(*, repo_root: Path, task_split_dir_raw: str) -> dict[str, Any]:
         task_split_dir=task_split_dir,
         vk_cards=vk_cards_payload,
     )
+    try:
+        clarify_plan_alignment = run_alignment_check(
+            repo_root=repo_root,
+            task_split_dir_raw=task_split_dir.name,
+            implementation_path_raw=str(implementation_plan),
+        )
+    except AlignmentCheckError as exc:
+        clarify_plan_alignment = {
+            "ok": False,
+            "error": {
+                "code": "CLARIFY_PLAN_ALIGNMENT_FAILED",
+                "message": str(exc),
+            },
+        }
+
     contracts = _collect_contracts(implementation_plan)
     coverage = _check_coverage(contracts=contracts, vk_cards_payload=vk_cards_payload)
 
     errors = list(coverage["errors"])
+    if not clarify_plan_alignment.get("ok"):
+        details = (
+            clarify_plan_alignment.get("errors")
+            if isinstance(clarify_plan_alignment.get("errors"), list)
+            else clarify_plan_alignment.get("error") or {}
+        )
+        if isinstance(details, list):
+            propagated_codes = {
+                item.get("code")
+                for item in details
+                if isinstance(item, dict) and item.get("code")
+            }
+            for code in (
+                "PLAN_FORBIDDEN_PROTOCOL_FIELD_DETECTED",
+                "PLAN_IMPLEMENTATION_DETAIL_INSUFFICIENT",
+            ):
+                if code in propagated_codes:
+                    errors.append(
+                        {
+                            "code": code,
+                            "message": f"clarify -> plan 承接校验命中 {code}",
+                            "details": details,
+                        }
+                    )
+        errors.append(
+            {
+                "code": "CLARIFY_PLAN_ALIGNMENT_FAILED",
+                "message": "clarify -> plan 承接校验未通过",
+                "details": details,
+            }
+        )
     ok = not errors
     if coverage["missing_feature_ids"] or coverage["missing_task_ids"]:
         ok = False
@@ -857,6 +931,9 @@ def run_check(*, repo_root: Path, task_split_dir_raw: str) -> dict[str, Any]:
         "execution_contract_mismatch": coverage["execution_contract_mismatch"],
         "acceptance_mapping_missing": coverage["acceptance_mapping_missing"],
         "missing_plan_card_ids": coverage["missing_plan_card_ids"],
+        "missing_task_id_fields": coverage["missing_task_id_fields"],
+        "empty_task_ids": coverage["empty_task_ids"],
+        "clarify_plan_alignment": clarify_plan_alignment,
         "summary": coverage["summary"],
         "errors": errors,
     }

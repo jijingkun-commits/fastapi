@@ -27,9 +27,9 @@
 
 ### 1.2 代码锚点
 
-  - scripts/wt-flow.sh::cmd_create
-  - scripts/wt-flow.sh::cmd_merge
-  - scripts/wt-flow.sh::main
+  - scripts/coder4/wt-flow.sh::cmd_create
+  - scripts/coder4/wt-flow.sh::cmd_merge
+  - scripts/coder4/wt-flow.sh::main
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#63-next-子命令
@@ -37,7 +37,7 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/wt-flow.sh
+  - scripts/coder4/wt-flow.sh
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -51,8 +51,8 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - bash scripts/wt-flow.sh status
-  - bash scripts/wt-flow.sh guard
+  - bash scripts/coder4/wt-flow.sh status
+  - bash scripts/coder4/wt-flow.sh guard
 
 ## 5. 风险与回滚
 
@@ -75,18 +75,18 @@ card_export:
   hard_depends_on: ['C03']
   depends_on: ['C03']
   file_whitelist:
-  - scripts/wt-flow.sh
+  - scripts/coder4/wt-flow.sh
   mechanism_summary:
   - 新增 next/verify/list 子命令支撑串行推进
   - verify 仅允许白名单命令前缀执行
   - 主仓 dirty 默认 fail-fast，禁止自动污染主线
   code_anchor_refs:
-  - scripts/wt-flow.sh::cmd_create
-  - scripts/wt-flow.sh::cmd_merge
-  - scripts/wt-flow.sh::main
+  - scripts/coder4/wt-flow.sh::cmd_create
+  - scripts/coder4/wt-flow.sh::cmd_merge
+  - scripts/coder4/wt-flow.sh::main
   acceptance_checks:
-  - bash scripts/wt-flow.sh status
-  - bash scripts/wt-flow.sh guard
+  - bash scripts/coder4/wt-flow.sh status
+  - bash scripts/coder4/wt-flow.sh guard
   rollback_anchors:
   - WT_FLOW_ALLOW_AUTOCOMMIT=0
   evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p1-03-wt-flow-扩展与-done-gate-白名单

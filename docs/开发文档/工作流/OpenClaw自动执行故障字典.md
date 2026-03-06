@@ -6,7 +6,7 @@
 
 发生 `NO_INCREMENT/BLOCKED/RECONCILE_ONLY` 时，先核对以下文件：
 
-1. `docs/内部参考/任务拆解/_active_task.json`
+1. `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
 2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
 3. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（`planning_contract`）
 
@@ -22,7 +22,7 @@
 | `NO_INCREMENT(duplicate_signature)` | 防重去重命中 | 短时间内签名完全相同 | 等冷却窗口结束后再推进 |
 | `RECONCILE_ONLY(scope_conflict)` | 作用域冲突 | 当前 `task_key` 之外还有活动卡 | 先清理非当前任务的 `inprogress/inreview` 卡 |
 | `RECONCILE_ONLY(multi_active_scoped)` | 串行门禁触发 | 同一 `task_key` 下活动卡超过 1 张 | 收敛到 1 张活动卡后再跑 |
-| `BLOCKED_DOC_CONTEXT` | 文档上下文不完整/不一致 | `_active_task.json` 缺字段；`task_key` 对不上；主计划链断裂 | 重新执行 `set_active_task.py`，并核对 `vk_cards.json` 与计划文档 |
+| `BLOCKED_DOC_CONTEXT` | 文档上下文不完整/不一致 | `_active_task.json` 缺字段；`task_key` 对不上；主计划链断裂 | 重新执行 `python3 scripts/coder4/set_active_task.py`，并核对 `vk_cards.json` 与计划文档 |
 | `BLOCKED_FEATURE_MAPPING` | 卡片字段不完整 | 缺 `feature_ids/mechanism_summary/code_anchor_refs/...` | 回到 `/jjk-vkplan` 重产，直到 fail-fast 校验通过 |
 | `BLOCKED_SERIAL_DEPENDENCY` | 前置依赖未满足 | 当前卡 `hard_depends_on` 未完成 | 先完成前置卡，再推进当前卡 |
 | `BLOCKED_EVIDENCE_GAP` | 证据不足，不能收口 | 证据绑定失败或验收证据缺失 | 补齐 `task_id/turn_id/process_id/status`，并确认 `target_task_id == evidence_task_id` 后重试 |

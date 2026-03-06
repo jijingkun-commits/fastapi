@@ -72,7 +72,7 @@
 
 ### 2.6 [Major] attempt 系统的本地替代方案不等价
 
-报告 3.2.3 节用 `.omc/state/attempts/<card_id>/` 目录替代 VK attempt。但 VK attempt 的实际用途远超"记录执行历史"：
+报告 3.2.3 节用 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/<card_id>/` 目录替代 VK attempt。但 VK attempt 的实际用途远超"记录执行历史"：
 
 | attempt 能力 | 本地方案是否覆盖 |
 |-------------|----------------|

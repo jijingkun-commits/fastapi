@@ -27,9 +27,9 @@
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_bootstrap_kernel.py::atomic_write_json
-  - scripts/coder4_bootstrap_kernel.py::load_local_state
-  - scripts/coder4_bootstrap_kernel.py::update_local_card_status
+  - scripts/coder4/coder4_bootstrap_kernel.py::atomic_write_json
+  - scripts/coder4/coder4_bootstrap_kernel.py::load_local_state
+  - scripts/coder4/coder4_bootstrap_kernel.py::update_local_card_status
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发设计方案.md#46-原子写入实现
@@ -37,8 +37,8 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/coder4_bootstrap_kernel.py
-  - .omc/state/task-runner-state.json
+  - scripts/coder4/coder4_bootstrap_kernel.py
+  - .state/<task_key>/task-runner-state.json
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -52,7 +52,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
   - python3 scripts/docs_guard.py --strict
 
 ## 5. 风险与回滚
@@ -76,18 +76,18 @@ card_export:
   hard_depends_on: ['C01']
   depends_on: ['C01']
   file_whitelist:
-  - scripts/coder4_bootstrap_kernel.py
-  - .omc/state/task-runner-state.json
+  - scripts/coder4/coder4_bootstrap_kernel.py
+  - .state/<task_key>/task-runner-state.json
   mechanism_summary:
   - task-runner-state 使用 write-to-temp + rename 原子写入
   - 写入前后增加文件锁避免并发覆盖
   - 写入失败可回退 .bak 保障状态可恢复
   code_anchor_refs:
-  - scripts/coder4_bootstrap_kernel.py::atomic_write_json
-  - scripts/coder4_bootstrap_kernel.py::load_local_state
-  - scripts/coder4_bootstrap_kernel.py::update_local_card_status
+  - scripts/coder4/coder4_bootstrap_kernel.py::atomic_write_json
+  - scripts/coder4/coder4_bootstrap_kernel.py::load_local_state
+  - scripts/coder4/coder4_bootstrap_kernel.py::update_local_card_status
   acceptance_checks:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - task-runner-state.json.bak

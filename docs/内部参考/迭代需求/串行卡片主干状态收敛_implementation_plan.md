@@ -19,8 +19,8 @@
 4. 拆解命令  
    `.cursor/commands/jjk-vkplan.md`
 5. 执行脚本锚点  
-   `scripts/wt-flow.sh`  
-   `scripts/coder4_bootstrap_kernel.py`
+   `scripts/coder4/wt-flow.sh`  
+   `scripts/coder4/coder4_bootstrap_kernel.py`
 
 > 设计审批说明：本轮来源为用户明确串行策略收敛指令，按 `DESIGN_APPROVAL_FALLBACK_ACK` 处理并进入 plan-only。
 
@@ -54,11 +54,11 @@
 |---|---|---|---|---|---|---|---|
 | F1 | Gate 契约双层化（G01 流程门禁 + IG01 集成门禁） | `vkplan` 生成契约时固化 gate 模式 | `/Users/jijingkun/.codex/engineering/templates/jjk_vkplan_templates.md` `docs/内部参考/迭代需求/_templates/jjk_vkplan_templates.md` | `gate_contract.gate_ids` `cards[].merge_required` | 回退到旧 gate 模板 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <dir>` | 本轮需求基线 |
 | F2 | `vktodo` 收敛为 create-only | 调用 `vktodo action=move` 时直接阻断 | `.cursor/commands/jjk-vktodo.md` `.agents/skills/jjk-vktodo/SKILL.md` | `allowed_actions: [create]` | 临时恢复 legacy move（仅应急） | `python3 scripts/docs_guard.py --strict` | 本轮职责重划 |
-| F3 | `cardrun` 主流程加入 per-card commit+merge | 每卡 `verify` 后进入 merge，再进入 done | `.cursor/commands/jjk-cardrun.md` `.agents/skills/jjk-cardrun/SKILL.md` | `done_definition` `merge_required` | 恢复 verify 即 done 旧逻辑（不推荐） | `bash scripts/wt-flow.sh verify C01` + `bash scripts/wt-flow.sh merge` | 当前串行断层问题 |
-| F4 | `wt-flow` 状态机支持 `verified` 中间态 | verify pass 仅写 verified；merge 成功写 done | `scripts/wt-flow.sh` | `card_status_map` `last_action_result` | 回退状态机改造 | `bash scripts/wt-flow.sh status` | 脚本状态机收敛 |
-| F5 | 执行证据化：子代理 + 提交合并证据 | 每卡执行后写 ledger 证据 | `scripts/coder4_bootstrap_kernel.py` | `subagent_id` `ws_file` `commit_sha` `merge_sha` | 字段降级为可选 | `python3 scripts/coder4_bootstrap_kernel.py --local-mode --output -` | 可观测需求 |
-| F6 | dirty 判定统一化 | preflight 和 merge 阶段采用同一白名单策略 | `scripts/wt-flow.sh` `scripts/coder4_bootstrap_kernel.py` `.cursor/commands/jjk-cardrun.md` | `dirty_policy_version` `dirty_whitelist` | 关闭白名单回退严格策略 | `git status --porcelain` 双场景验证 | 当前三处口径不一致 |
-| F7 | 新增 IG01 集成门禁 | 全部实现卡 done 后执行 master 集成验收 | `scripts/check_integration_gate.py`（新增） | `integration_gate.passed` | 删除 IG01 并回退人工验收 | `python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master` | 主干可见性诉求 |
+| F3 | `cardrun` 主流程加入 per-card commit+merge | 每卡 `verify` 后进入 merge，再进入 done | `.cursor/commands/jjk-cardrun.md` `.agents/skills/jjk-cardrun/SKILL.md` | `done_definition` `merge_required` | 恢复 verify 即 done 旧逻辑（不推荐） | `bash scripts/coder4/wt-flow.sh verify C01` + `bash scripts/coder4/wt-flow.sh merge` | 当前串行断层问题 |
+| F4 | `wt-flow` 状态机支持 `verified` 中间态 | verify pass 仅写 verified；merge 成功写 done | `scripts/coder4/wt-flow.sh` | `card_status_map` `last_action_result` | 回退状态机改造 | `bash scripts/coder4/wt-flow.sh status` | 脚本状态机收敛 |
+| F5 | 执行证据化：子代理 + 提交合并证据 | 每卡执行后写 ledger 证据 | `scripts/coder4/coder4_bootstrap_kernel.py` | `subagent_id` `ws_file` `commit_sha` `merge_sha` | 字段降级为可选 | `python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --output -` | 可观测需求 |
+| F6 | dirty 判定统一化 | preflight 和 merge 阶段采用同一白名单策略 | `scripts/coder4/wt-flow.sh` `scripts/coder4/coder4_bootstrap_kernel.py` `.cursor/commands/jjk-cardrun.md` | `dirty_policy_version` `dirty_whitelist` | 关闭白名单回退严格策略 | `git status --porcelain` 双场景验证 | 当前三处口径不一致 |
+| F7 | 新增 IG01 集成门禁 | 全部实现卡 done 后执行 master 集成验收 | `scripts/coder4/check_integration_gate.py`（新增） | `integration_gate.passed` | 删除 IG01 并回退人工验收 | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master` | 主干可见性诉求 |
 | F8 | 新增 Gate 契约一致性校验脚本 | 计划与拆解产物生成后执行一致性检查 | `scripts/check_gate_contract_consistency.py`（新增） | `contract_consistency.passed` | 删除脚本回退人工校验 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <dir>` | 契约一致性需求 |
 
 ## 4. 最小代码样例（约束实现形态）
@@ -143,15 +143,15 @@ implementation_tasks:
     pr_id: PR-02
     phase: Phase-2
     file_paths:
-      - scripts/wt-flow.sh
+      - scripts/coder4/wt-flow.sh
     symbols:
       - cmd_verify
       - cmd_merge
       - card_status_map
     change_type: modify
     acceptance_cmds:
-      - bash scripts/wt-flow.sh verify C01
-      - bash scripts/wt-flow.sh status
+      - bash scripts/coder4/wt-flow.sh verify C01
+      - bash scripts/coder4/wt-flow.sh status
     rollback_point: 回退 wt-flow 状态机变更
 
   - task_id: T-05
@@ -159,14 +159,14 @@ implementation_tasks:
     pr_id: PR-03
     phase: Phase-3
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     symbols:
       - record_attempt_evidence
       - apply_action
       - result.applied
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --output -
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --output -
     rollback_point: 去除新增证据字段，保留旧结构
 
   - task_id: T-06
@@ -174,8 +174,8 @@ implementation_tasks:
     pr_id: PR-03
     phase: Phase-3
     file_paths:
-      - scripts/wt-flow.sh
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/wt-flow.sh
+      - scripts/coder4/coder4_bootstrap_kernel.py
       - .cursor/commands/jjk-cardrun.md
     symbols:
       - _ensure_clean
@@ -191,13 +191,13 @@ implementation_tasks:
     pr_id: PR-04
     phase: Phase-4
     file_paths:
-      - scripts/check_integration_gate.py
+      - scripts/coder4/check_integration_gate.py
     symbols:
       - check_merged_cards
       - check_master_visibility
     change_type: add
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master
     rollback_point: 删除 IG01 脚本并回退人工验收
 
   - task_id: T-08
@@ -242,8 +242,8 @@ task_to_pr_mapping:
       - PR-01
     pr_subject: "cardrun 执行链收敛：每卡 verify+merge 才可 done"
     acceptance_cmds:
-      - bash scripts/wt-flow.sh verify C01
-      - bash scripts/wt-flow.sh status
+      - bash scripts/coder4/wt-flow.sh verify C01
+      - bash scripts/coder4/wt-flow.sh status
     rollback_point: 回退 cardrun/wt-flow 语义
   - task_id: T-04
     pr_id: PR-02
@@ -252,7 +252,7 @@ task_to_pr_mapping:
       - PR-01
     pr_subject: "wt-flow 状态机中间态与合并后 done 收敛"
     acceptance_cmds:
-      - bash scripts/wt-flow.sh status
+      - bash scripts/coder4/wt-flow.sh status
     rollback_point: 回退状态机改造
   - task_id: T-05
     pr_id: PR-03
@@ -261,7 +261,7 @@ task_to_pr_mapping:
       - PR-02
     pr_subject: "执行证据化：子代理与合并证据落账"
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --output -
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --output -
     rollback_point: 移除新增证据字段
   - task_id: T-06
     pr_id: PR-03
@@ -279,7 +279,7 @@ task_to_pr_mapping:
       - PR-03
     pr_subject: "IG01 集成门禁脚本"
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master
     rollback_point: 删除 IG01 脚本
   - task_id: T-08
     pr_id: PR-04
@@ -338,7 +338,7 @@ planning_contract:
       done_gate:
         - verify 不直接 done，merge 成功后 done
       acceptance_checks:
-        - bash scripts/wt-flow.sh status
+        - bash scripts/coder4/wt-flow.sh status
       evidence_entry: docs/内部参考/迭代需求/串行卡片主干状态收敛_implementation_plan.md
     - card_id: C04
       feature_ids: [F5]
@@ -348,7 +348,7 @@ planning_contract:
       done_gate:
         - ledger 具备子代理与提交合并证据
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --output -
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --output -
       evidence_entry: docs/内部参考/迭代需求/串行卡片主干状态收敛_implementation_plan.md
     - card_id: C05
       feature_ids: [F6]
@@ -378,7 +378,7 @@ planning_contract:
       done_gate:
         - 实现卡已合并主干且主干回归通过
       acceptance_checks:
-        - python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master
       evidence_entry: docs/内部参考/迭代需求/串行卡片主干状态收敛_implementation_plan.md
   task_to_pr_mapping:
     - task_id: T-01
@@ -395,7 +395,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "cardrun 每卡提交并合并主干"
       acceptance_cmds:
-        - bash scripts/wt-flow.sh status
+        - bash scripts/coder4/wt-flow.sh status
       rollback_point: 回退 cardrun/wt-flow 语义
     - task_id: T-05
       pr_id: PR-03
@@ -403,7 +403,7 @@ planning_contract:
       pr_depends_on: [PR-02]
       pr_subject: "执行证据化与 dirty 策略统一"
       acceptance_cmds:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --output -
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --output -
       rollback_point: 回退 kernel 证据字段与 dirty 策略
     - task_id: T-07
       pr_id: PR-04
@@ -411,7 +411,7 @@ planning_contract:
       pr_depends_on: [PR-03]
       pr_subject: "IG01 集成门禁与契约一致性校验"
       acceptance_cmds:
-        - python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master
         - python3 scripts/check_gate_contract_consistency.py --task-split-dir <dir>
       rollback_point: 删除新增门禁脚本并回退文档契约
 ```

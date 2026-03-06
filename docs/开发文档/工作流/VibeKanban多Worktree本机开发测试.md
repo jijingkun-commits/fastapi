@@ -104,7 +104,7 @@ bash scripts/vk_dev.sh up
         -> /jjk-vktodo <任务拆解目录> create（create-only）
         -> /jjk-cardrun <任务拆解目录> loop
         -> python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>
-        -> python3 scripts/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master
+        -> python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master
         -> /jjk-review -> /jjk-test（或 /jjk-verify）
 ```
 
@@ -131,13 +131,13 @@ bash scripts/vk_dev.sh up
 7. 卡片唯一键必须为 `<task_key>::<WS-ID>`，标题采用 `WS-ID` 前置并保留 `task_key`。
 8. `/jjk-cardrun` 对实现卡必须执行 `verify -> merge -> done`，并在 merge 后生成证据。
 9. Gate 层至少包含 `G01`（契约一致性）与 `IG01`（主干可见性）双门禁。
-10. 自动执行器运行前，必须将当前任务写入 `docs/内部参考/任务拆解/_active_task.json`，并确保其中 `task_key` 与目标 `vk_cards.json` 一致。
+10. 自动执行器运行前，必须将当前任务写入 `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`，并确保其中 `task_key` 与目标 `vk_cards.json` 一致。
 11. coder4 自动执行总控细节与排障请看：`docs/开发文档/工作流/Coder4自动执行总控手册.md`。
 
 推荐命令：
 
 ```bash
-python3 scripts/set_active_task.py \
+python3 scripts/coder4/set_active_task.py \
   --task-split-dir <YYYY-MM-DD_主题> \
   --project-id <VK_PROJECT_ID>
 ```

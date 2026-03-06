@@ -10,7 +10,7 @@
 - 边界:
   - 不重构 `ragflow_tool`、`multi_agent_graph` 等业务逻辑实现。
   - 不改变 `vk_cards` 的业务任务拆解顺序（仍以 C01~C07 + G01 为主）。
-  - 不引入新的任务系统，仅在现有 `.omc/state` 与 `scripts/*` 体系上收敛。
+  - 不引入新的任务系统，仅在现有 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>` 与 `scripts/*` 体系上收敛。
 - 成功标准:
   - 同一分支、同一输入下，本地与 CI 的验证结论一致。
   - `check_integration_gate` 在进入集成验收前即可自动识别缺失证据并阻断。
@@ -41,10 +41,10 @@
 ## 4. 设计概要
 - 架构:
   - 工作流控制面：`scripts/` 下的门禁脚本 + 统一验证入口脚本。
-  - 证据数据面：`.omc/state/<task_key>/attempts/<card_id>/merge_result.json`、`task-runner-state.json`。
+  - 证据数据面：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::merge_results.<card_id>`、`task-runner-state.json`。
   - 审计与展示面：`docs/内部参考/任务拆解/*` 与 CI Summary。
 - 组件:
-  - `scripts/check_integration_gate.py`：校验 merge 证据存在性、提交可见性、状态一致性。
+  - `scripts/coder4/check_integration_gate.py`：校验 merge 证据存在性、提交可见性、状态一致性。
   - `scripts/check_gate_contract_consistency.py`：校验 `vk_cards / parallel_plan / implementation_plan` 契约一致。
   - `scripts/docs_guard.py`：文档合规与链接完整性门禁。
   - `wt-flow` / 卡片执行链：负责在实施卡完成时落盘 `merge_result.json`。
@@ -52,7 +52,7 @@
   - 新增 CI Workflow（设计项）：执行同一套标准命令并输出汇总。
 - 数据流:
   - Step 1（开发者本地）：统一入口脚本启动，执行 unit tests + docs guard + contract consistency。
-  - Step 2（证据检查）：读取 `.omc/state`，确认 C01~C07 的 `merge_result.json` 完整且格式正确。
+  - Step 2（证据检查）：读取 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>`，确认 C01~C07 的 `merge_result.json` 完整且格式正确。
   - Step 3（集成门禁）：`check_integration_gate.py` 验证每个 merge commit 对基线可见。
   - Step 4（CI 复核）：PR/手动触发 CI 复跑同链路并输出结论，结论回写 PR summary。
   - Step 5（人工闸门）：负责人审阅阶段报告，确认“结论+证据+剩余风险”后再推进。

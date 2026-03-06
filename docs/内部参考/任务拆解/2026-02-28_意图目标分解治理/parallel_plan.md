@@ -22,7 +22,7 @@
 
 ```yaml
 automation_contract:
-  source_of_truth: docs/内部参考/任务拆解/_active_task.json
+  source_of_truth: docs/内部参考/任务拆解/2026-02-28_意图目标分解治理/_active_task.json
   required_fields:
     - project_id
     - task_split_dir

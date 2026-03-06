@@ -10,7 +10,7 @@
 
 当前系统存在两类耦合问题，已经开始互相放大：
 
-1. **并行任务资源冲突**：多个 `task_key` 并行开发时，`feature/C01`、`.worktrees/C01`、`.omc/state/task-runner-state.json`、`.omc/state/attempts/C01/*` 等资源存在复用覆盖风险。
+1. **并行任务资源冲突**：多个 `task_key` 并行开发时，`feature/C01`、`.worktrees/C01`、`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`、`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/C01/*` 等资源存在复用覆盖风险。
 2. **用户响应链路被收口逻辑拖慢**：在聊天主链路中存在同步写入/召回操作，容易把“后台治理动作”叠加到用户可感知时延。
 3. **读写口径不一致**：即使写入端隔离，读侧脚本仍可能读取全局默认路径，导致 active 索引与运行状态漂移。
 
@@ -29,9 +29,9 @@
 
 ### 2.2 范围（In Scope）
 
-1. `scripts/wt-flow.sh` 的命名空间隔离改造（分支、worktree、state、attempts）。
-2. `scripts/coder4_bootstrap_kernel.py`、`scripts/coder4_vk_sync.py`、`scripts/check_integration_gate.py` 的读侧路径统一。
-3. `scripts/coder4_scope_guard.py` 的 active 判定一致性修正。
+1. `scripts/coder4/wt-flow.sh` 的命名空间隔离改造（分支、worktree、state、attempts）。
+2. `scripts/coder4/coder4_bootstrap_kernel.py`、`scripts/coder4/coder4_vk_sync.py`、`scripts/coder4/check_integration_gate.py` 的读侧路径统一。
+3. `scripts/coder4/coder4_scope_guard.py` 的 active 判定一致性修正。
 4. `app/services/chat_service.py` 的主链路异步收口改造（把后台动作从用户响应关键路径拆出）。
 5. 配套文档与流程命令更新：`jjk-cardrun`、`jjk-vkplan`、工作流文档。
 

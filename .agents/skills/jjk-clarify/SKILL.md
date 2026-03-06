@@ -1,196 +1,206 @@
 ---
 name: jjk-clarify
-description: "Use when you need `jjk-clarify` in this repository. Source intent: 澄清入口（结合 brainstorming）：提高提问效率，产出标准 design 文档"
+description: "Use when you need `jjk-clarify` in this repository. Source intent: 澄清入口（兼容 brainstorming，保留发散能力）：冻结可执行设计并产出标准 handoff 契约"
 ---
 <!-- AUTO-GENERATED: jjk-skill-mirror -->
 <!-- source: .cursor/commands/jjk-clarify.md -->
 
-# 任务澄清 (Clarify Task)
+# 任务澄清（Clarify Task）
 
-本命令是你 `jjk-*` 体系里的澄清入口，目标是**复用** `brainstorming`，而不是复制它。
+`$jjk-clarify` 是 `jjk-*` 执行链的设计冻结入口，目标是把模糊想法变成“可直接进入 `$jjk-plan`”的基线。
+
+## 与 brainstorming 的关系
+
+1. 能用 `brainstorming` 时必须先走其流程。
+2. 本指令仅负责设计冻结与 handoff，不复制 `brainstorming` 的发散流程。
+3. 主文档永远只保留最终方案。
+
+---
 
 ## 执行契约
 
-1. 若当前环境可用 `brainstorming`，**必须先调用并遵循其流程**。
-2. 若当前环境不可用 `brainstorming`，按本文件 fallback 流程执行，并在“执行备注”区块标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
-3. 设计未获用户审批前，禁止进入实现阶段。
-4. 标准模式产物统一写入：`docs/plans/YYYY-MM-DD-<topic>-design.md`（轻量模式可不落盘）。
-5. 禁止在本文件复制完整 brainstorming 正文，避免双份维护漂移。
-6. `design.md`、`*_requirements.md`、`*_implementation_plan.md` 仅保留最终方案，禁止输出方案 A/B/C（或 1/2/3）对比内容。
-
-## 执行意图门禁（新增，强制）
-
-1. `$jjk-clarify` 默认只做澄清与设计，不自动进入 `$jjk-plan`、`$jjk-imp`、`$jjk-feature` 的执行链。
-2. 用户若只回复“好的/继续/确认”但未明确“执行/落地/开始改”，本命令必须停留在澄清态。
-3. 仅当用户在当前轮显式表达执行动词时，才允许输出“建议下一步执行命令”。
-4. 若执行意图不明确，输出标记 `CLARIFY_EXECUTION_INTENT_REQUIRED`，并给出可选下一步（继续澄清或进入规划）。
-
-## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`$jjk-clarify`
-2. Codex：`$jjk-clarify`
-
-> 说明：Codex 推荐显式调用 `$jjk-clarify`。
+1. 设计未审批前，禁止进入任何下游命令。
+2. 标准产物：`docs/plans/YYYY-MM-DD-<topic>-design.md`。
+3. 每份 `design.md` 必须包含 `design_freeze_summary` 和 `clarify_handoff_contract` 两个 YAML 区块。
+4. 若 `brainstorming` 不可用，走 fallback 并在执行备注标记 `BRAINSTORM_UNAVAILABLE_FALLBACK`。
+5. 使用联网搜索和github搜索工具，以及上下文理解能力，确保设计符合用户意图。
 
 ---
 
-## 与 brainstorming 的分工
+## 提问原则
 
-1. `brainstorming`：流程门禁、设计审批、阶段收敛。
-2. `jjk-clarify`：提问效率增强（单主题问题包）+ 多 IDE fallback。
-
----
-
-## 模板来源优先级（跨项目，强制）
-
-`$jjk-clarify` 统一使用仓库内相对路径模板，禁止依赖用户绝对路径。
-
-模板按以下优先级读取：
-
-1. 项目主模板（必需）：
-   `docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`
-2. 项目覆盖模板（可选，仅放差异）：
-   `docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`
-
-若主模板缺失，使用本命令内置最小模板兜底，并在“执行备注”输出 `TEMPLATE_FILE_MISSING`。
+1. **默认批量提问**：边界清晰时，单轮最多 5 个关键问题
+2. **先锁定目标/边界，再锁定契约/实现落点**
+3. **不做并列方案打分**
+4. **遇到以下情况切换为逐个提问**：
+   - 用户回答模糊或存在矛盾
+   - 涉及跨模块状态契约（需先确认边界再问细节）
+   - 连续 2 轮批量提问仍不清晰
 
 ---
 
-## 何时使用
+## 设计完成定义（DoD v3.2，极简）
 
-| 场景 | 推荐命令 |
-|------|----------|
-| 需求模糊，先做高效澄清与方案收敛 | `$jjk-clarify` ✅ |
-| 需要更细粒度领域深挖 | `$jjk-clarify --deep` ✅ |
-| 任务很大，需要并行澄清 | `$jjk-clarify`（自动启用 team） ✅ |
-| 需要进入正式需求与技术方案产出 | `$jjk-plan` |
+审批前必须冻结以下 7 块（缺一不可）：
 
----
+1. `scope_contract`：目标 + 范围 + 边界 + 成功标准。
+2. `product_contract`（PRD-Lite）：目标用户与核心场景 + 业务目标/KPI + 非目标 + 验收口径 + 发布约束。
+3. `architecture_contract`：模块边界 + 端到端数据流 + 状态生命周期 + 异常语义。
+4. `requirement_seeds`：字段级需求原子（至少 1 条）。
+5. `implementation_seeds`：轻量版任务原子（`task_id + file_paths + symbols + change_type`，至少 1 条）。
+6. `execution_chain_seed`：`preferred_mode + task_key + card_seed` 框架。
+7. `risk_rollback_contract`：至少 2 条关键风险 + 回退锚点（开关默认 `true`，回退置 `false`）。
 
-## 提问效率增强（单主题问题包）
+缺失任一块时：
 
-在不破坏 brainstorming 约束的前提下，采用“**单主题问题包**”：
-
-1. 每轮只聚焦一个主题（满足单主题约束）。
-2. 同轮允许最多 5 个结构化子项，用户可一次回复（例如 `A2/B1/C3/D2/E1`）。
-3. 默认模式最多 2 轮问题包；超过则建议切 `--deep`。
-4. 若还有关键不确定项，再加 1 个精准追问。
-5. 涉及架构/工作流/跨端契约时，`D. 量化目标` 与 `E. 发布与回退口径（默认全量开启）` 为必问项，不得省略。
-6. 涉及配置开关时，默认口径必须是“全量开启 + 一键关闭回退”；仅当用户明确要求灰度时，才允许给出灰度放量方案。
-
-模板见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`单主题问题包模板` 段）。  
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
+1. 输出 `CLARIFY_DESIGN_NOT_ACTIONABLE`。
+2. 继续澄清，不得审批。
 
 ---
 
-## 轻量澄清模式（小任务）
+## 工程流一致性附加门禁（v3.2，强制）
 
-满足以下全部条件时，可走轻量模式（不强制写入 design 文档）：
+审批前除 DoD 外，必须额外通过以下 6 项一致性校验（任一失败即 `FAIL_FAST`）：
 
-1. 预计改动 `<= 3` 个文件；
-2. 单模块内修改；
-3. 不涉及架构/API/表结构/配置变更；
-4. 不跨后端/前端/AI-workflow/数据库边界。
-
-轻量模式仍需输出：
-
-1. 目标、范围、成功标准；
-2. 最终方案 + 决策权衡（仅说明放弃原因，不做并列评分）；
-3. 若澄清中发现边界升级，立即切换为标准模式并落盘 design 文档。
+1. **产品契约完整性门禁（PRD-Lite）**
+   - `product_contract` 必须具备：`target_users/core_scenarios/business_goals(non-empty KPI)/non_goals/acceptance_gates`。
+   - 禁止“待确认/后续补充/TBD”占位进入审批态。
+   - 失败输出：`CLARIFY_PRODUCT_CONTRACT_INCOMPLETE`。
+2. **语义唯一化门禁**
+   - 关键异常语义必须“单策略冻结”（例如缺失关键字段时由后端归一为 `error` 或前端统一 fallback，只能二选一）。
+   - 禁止在最终方案中保留“`A 或 B`”未决语义。
+   - 失败输出：`CLARIFY_SEMANTIC_NOT_FROZEN`。
+3. **契约源唯一化门禁**
+   - “单一契约源”必须明确唯一机制（如代码生成 *或* 镜像同步，必须单选并冻结）。
+   - 禁止“并存可选”描述进入 handoff。
+   - 失败输出：`CLARIFY_CONTRACT_SOURCE_UNDECIDED`。
+4. **handoff 种子对齐门禁**
+   - `clarify_handoff_contract.required.requirement_seeds` 必须完整覆盖主文档 `requirement_seeds`。
+   - `clarify_handoff_contract.required.implementation_seeds` 必须完整覆盖主文档 `implementation_seeds`。
+   - `execution_chain_seed.card_seed` 必须与 implementation task_id 集一致（可排序不同，不可缺失/新增）。
+   - 失败输出：`CLARIFY_HANDOFF_CONTRACT_INCOMPLETE`。
+5. **并行依赖门禁**
+   - 当 `preferred_mode=parallel` 且 `card_seed>=2` 时，`implementation_seeds` 必须显式给出依赖关系（`blocked_by` 或等价字段）。
+   - 必须可恢复出拓扑顺序，不允许“无依赖并行”直接落地。
+   - 失败输出：`CLARIFY_EXECUTION_DEPENDENCY_MISSING`。
+6. **回放归一门禁**
+   - 必须指定结构化结果在消息体的 canonical 字段（如 `additional_kwargs`）。
+   - 若存在历史字段并存，必须给出“读旧写新”迁移语义。
+   - 失败输出：`CLARIFY_REPLAY_CANONICAL_UNSET`。
 
 ---
 
-## 执行流程（精简）
+## 设计冻结回执（唯一门禁）
 
-### 0) 先探索项目上下文（强制）
+审批前必须输出：
 
-至少检查：
+```yaml
+design_freeze_summary:
+  design_actionable: true|false
+  missing_blocks: []
+  risk_level: low|medium|high
+  risk_counterexamples_count: 2
+  handoff_contract_ready: true|false
+  product_contract_ready: true|false
+  implementation_seed_count: <int>
+  semantic_frozen: true|false
+  contract_source_decided: true|false
+  handoff_seed_alignment_ok: true|false
+  parallel_dependency_ready: true|false
+  replay_canonical_field_set: true|false
+  blocking_issues: []
+```
 
-1. 关键代码入口（如 `app/ai/workflow/*`, `app/services/*`, `web/src/*`）
-2. 相关文档（如 `docs/**` 与历史计划）
-3. 当前变更状态（`git status`）
+门禁规则：
 
-### 0.5) Team 升级判定（先扫描后决策）
+1. `design_actionable=false` 或 `missing_blocks` 非空：禁止审批。
+2. `handoff_contract_ready=false`：禁止审批。
+3. `product_contract_ready=false`：禁止审批。
+4. `implementation_seed_count=0`：禁止审批。
+5. `risk_counterexamples_count<2`：禁止审批。
+6. `semantic_frozen=false`：禁止审批。
+7. `contract_source_decided=false`：禁止审批。
+8. `handoff_seed_alignment_ok=false`：禁止审批。
+9. `parallel_dependency_ready=false`（仅 parallel 模式要求）：禁止审批。
+10. `replay_canonical_field_set=false`：禁止审批。
+11. `blocking_issues` 非空：禁止审批。
 
-`$jjk-team-clarify` 已废弃，不再作为独立入口。  
-统一由 `$jjk-clarify` 在大任务时自动升级为 Team 执行。
+---
 
-完成步骤 0 的上下文扫描后，先输出“Team 判定快照”：
+## 设计审批（v3 自然版）
 
-1. `module_count`：涉及模块/子系统数量；
-2. `boundary_count`：跨边界数量（后端/前端/AI-workflow/数据库）；
-3. `uncertainty_count`：需要并行查证的不确定项数量；
-4. `estimated_file_count`：预估改动文件数量。
+冻结后必须主动发起确认：
 
-判定规则：
+> 以上设计已完全冻结。  
+> 请回复：**确认 / 需要修改XX点 / 否**  
+> （回复“确认”或“是”且门禁全部通过即视为审批通过，可进入 `$jjk-plan`；否则记录条件采纳并继续澄清）
 
-1. 命中条件：`module_count >= 3`；
-2. 命中条件：`boundary_count >= 2`；
-3. 命中条件：`uncertainty_count >= 2`；
-4. 命中条件：`estimated_file_count >= 8`。
+审批规则：
 
-执行阈值：
+1. 仅当所有门禁通过且用户回复肯定语义（如“确认”“是”“OK”“走这个”）时，审批通过（`design_approved=true`）。
+2. 若用户肯定但仍存在阻断项，记录“条件采纳”并保持 `design_approved=false`，输出 `CONDITIONAL_APPROVAL_BLOCKED`，不得进入下游。
+3. 非肯定语义或存在修改点时，继续澄清，不进入下游。
+4. 审批动作后，自动在 `design.md` 追加审批记录：`design_approved/approved_at/approved_round/approval_evidence`；若为条件采纳，建议补充 `approval_mode=conditional` 与 `go_no_go=NO_GO`。
 
-1. 命中条件 `>= 2` 条：自动升级 Team；
-2. 命中条件 `<= 1` 条：默认单代理执行（除非用户明确指定 Team）。
+---
 
-执行策略：
+## clarify_handoff_contract（v2，推荐结构）
 
-1. **有 Team 能力时**：自动以 team 方式并行收集上下文与方案草稿，Leader 对外保持单线程提问口径。
-2. **无 Team 能力时**：降级为单代理执行，并在“执行备注”区块标注 `TEAM_UNAVAILABLE_FALLBACK`。
+保持 v2 结构（`required + extended`），并继续兼容 v1 顶层字段。
 
-### 0.6) Team 交叉质检约束（新增，轻量）
+```yaml
+clarify_handoff_contract:
+  version: v2
+  topic: "<topic>"
+  design_source: docs/plans/YYYY-MM-DD-<topic>-design.md
+  handoff_ready: true
+  required:
+    product_contract_summary:
+      target_users: []
+      core_scenarios: []
+      business_goal_metrics: []
+      non_goals: []
+      acceptance_gates: []
+    requirement_seeds: [...]
+    implementation_seeds: [...]
+    execution_chain_seed:
+      preferred_mode: core|parallel
+      task_key: PP-YYYYMMDD-topic
+      card_seed: []
+      execution_contract_hint:
+        delivery_mode: one_shot|staged
+        execution_unit: all_tasks|per_pr|per_task
+        commit_policy: single_commit|per_pr
+        stop_boundary: none|per_pr|per_task
+    alignment_contract:
+      strict_match: true
+      requirement_seed_ids: []
+      implementation_task_ids: []
+      card_seed_ids: []
+  extended:
+    observability_hints: []
+    risk_counterexample_map: []
+    assumptions: []
+```
 
-1. Team 模式下必须启用抽检互审：至少抽检 `20%` 工作项（向上取整，最少 `1` 项）。
-2. 每个抽检项必须包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
-3. 抽检未通过的工作项不得推进到下一阶段，必须先复核并补齐证据。
-4. 阶段汇报至少包含：`结论`、`证据`、`剩余风险`。
+---
 
-### 1) 进行澄清提问
+## Team 策略
 
-- 默认模式：使用“单主题问题包”做快速对齐。
-- Deep 模式：按领域逐个问题包深挖。
-- 若命中架构/状态契约/SSE 等高风险改动，问题包必须覆盖 `D. 量化目标` 与 `E. 发布与回退口径（默认全量开启）`。
+默认单代理。满足 `>=2` 条时建议升级：
 
-### 2) 复述确认
+1. `module_count >= 3`
+2. `boundary_count >= 2`
+3. `uncertainty_count >= 2`
+4. `estimated_file_count >= 12`
 
-输出“我的理解”，至少包含：
+无 Team 能力时降级单代理，并标记 `TEAM_UNAVAILABLE_FALLBACK`。
 
-1. 目标
-2. 范围
-3. 边界条件
-4. 成功标准
+---
 
-### 3) 方案收敛（强制）
+## 执行备注
 
-必须只输出最终方案；若需要说明取舍，仅允许在“决策权衡”中简述放弃路径与原因，禁止 A/B/C 并列对比与推荐度打分。
-
-### 4) 设计审批（强制）
-
-按 brainstorming 约束：设计需经用户确认后，才可进入下一阶段。
-
-审批通过后，必须在 design 文档补充“审批记录”：
-
-1. `design_approved: true`
-2. `approved_at: <YYYY-MM-DD HH:mm>`
-3. `approved_round: <轮次或版本>`
-
-### 5) 产出物（与 brainstorming 名称和路径一致）
-
-标准模式统一写入：
-
-`docs/plans/YYYY-MM-DD-<topic>-design.md`
-
-> 不再使用 `_context.md` 或 `*-clarify.md` 作为主产物。
-
-建议结构见项目主模板：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md`（`design 文档结构模板` 段）。  
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_clarify_templates.override.md`。
-
-轻量模式可不落盘，但需在回复内给出简版结论与最终方案。
-
-### 6) 执行备注（结构化可观测）
-
-若触发能力降级或模板异常，在回复末尾追加以下结构化区块，不插入正文主叙述：
+若发生能力降级或模板异常，回复末尾追加：
 
 ```yaml
 execution_notes:
@@ -200,26 +210,19 @@ execution_notes:
   template:
     missing: false
     source: "docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md"
+  question_mode: "single|package"
   degrade_reason: ""
   alternative_tool: ""
   verification: ""
 ```
 
-填写规则：
+---
 
-1. 触发 `brainstorming` 降级时，`fallback.brainstorming=true`。
-2. 触发 Team 降级时，`fallback.team=true`。
-3. 模板缺失时，`template.missing=true` 且补充 `degrade_reason`。
-4. 发生任何降级时，必须填写 `alternative_tool` 与 `verification`。
+## 禁止项
+
+1. 禁止未审批直接跳实现。
+2. 禁止在主文档输出 A/B/C 对比。
 
 ---
 
-## 禁止项（强制）
-
-1. 禁止从 `$jjk-clarify` 直接跳到 `$jjk-imp` 或 `$jjk-feature`。
-2. 禁止未审批设计就进入实现。
-3. 禁止在 design/requirements/implementation_plan 主文档中输出方案 A/B/C（或 1/2/3）对比。
-
----
-
-*使用 `$jjk-clarify` 触发。目标是“结合 brainstorming，而不是复制 brainstorming”。*
+*使用 `$jjk-clarify` 触发。目标是最小必要流程 + 最大执行确定性。*

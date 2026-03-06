@@ -476,7 +476,7 @@ planning_contract:
 2. `single_active_card` 串行约束复核：
    - 本节 `strict_single_active_card: true`。
    - `vk_cards.json` 顶层 `single_active_card=true`。
-   - `docs/内部参考/任务拆解/_active_task.json` 顶层 `single_active_card=true`。
+   - `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json` 顶层 `single_active_card=true`。
 3. G02 关键字段复核（与 WS-G02 对齐）：
    - `task_mode=inspection-card`
    - `merge_required=false`

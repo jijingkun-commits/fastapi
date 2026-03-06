@@ -1,0 +1,91 @@
+{
+  "ok": true,
+  "task_split_dir": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-04_用户个性化永久记忆与管理能力",
+  "task_key": "PP-20260304-USER-MEMORY-LLM-ASYNC",
+  "files": {
+    "vk_cards": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/vk_cards.json",
+    "parallel_plan": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/parallel_plan.md",
+    "implementation_plan": "/Users/jijingkun/bojxAI/fastapi/docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md"
+  },
+  "contracts": {
+    "vk_cards": {
+      "execution_mode": "serial",
+      "card_order": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "G01"
+      ],
+      "gate_contract": {
+        "mode": "as_cards",
+        "gate_ids": [
+          "G01"
+        ],
+        "depends_on": {
+          "G01": [
+            "C09"
+          ]
+        }
+      }
+    },
+    "parallel_plan": {
+      "execution_mode": "serial",
+      "card_order": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "G01"
+      ],
+      "gate_contract": {
+        "mode": "as_cards",
+        "gate_ids": [
+          "G01"
+        ],
+        "depends_on": {
+          "G01": [
+            "C09"
+          ]
+        }
+      }
+    },
+    "implementation_plan": {
+      "execution_mode": "serial",
+      "card_order": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "G01"
+      ],
+      "gate_contract": {
+        "mode": "as_cards",
+        "gate_ids": [
+          "G01"
+        ],
+        "depends_on": {
+          "G01": [
+            "C09"
+          ]
+        }
+      }
+    }
+  },
+  "errors": []
+}

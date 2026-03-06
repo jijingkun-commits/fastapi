@@ -658,6 +658,12 @@ def _resolve_active_goals(
     if isinstance(decomposed, list) and decomposed:
         return _normalize_active_goals([goal for goal in decomposed if isinstance(goal, dict)])
 
+    intent_plan = state.get("intent_plan")
+    if isinstance(intent_plan, dict):
+        intent_goals = [goal for goal in list(intent_plan.get("goals") or []) if isinstance(goal, dict)]
+        if intent_goals:
+            return _normalize_active_goals(intent_goals)
+
     heuristic_plan = _infer_initial_intent_plan(state)
     heuristic_goals = [goal for goal in list(heuristic_plan.get("goals") or []) if isinstance(goal, dict)]
     if heuristic_goals:
@@ -3444,10 +3450,11 @@ def _dispatch_values_mode_chunk(
             ctx.state,
             runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
         )
-        final_state["decomposed_goals"] = active_goals
 
         guard_state = dict(ctx.state)
-        guard_state["decomposed_goals"] = active_goals
+        if has_explicit_router_contract:
+            final_state["decomposed_goals"] = active_goals
+            guard_state["decomposed_goals"] = active_goals
 
         handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
@@ -4261,6 +4268,10 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             f"{current_todo_id}。若用户要求“描述里补充/添加外部信息（天气、股价等）”，"
             "应优先按更新该待办处理。"
         )
+
+    memory_context = str(state.get("memory_context") or "").strip()
+    if memory_context:
+        context_parts.append(memory_context)
 
     updates["system_context"] = "\n".join(context_parts)
     

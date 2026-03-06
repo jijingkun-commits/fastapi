@@ -8,6 +8,10 @@ on:
     paths:
       - 'app/**'
       - 'web/src/**'
+      - '.cursor/commands/**'
+      - '.env*'
+      - 'install/**'
+      - 'scripts/**'
 
 jobs:
   check-doc-sync:
@@ -18,50 +22,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check doc sync
+      - name: Check doc sync mapping
         run: |
           echo "========================================="
-          echo "  文档同步检查"
+          echo "  文档同步强校验"
           echo "========================================="
           echo ""
-
-          # 获取本次 PR 中变更的代码文件
-          CHANGED_CODE=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^(app/|web/src/)' || true)
-
-          # 获取本次 PR 中变更的文档文件
-          CHANGED_DOCS=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^docs/' || true)
-
-          if [ -z "$CHANGED_CODE" ]; then
-            echo "未检测到代码文件变更，跳过检查"
-            exit 0
-          fi
-
-          echo "变更的代码文件："
-          echo "$CHANGED_CODE" | while read -r file; do
-            echo "  - $file"
-          done
-          echo ""
-
-          if [ -n "$CHANGED_DOCS" ]; then
-            echo "变更的文档文件："
-            echo "$CHANGED_DOCS" | while read -r file; do
-              echo "  - $file"
-            done
-            echo ""
-            echo "文档同步检查通过"
-          else
-            echo "::warning::检测到代码变更但无文档更新，请确认是否需要同步文档"
-            echo ""
-            echo "提示："
-            echo "  - 查阅 .cursor/rules/doc_sync.mdc 了解文档映射规则"
-            echo "  - 跳过条件：纯格式化/重构、简单 Bug 修复"
-          fi
-
-      - name: Enforce anti-mess manual sync
-        run: |
-          python3 scripts/check_special_doc_sync.py \
-            --diff-range "origin/${{ github.base_ref }}...HEAD" \
-            --strict
+          bash scripts/check_doc_sync.sh --diff-range "origin/${{ github.base_ref }}...HEAD"
 
       - name: Summary
         run: |

@@ -3,14 +3,14 @@
 # 文档: https://pre-commit.com/
 
 repos:
-  # 文档同步检查
+  # 文档同步强校验（阻断）
   - repo: local
     hooks:
       - id: doc-sync-check
-        name: 文档同步检查
+        name: 文档同步强校验
         entry: scripts/check_doc_sync.sh
         language: script
-        files: ^(app/|web/src/)
+        files: ^(app/|web/src/|\.cursor/commands/|\.env|install/|scripts/)
         pass_filenames: false
         always_run: false
         verbose: true

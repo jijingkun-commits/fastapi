@@ -22,7 +22,7 @@
 
 ```yaml
 automation_contract:
-  source_of_truth: docs/内部参考/任务拆解/_active_task.json
+  source_of_truth: docs/内部参考/任务拆解/2026-03-01_聊天断页续跑与强停止/_active_task.json
   required_fields:
     - project_id
     - task_split_dir

@@ -11,48 +11,17 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `/jjk-review`：提供审查发现与风险边界。
-2. `/jjk-verify`：负责最终验收判定（本命令不直接给最终发布结论）。
-3. `playwright`：前端/E2E 自动化优先能力（可用时优先）。
-4. `systematic-debugging`：测试失败时用于根因定位，不在本命令内盲修。
-5. `team`（OMX）：大规模测试并行执行与汇总。
-6. `/jjk-test`：负责测试范围编排、证据采集、报告产出与测试资产回填。
-
-约束：
-
-1. 禁止在 `/jjk-test` 内做实现修复；修复应回退 `/jjk-debug` 或 `/jjk-imp(-ws)`。
-2. 禁止把 `/jjk-test` 当“仅跑几条命令”无报告流程；必须产出结构化测试报告。
-3. `/jjk-team-test` 不再作为主入口，统一由 `/jjk-test` 按规模自动升级 Team。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`/jjk-test`
-2. Codex：`/prompts:jjk-test`
-
-> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `/jjk-test` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_test_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_test_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_test_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 功能开发完成，需要完整测试与测试报告 | `/jjk-test` ✅ |
-| 只做审查结论 | `/jjk-review` |
-| 一次性给最终验收结论 | `/jjk-verify` |
-| 测试失败后修复问题 | `/jjk-debug` 或 `/jjk-imp(-ws)` |
-
----
 
 ## 输入前置（强制）
 
@@ -93,7 +62,7 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 1. **有 Team 能力时**：按测试维度并行执行，Leader 汇总统一报告。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，强制）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下，每个成员提交阶段结果后，必须由另一名成员执行反方审查，至少包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
 2. `2` 人任务执行双向互审；`3+` 人任务执行环形互审（A 审 B，B 审 C，...，最后一人审 A）。
@@ -149,7 +118,7 @@ venv/bin/python scripts/backfill_gate_status.py --plan "$PARALLEL_PLAN_PATH"
 1. `Executive Summary`（PASS/WARN/FAIL）
 2. `Defect List`（含证据）
 3. `Trace Matrix`（用例ID/结果/状态）
-4. 新增问题与历史问题区分
+4. 本轮问题与历史问题区分
 
 并同步：
 
@@ -161,7 +130,7 @@ venv/bin/python scripts/backfill_gate_status.py --plan "$PARALLEL_PLAN_PATH"
 
 ## 输出模板（推荐）
 
-见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_test_templates.md`（`输出模板` 段）。
+见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_test_templates.md`（`输出模板` 段）。
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_test_templates.md`。
 
 ## 禁止项（强制）

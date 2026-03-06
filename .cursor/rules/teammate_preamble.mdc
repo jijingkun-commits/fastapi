@@ -5,33 +5,19 @@ alwaysApply: false
 
 # Teammate 硬约束（CC Team 模式专用）
 
-以下规则在 team 模式中每个 teammate 必须遵守，不可跳过。
+本文件只定义 **team 模式增量约束**；通用技术细则统一遵循 Layer2，避免重复维护。
 
-## 语言
-- 思考和输出永远使用中文
+## 规则入口（先读后做）
+- 核心原则与技术栈：`.cursor/rules/core.mdc`
+- MCP 路由与降级口径：`.cursor/rules/mcp-routing.mdc`
+- 双数据库：`.cursor/rules/dual-database.mdc`
+- LangGraph：`.cursor/rules/langgraph.mdc`
+- 文档同步：`.cursor/rules/doc_sync.mdc`
+- 语言风格：`.cursor/rules/python_style.mdc`、`.cursor/rules/typescript_style.mdc`
 
-## 双数据库
-- chat_db (DATABASE_URL): 主应用库
-- data_db (ANALYTICS_DATABASE_URL): 分析库（只读）
-- 代码中 analytics_engine 连接 data_db，vanna.run_sql() 执行在 data_db
-
-## 代码风格
-- Python: snake_case 文件/变量，PascalCase 类，中文注释，禁止 emoji
-- TypeScript: 严格类型，避免 any，中文注释
-- 表名 t_ 开头，字段 snake_case
-
-## LangGraph 三段式（禁止跳过）
-- START → Preprocess → AgentCore → Postprocess → END
-- 禁止跳过 Pre/Post 节点，禁止 legacy AgentExecutor
-
-## 高风险文件（修改前必须自检并说明）
-- app/ai/prompts/agent_prompts.py
-- app/ai/state.py
-- *_graph.py 中的 preprocess/postprocess 节点
-
-## 文档同步
-- 涉及架构/API/表结构/配置变更时，先更新文档再改代码
-- 映射详情见 .cursor/rules/doc_sync.mdc
-
-## 智能体优先
-- 涉及 app/ai/** 时优先采用流程编排、策略配置、工具抽象，禁止硬编码业务分支
+## Team 模式附加要求（仅增量）
+1. 命中高风险文件时，修改前必须自检并在交付中说明影响范围与验证结果：
+   - `app/ai/prompts/agent_prompts.py`
+   - `app/ai/state.py`
+   - `*_graph.py` 中的 `preprocess/postprocess` 节点
+2. 发生工具降级或阻塞时，必须显式给出：`原因`、`替代工具`、`验证结果`。

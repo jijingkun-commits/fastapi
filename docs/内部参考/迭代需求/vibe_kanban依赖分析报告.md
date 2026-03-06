@@ -8,7 +8,7 @@
 
 ## 1. 摘要（Executive Summary）
 
-Vibe Kanban 在当前工作流中承担的核心角色是"看板状态存储与卡片 CRUD"，但其被归因的能力（worktree 隔离、rebase/merge、串行门禁）实际由标准 git 操作和本地脚本完成。VK 的真正独有能力仅限于 attempt 系统和远程看板可视化。引入 VK 的代价是 1256 行专属规则/命令/脚本、约 156 处跨 21 个文件的引用、对外部 MCP 服务及本地 HTTP REST API 的强依赖，以及五方一致性校验（`_active_task.json` / `vk_cards.json` / VK 看板 / `parallel_plan.md` / coder4 状态）带来的脆弱性。VK API 依赖分为两类通道：4 个 MCP 工具调用（集中在 `/jjk-vktodo`）和 3 个 HTTP REST API 调用（`coder4_bootstrap_kernel.py` 直连 `127.0.0.1:3001`）。此外，`scripts/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数），未被现有文档记录。`project_id` 是贯穿 `_active_task.json -> scope_guard -> bootstrap_kernel -> VK API` 的核心参数，移除需要设计替代标识符。推荐分三阶段实施：先将 VK 降级为只读看板，再扩展 `wt-flow.sh` 承接本地任务编排，最终完全移除 VK 依赖。仓内改造工作量估算 8-13 人天，仓外依赖改造额外增加 3-5 人天，总计 11-18 人天。
+Vibe Kanban 在当前工作流中承担的核心角色是"看板状态存储与卡片 CRUD"，但其被归因的能力（worktree 隔离、rebase/merge、串行门禁）实际由标准 git 操作和本地脚本完成。VK 的真正独有能力仅限于 attempt 系统和远程看板可视化。引入 VK 的代价是 1256 行专属规则/命令/脚本、约 156 处跨 21 个文件的引用、对外部 MCP 服务及本地 HTTP REST API 的强依赖，以及五方一致性校验（`_active_task.json` / `vk_cards.json` / VK 看板 / `parallel_plan.md` / coder4 状态）带来的脆弱性。VK API 依赖分为两类通道：4 个 MCP 工具调用（集中在 `/jjk-vktodo`）和 3 个 HTTP REST API 调用（`coder4_bootstrap_kernel.py` 直连 `127.0.0.1:3001`）。此外，`scripts/coder4/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数），未被现有文档记录。`project_id` 是贯穿 `_active_task.json -> scope_guard -> bootstrap_kernel -> VK API` 的核心参数，移除需要设计替代标识符。推荐分三阶段实施：先将 VK 降级为只读看板，再扩展 `wt-flow.sh` 承接本地任务编排，最终完全移除 VK 依赖。仓内改造工作量估算 8-13 人天，仓外依赖改造额外增加 3-5 人天，总计 11-18 人天。
 
 > 定位说明：本报告为决策草案，覆盖仓内 + 仓外依赖的全链路分析。工时估算基于静态代码分析，实际实施前建议对仓外依赖做专项评审以确认改造细节。
 
@@ -51,9 +51,9 @@ flowchart TD
 | `/jjk-vkplan` | `.cursor/commands/jjk-vkplan.md` | 253 | 并行拆解，生成 `vk_cards.json` |
 | `/jjk-vktodo` | `.cursor/commands/jjk-vktodo.md` | 192 | VK 看板批量建卡/推进 |
 | `/jjk-vksync` | `.cursor/commands/jjk-vksync.md` | 84 | 多 worktree G0 基线同步 |
-| `set_active_task.py` | `.cursor/scripts/set_active_task.py` | 141 | 写入 `_active_task.json` |
-| `coder4_scope_guard.py` | `scripts/coder4_scope_guard.py` | 260 | 作用域切换守卫 |
-| `wt-flow.sh` | `scripts/wt-flow.sh` | 220 | worktree 生命周期管理 |
+| `set_active_task.py` | `.cursor/scripts/coder4/set_active_task.py` | 141 | 写入 `_active_task.json` |
+| `coder4_scope_guard.py` | `scripts/coder4/coder4_scope_guard.py` | 260 | 作用域切换守卫 |
+| `wt-flow.sh` | `scripts/coder4/wt-flow.sh` | 220 | worktree 生命周期管理 |
 | VK Execution Guard | `.cursor/skills/vk-coder4-execution-guard/SKILL.md` | 145 | coder4 串行执行防漂移 |
 | VK 运维脚本 | `.cursor/scripts/vk_*.sh` (4 个) | 582 | VK 服务启停/端口/清理 |
 
@@ -84,8 +84,8 @@ VK 在工作流中被赋予的角色远超其实际提供的能力。以下是�
 
 | 被归因给 VK 的能力 | 实际提供者 | 证据 |
 |-------------------|-----------|------|
-| worktree 创建/隔离 | `scripts/wt-flow.sh` (L55-84) | `git worktree add` 标准命令 |
-| rebase/merge 回主分支 | `scripts/wt-flow.sh` (L88-146) | `git rebase` + `git merge --no-ff` |
+| worktree 创建/隔离 | `scripts/coder4/wt-flow.sh` (L55-84) | `git worktree add` 标准命令 |
+| rebase/merge 回主分支 | `scripts/coder4/wt-flow.sh` (L88-146) | `git rebase` + `git merge --no-ff` |
 | 串行门禁（单卡推进） | `_active_task.json` + coder4 逻辑 | `single_active_card=true` 由本地 JSON 控制 |
 | 卡片依赖链校验 | `vk_cards.json` 本地文件 | `hard_depends_on` 字段由本地 JSON 定义 |
 | 证据绑定与台账 | `coder4_task_ledger.jsonl` | 本地 JSONL 文件 |
@@ -103,7 +103,7 @@ VK 在工作流中被赋予的角色远超其实际提供的能力。以下是�
 | VK 专属规则/命令/脚本 | 1256 行 | `.cursor/commands/jjk-vk*.md` + `.cursor/scripts/vk_*.sh` + SKILL.md |
 | 跨文件 VK 引用 | 约 156 处（21 个文件） | 全仓库 `grep` 统计（模式：`vibe_kanban\|jjk-vk\|mcp__vibe_kanban`） |
 | VK MCP 工具调用 | 4 处（仓内直接调用） | `.cursor/commands/jjk-vktodo.md` L89-106 |
-| VK HTTP REST API 调用 | 3 处（`127.0.0.1:3001/api/tasks`） | `scripts/coder4_bootstrap_kernel.py` L196, L382, L396 |
+| VK HTTP REST API 调用 | 3 处（`127.0.0.1:3001/api/tasks`） | `scripts/coder4/coder4_bootstrap_kernel.py` L196, L382, L396 |
 | 五方一致性校验 | 31 条约束 | `/jjk-vkplan` 中的硬拦截规则 |
 | 外部服务依赖 | 1 个 MCP 二进制 | `.mcp.json` 中 `vibe_kanban` 配置 |
 | VK 运维脚本 | 582 行 | `.cursor/scripts/vk_dev.sh` (300行) 等 4 个脚本 |
@@ -128,7 +128,7 @@ coder4 状态文件  ==  VK 看板卡片状态
 - `status`：查看当前会话状态（L175-182）
 - `guard`：检查是否在主分支上（L186-193）
 
-引用来源：`scripts/wt-flow.sh`
+引用来源：`scripts/coder4/wt-flow.sh`
 
 ### 3.2 抛弃 VK 后的替代方案
 
@@ -152,7 +152,7 @@ coder4 状态文件  ==  VK 看板卡片状态
 替代 VK 远程状态存储，使用三个本地文件：
 
 ```
-.omc/state/
+docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/
   task-runner-state.json    -- 当前执行状态（替代 coder4_cron_state.json）
   wt-sessions/              -- 每个 worktree 会话的独立状态
     <slug>.json
@@ -183,7 +183,7 @@ coder4 状态文件  ==  VK 看板卡片状态
 VK 的 attempt 系统记录每次执行尝试。本地替代方案：
 
 ```
-.omc/state/attempts/
+docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/
   <card_id>/
     attempt_001.json    -- { started_at, ended_at, result, evidence }
     attempt_002.json
@@ -220,7 +220,7 @@ flowchart TD
     E -->|"读取"| G["task-runner-state.json"]
     E -->|"读取"| H["vk_cards.json"]
     E -->|"写入"| I["task-ledger.jsonl"]
-    E -->|"写入"| J["attempts/<card_id>/"]
+    E -->|"写入"| J["task-runner-state.json::gate_results/merge_results/<card_id>/"]
 
     style G fill:#9cf,stroke:#333
     style H fill:#9cf,stroke:#333
@@ -309,7 +309,7 @@ flowchart LR
 
 **(b) HTTP REST API 调用（3 个，集中在 `coder4_bootstrap_kernel.py`）**
 
-`scripts/coder4_bootstrap_kernel.py` 不走 MCP 通道，而是通过 `http_json()` 直连本地 VK 服务 `127.0.0.1:3001`：
+`scripts/coder4/coder4_bootstrap_kernel.py` 不走 MCP 通道，而是通过 `http_json()` 直连本地 VK 服务 `127.0.0.1:3001`：
 
 | 序号 | HTTP 方法 | 端点 | 调用位置 | 用途 |
 |------|----------|------|---------|------|
@@ -317,7 +317,7 @@ flowchart LR
 | 2 | POST | `/api/tasks` | L382 (`apply_action` seed) | 创建新卡片 |
 | 3 | PUT | `/api/tasks/<task_id>` | L396 (`apply_action` activate) | 更新卡片状态为 inprogress |
 
-引用来源：`.cursor/commands/jjk-vktodo.md` L89-106（MCP 通道）、`scripts/coder4_bootstrap_kernel.py` L196/L382/L396（HTTP REST 通道）、`.mcp.json` L43-54
+引用来源：`.cursor/commands/jjk-vktodo.md` L89-106（MCP 通道）、`scripts/coder4/coder4_bootstrap_kernel.py` L196/L382/L396（HTTP REST 通道）、`.mcp.json` L43-54
 
 #### 3.4.2 需要修改的文件清单（21 个文件）
 
@@ -329,10 +329,10 @@ flowchart LR
 | `.cursor/commands/jjk-vksync.md` | 简化 | ~40 行 | 移除 VK 同步，保留 worktree 校验 |
 | `.cursor/commands/jjk-plan.md` | 小改 | ~20 行 | 移除 VK project_id 引用 |
 | `.cursor/skills/vk-coder4-execution-guard/SKILL.md` | 重写 | ~80 行 | 从 VK 卡片改为本地状态驱动 |
-| `.cursor/scripts/set_active_task.py` | 中改 | ~30 行 | `--project-id` 为必填参数并写入 `_active_task.json` 真理源，`project_id` 贯穿 `_active_task.json -> scope_guard -> bootstrap_kernel -> VK API` 全链路，移除需设计替代标识符 |
-| `scripts/coder4_scope_guard.py` | 中改 | ~25 行 | 依赖 `project_id` 做作用域门禁（L180-184 读取、L189-190 比对、L117-118 传递给 `set_active_task.py`），移除 VK 语义后需重新定义作用域判定逻辑 |
-| `scripts/coder4_bootstrap_kernel.py` | 中改 | ~30 行 | 移除 `--vk-api-base` 参数及 VK HTTP REST API 调用逻辑（幽灵依赖，463 行文件） |
-| `scripts/wt-flow.sh` | 扩展 | +150 行 | 新增 next/verify/list 子命令 |
+| `.cursor/scripts/coder4/set_active_task.py` | 中改 | ~30 行 | `--project-id` 为必填参数并写入 `_active_task.json` 真理源，`project_id` 贯穿 `_active_task.json -> scope_guard -> bootstrap_kernel -> VK API` 全链路，移除需设计替代标识符 |
+| `scripts/coder4/coder4_scope_guard.py` | 中改 | ~25 行 | 依赖 `project_id` 做作用域门禁（L180-184 读取、L189-190 比对、L117-118 传递给 `set_active_task.py`），移除 VK 语义后需重新定义作用域判定逻辑 |
+| `scripts/coder4/coder4_bootstrap_kernel.py` | 中改 | ~30 行 | 移除 `--vk-api-base` 参数及 VK HTTP REST API 调用逻辑（幽灵依赖，463 行文件） |
+| `scripts/coder4/wt-flow.sh` | 扩展 | +150 行 | 新增 next/verify/list 子命令 |
 | `CLAUDE.md` | 小改 | ~5 行 | 移除 VK 相关说明 |
 | `docs/开发文档/工作流/Coder4自动执行总控手册.md` | 中改 | ~50 行 | 从 VK 看板改为本地状态 |
 | `docs/开发文档/工作流/开发工作流.md` | 小改 | ~10 行 | 更新工作流描述 |
@@ -350,7 +350,7 @@ flowchart LR
 | 文件 | 用途 | 估算行数 |
 |------|------|---------|
 | `scripts/task-runner.sh` 或扩展 `wt-flow.sh` | 本地任务编排引擎（next/verify/list） | 150-200 行 |
-| `.omc/state/task-runner-state.json` | 运行时状态文件（自动生成） | - |
+| `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json` | 运行时状态文件（自动生成） | - |
 | `scripts/vk_sync_push.py`（仅 Phase 1） | 异步推送本地状态到 VK（过渡期） | 80-120 行 |
 | `.cursor/commands/jjk-task.md` | 替代 `/jjk-vktodo` 的本地任务管理命令 | 100-150 行 |
 | `docs/开发文档/工作流/本地任务编排手册.md` | 替代 VK 相关文档 | 100-150 行 |
@@ -516,10 +516,10 @@ flowchart LR
 
 | 文件路径 | 引用章节 |
 |---------|---------|
-| `scripts/wt-flow.sh` | 2.2, 3.1, 3.2 |
-| `.cursor/scripts/set_active_task.py` | 2.2, 3.1, 3.4 |
-| `scripts/coder4_scope_guard.py` | 2.2, 3.1, 3.4 |
-| `scripts/coder4_bootstrap_kernel.py` | 3.4 |
+| `scripts/coder4/wt-flow.sh` | 2.2, 3.1, 3.2 |
+| `.cursor/scripts/coder4/set_active_task.py` | 2.2, 3.1, 3.4 |
+| `scripts/coder4/coder4_scope_guard.py` | 2.2, 3.1, 3.4 |
+| `scripts/coder4/coder4_bootstrap_kernel.py` | 3.4 |
 | `.cursor/scripts/vk_dev.sh` | 3.4 |
 | `.cursor/scripts/vk_setup.sh` | 3.4 |
 | `.cursor/scripts/vk_cleanup.sh` | 3.4 |
@@ -531,7 +531,7 @@ flowchart LR
 |---------|---------|
 | `.mcp.json` | 3.1, 3.4 |
 | `docs/内部参考/任务拆解/2026-02-21_openclaw迁移重建基线/vk_cards.json` | 2.3, 3.1 |
-| `docs/内部参考/任务拆解/_active_task.json` | 2.3, 3.1 |
+| `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json` | 2.3, 3.1 |
 
 ### 文档文件
 
@@ -568,7 +568,7 @@ flowchart LR
 | Q4 | `vk_cards.json` 的格式是否需要版本化管理？当前无 schema 校验。 | Phase 2 | Phase 2 实施时确认 |
 | Q5 | ~~多人协作场景下，本地 JSON 真理源如何处理并发写入冲突？~~ | **已解决** | heartbeat 串行执行，无并发问题，见 7.9 |
 | Q6 | attempt 系统的本地替代方案是否需要支持跨会话查询（如"查看 C01 的所有历史尝试"）？ | Phase 2 | Phase 2 设计时确认 |
-| Q7 | ~~`scripts/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数、通过 HTTP REST 直连 `127.0.0.1:3001`），当前未被任何文档记录。是否需要在 Phase 1 即处理？~~ | **已解决** | Phase 1 新增 `--local-mode` 时一并处理，见 7.4 |
+| Q7 | ~~`scripts/coder4/coder4_bootstrap_kernel.py`（463 行）存在对 VK 的幽灵依赖（读取 `vk_cards.json`、接受 `--vk-api-base` 参数、通过 HTTP REST 直连 `127.0.0.1:3001`），当前未被任何文档记录。是否需要在 Phase 1 即处理？~~ | **已解决** | Phase 1 新增 `--local-mode` 时一并处理，见 7.4 |
 | Q8 | ~~历史上 coder4 是否出现过因 VK MCP 不可用导致的连续超时？如有，需补充故障频次数据以量化 VK 依赖的实际影响。~~ | **不再需要** | VK 从执行链路移除，见 7.9 |
 
 ---
@@ -612,9 +612,9 @@ OpenClaw 的 heartbeat 机制通过 `~/.openclaw/workspace-dev/HEARTBEAT.md` 文
 # coder4 Heartbeat 任务清单
 
 ## 当前任务链
-- active_task: /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json
-- task_runner_state: .omc/state/task-runner-state.json
-- ledger: .omc/state/task-ledger.jsonl
+- active_task: docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
+- task_runner_state: docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json
+- ledger: docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl
 
 ## 每轮执行协议
 1. 读取 task-runner-state.json，获取 current_card + card_status_map
@@ -668,7 +668,7 @@ flowchart TD
         F2["vk_cards.json"]
         F3["task-runner-state.json"]
         F4["task-ledger.jsonl"]
-        F5["attempts/<card_id>/"]
+        F5["task-runner-state.json::gate_results/merge_results/<card_id>/"]
     end
 
     subgraph "本地执行层"
@@ -733,7 +733,7 @@ board_tasks = list_tasks(api_base, project_id)
 
 # 改造后
 card_status_map = load_local_card_status(task_runner_state_path)
-# task_runner_state_path = .omc/state/task-runner-state.json
+# task_runner_state_path = docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json
 ```
 
 这是 **唯一需要改动的 VK API 读取点**。`seed` 和 `activate` 的写入操作改为写本地 JSON + 异步推送 VK。
@@ -860,8 +860,8 @@ async def push_card_status(card_id: str, status: str, vk_api_base: str) -> dict:
 
 | 文件 | 原方案（第 4 章） | 新方案（heartbeat） |
 |------|-----------------|-------------------|
-| `scripts/coder4_bootstrap_kernel.py` | 移除 `--vk-api-base` 参数 | 新增 `--local-mode`，`build_kernel_context()` 改读本地 JSON |
-| `scripts/wt-flow.sh` | 扩展 +150 行（next/verify/list） | 保持扩展，`next` 逻辑由 heartbeat 驱动 |
+| `scripts/coder4/coder4_bootstrap_kernel.py` | 移除 `--vk-api-base` 参数 | 新增 `--local-mode`，`build_kernel_context()` 改读本地 JSON |
+| `scripts/coder4/wt-flow.sh` | 扩展 +150 行（next/verify/list） | 保持扩展，`next` 逻辑由 heartbeat 驱动 |
 | `~/.openclaw-dev/cron/jobs.json` | 清理 VK 参数 | **coder4 job 从 `kind: cron` 改为 `kind: heartbeat`**，payload 精简 |
 | `~/.openclaw/workspace-dev/HEARTBEAT.md` | 不存在 | **新建**：coder4 heartbeat 任务清单 |
 | `~/.openclaw/workspace-dev/WORKFLOW_AUTO.md` | 重写 VK 规则 | 大幅精简：移除 VK 规则，保留 LLM 行为约束 |
@@ -873,7 +873,7 @@ async def push_card_status(card_id: str, status: str, vk_api_base: str) -> dict:
 |------|------|---------|
 | `~/.openclaw/workspace-dev/HEARTBEAT.md` | coder4 heartbeat 任务清单 | 30-50 |
 | `scripts/vk_readonly_push.py` | VK 只读推送模块 | 60-80 |
-| `.omc/state/task-runner-state.json` | 运行时状态文件（自动生成） | - |
+| `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json` | 运行时状态文件（自动生成） | - |
 | `.cursor/commands/jjk-task.md` | 替代 `/jjk-vktodo` 的本地任务管理命令 | 100-150 |
 | `docs/开发文档/工作流/本地任务编排手册.md` | 替代 VK 相关文档 | 100-150 |
 
@@ -936,7 +936,7 @@ Phase 3: VK 依赖清除 + 收尾（2-3 天）
 | Q3 | 长期是否需要替代 VK 的可视化？ | **已解决** | Telegram 双向交互 + `wt-flow.sh list` 命令行满足日常需求；若需 Web UI 可后续引入工作流引擎（可选） |
 | Q4 | vk_cards.json 是否需要 schema 校验？ | **待确认** | 建议在 `load_context` 模块中加入 JSON Schema 校验 |
 | Q5 | 本地 JSON 并发写入冲突？ | **已解决** | heartbeat 串行执行，同一时刻只有一个 agent turn 在运行，无并发问题 |
-| Q6 | attempt 系统是否需要跨会话查询？ | **待确认** | 本地 `attempts/<card_id>/` 目录支持文件级查询；Telegram 可查询历史 |
+| Q6 | attempt 系统是否需要跨会话查询？ | **待确认** | 本地 `task-runner-state.json::gate_results/merge_results/<card_id>/` 目录支持文件级查询；Telegram 可查询历史 |
 | Q7 | bootstrap_kernel 幽灵依赖何时处理？ | **已解决** | Phase 1 新增 `--local-mode` 时一并处理 |
 | Q8 | VK MCP 故障频次数据？ | **不再需要** | VK 从执行链路移除，故障频次不再影响自动化 |
 | Q9 | OpenClaw heartbeat 的具体配置方式？ | **新增，待确认** | 需确认 `jobs.json` 中 heartbeat kind 的配置语法，以及 `HEARTBEAT.md` 的读取时机 |

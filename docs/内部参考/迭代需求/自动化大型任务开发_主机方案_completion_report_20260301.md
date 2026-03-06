@@ -86,8 +86,8 @@
 
 | 文件 | 当前值 |
 |------|--------|
-| `docs/内部参考/任务拆解/_active_task.json.task_key` | `PP-20260228-INTENT-DECOMPOSITION-DB` |
-| `docs/内部参考/任务拆解/_active_task.json.task_split_dir` | `2026-02-28_意图目标分解治理` |
+| `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json.task_key` | `PP-20260228-INTENT-DECOMPOSITION-DB` |
+| `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json.task_split_dir` | `2026-02-28_意图目标分解治理` |
 
 ---
 

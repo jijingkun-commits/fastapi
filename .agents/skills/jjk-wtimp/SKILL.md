@@ -14,49 +14,18 @@ description: "Use when you need `jjk-wtimp` in this repository. Source intent: W
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `using-git-worktrees`：提供 worktree 使用范式与隔离边界。
-2. `$jjk-imp` / `$jjk-imp-ws`：在 worktree 内执行实现任务。
-3. `$jjk-git-commit`：负责可追溯提交规范。
-4. `verification-before-completion`：提供证据优先的完成门禁。
-5. `team`（OMX）：复杂任务并行执行与结果汇总。
-6. `$jjk-wtimp`：负责上下文校验、worktree 生命周期编排、合并回主线与交接输出。
-
-约束：
-
-1. 禁止在 `$jjk-wtimp` 复制上游 skill 正文；仅保留调用契约与本地增强。
-2. 禁止把 `$jjk-team-wtimp` 作为主入口，统一由 `$jjk-wtimp` 按规模自动升级 Team。
-3. 禁止在 worktree 流程中直接修改主工作区代码。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`$jjk-wtimp`
-2. Codex：`$jjk-wtimp`
-
-> 说明：Codex 推荐显式调用 `$jjk-wtimp`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `$jjk-wtimp` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_wtimp_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_wtimp_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_wtimp_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 `GLOBAL_TEMPLATE_MISSING` 属于全局预检失败标记，可与命令级 `FAIL_FAST` 标记并存。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 需要隔离实现并避免污染主工作区 | `$jjk-wtimp` ✅ |
-| 已在目标 worktree 内，仅需继续编码 | `$jjk-imp` 或 `$jjk-imp-ws` |
-| 只做提交规范化 | `$jjk-git-commit` |
-| 最终验收结论 | `$jjk-verify` |
-
----
 
 ## 输入前置（强制）
 
@@ -107,7 +76,7 @@ git worktree list
 1. **有 Team 能力时**：在同一 worktree 根目录下分任务并行执行，Leader 汇总统一交付。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，轻量）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下必须启用抽检互审：至少抽检 `20%` 工作项（向上取整，最少 `1` 项）。
 2. 每个抽检项必须包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
@@ -140,7 +109,7 @@ git worktree list
 
 ### 5) 提交、合并与清理
 
-1. 在 worktree 内按 `$jjk-git-commit` 契约完成提交。
+1. 在 worktree 内按 `implementation_plan.task_to_pr_mapping` 与 `execution_contract.commit_policy` 完成提交。
 2. 执行 `bash scripts/wt-flow.sh merge`（可选 `--no-cleanup`）。
 3. 若冲突或脚本中断，保留 worktree 并输出下一步处理建议。
 
@@ -162,7 +131,7 @@ git worktree list
 
 ## 输出模板（推荐）
 
-见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_wtimp_templates.md`（`输出模板` 段）。
+见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_wtimp_templates.md`（`输出模板` 段）。
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_wtimp_templates.md`。
 
 ## 禁止项（强制）
@@ -180,7 +149,7 @@ git worktree list
 ## 使用示例
 
 ```text
-$jjk-wtimp 新增导出 API 并完成隔离交付
+$jjk-wtimp 导出 API 并完成隔离交付
 ```
 
 ```text

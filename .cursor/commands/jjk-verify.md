@@ -11,48 +11,17 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `/jjk-review`：提供结构化审查发现与阻断结论。
-2. `/jjk-test`：提供更完整的测试执行能力（本命令默认跑最小必要集）。
-3. `verification-before-completion`：提供“证据优先”方法论。
-4. `security-review`：高风险变更时补充安全验证深度。
-5. `team`（OMX）：大范围验收并行执行与结果汇总。
-6. `/jjk-verify`：负责输入映射校验、最小必要验证编排、UAT判定与最终验收报告。
-
-约束：
-
-1. 禁止在 `/jjk-verify` 复制上游 skill 正文；只保留调用契约与本地增强。
-2. 禁止“无证据给结论”；证据不足必须显式标记并降级判定。
-3. `/jjk-team-verify` 不再作为主入口，统一由 `/jjk-verify` 按规模自动升级 Team。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`/jjk-verify`
-2. Codex：`/prompts:jjk-verify`
-
-> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `/jjk-verify` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_verify_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 实现与评审完成，准备一次性给出验收结论 | `/jjk-verify` ✅ |
-| 只做代码审查结论 | `/jjk-review` |
-| 需要完整深度测试与测试资产产出 | `/jjk-test` |
-| 发现阻断问题需回修 | `/jjk-debug` 或 `/jjk-imp(-ws)` |
-
----
 
 ## 输入前置（强制）
 
@@ -75,7 +44,7 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 2. 自动证据充分时，直接给最终结论；不得强制用户逐项手工确认。
 3. 仅在自动证据不足时进入交互 UAT，问题数限制 1~3 条。
 4. 任一关键命令失败，必须在报告记录：`命令原文 + 退出码 + 错误摘要 + 处理建议`。
-5. 必须区分“新增问题”与“历史问题”。
+5. 必须区分“本轮问题”与“历史问题”。
 
 ---
 
@@ -103,13 +72,23 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 1. **有 Team 能力时**：分维度并行执行，Leader 汇总统一验收报告。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，强制）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下，每个成员提交阶段结果后，必须由另一名成员执行反方审查，至少包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
 2. `2` 人任务执行双向互审；`3+` 人任务执行环形互审（A 审 B，B 审 C，...，最后一人审 A）。
 3. 未通过交叉审查的子任务不得标记完成；出现审查冲突时，必须创建复核子任务并附证据。
 4. 阶段汇报至少包含：`结论`、`证据`、`剩余风险`。
 5. 仅在 `pending=0`、`in_progress=0` 且交叉审查冲突清零后，才允许进入收尾或关停。
+
+### 0.7) 分支端口上下文校验（Web/E2E/UAT 涉及时强制）
+
+1. 先执行 `eval "$(bash scripts/vk_ports.sh --export)"`，以当前分支/工作树自动计算 `VK_BACKEND_PORT`、`VK_FRONTEND_PORT`、`VK_BACKEND_BASE_URL`、`VK_FRONTEND_BASE_URL`。
+2. 禁止在 Web/E2E/UAT 场景硬编码 `3000/8000`；必须使用上述变量或 `.env.vk.local` 同源值。
+3. 运行态最小校验：  
+   - `lsof -nP -iTCP:${VK_BACKEND_PORT} -sTCP:LISTEN`  
+   - `lsof -nP -iTCP:${VK_FRONTEND_PORT} -sTCP:LISTEN`  
+   - `curl -sf "${VK_BACKEND_BASE_URL}/health"`（若项目健康路由存在）  
+4. 若浏览器访问目标与 `VK_FRONTEND_BASE_URL` 不一致，`FAIL_FAST` 输出 `VERIFY_PORT_CONTEXT_MISMATCH`。
 
 ### 1) 变更分析与验证策略
 
@@ -133,6 +112,7 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 1. 默认自动判定（命令断言 + 回包字段 + 退出码）。
 2. 证据不足时进入交互确认（1~3 项），并给出清晰通过标准。
 3. UAT `FAIL` 时，输出回退修复建议。
+4. 涉及浏览器路径时，报告中必须回填：`VK_GIT_BRANCH`、`VK_BACKEND_BASE_URL`、`VK_FRONTEND_BASE_URL`、实际访问 URL 与一致性结论。
 
 ### 5) 报告输出与结论
 
@@ -150,14 +130,14 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 4. UAT 结论
 5. 自动证据与降级记录
 6. 文档同步状态
-7. 下一步建议命令（`/jjk-create-pr`、`/jjk-debug`、`/jjk-imp(-ws)`）
+7. 下一步建议命令（`合并/发布`、`/jjk-debug`、`/jjk-imp(-ws)`）
 
 ---
 
 ## 输出模板（推荐）
 
-- 极简报告模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`极简报告模板` 段）
-- 标准报告模板：`/Users/jijingkun/.codex/engineering/templates/jjk_verify_templates.md`（`标准报告模板` 段）
+- 极简报告模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_verify_templates.md`（`极简报告模板` 段）
+- 标准报告模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_verify_templates.md`（`标准报告模板` 段）
 - 项目覆盖：`docs/内部参考/迭代需求/_templates/jjk_verify_templates.md`
 
 ## 禁止项（强制）
@@ -165,11 +145,13 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 1. 禁止只输出“进行中/待确认”而不输出验收报告。
 2. 禁止无证据直接给 `PASS`。
 3. 禁止忽略阻断项继续推进到交付阶段。
-4. 禁止把历史问题全部算作本次新增问题。
+4. 禁止把历史问题全部算作本次问题。
 
 ## 推荐链路
 
-`/jjk-review -> /jjk-verify -> /jjk-create-pr`
+`主链: /jjk-review -> /jjk-verify -> 合并/发布`
+
+`可选分支: 若需远端 PR 交付，可在 /jjk-review 前先执行 /jjk-create-pr`
 
 ## 使用示例
 

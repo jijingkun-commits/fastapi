@@ -20,7 +20,7 @@
 ### 1.1 功能机制（必填）
 
 - 触发条件: 前置依赖 `G01` 完成
-- 输入: `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/attempts/<card_id>/merge_result.json` + `master` 基线
+- 输入: `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/task-runner-state.json.merge_results.<card_id>` + `master` 基线
 - 输出: `IG01` 门禁验收结果
 - 状态流转（含异常分支）: `Backlog -> Doing -> Review -> Gate -> Done`，失败则标记 blocked
 - 与上/下游 WS 的契约关系: 仅在 `G01` 通过后执行；失败时阻断最终完成
@@ -28,8 +28,8 @@
 ### 1.2 代码锚点与样例（必填）
 
 - 代码锚点（函数/类级）:
-  - `scripts/check_integration_gate.py::run_check`
-  - `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/attempts/<card_id>/merge_result.json`
+  - `scripts/coder4/check_integration_gate.py::run_check`
+  - `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/task-runner-state.json.merge_results.<card_id>`
   - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
 
@@ -47,7 +47,7 @@ else:
 ## 2. 文件边界
 
 ### 可修改（白名单）
-- `scripts/check_integration_gate.py`
+- `scripts/coder4/check_integration_gate.py`
 - `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md`
 - `docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/vk_cards.json`
 - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
@@ -64,8 +64,8 @@ else:
 ## 4. 实施步骤
 
 1. 验证前置 `G01` 已通过。
-2. 执行 `python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master`。
-3. 记录校验结果；失败时回溯缺失 `merge_result.json` 的实现卡。
+2. 执行 `python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master`。
+3. 记录校验结果；失败时回溯缺失 `merge_results.<card_id>` 的实现卡。
 
 ### 4.1 串行门禁（serial 模式必填）
 
@@ -76,7 +76,7 @@ else:
 ## 5. 测试与验收
 
 - 最小测试集:
-- `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master`
+- `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master`
 - 验收标准:
 - 所有实现卡 merge 证据完整且 `merged=true`
 - 所有实现卡 `merge_commit` 对 `master` 可见
@@ -89,7 +89,7 @@ else:
 
 ## 6. 风险与回滚
 
-- 主要风险: `merge_result.json` 漏写、直接在 `master` 提交绕过每卡 merge 证据
+- 主要风险: `merge_results.<card_id>` 漏写、直接在 `master` 提交绕过每卡 merge 证据
 - 回滚点:
 - 保持最终状态在 `G01 done / IG01 blocked`
 - 回到缺失证据的实现卡补齐 merge 账本
@@ -100,7 +100,7 @@ else:
 - 实际修改文件列表: 见白名单
 - 是否修改了白名单外文件（是/否）: 否
 - 测试命令与结果: 见 acceptance_checks
-- 已知风险点: 实现卡历史遗留未落 merge_result 时会阻断
+- 已知风险点: 实现卡历史遗留未落 merge_results 时会阻断
 - 回滚建议: 先补 merge 账本，再重跑 IG01
 - 证据绑定检查（target_task_id == evidence_task_id）: 必填
 
@@ -121,7 +121,7 @@ card_export:
   soft_depends_on: []
   depends_on: [G01]
   file_whitelist:
-    - scripts/check_integration_gate.py
+    - scripts/coder4/check_integration_gate.py
     - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md
     - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/vk_cards.json
     - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
@@ -132,19 +132,19 @@ card_export:
     - 校验 merge_commit 对 master 基线可见
     - 失败则阻断最终完成态
   code_anchor_refs:
-    - scripts/check_integration_gate.py::run_check
-    - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/attempts/<card_id>/merge_result.json
+    - scripts/coder4/check_integration_gate.py::run_check
+    - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/task-runner-state.json.merge_results.<card_id>
     - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
   example_refs:
     - docs/开发文档/技巧与速查/AI协作速查表.md#串行主干状态流最小路径
   acceptance_checks:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master
   rollback_anchors:
     - 保持最终状态在 G01 done / IG01 blocked
     - 回到缺失证据的实现卡补齐 merge 账本
   evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9
   check_cmd:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state" --baseline master
   handoff_artifacts:
     - docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/sse_events_v1.json
   done_gate:

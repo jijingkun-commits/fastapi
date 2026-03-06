@@ -11,48 +11,17 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `requesting-code-review`：提供“如何发起高质量评审”的方法框架。
-2. `receiving-code-review`：当已有反馈时，用于校验反馈合理性并生成处理策略。
-3. `verification-before-completion`：提供证据优先原则，避免无证据结论。
-4. `security-review`：高风险改动时用于补充安全审计深度。
-5. `team`（OMX）：大范围审查并行执行与结论汇总。
-6. `/jjk-review`：负责输入映射校验、审查清单落地、发现分级、阻断判定与报告回填。
-
-约束：
-
-1. 禁止在 `/jjk-review` 复制上游 skill 正文；仅保留调用契约与本地增强。
-2. `/jjk-review` 不负责实现改码；发现问题后回推 `/jjk-debug` 或 `/jjk-imp(-ws)`。
-3. `/jjk-team-review` 不再作为主入口，统一由 `/jjk-review` 按规模自动升级 Team。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`/jjk-review`
-2. Codex：`/prompts:jjk-review`
-
-> 说明：Codex 的自定义命令入口是 `/prompts:<name>`，不是 `/<name>`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `/jjk-review` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_review_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_review_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_review_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 已完成实现，准备进入评审 | `/jjk-review` ✅ |
-| 需要“一次性验收结论” | `/jjk-verify` |
-| 需要修复评审阻断项 | `/jjk-debug` 或 `/jjk-imp(-ws)` |
-| 需要完整测试回归报告 | `/jjk-test` |
-
----
 
 ## 输入前置（强制）
 
@@ -93,7 +62,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 1. **有 Team 能力时**：分维度并行审查，Leader 汇总统一结论。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，强制）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下，每个成员提交阶段结果后，必须由另一名成员执行反方审查，至少包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
 2. `2` 人任务执行双向互审；`3+` 人任务执行环形互审（A 审 B，B 审 C，...，最后一人审 A）。
@@ -151,7 +120,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 
 ## 输出模板（推荐）
 
-见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_review_templates.md`（`输出模板` 段）。
+见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_review_templates.md`（`输出模板` 段）。
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_review_templates.md`。
 
 ## 禁止项（强制）
@@ -164,7 +133,9 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 
 ## 推荐链路
 
-`/jjk-create-pr -> /jjk-review -> /jjk-verify`
+`主链: /jjk-imp | /jjk-imp-ws | /jjk-wtimp -> /jjk-review -> /jjk-verify`
+
+`可选分支: 需要远端 PR 交付时，先执行 /jjk-create-pr 再进入 /jjk-review`
 
 ## 使用示例
 

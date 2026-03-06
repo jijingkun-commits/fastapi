@@ -623,10 +623,10 @@ implementation_readiness:
 
 - `mcp__vibe_kanban__list_issues` 在本时段持续返回 `502 Bad Gateway`，按 `/jjk-vktodo` 兜底策略切换本地 VK API。
 - 兜底执行命令：
-  - `python3 scripts/coder4_vk_sync.py --active-task /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json --card-id C01 --status done`
+  - `python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --card-id C01 --status done`
 - 执行结果：
   - `C01` 新建并置为 `done`，task_id=`6adb4f1d-47a4-4ded-914b-f83553e2d3ef`
   - `PP-20260228-INTENT-DECOMPOSITION-DB` 全量 `11` 张卡片状态对账完成，统计为 `done=11`
 - 作用域绑定校验：
-  - `python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task /Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json`
+  - `python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json`
   - 返回 `{"ok": true, "action": "already_active"}`，三元组一致：`task_split_dir/project_id/task_key`

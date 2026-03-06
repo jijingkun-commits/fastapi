@@ -14,35 +14,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `$jjk-vkplan`：负责执行契约生成与静态校验（依赖、Gate、PR 映射、active_task 对齐）。
-2. `$jjk-vktodo`：负责 create-only 幂等建卡。
-3. `$jjk-cardrun`：负责执行态推进（选卡、scope_guard、verify、串行循环、状态收口）。
-4. `team`（OMX）：仅在大规模建卡时并行分片执行。
-
-约束：
-
-1. 禁止在 `$jjk-vktodo` 做状态推进（move/review/done）。
-2. 禁止在 `$jjk-vktodo` 执行作用域绑定或自动执行调度。
-3. 禁止在 `$jjk-vktodo` 重写 `$jjk-vkplan` 既有契约语义。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`$jjk-vktodo`
-2. Codex：`$jjk-vktodo`
-
-> 说明：Codex 推荐显式调用 `$jjk-vktodo`。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 已完成 `$jjk-vkplan`，需要把 `vk_cards.json` 落到看板 | `$jjk-vktodo` ✅ |
-| 需要推进卡片状态（Doing/Review/Gate/Done） | 使用 `$jjk-cardrun` |
-| 需要作用域绑定（scope request） | 使用 `$jjk-cardrun` |
-
----
-
 ## 输入前置（强制）
 
 1. `task_split_dir` 必须可解析且目录存在：
@@ -53,7 +25,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
    - `cards[]`
 3. `project_id` 必须可确定：
    - 优先显式参数 `project`；
-   - 否则读取 `docs/内部参考/任务拆解/_active_task.json`。
+   - 否则读取 `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`。
 4. 若无法解析 `project_id`，`FAIL_FAST` 输出 `VKTODO_MISSING_PROJECT_ID`。
 5. 若 `vk_cards.json` 结构非法，`FAIL_FAST` 输出 `VKTODO_INPUT_INVALID`。
 6. 若调用参数包含 `action!=create`，`FAIL_FAST` 输出 `VKTODO_ACTION_NOT_ALLOWED`。
@@ -67,7 +39,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 - 第 1 个参数：任务拆解目录（目录名/相对路径/绝对路径）
 - 第 2 个参数（可选）：`create`（仅允许该值）
 
-### 2) 键值参数（兼容）
+### 2) 键值参数
 
 1. `task_split_dir`：任务拆解目录
 2. `project`：项目名或项目 ID（可选）
@@ -81,7 +53,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 ### 0) 上下文解析
 
 1. 解析 `task_split_dir` 与 `project_id`。
-2. 读取 `vk_cards.json` 与 `_active_task.json`，校验 `task_key/task_split_dir` 一致性。
+2. 读取 `vk_cards.json` 与任务级 `_active_task.json`，校验 `task_key/task_split_dir` 一致性。
 3. 若冲突，`FAIL_FAST` 输出 `VKTODO_ACTIVE_TASK_MISMATCH`。
 
 ### 1) 组装建卡清单

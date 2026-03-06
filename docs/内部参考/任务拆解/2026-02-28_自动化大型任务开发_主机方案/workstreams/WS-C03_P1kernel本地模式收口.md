@@ -27,9 +27,9 @@
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_bootstrap_kernel.py::build_kernel_context
-  - scripts/coder4_bootstrap_kernel.py::apply_action
-  - scripts/coder4_bootstrap_kernel.py::main
+  - scripts/coder4/coder4_bootstrap_kernel.py::build_kernel_context
+  - scripts/coder4/coder4_bootstrap_kernel.py::apply_action
+  - scripts/coder4/coder4_bootstrap_kernel.py::main
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口
@@ -37,7 +37,7 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/coder4_bootstrap_kernel.py
+  - scripts/coder4/coder4_bootstrap_kernel.py
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -51,7 +51,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
 
 ## 5. 风险与回滚
 
@@ -74,17 +74,17 @@ card_export:
   hard_depends_on: ['C02']
   depends_on: ['C02']
   file_whitelist:
-  - scripts/coder4_bootstrap_kernel.py
+  - scripts/coder4/coder4_bootstrap_kernel.py
   mechanism_summary:
   - load_context 在 local-mode 下只读取本地状态
   - seed/activate 写本地状态，不再依赖 VK API 写入
   - 卡片完成后 trigger_next_round 立即唤醒下一轮
   code_anchor_refs:
-  - scripts/coder4_bootstrap_kernel.py::build_kernel_context
-  - scripts/coder4_bootstrap_kernel.py::apply_action
-  - scripts/coder4_bootstrap_kernel.py::main
+  - scripts/coder4/coder4_bootstrap_kernel.py::build_kernel_context
+  - scripts/coder4/coder4_bootstrap_kernel.py::apply_action
+  - scripts/coder4/coder4_bootstrap_kernel.py::main
   acceptance_checks:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
   rollback_anchors:
   - DISABLE_AUTO_WAKE
   evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口

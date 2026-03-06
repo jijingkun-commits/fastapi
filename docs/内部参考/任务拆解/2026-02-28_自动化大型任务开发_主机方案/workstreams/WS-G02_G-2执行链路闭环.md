@@ -25,8 +25,8 @@
 
 ### 1.2 代码锚点
 
-  - scripts/coder4_bootstrap_kernel.py::decide_action
-  - scripts/wt-flow.sh::main
+  - scripts/coder4/coder4_bootstrap_kernel.py::decide_action
+  - scripts/coder4/wt-flow.sh::main
 
 - 来源证据:
   - docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿
@@ -34,8 +34,8 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - scripts/coder4_bootstrap_kernel.py
-  - scripts/wt-flow.sh
+  - scripts/coder4/coder4_bootstrap_kernel.py
+  - scripts/coder4/wt-flow.sh
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -49,7 +49,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
 
 ## 5. 风险与回滚
 
@@ -72,16 +72,16 @@ card_export:
   hard_depends_on: ['G01']
   depends_on: ['G01']
   file_whitelist:
-  - scripts/coder4_bootstrap_kernel.py
-  - scripts/wt-flow.sh
+  - scripts/coder4/coder4_bootstrap_kernel.py
+  - scripts/coder4/wt-flow.sh
   mechanism_summary:
   - 验证 seed->activate->dispatch->done 全链路闭环
   - 核验单活串行策略与 done_gate 收口一致
   code_anchor_refs:
-  - scripts/coder4_bootstrap_kernel.py::decide_action
-  - scripts/wt-flow.sh::main
+  - scripts/coder4/coder4_bootstrap_kernel.py::decide_action
+  - scripts/coder4/wt-flow.sh::main
   acceptance_checks:
-  - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+  - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/2026-02-28_自动化大型任务开发_主机方案/_active_task.json
   rollback_anchors:
   - FREEZE_ON_CHAIN_FAIL
   evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿

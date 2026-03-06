@@ -1,0 +1,55 @@
+{
+  "attempt_id": "attempt_002",
+  "task_key": "PP-20260304-USER-MEMORY-LLM-ASYNC",
+  "card_id": "SYSTEM",
+  "started_at": "2026-03-06T01:43:29.004308+00:00",
+  "ended_at": "2026-03-06T01:43:29.019777+00:00",
+  "result": "preflight_blocked",
+  "action": "preflight_blocked",
+  "evidence": {
+    "target_status": null,
+    "applied": {
+      "performed": false
+    },
+    "auto_wake": {
+      "attempted": false,
+      "ok": false,
+      "disabled": false
+    },
+    "blocked_details": [
+      {
+        "reason": "main_repo_dirty",
+        "repo_root": "/Users/jijingkun/bojxAI/fastapi",
+        "dirty_preview": [
+          " D .agents/skills/jjk-api-docs/SKILL.md",
+          " M .agents/skills/jjk-cardrun/SKILL.md",
+          " M .agents/skills/jjk-clarify/SKILL.md",
+          " M .agents/skills/jjk-create-pr/SKILL.md",
+          " M .agents/skills/jjk-debug/SKILL.md",
+          " D .agents/skills/jjk-deslop/SKILL.md",
+          " D .agents/skills/jjk-doc-check/SKILL.md",
+          " D .agents/skills/jjk-feature/SKILL.md"
+        ],
+        "dirty_ignored_preview": [
+          " M docs/plans/2026-03-04-chat-multi-session-concurrency-reanalysis-design.md"
+        ],
+        "dirty_policy_version": "v1_docs_templates",
+        "dirty_whitelist": [
+          "docs/",
+          ".cursor/commands/",
+          ".agents/skills/",
+          ".claude/commands/"
+        ]
+      }
+    ],
+    "idempotency_key": "f0c6dc3ed22d06c690fde93707ab2dfebb9a2919afa9fd320d6115a6576bb113"
+  },
+  "worktree_path": "/Users/jijingkun/bojxAI/fastapi",
+  "commit_sha": null,
+  "merge_sha": null,
+  "subagent_id": null,
+  "ws_file": null,
+  "execution_mode": "serial",
+  "trigger": "hooks",
+  "duration_seconds": 0
+}

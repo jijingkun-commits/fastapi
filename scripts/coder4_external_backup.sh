@@ -13,7 +13,6 @@ FILES=(
   "~/.openclaw-dev/cron/jobs.json"
   "~/.openclaw/workspace-dev/WORKFLOW_AUTO.md"
   "~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md"
-  "~/.openclaw/workspace-dev/state/coder4_scope_request.json"
   "~/.openclaw/workspace-dev/state/coder4_cron_state.json"
 )
 
@@ -32,6 +31,19 @@ for raw in "${FILES[@]}"; do
     echo -e "missing\t${src}\t-" >> "${MANIFEST}"
   fi
 done
+
+while IFS= read -r src; do
+  [[ -n "${src}" ]] || continue
+  rel="${src#/}"
+  dst="${BACKUP_DIR}/files/${rel}"
+  mkdir -p "$(dirname "${dst}")"
+  cp -p "${src}" "${dst}"
+  echo -e "present\t${src}\t${dst}" >> "${MANIFEST}"
+done < <(
+  find "${REPO_ROOT}/docs/内部参考/任务拆解" \
+    -mindepth 3 -maxdepth 3 -type f -name "coder4_scope_request.json" 2>/dev/null \
+    | LC_ALL=C sort
+)
 
 > "${CHECKSUMS}"
 while IFS=$'\t' read -r status _src dst; do

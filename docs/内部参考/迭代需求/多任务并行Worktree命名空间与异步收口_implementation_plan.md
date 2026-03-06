@@ -13,11 +13,11 @@
 3. `.cursor/commands/jjk-cardrun.md`
 4. `.cursor/commands/jjk-vkplan.md`
 5. `.cursor/commands/jjk-vktodo.md`
-6. `scripts/wt-flow.sh`
-7. `scripts/coder4_bootstrap_kernel.py`
-8. `scripts/coder4_vk_sync.py`
-9. `scripts/check_integration_gate.py`
-10. `scripts/coder4_scope_guard.py`
+6. `scripts/coder4/wt-flow.sh`
+7. `scripts/coder4/coder4_bootstrap_kernel.py`
+8. `scripts/coder4/coder4_vk_sync.py`
+9. `scripts/coder4/check_integration_gate.py`
+10. `scripts/coder4/coder4_scope_guard.py`
 11. `app/services/chat_service.py`
 
 ---
@@ -74,18 +74,18 @@
 
 ### 1.1 模块边界
 
-1. `scripts/wt-flow.sh`：只负责 worktree 生命周期与卡片状态推进，不承载业务语义。
+1. `scripts/coder4/wt-flow.sh`：只负责 worktree 生命周期与卡片状态推进，不承载业务语义。
 2. `coder4_*` 脚本：只消费本地状态真理源，不自行推导跨任务全局状态。
 3. `chat_service`：主链路优先输出用户可见响应，后台收口动作异步执行。
 4. `jjk-*` 命令文档：只声明契约，不承载脚本实现细节。
 
 ### 1.2 状态契约
 
-1. active 索引：`docs/内部参考/任务拆解/_active_task.json`
-2. 任务级状态根：`.omc/state/<task_key>/`
-3. 卡片状态：`.omc/state/<task_key>/task-runner-state.json`
-4. 会话状态：`.omc/state/<task_key>/wt-flow-state.json`
-5. 证据目录：`.omc/state/<task_key>/attempts/<card_id>/`
+1. active 索引：`docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
+2. 任务级状态根：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/`
+3. 卡片状态：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`
+4. 会话状态：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json`
+5. 证据目录：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/<card_id>/`
 
 ### 1.3 路由闭环
 
@@ -132,17 +132,17 @@ F --> G[wt-flow / bootstrap / vk_sync / IG]
 
 | feature_id | card_id | 目标与边界 | 代码锚点 | 验证命令 | 回滚锚点 |
 |---|---|---|---|---|---|
-| P1-01 | C01 | 分支/worktree 命名空间隔离，兼容 legacy | `scripts/wt-flow.sh::cmd_create` `::_resolve_worktree_path_for_card` | `bash scripts/wt-flow.sh next --state-dir .omc/state`（双任务模拟） | 保留 legacy 分支解析分支 |
-| P1-02 | C01 | 会话状态与卡片状态按 task_key 隔离 | `scripts/wt-flow.sh::_task_state_file` `::_read_state/_save_state` | `bash scripts/wt-flow.sh list --state-dir .omc/state` | 回退到全局 state 文件路径 |
-| P1-03 | C02 | attempts 证据目录按 task_key 隔离 | `scripts/wt-flow.sh::_mark_card_done_after_merge` `cmd_verify` | `python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master` | 回退旧 attempts 路径并保留兼容读取 |
-| P2-01 | C03 | 读侧脚本默认路径统一到 task_key 状态根 | `scripts/coder4_bootstrap_kernel.py` `scripts/coder4_vk_sync.py` `scripts/check_integration_gate.py` | `python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json` | 增加 fallback 到 legacy 路径 |
-| P2-02 | C03 | scope_guard already_active 补齐 task_key 判定 | `scripts/coder4_scope_guard.py` | `python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json` | 回退到 split+project 判定 |
+| P1-01 | C01 | 分支/worktree 命名空间隔离，兼容 legacy | `scripts/coder4/wt-flow.sh::cmd_create` `::_resolve_worktree_path_for_card` | `bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>`（双任务模拟） | 保留 legacy 分支解析分支 |
+| P1-02 | C01 | 会话状态与卡片状态按 task_key 隔离 | `scripts/coder4/wt-flow.sh::_task_state_file` `::_read_state/_save_state` | `bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>` | 回退到全局 state 文件路径 |
+| P1-03 | C02 | attempts 证据目录按 task_key 隔离 | `scripts/coder4/wt-flow.sh::_mark_card_done_after_merge` `cmd_verify` | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master` | 回退旧 attempts 路径并保留兼容读取 |
+| P2-01 | C03 | 读侧脚本默认路径统一到 task_key 状态根 | `scripts/coder4/coder4_bootstrap_kernel.py` `scripts/coder4/coder4_vk_sync.py` `scripts/coder4/check_integration_gate.py` | `python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json` | 增加 fallback 到 legacy 路径 |
+| P2-02 | C03 | scope_guard already_active 补齐 task_key 判定 | `scripts/coder4/coder4_scope_guard.py` | `python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json` | 回退到 split+project 判定 |
 | P3-01 | C04 | 主链路优先返回，后台收口动作异步化 | `app/services/chat_service.py` | `venv/bin/python -m pytest -q tests/services/test_chat_service_async_postprocess.py` | 开关关闭异步路径，退回同步 |
 | P3-02 | C04 | 异步任务幂等、重试、告警 | `app/services/chat_async_postprocess_service.py`（新增） | `venv/bin/python -m pytest -q tests/services/test_chat_async_postprocess_service.py` | 降级为仅日志不执行 |
 | P3-03 | C05 | 主链路时延指标与异步任务观测 | `app/services/chat_service.py` `app/services/run_control_service.py` | `venv/bin/python -m pytest -q tests/services/test_chat_stream_latency_metrics.py` | 关闭新增 metrics，不影响主流程 |
 | P4-01 | C06 | 文档/命令口径同步，避免旧示例误导 | `.cursor/commands/jjk-cardrun.md` `docs/开发文档/工作流/开发工作流.md` `docs/SUMMARY.md` | `python3 scripts/docs_guard.py --strict` | 回退文档改动 |
-| G-1 | G01 | 串行闭环与作用域门禁校验 | `scripts/wt-flow.sh` `scripts/coder4_scope_guard.py` | `bash scripts/wt-flow.sh verify C01 --state-dir .omc/state` + `bash scripts/wt-flow.sh merge --state-dir .omc/state` | 失败时阻断推进 |
-| IG-1 | IG01 | 集成门禁：主干可见与证据一致性 | `scripts/check_integration_gate.py` | `python3 scripts/check_integration_gate.py --task-split-dir <dir> --baseline master` | 回退并修复证据后重试 |
+| G-1 | G01 | 串行闭环与作用域门禁校验 | `scripts/coder4/wt-flow.sh` `scripts/coder4/coder4_scope_guard.py` | `bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>` + `bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>` | 失败时阻断推进 |
+| IG-1 | IG01 | 集成门禁：主干可见与证据一致性 | `scripts/coder4/check_integration_gate.py` | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <dir> --baseline master` | 回退并修复证据后重试 |
 
 ### 3.2 最小代码样例（每个 feature 至少 1 个）
 
@@ -161,14 +161,14 @@ fi
 ```bash
 _state_root() {
   local task_key="$(jq -r '.task_key // ""' "$ACTIVE_TASK_FILE")"
-  [[ -n "$task_key" ]] && echo "${REPO_ROOT}/.omc/state/${task_key}" || echo "${REPO_ROOT}/.omc/state"
+  [[ -n "$task_key" ]] && echo "${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/${task_key}" || echo "${REPO_ROOT}/docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>"
 }
 ```
 
 #### P1-03 attempts 目录隔离
 
 ```bash
-result_file="${state_root}/attempts/${card_id}/merge_result.json"
+result_field="task-runner-state.json::merge_results.${card_id}"
 ```
 
 #### P2-01 读侧统一解析
@@ -177,8 +177,8 @@ result_file="${state_root}/attempts/${card_id}/merge_result.json"
 def resolve_state_file(active_task_path: Path) -> Path:
     task_key = load_json(active_task_path).get("task_key")
     if task_key:
-        return Path(".omc/state") / task_key / "task-runner-state.json"
-    return Path(".omc/state/task-runner-state.json")
+        return Path("docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>") / task_key / "task-runner-state.json"
+    return Path("docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json")
 ```
 
 #### P2-02 scope_guard 判定增强
@@ -235,15 +235,15 @@ implementation_tasks:
     pr_id: PR-01
     phase: Phase-1
     file_paths:
-      - scripts/wt-flow.sh
+      - scripts/coder4/wt-flow.sh
     symbols:
       - cmd_create
       - _resolve_worktree_path_for_card
       - _mark_card_done_after_merge
     change_type: modify
     acceptance_cmds:
-      - bash scripts/wt-flow.sh next --state-dir .omc/state
-      - bash scripts/wt-flow.sh list --state-dir .omc/state
+      - bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+      - bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
     rollback_point: 恢复 legacy 分支与 worktree 命名逻辑
 
   - task_id: T-02
@@ -251,7 +251,7 @@ implementation_tasks:
     pr_id: PR-01
     phase: Phase-1
     file_paths:
-      - scripts/wt-flow.sh
+      - scripts/coder4/wt-flow.sh
     symbols:
       - _task_state_file
       - _read_state
@@ -259,24 +259,24 @@ implementation_tasks:
       - _clear_state
     change_type: modify
     acceptance_cmds:
-      - bash scripts/wt-flow.sh list --state-dir .omc/state
-      - bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-    rollback_point: 切回全局 `.omc/state/wt-flow-state.json` 与 `.omc/state/task-runner-state.json`
+      - bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+      - bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+    rollback_point: 切回全局 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/wt-flow-state.json` 与 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`
 
   - task_id: T-03
     feature_id: P1-03
     pr_id: PR-02
     phase: Phase-1
     file_paths:
-      - scripts/wt-flow.sh
-      - scripts/check_integration_gate.py
+      - scripts/coder4/wt-flow.sh
+      - scripts/coder4/check_integration_gate.py
     symbols:
       - _mark_card_done_after_merge
       - cmd_verify
       - run_check
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
     rollback_point: 保留 task_key 目录读取兼容并回退写入路径
 
   - task_id: T-04
@@ -284,17 +284,17 @@ implementation_tasks:
     pr_id: PR-03
     phase: Phase-2
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
-      - scripts/coder4_vk_sync.py
-      - scripts/check_integration_gate.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_vk_sync.py
+      - scripts/coder4/check_integration_gate.py
     symbols:
       - DEFAULT_STATE_FILE
       - parse_args
       - run_check
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
-      - python3 scripts/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/_active_task.json --dry-run --output -
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
+      - python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --dry-run --output -
     rollback_point: 提供 legacy 路径 fallback 并保持参数可覆盖
 
   - task_id: T-05
@@ -302,13 +302,13 @@ implementation_tasks:
     pr_id: PR-03
     phase: Phase-2
     file_paths:
-      - scripts/coder4_scope_guard.py
+      - scripts/coder4/coder4_scope_guard.py
     symbols:
       - validate_split
       - already_active
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+      - python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json
     rollback_point: 回退 task_key 判定并保留日志告警
 
   - task_id: T-06
@@ -380,15 +380,15 @@ implementation_tasks:
     pr_id: PR-06
     phase: Gate
     file_paths:
-      - scripts/wt-flow.sh
-      - scripts/coder4_scope_guard.py
+      - scripts/coder4/wt-flow.sh
+      - scripts/coder4/coder4_scope_guard.py
     symbols:
       - cmd_verify
       - cmd_merge
     change_type: modify
     acceptance_cmds:
-      - bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-      - bash scripts/wt-flow.sh merge --state-dir .omc/state
+      - bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+      - bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
     rollback_point: gate 阻断，不允许推进 IG
 
   - task_id: T-11
@@ -396,12 +396,12 @@ implementation_tasks:
     pr_id: PR-06
     phase: Integration-Gate
     file_paths:
-      - scripts/check_integration_gate.py
+      - scripts/coder4/check_integration_gate.py
     symbols:
       - run_check
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
     rollback_point: 失败阻断发布，回到对应 feature 修复
 ```
 
@@ -417,7 +417,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "wt-flow 命名空间改造：分支与 worktree"
     acceptance_cmds:
-      - bash scripts/wt-flow.sh next --state-dir .omc/state
+      - bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
     rollback_point: 回退 create/path 相关改动
 
   - task_id: T-02
@@ -426,7 +426,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "wt-flow 状态隔离：session/task state"
     acceptance_cmds:
-      - bash scripts/wt-flow.sh list --state-dir .omc/state
+      - bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
     rollback_point: 回退 state 路径解析
 
   - task_id: T-03
@@ -435,7 +435,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-01]
     pr_subject: "attempts 证据目录 task_key 隔离"
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
     rollback_point: 临时兼容旧 attempts 读取
 
   - task_id: T-04
@@ -444,7 +444,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-01, PR-02]
     pr_subject: "bootstrap/vk_sync/IG 读侧路径统一"
     acceptance_cmds:
-      - python3 scripts/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/_active_task.json --dry-run --output -
+      - python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --dry-run --output -
     rollback_point: 回退默认路径并保留参数覆盖
 
   - task_id: T-05
@@ -453,7 +453,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-01, PR-02]
     pr_subject: "scope_guard already_active 增补 task_key"
     acceptance_cmds:
-      - python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+      - python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json
     rollback_point: 保持旧判定 + 追加告警
 
   - task_id: T-06
@@ -498,8 +498,8 @@ task_to_pr_mapping:
     pr_depends_on: [PR-05]
     pr_subject: "G1 串行门禁收口验证"
     acceptance_cmds:
-      - bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-      - bash scripts/wt-flow.sh merge --state-dir .omc/state
+      - bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+      - bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
     rollback_point: 阻断进入 IG，回滚上游 PR
 
   - task_id: T-11
@@ -508,7 +508,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-05]
     pr_subject: "IG1 集成门禁与主干可见性校验"
     acceptance_cmds:
-      - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+      - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
     rollback_point: 集成门禁失败即停止发布
 ```
 
@@ -542,8 +542,8 @@ planning_contract:
         - 命名空间分支与 worktree 创建通过
         - task_key 状态路径可解析
       acceptance_checks:
-        - bash scripts/wt-flow.sh next --state-dir .omc/state
-        - bash scripts/wt-flow.sh list --state-dir .omc/state
+        - bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+        - bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
       evidence_entry: docs/内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md
 
     - card_id: C02
@@ -555,7 +555,7 @@ planning_contract:
       done_gate:
         - attempts 目录按 task_key 隔离
       acceptance_checks:
-        - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
       evidence_entry: docs/内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md
 
     - card_id: C03
@@ -567,8 +567,8 @@ planning_contract:
       done_gate:
         - 读侧脚本默认路径与 active task_key 对齐
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
-        - python3 scripts/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/_active_task.json --dry-run --output -
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
+        - python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --dry-run --output -
       evidence_entry: docs/内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md
 
     - card_id: C04
@@ -620,8 +620,8 @@ planning_contract:
       done_gate:
         - verify -> merge -> done 串行闭环通过
       acceptance_checks:
-        - bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-        - bash scripts/wt-flow.sh merge --state-dir .omc/state
+        - bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+        - bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
       evidence_entry: docs/内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md
 
     - card_id: IG01
@@ -633,7 +633,7 @@ planning_contract:
       done_gate:
         - 集成门禁通过且主干可见
       acceptance_checks:
-        - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
       evidence_entry: docs/内部参考/迭代需求/多任务并行Worktree命名空间与异步收口_implementation_plan.md
 
   task_to_pr_mapping:
@@ -643,7 +643,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "wt-flow 命名空间改造：分支与 worktree"
       acceptance_cmds:
-        - bash scripts/wt-flow.sh next --state-dir .omc/state
+        - bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
       rollback_point: 回退 create/path 命名空间改造
 
     - task_id: T-02
@@ -652,7 +652,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "wt-flow 状态隔离：session + task state"
       acceptance_cmds:
-        - bash scripts/wt-flow.sh list --state-dir .omc/state
+        - bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
       rollback_point: 回退状态路径改造
 
     - task_id: T-03
@@ -661,7 +661,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "attempts 证据目录 task_key 隔离"
       acceptance_cmds:
-        - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
       rollback_point: 兼容读取旧证据路径
 
     - task_id: T-04
@@ -670,7 +670,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "读侧路径统一（bootstrap/vk_sync/IG）"
       acceptance_cmds:
-        - python3 scripts/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/_active_task.json --dry-run --output -
+        - python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --dry-run --output -
       rollback_point: 回退默认路径，保留参数化
 
     - task_id: T-05
@@ -679,7 +679,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "scope_guard already_active 增补 task_key"
       acceptance_cmds:
-        - python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json
+        - python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json
       rollback_point: 回退到 split+project 判定
 
     - task_id: T-06
@@ -724,8 +724,8 @@ planning_contract:
       pr_depends_on: [PR-05]
       pr_subject: "G1 串行门禁收口"
       acceptance_cmds:
-        - bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-        - bash scripts/wt-flow.sh merge --state-dir .omc/state
+        - bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+        - bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
       rollback_point: gate 失败即阻断
 
     - task_id: T-11
@@ -734,7 +734,7 @@ planning_contract:
       pr_depends_on: [PR-05]
       pr_subject: "IG1 集成门禁与主干可见性"
       acceptance_cmds:
-        - python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+        - python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
       rollback_point: 集成门禁失败回退至对应功能卡
 ```
 
@@ -819,8 +819,8 @@ test_strategy:
 
 | 工作包 | 负责人建议 | 文件边界 | 依赖 | 预估 | 完成标志 |
 |---|---|---|---|---|---|
-| WP-A：`wt-flow` 命名空间改造 | AI-1 | `scripts/wt-flow.sh` | 无 | 1.5 天 | 分支/worktree/state/attempts 均可按 `task_key` 隔离 |
-| WP-B：读侧路径统一 | AI-2 | `scripts/coder4_bootstrap_kernel.py`、`scripts/coder4_vk_sync.py`、`scripts/check_integration_gate.py`、`scripts/coder4_scope_guard.py` | WP-A 部分函数契约 | 1.5 天 | active task 切换后读写一致，不再命中全局旧路径 |
+| WP-A：`wt-flow` 命名空间改造 | AI-1 | `scripts/coder4/wt-flow.sh` | 无 | 1.5 天 | 分支/worktree/state/gate_results/merge_results 均可按 `task_key` 隔离 |
+| WP-B：读侧路径统一 | AI-2 | `scripts/coder4/coder4_bootstrap_kernel.py`、`scripts/coder4/coder4_vk_sync.py`、`scripts/coder4/check_integration_gate.py`、`scripts/coder4/coder4_scope_guard.py` | WP-A 部分函数契约 | 1.5 天 | active task 切换后读写一致，不再命中全局旧路径 |
 | WP-C：主链路异步收口 | AI-3 | `app/services/chat_service.py` + 新增异步收口服务文件 | 无（可并行） | 2 天 | 用户响应关键路径不再等待后台收口 |
 | WP-D：测试与文档门禁 | AI-4 | `tests/**`、`.cursor/commands/**`、`docs/开发文档/工作流/**`、`docs/SUMMARY.md` | 依赖 A/B/C 输出 | 1 天 | 回归用例+文档口径统一+docs_guard 通过 |
 
@@ -834,7 +834,7 @@ test_strategy:
 
 ### 10.4 首周硬门禁（必须全部满足）
 
-1. **并行隔离门禁**：同名 `C01` 在两任务并行下不发生分支/worktree/state/attempts 冲突。
+1. **并行隔离门禁**：同名 `C01` 在两任务并行下不发生分支/worktree/state/gate_results/merge_results 冲突。
 2. **一致性门禁**：`_active_task.json.task_key` 与 `task-runner-state.json.task_key` 一致。
 3. **异步时延门禁**：主链路 `done` 事件不等待 flush/rebuild/sync 等后台动作。
 4. **失败隔离门禁**：后台收口失败仅告警，不影响本次回答返回。
@@ -847,15 +847,15 @@ test_strategy:
 python3 scripts/docs_guard.py --strict
 
 # 2) 并行隔离与状态一致性
-bash scripts/wt-flow.sh next --state-dir .omc/state
-bash scripts/wt-flow.sh list --state-dir .omc/state
-python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
-python3 scripts/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/_active_task.json --dry-run --output -
+bash scripts/coder4/wt-flow.sh next --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+bash scripts/coder4/wt-flow.sh list --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
+python3 scripts/coder4/coder4_vk_sync.py --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json --dry-run --output -
 
 # 3) 串行门禁与集成门禁
-bash scripts/wt-flow.sh verify C01 --state-dir .omc/state
-bash scripts/wt-flow.sh merge --state-dir .omc/state
-python3 scripts/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
+bash scripts/coder4/wt-flow.sh verify C01 --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+bash scripts/coder4/wt-flow.sh merge --state-dir docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>
+python3 scripts/coder4/check_integration_gate.py --task-split-dir 2026-03-01_知识库检索P2分阶段治理 --baseline master
 
 # 4) 异步主链路回归（需新增测试文件）
 venv/bin/python -m pytest -q tests/services/test_chat_service_async_postprocess.py

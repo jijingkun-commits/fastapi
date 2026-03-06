@@ -1,6 +1,35 @@
 """聊天文档记忆单开关解析测试。"""
 
+import asyncio
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from langchain_core.messages import AIMessage, HumanMessage
+
 from app.services import chat_service
+from app.services.chat_service import ChatService
+
+
+class _FakeQuery:
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+
+class _FakeDB:
+    def query(self, *args, **kwargs):
+        return _FakeQuery()
+
+
+@contextmanager
+def _fake_get_db_context():
+    yield _FakeDB()
 
 
 def test_document_memory_recall_switch_should_follow_master_config(monkeypatch) -> None:  # noqa: ANN001
@@ -158,3 +187,103 @@ def test_persist_memory_should_flush_when_async_disabled(monkeypatch) -> None:  
 
     assert context == "最新记忆上下文"
     assert called == {"flush": 1, "recall": 1}
+
+
+def test_persist_memory_should_upsert_preference_and_recall_when_sync(monkeypatch) -> None:  # noqa: ANN001
+    """同步模式下命中偏好时应写入 preference 并触发 recall。"""
+
+    called = {"flush": 0, "preference": 0, "recall": 0}
+
+    def _unexpected_enqueue(*args, **kwargs):  # noqa: ANN001
+        raise AssertionError("sync 模式不应调用 enqueue_memory_intent_job")
+
+    def _fake_flush(*args, **kwargs):  # noqa: ANN001
+        called["flush"] += 1
+        return 0
+
+    def _fake_upsert_preference(*args, **kwargs):  # noqa: ANN001
+        called["preference"] += 1
+        return 1
+
+    def _fake_recall(*args, **kwargs):  # noqa: ANN001
+        called["recall"] += 1
+        return "偏好已更新后的上下文"
+
+    monkeypatch.setattr(chat_service, "enqueue_memory_intent_job", _unexpected_enqueue)
+    monkeypatch.setattr(chat_service, "flush_document_memory", _fake_flush)
+    monkeypatch.setattr(
+        chat_service,
+        "upsert_preference_document_memory",
+        _fake_upsert_preference,
+        raising=False,
+    )
+    monkeypatch.setattr(chat_service, "recall_document_memory", _fake_recall)
+
+    context = chat_service._persist_document_memory_context(
+        object(),
+        user_id=7,
+        prompt="永远记住，你叫hh",
+        thread_id="thread-sync",
+        source_message_id=1003,
+        document_memory_context="",
+        document_memory_flush_enabled=True,
+        document_memory_recall_enabled=True,
+        memory_intent_async_enabled=False,
+        document_memory_max_results=6,
+        document_memory_max_injected_chars=1200,
+        document_hybrid_min_score=0.05,
+        document_vector_weight=0.7,
+        document_text_weight=0.3,
+    )
+
+    assert context == "偏好已更新后的上下文"
+    assert called == {"flush": 1, "preference": 1, "recall": 1}
+
+
+def test_stream_should_pass_memory_context_without_system_message_persistence(monkeypatch) -> None:  # noqa: ANN001
+    """stream 输入应只保留 human 消息，记忆通过 memory_context 字段传递。"""
+
+    captured: dict[str, object] = {}
+
+    class _FakeGraph:
+        async def astream(self, input_state, config, stream_mode):  # noqa: ANN001, ARG002
+            captured["input_state"] = input_state
+            yield {
+                "type": "result",
+                "data": {"data_type": "text", "data": None, "message": "ok"},
+                "node": "supervisor",
+            }
+
+        async def aget_state(self, config):  # noqa: ANN001, ARG002
+            return SimpleNamespace(
+                tasks=[],
+                values={"messages": [HumanMessage(content="hi"), AIMessage(content="ok")]},
+            )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):  # noqa: ANN001, ARG002
+        return _FakeGraph()
+
+    monkeypatch.setattr(chat_service, "_is_document_memory_enabled", lambda fallback: True)
+    monkeypatch.setattr(chat_service, "_is_document_memory_recall_enabled", lambda fallback: True)
+    monkeypatch.setattr(chat_service, "_is_document_memory_flush_enabled", lambda fallback: False)
+    monkeypatch.setattr(
+        chat_service,
+        "recall_document_memory",
+        lambda *args, **kwargs: "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）：\n- assistant.persona: 小哈",
+    )
+
+    async def _drain_stream():
+        with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+            "app.repositories.chat_repo.save_message",
+            lambda *args, **kwargs: SimpleNamespace(id=123),
+        ), patch.object(ChatService, "get_graph", _fake_get_graph):
+            svc = ChatService()
+            async for _ in svc.stream(prompt="你是谁", thread_id="thread-memory", user_id=2):
+                pass
+
+    asyncio.run(_drain_stream())
+
+    input_state = captured["input_state"]
+    assert input_state["memory_context"].startswith("以下是用户稳定偏好")
+    assert len(input_state["messages"]) == 1
+    assert isinstance(input_state["messages"][0], HumanMessage)

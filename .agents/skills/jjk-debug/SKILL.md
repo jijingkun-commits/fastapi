@@ -13,46 +13,16 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
-## 与 Superpowers / OMX 的分工（强制）
+## 执行模式
 
-1. `systematic-debugging`：负责根因调查、假设验证、最小修复策略。
-2. `test-driven-development`：负责回归测试先行（先失败后修复）。
-3. `verification-before-completion`：负责完成前证据校验。
-4. `team`（OMX）：负责大范围故障并行排查与修复分片。
-5. `$jjk-debug`：负责阶段编排、输入输出契约、文档回填与交付口径。
+### 默认模式：诊断 + 修复
+- 根因定位 → 最小修复 → 证据验证
 
-约束：
-
-1. 禁止在 `$jjk-debug` 复制上述 skills 的完整正文。
-2. 插件可用时优先调用；插件不可用时必须显式 fallback，不得静默降级。
-3. `$jjk-debug` 是“可改码修复”；若只做诊断不改码，必须回退 `$jjk-pc`。
-
-## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`$jjk-debug`
-2. Codex：`$jjk-debug`
-
-> 说明：Codex 推荐显式调用 `$jjk-debug`。
-
-## 模板来源优先级（跨项目，强制）
-
-`$jjk-debug` 的模板按以下优先级读取：
-
-1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_debug_templates.md`
-2. 项目覆盖模板（仅放差异，不放全量复制）：
-   `docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`
-
-若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 遇到 Bug，需要直接修复并回归验证 | `$jjk-debug` ✅ |
-| 仅诊断并给修复计划，不改代码 | `$jjk-pc` |
-| 已有可执行计划，按任务落地 | `$jjk-imp` |
-| 修复后统一验收 | `$jjk-verify` |
+### 仅诊断模式：`$jjk-debug --diagnose-only`
+- 仅做诊断与规划，**禁止修改代码**
+- 产出修复计划（包含 2-3 个方案对比）
+- 统一产物：`docs/内部参考/迭代需求/fix_plan_<topic>.md`
+- 该模式替代旧 `jjk-pc` 入口
 
 ---
 
@@ -68,8 +38,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 
 ### 0.5) 大任务自动启用 Team（强制判定）
 
-`$jjk-team-debug` 不再作为主入口。
-统一由 `$jjk-debug` 在大任务时自动升级 Team 修复模式。
+`$jjk-debug` 在大任务时自动升级 Team 修复模式。
 
 触发条件（满足任一即可）：
 
@@ -83,7 +52,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 1. **有 Team 能力时**：并行收集证据与验证假设，Leader 统一汇总根因与修复方案。
 2. **无 Team 能力时**：降级为单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，强制）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下，每个成员提交阶段结果后，必须由另一名成员执行反方审查，至少包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
 2. `2` 人任务执行双向互审；`3+` 人任务执行环形互审（A 审 B，B 审 C，...，最后一人审 A）。
@@ -139,7 +108,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 4. 验证命令与结果（含失败->通过过程）
 5. 风险、回滚点与后续建议
 
-建议结构见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_debug_templates.md`。  
+建议结构见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_debug_templates.md`。  
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`。
 
 ---

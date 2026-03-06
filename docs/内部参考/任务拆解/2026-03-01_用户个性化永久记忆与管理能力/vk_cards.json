@@ -10,7 +10,7 @@
     "inspection/question-card": "policy_gate"
   },
   "automation_contract": {
-    "source_of_truth": "docs/内部参考/任务拆解/_active_task.json",
+    "source_of_truth": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/_active_task.json",
     "required_fields": [
       "project_id",
       "task_split_dir",
@@ -546,7 +546,7 @@
         "门禁失败时禁止进入 /jjk-vktodo 自动落卡执行"
       ],
       "code_anchor_refs": [
-        "docs/内部参考/任务拆解/_active_task.json::scope",
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/_active_task.json::scope",
         "scripts/docs_guard.py::strict mode",
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
       ],
@@ -554,8 +554,8 @@
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
-        "python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json",
-        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
+        "python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir 2026-03-01_用户个性化永久记忆与管理能力 --scope-request docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/coder4_scope_request.json",
+        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; state=json.loads(pathlib.Path('/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/task-runner-state.json').read_text(encoding='utf-8')); gate=state.get('gate_results', {}); missing=[c for c in req if c not in gate]; failed=[c for c in req if not gate.get(c, {}).get('passed', False)]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
       ],
       "rollback_anchors": [
         "暂停 /jjk-vktodo",
@@ -574,8 +574,8 @@
         "active_task 作用域绑定正确"
       ],
       "check_cmd": [
-        "python3 scripts/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --active-task docs/内部参考/任务拆解/_active_task.json --scope-request /Users/jijingkun/.openclaw/workspace-dev/state/coder4_scope_request.json",
-        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; root=pathlib.Path('/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/attempts'); missing=[]; failed=[]; [((missing.append(c) if not (root/c/'gate_result.json').exists() else (failed.append(c) if not json.loads((root/c/'gate_result.json').read_text(encoding='utf-8')).get('passed', False) else None))) for c in req]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
+        "python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir 2026-03-01_用户个性化永久记忆与管理能力 --scope-request docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/coder4_scope_request.json",
+        "python3 -c \"import json, pathlib; req=['C01','C02','C03','C04','C05','C06']; state=json.loads(pathlib.Path('/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/PP-20260301-USER-MEMORY-ADMIN/task-runner-state.json').read_text(encoding='utf-8')); gate=state.get('gate_results', {}); missing=[c for c in req if c not in gate]; failed=[c for c in req if not gate.get(c, {}).get('passed', False)]; assert not missing and not failed, f'missing={missing},failed={failed}'\""
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-G01_G01Gate全链路验收门禁.md"
     },
@@ -607,15 +607,15 @@
         "未通过则阻断最终完成态，避免仅本地 done 的假完成"
       ],
       "code_anchor_refs": [
-        "scripts/check_integration_gate.py::run_check",
-        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/attempts/<card_id>/merge_result.json",
+        "scripts/coder4/check_integration_gate.py::run_check",
+        "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state/<task_key>/task-runner-state.json.merge_results.<card_id>",
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
       ],
       "example_refs": [
         "docs/开发文档/技巧与速查/AI协作速查表.md#串行主干状态流最小路径"
       ],
       "acceptance_checks": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --state-dir \"docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state\" --baseline master"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --state-dir \"docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state\" --baseline master"
       ],
       "rollback_anchors": [
         "暂停最终交付并回到缺失 merge 证据的实现卡补账",
@@ -625,7 +625,7 @@
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "scripts/check_integration_gate.py",
+        "scripts/coder4/check_integration_gate.py",
         "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
         "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/vk_cards.json",
         "docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md"
@@ -635,7 +635,7 @@
         "merge_commit 全部对 baseline(master) 可见"
       ],
       "check_cmd": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --state-dir \"docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state\" --baseline master"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir \"2026-03-01_用户个性化永久记忆与管理能力\" --state-dir \"docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/.state\" --baseline master"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-IG01_IG01集成门禁主干可见性校验.md"
     }

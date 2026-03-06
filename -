@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "action": "preflight_blocked",
+  "error": {
+    "code": "CARDRUN_PR_MAPPING_MISSING",
+    "message": "task_split_dir=2026-03-01_知识库检索P2分阶段治理 缺少 task_to_pr_mapping",
+    "details": {
+      "task_split_dir": "2026-03-01_知识库检索P2分阶段治理",
+      "task_to_pr_mapping": null
+    }
+  }
+}

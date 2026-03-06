@@ -23,7 +23,15 @@ requirements_contract:
   topic: "<主题>"
   status: draft
   design_source: docs/plans/YYYY-MM-DD-<topic>-design.md
+  clarify_handoff_source: docs/plans/YYYY-MM-DD-<topic>-design.md#clarify_handoff_contract
+  clarify_handoff_version: v2
   design_approved: true
+  design_approval_evidence: "<用户明确确认原话>"
+  design_freeze_summary:
+    design_actionable: true
+    missing_blocks: []
+    risk_level: low
+    risk_counterexamples_count: 2
   owner: "<owner>"
   approver: "<approver>"
   updated_at: "YYYY-MM-DD HH:mm"
@@ -32,6 +40,7 @@ requirements_contract:
 ```yaml
 fr_contract_matrix:
   - fr_id: FR-01
+    source_seed_ref: clarify_handoff_contract.required.requirement_seeds[0]  # v1 兼容: clarify_handoff_contract.requirement_seeds[0]
     user_value: 简要价值说明
     trigger: 触发条件
     input_contract:
@@ -64,6 +73,10 @@ traceability_matrix:
 3. 每个 `TC-*` 必须在 `traceability_matrix` 映射到唯一 `task_id` 与 `acceptance_cmd_ref`。
 4. 当 `requirements_contract.status` 为 `draft/草稿` 时，`implementation_readiness.implementation_ready` 必须为 `false`。
 5. 新增开关默认值必须写为开启（`true`）；除非用户明确要求灰度，禁止采用“默认关闭 + 灰度放量”口径。
+6. `design_approval_evidence` 必须非空，缺失时标记 `DESIGN_APPROVAL_EVIDENCE_MISSING`。
+7. `design_freeze_summary.design_actionable` 必须为 `true` 且 `missing_blocks=[]`，否则标记 `DESIGN_NOT_ACTIONABLE`。
+8. `design_freeze_summary.risk_counterexamples_count` 必须 `>=2`，否则标记 `DESIGN_RISK_EXAMPLES_INSUFFICIENT`。
+9. 禁止在机读 YAML 中出现旧协议字段：`intent_plan`、`validate_intent_plan_contract`、`legacy_json_object`；出现即标记 `PLAN_FORBIDDEN_PROTOCOL_FIELD_DETECTED`。
 
 ## 本项目强制追加字段（Task -> PR 映射）
 
@@ -85,22 +98,32 @@ planning_contract:
 ```yaml
 implementation_tasks:
   - task_id: T-01
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[0]  # v1 兼容: clarify_handoff_contract.implementation_seeds[0]
     feature_id: P1-01
     pr_id: PR-01
+    phase: Phase-1
+    change_type: modify
+    owner: ai-workflow
+    depends_on_tasks: []
+    risk_point: 状态迁移一致性风险
     file_paths:
       - app/ai/workflow/multi_agent_graph.py
     symbols:
-      - build_intent_plan
+      - build_active_goals
     acceptance_cmds:
       - venv/bin/python -m pytest tests/unit/test_xxx.py -q
-    rollback_point: 回退到 old_build_intent_plan
+    rollback_point: 回退到 old_build_active_goals
 ```
 
 校验规则：
 
 1. 每个 `task_id` 必须且仅能映射一个 `pr_id`。
 2. `implementation_tasks[*].pr_id` 必须可回查 `task_to_pr_mapping`。
-3. 缺少映射时，计划状态必须标注 `BLOCKED`，并阻断 `/jjk-vkplan`。
+3. 每个 `implementation_tasks[*]` 必须包含：`source_seed_ref/phase/change_type/owner/depends_on_tasks/risk_point/file_paths/symbols/acceptance_cmds/rollback_point`。
+4. 缺少映射或必填字段时，计划状态必须标注 `BLOCKED`，并阻断 `/jjk-vkplan`。
+5. `source_seed_ref` 缺失或无法回查 design 中 `clarify_handoff_contract` 时，必须标记 `CLARIFY_PLAN_BRIDGE_BROKEN`。
+6. 若任意任务缺少上述细节字段，必须标记 `PLAN_IMPLEMENTATION_DETAIL_INSUFFICIENT`，并禁止进入执行链。
+7. 若 `clarify_handoff_contract` 中 `implementation_seeds` 为轻量输入（仅 `task_id/file_paths/symbols/change_type`），必须在 `implementation_tasks` 层补齐 `acceptance_cmds/rollback_point/pr_id/phase/depends_on_tasks`。
 
 ## 本项目强制追加字段（Execution Contract）
 
@@ -113,6 +136,7 @@ execution_contract:
   commit_policy: single_commit
   stop_boundary: none
   stop_on_blocked: true
+  source_seed_ref: clarify_handoff_contract.required.execution_chain_seed.execution_contract_hint  # v1 兼容: clarify_handoff_contract.execution_chain_seed.execution_contract_hint
 ```
 
 ```yaml

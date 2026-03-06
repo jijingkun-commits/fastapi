@@ -4,7 +4,7 @@
 
 **本文定位**：完整手册，详解 Skills、Commands、Rules 的原理、用法和项目配置。如果只需快速查阅命令列表，请看 [AI 协作速查表](AI协作速查表.md)。
 
-## 0. 命令权威源与统计口径（2026-02-14 校准）
+## 0. 命令权威源与统计口径（2026-03-06 校准）
 
 为保持“全量百科”定位且避免命令口径漂移，本文固定采用以下规则：
 
@@ -12,7 +12,7 @@
    - 运行时镜像：`.claude/commands/*.md`（Claude Code）与 `~/.codex/prompts/*.md`（Codex）。
    - 触发方式：Claude Code / Cursor 用 `/jjk-xxx`；Codex 用 `/prompts:jjk-xxx`。
 2. 本文职责：保留命令百科、场景建议与链路示例，不替代权威命令文档。
-3. 统计口径：按 `.cursor/commands/` 目录文件计数，统计时间 `2026-03-01`，当前共 `24` 个命令文件。
+3. 统计口径：按 `.cursor/commands/*.md` 文件计数（不含 `.bak`），统计时间 `2026-03-06`，当前共 `17` 个命令文件。
 4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
 
 ## 1. Cursor Skills 使用指南
@@ -115,20 +115,30 @@ npx ai-agent-skills info <skill-name>
 ### 2.1 核心流程
 
 ```
-想法 → /jjk-plan → requirements.md → /jjk-imp → 代码 → /jjk-verify → 验收
-                                                       （或 /jjk-review → /jjk-test → 验收）
+想法 → /jjk-clarify（设计冻结 + PRD-Lite） → /jjk-plan → requirements.md + implementation_plan.md
+     → /jjk-imp（或 /jjk-vkplan -> /jjk-cardrun） → /jjk-verify → 验收
+                                                （或 /jjk-review → /jjk-test → 验收）
 ```
 
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
-| **规划** | `/jjk-plan` | `requirements.md` | 明确需求和设计 |
+| **澄清冻结** | `/jjk-clarify` | `design.md` + `design_freeze_summary` + `clarify_handoff_contract` | 开发前冻结边界/语义/回退口径 |
+| **规划** | `/jjk-plan` | `requirements.md` + `implementation_plan.md` | 形成 WHAT + HOW，可直接承接实现 |
 | **实现** | `/jjk-imp` | 代码 + 文档 | AI 实现功能 |
 | **一站式验证** | `/jjk-verify` | 验证报告 | 审查 + 测试 + 交互式 UAT |
 | **测试** | `/jjk-test` | 测试报告 | 验证功能 |
 | **调试** | `/jjk-debug` | 修复方案 | 排查问题 |
 | **审查** | `/jjk-review` | 审查意见 | 代码质量检查 |
-| **小改动** | `/jjk-quick` | 代码 | <= 3 文件快速修改 |
-| **全流程** | `/jjk-feature` | 完整功能 | Plan + Imp + Test |
+| **并行拆解** | `/jjk-vkplan` + `/jjk-cardrun` | `parallel_plan` + 卡片执行证据 | 多任务并行与串行收口 |
+
+### 2.1.1 Clarify v3.2 必过门禁（工程模式）
+
+开发前必须满足：
+
+1. `product_contract`（PRD-Lite）完整：`target_users/core_scenarios/business_goals/non_goals/acceptance_gates`。
+2. `design_freeze_summary.product_contract_ready=true`。
+3. 条件采纳（`design_approved=false`）不得进入 `/jjk-plan`。
+4. 建议执行：`python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` 做桥接校验。
 
 ### 2.2 上下文引用策略
 
@@ -363,67 +373,73 @@ description: 命令的简短描述
 ```
 你的场景是什么？
 │
-├─ 需求不明确，想先澄清
-│   └─ /jjk-clarify （轻量问答；deep 模式做领域灰区分析）
+├─ 需求还模糊，先发散方案
+│   └─ /ask -> /jjk-clarify
 │
-├─ 需要正式的需求文档
-│   └─ /jjk-plan （产出 requirements.md）
+├─ 需要冻结边界与验收口径
+│   └─ /jjk-clarify
 │
-├─ 已有明确计划，只需编码
+├─ 需要正式规划文档
+│   └─ /jjk-plan （core/parallel）
+│
+├─ 已有计划，执行单任务实现
 │   └─ /jjk-imp
 │
-├─ 小改动（<= 3 文件，无架构变更）
-│   └─ /jjk-quick （跳过完整流程，直接改码 + 最小验证）
+├─ 需要隔离环境执行实现
+│   └─ /jjk-wtimp
 │
-├─ 完整的新功能开发
-│   └─ /jjk-feature （= plan + imp + review）
+├─ 需要并行拆解与收口
+│   └─ /jjk-vkplan -> /jjk-vktodo create -> /jjk-cardrun loop
 │
-├─ 代码写完了，一次性验证
-│   └─ /jjk-verify （审查 + 测试 + 交互式 UAT）
+├─ 单个工作包（WS）实现
+│   └─ /jjk-imp-ws
 │
-├─ 代码写完了，只需审查
-│   └─ /jjk-review （含快速自测）
-│
-├─ 需要完整的测试流程
-│   └─ /jjk-test （用例生成、E2E、报告）
+├─ 代码写完了，需要验收
+│   └─ /jjk-verify （或 /jjk-review -> /jjk-test）
 │
 └─ 遇到 Bug 需要排查
-    └─ /jjk-debug （重现、定位、修复、预防）
+    └─ /jjk-debug （结构治理用 /jjk-refactor）
 ```
 
 ### 7.2 核心开发流程
 
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
-| `/jjk-clarify` | 快速澄清 - 通过问答确认理解（支持 deep 模式做领域灰区分析） | 无 |
-| `/jjk-plan` | 正式规划 - 产出需求文档和技术方案 | `requirements.md` |
-| `/jjk-imp` | 代码实现 - 根据计划编写代码，同步文档 | 代码 + 文档 |
-| `/jjk-quick` | 小改动快速模式 - <= 3 文件，跳过完整流程 | 代码 |
-| `/jjk-verify` | 一站式验证 - 审查 + 测试 + 交互式 UAT | 验证报告 |
-| `/jjk-review` | 代码审查 - 功能验证 + 质量检查 + 安全审计 + 快速自测 | 审查意见 |
-| `/jjk-test` | 完整测试 - 用例生成、三重验证、报告产出 | `test_report.md` |
-| `/jjk-debug` | 问题排查 - 重现、定位、修复、预防 | 修复 + 测试用例 |
-| `/jjk-feature` | 全流程 - 一站式从需求到交付 (= plan + imp + review) | 全部 |
+| `/ask` | 发散澄清入口（探索优先），推荐收敛到 `/jjk-clarify` | 方案探索快照（可选） |
+| `/jjk-clarify` | 设计冻结入口，沉淀 `design_freeze_summary + clarify_handoff_contract` | `design.md` |
+| `/jjk-plan` | 正式规划入口（`core/parallel`），产出需求与实现方案 | `requirements.md` + `implementation_plan.md` |
+| `/jjk-imp` | 标准实现入口，按计划改码并同步必要文档 | 代码 + 文档 |
+| `/jjk-wtimp` | worktree 隔离实现入口，适合中大改动 | 隔离实现证据 + 合并结果 |
+| `/jjk-vkplan` | 并行拆解入口，生成可执行卡片契约 | `parallel_plan.md` + `vk_cards.json` |
+| `/jjk-vktodo` | create-only 幂等建卡，不负责状态推进 | VK 卡片 |
+| `/jjk-cardrun` | 串行卡片执行与收口（`verify -> merge -> done`） | 卡片执行轨迹 + merge 证据 |
+| `/jjk-imp-ws` | 单个 WS 白名单实现并回填自检卡 | WS 实现证据 |
+| `/jjk-review` | 代码审查与风险分级 | 审查报告 |
+| `/jjk-test` | 测试执行与报告沉淀 | 测试报告 |
+| `/jjk-verify` | 一站式验收（审查 + 测试 + UAT） | 验收结论 |
+| `/jjk-debug` | 系统化问题排查与最小修复 | 修复说明 + 验证证据 |
+| `/jjk-refactor` | 行为等价重构与结构治理 | 重构结果 + 验证证据 |
+| `/jjk-create-pr` | PR 交付入口（消费 `pr_ready_manifest`） | PR 链接 + 交付摘要 |
 
 ### 7.3 Git 工作流
 
-标准化的 Git 操作流程，确保提交信息规范、PR 描述完整。
+聚焦“实现完成后的交付收口”：
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/jjk-git-commit` | 规范化提交 - 自动分析变更并生成符合规范的提交信息 | `/jjk-git-commit` |
-| `/jjk-create-pr` | 创建 PR - 生成完整的 PR 描述，包含变更摘要和测试计划 | `/jjk-create-pr` |
+| `/jjk-create-pr` | 创建/更新 PR，校验任务映射与验收证据 | `/jjk-create-pr` |
 
 ### 7.4 代码质量
 
-提升代码质量的工具集，包括规范检查、重构和安全审计。
+优先采用“审查 + 测试 + 验收 + 根因修复”的闭环。
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/jjk-lint` | 代码规范检查 - 运行 ruff/eslint 并自动修复问题 | `/jjk-lint @app/services/` |
-| `/jjk-refactor` | 代码重构 - 在保持功能不变的前提下改善代码结构 | `/jjk-refactor @app/services/chat_service.py` |
-| `/jjk-deslop` | 清理 AI 冗余代码 - 移除不必要的复杂性和过度工程 | `/jjk-deslop` |
-| `/jjk-security-audit` | 安全审计 - 检查注入漏洞、认证问题、数据泄露风险 | `/jjk-security-audit` |
+| `/jjk-review` | 结构化代码审查，定位高风险点 | `/jjk-review` |
+| `/jjk-test` | 执行测试矩阵并输出测试报告 | `/jjk-test` |
+| `/jjk-verify` | 审查 + 测试 + UAT 一体化验收 | `/jjk-verify` |
+| `/jjk-debug` | 出现缺陷时做根因定位与最小修复 | `/jjk-debug` |
+| `/jjk-refactor` | 行为等价重构，降低复杂度与重复 | `/jjk-refactor @app/services/chat_service.py` |
 
 ### 7.5 数据库
 
@@ -431,12 +447,14 @@ description: 命令的简短描述
 
 ### 7.6 文档同步
 
-自动生成与校验文档，保持文档与代码同步。
+文档同步已并入标准研发链路，不再维护独立文档命令。
 
-| 命令 | 说明 | 使用示例 |
+| 入口/命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/jjk-api-docs` | 生成 API 文档 - 根据代码自动生成接口文档 | `/jjk-api-docs @app/api/v1/endpoints/` |
-| `/jjk-doc-check` | 文档同步检查 - 检测代码变更是否有对应文档更新 | `/jjk-doc-check`（建议在 git commit 前执行） |
+| `/jjk-imp` | 实现阶段同步必要文档变更 | `/jjk-imp` |
+| `/jjk-review` | 审查阶段检查文档-代码一致性 | `/jjk-review` |
+| `/jjk-verify` | 验收阶段做最终文档收口确认 | `/jjk-verify` |
+| `python3 scripts/check_clarify_plan_alignment.py ...` | Clarify/Plan 契约一致性校验 | `python3 scripts/check_clarify_plan_alignment.py --requirements-path ... --implementation-path ...` |
 
 ### 7.7 并行与看板协作
 
@@ -445,16 +463,18 @@ description: 命令的简短描述
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/jjk-vkplan` | 并行拆解入口 - 在 `/jjk-plan` 后生成 `parallel_plan.md`、`workstreams/WS-*.md`、`vk_cards.json` | `/jjk-vkplan` |
-| `/jjk-vksync` | 基线同步检查 - 校验 `WS-00` 是否已进入各并行 worktree 基线 | `/jjk-vksync 2026-02-14_文档治理执行 check` |
 | `/jjk-vktodo` | create-only 幂等建卡 - 消费 `vk_cards.json` 落卡，不负责状态推进 | `/jjk-vktodo 2026-02-14_文档治理执行 create` |
 | `/jjk-cardrun` | 串行执行调度 - 消费 `vk_cards.json` 按 `card_order` 单活卡推进并执行 `verify -> merge -> done` | `/jjk-cardrun 2026-03-01_用户个性化永久记忆与管理能力 loop` |
 | `/jjk-imp-ws` | 子任务实现 - 按单个 `WS-*.md` 白名单执行并回填自检卡 | `/jjk-imp-ws @workstreams/WS-02_命令权威源与百科校准.md` |
+| `python3 scripts/check_gate_contract_consistency.py --task-split-dir ...` | G01 契约一致性校验 | `python3 scripts/check_gate_contract_consistency.py --task-split-dir <任务拆解目录>` |
+| `python3 scripts/coder4/check_integration_gate.py --task-split-dir ... --baseline master` | IG01 集成门禁校验 | `python3 scripts/coder4/check_integration_gate.py --task-split-dir <任务拆解目录> --baseline master` |
 
-### 7.8 问题诊断（只分析不改码）
+### 7.8 通用命令补充（非 JJK 主链）
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/jjk-pc` | 问题诊断 - 只做根因分析并产出 `fix_plan.md`，不改代码（命令文档内示例触发词为 `/jjk-diagnose`） | `/jjk-pc 生产环境出现 500 错误` |
+| `/plan` | 通用实施规划，输出 `docs/plans/...` 计划文档 | `/plan` |
+| `/do` | 按已有计划执行实现、测试与审查 | `/do` |
 
 ---
 
@@ -469,38 +489,32 @@ npx ai-agent-skills update --all    # 更新全部
 
 # === Commands（在聊天中输入）===
 
-# 核心开发流程 - 覆盖完整开发周期
-/jjk-clarify       # 通过问答澄清需求（deep 模式做领域灰区分析）
-/jjk-plan          # 生成 requirements.md 和技术方案
-/jjk-imp           # 根据计划编写代码，自动同步文档
-/jjk-quick         # 小改动快速模式（<= 3 文件，跳过完整流程）
-/jjk-verify        # 一站式验证：审查 + 测试 + 交互式 UAT
-/jjk-test          # 全链路测试：环境准备、用例生成、执行验证
-/jjk-debug         # 重现、定位、修复、记录的标准排查流程
-/jjk-review        # 检查代码质量、文档同步、规范遵循
-/jjk-feature       # 一站式完成从需求到交付的全流程
-/jjk-pc            # 仅诊断并输出 fix_plan（命令文档示例触发词 /jjk-diagnose）
+# 发散与冻结
+/ask               # 先发散方案，再收敛到 /jjk-clarify
+/jjk-clarify       # 设计冻结 + handoff 契约（含 PRD-Lite）
+/jjk-plan          # 生成 requirements + implementation_plan（core/parallel）
 
 # 并行与看板 - 多 worktree 协作
 /jjk-vkplan        # 在 /jjk-plan 后执行并行拆解并产出 vk_cards.json
 /jjk-vktodo        # create-only 落卡（不做 move/review/done）
 /jjk-cardrun       # 按 card_order 串行推进，并执行 verify->merge->done 收口
-/jjk-vksync        # 手动执行 G0 基线同步检查（check/apply）
 /jjk-imp-ws        # 按单个 WS 白名单执行实现与回填
 
-# Git 工作流 - 标准化的版本控制操作
-/jjk-git-commit    # 自动分析变更并生成规范提交信息
-/jjk-create-pr     # 生成完整 PR 描述，含变更摘要和测试计划
+# 单任务实现与隔离实现
+/jjk-imp           # 标准实现入口（不隔离）
+/jjk-wtimp         # worktree 隔离实现（适合中大改动）
 
-# 代码质量 - 提升代码健壮性
-/jjk-lint          # 运行 ruff/eslint 并自动修复问题
-/jjk-refactor      # 在保持功能不变的前提下改善代码结构
-/jjk-deslop        # 移除 AI 生成的不必要复杂性
-/jjk-security-audit # 检查注入漏洞、认证问题、数据泄露
+# 审查、测试、验收与治理
+/jjk-review        # 代码审查与风险分级
+/jjk-test          # 执行测试矩阵并产出报告
+/jjk-verify        # 一站式验收（审查 + 测试 + UAT）
+/jjk-debug         # 问题重现、定位、修复与预防
+/jjk-refactor      # 行为等价重构与结构治理
 
-# 文档与可视化 - 保持文档同步
-/jjk-api-docs      # 根据代码自动生成接口文档
-/jjk-doc-check     # 检查代码变更是否有对应文档更新
+# 交付与通用补充
+/jjk-create-pr     # 创建/更新 PR，校验交付证据
+/plan              # 通用规划命令（非 JJK 主链）
+/do                # 通用执行命令（非 JJK 主链）
 
 # === 上下文引用 ===
 @文件路径                            # 引用文件
@@ -527,34 +541,27 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（24 个）
+### 9.2 Commands（17 个）
 
 ```
 .cursor/commands/
-├── jjk-api-docs.md        # 生成 API 文档
-├── jjk-clarify.md         # 快速澄清需求（支持 deep 模式）
-├── jjk-create-pr.md       # 创建 PR
+├── ask.md                 # 发散澄清入口（探索优先）
+├── do.md                  # 通用执行实施
 ├── jjk-cardrun.md         # 串行卡片执行调度
+├── jjk-clarify.md         # 设计冻结 + handoff 契约
+├── jjk-create-pr.md       # PR 交付入口
 ├── jjk-debug.md           # 调试问题
-├── jjk-deslop.md          # 清理 AI 冗余代码
-├── jjk-doc-check.md       # 文档同步检查
-├── jjk-feature.md         # 全流程开发
-├── jjk-git-commit.md      # 规范化提交
 ├── jjk-imp-ws.md          # 子任务实现（WS）
 ├── jjk-imp.md             # 实现代码
-├── jjk-lint.md            # 代码规范检查
-├── jjk-pc.md              # 问题诊断（命令文档示例触发词 /jjk-diagnose）
-├── jjk-plan.md            # 需求规划（含 TDD 测试策略前置）
-├── jjk-quick.md           # 小改动快速模式（<= 3 文件）
+├── jjk-plan.md            # 正式规划入口（core/parallel）
 ├── jjk-refactor.md        # 代码重构
 ├── jjk-review.md          # 代码审查
-├── jjk-security-audit.md  # 安全审计
 ├── jjk-test.md            # 运行测试
 ├── jjk-verify.md          # 一站式验证（审查 + 测试 + UAT）
 ├── jjk-vkplan.md          # 并行拆解
-├── jjk-vksync.md          # 基线同步检查
 ├── jjk-vktodo.md          # create-only 幂等建卡
-└── jjk-wtimp.md           # Worktree 隔离编码
+├── jjk-wtimp.md           # Worktree 隔离编码
+└── plan.md                # 通用实施规划
 ```
 
 ### 9.3 Rules（8 个）

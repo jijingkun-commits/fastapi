@@ -177,6 +177,72 @@ def test_recall_should_include_preference_even_without_query_hit(monkeypatch):
     assert "用户稳定偏好" in context
     assert "assistant.persona: 小哈" in context
     assert "memory://user/2/preference/global:assistant.persona#L1-L5" in context
+    assert "按 AI 人设进行自称" in context
+    assert "不要回答“无法跨会话记住该称呼”" in context
+
+
+def test_upsert_preference_documents_from_input_should_persist_candidates(monkeypatch):
+    """从输入提取到显式偏好时应写入 preference 文档。"""
+
+    captured = {"upserts": []}
+
+    def _fake_upsert(db, **kwargs):  # noqa: ANN001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=51, content_md=kwargs["content_md"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "replace_document_chunks",
+        lambda *args, **kwargs: 1,
+    )
+
+    session = _DummySession()
+    count = memory_service.upsert_preference_documents_from_input(
+        session,
+        user_id=2,
+        user_text="永远记住，你叫hh",
+        source_thread_id="thread-xy",
+        source_message_id=5010,
+    )
+
+    assert count == 1
+    assert session.commit_called is True
+    assert captured["upserts"][0]["doc_kind"] == "preference"
+    assert captured["upserts"][0]["doc_key"] == "global:assistant.persona"
+    assert captured["upserts"][0]["summary_md"] == "hh"
+
+
+def test_upsert_preference_documents_from_input_should_persist_user_display_name(monkeypatch):
+    """命中“我叫”时应写入用户称呼 preference 文档。"""
+
+    captured = {"upserts": []}
+
+    def _fake_upsert(db, **kwargs):  # noqa: ANN001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=52, content_md=kwargs["content_md"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "replace_document_chunks",
+        lambda *args, **kwargs: 1,
+    )
+
+    session = _DummySession()
+    count = memory_service.upsert_preference_documents_from_input(
+        session,
+        user_id=2,
+        user_text="请永远记住，我叫jjk",
+        source_thread_id="thread-xy",
+        source_message_id=5011,
+    )
+
+    assert count == 1
+    assert session.commit_called is True
+    assert captured["upserts"][0]["doc_kind"] == "preference"
+    assert captured["upserts"][0]["doc_key"] == "global:user.display_name"
+    assert captured["upserts"][0]["summary_md"] == "jjk"
 
 
 def test_split_document_to_chunks_should_strip_source_metadata_lines():

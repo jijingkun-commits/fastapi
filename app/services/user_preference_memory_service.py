@@ -31,10 +31,13 @@ class PreferenceMemoryCandidate:
     confidence: Decimal
 
 
-_TRIGGER_PATTERN = re.compile(r"(记住|默认|以后都|之后都|请始终|都用|一直)")
+_TRIGGER_PATTERN = re.compile(r"(记住|默认|以后都|之后都|请始终|都用|一直|永远|总是)")
 _PERSONA_LABEL_PATTERN = re.compile(r"AI人设\s*[:：]\s*([^\n，。！？；;]{1,40})")
 _PERSONA_NAME_PATTERN = re.compile(
     r"(?:你叫|你以后叫|以后都叫你|自称|叫你|称呼你为|把你叫做)\s*[\"“'‘]?\s*([\u4e00-\u9fa5A-Za-z0-9_-]{1,24})\s*[\"”'’]?"
+)
+_USER_DISPLAY_NAME_PATTERN = re.compile(
+    r"(?:我叫|我的名字(?:是)?|可以叫我|叫我|称呼我(?:为)?|你可以叫我)\s*[\"“'‘]?\s*([\u4e00-\u9fa5A-Za-z0-9_-]{1,24})\s*[\"”'’]?"
 )
 
 _DISPLAY_MAPPING = {
@@ -68,6 +71,10 @@ _DISPLAY_MAPPING = {
     },
     "assistant.persona": {
         "label": "AI人设",
+        "values": {},
+    },
+    "user.display_name": {
+        "label": "用户称呼",
         "values": {},
     },
 }
@@ -108,7 +115,7 @@ def _normalize_persona_value(raw: str) -> str:
 def _normalize_controlled_memory_value(memory_key: str, raw_value: Any) -> str:
     """归一化受控记忆值。"""
 
-    if memory_key == "assistant.persona":
+    if memory_key in {"assistant.persona", "user.display_name"}:
         return _normalize_persona_value(str(raw_value or ""))
 
     mapping = _DISPLAY_MAPPING.get(memory_key)
@@ -260,6 +267,18 @@ def extract_explicit_preference_candidates(user_text: str) -> list[PreferenceMem
             memory_key="assistant.persona",
             memory_value=persona,
             confidence=Decimal("0.920"),
+        )
+
+    user_display_name_raw = ""
+    user_display_name_match = _USER_DISPLAY_NAME_PATTERN.search(text)
+    if user_display_name_match:
+        user_display_name_raw = user_display_name_match.group(1)
+    user_display_name = _normalize_persona_value(user_display_name_raw)
+    if user_display_name:
+        candidates["user.display_name"] = PreferenceMemoryCandidate(
+            memory_key="user.display_name",
+            memory_value=user_display_name,
+            confidence=Decimal("0.910"),
         )
 
     return list(candidates.values())

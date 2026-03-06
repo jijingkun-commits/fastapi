@@ -35,9 +35,9 @@
 | 层级 | 归属模块 | 本轮变更 | 禁止越层 |
 |------|---------|---------|---------|
 | 触发层 | OpenClaw hooks/cron | 调整触发策略与鉴权基线 | 禁止在业务代码中散落触发策略 |
-| 编排层 | `scripts/coder4_bootstrap_kernel.py` | 本地模式、状态迁移、推进触发 | 禁止在 shell 脚本中复制决策逻辑 |
-| 执行层 | `scripts/wt-flow.sh` | worktree 生命周期与 gate 校验 | 禁止回写业务状态到 VK 作为真理源 |
-| 状态层 | `.omc/state/*` | state/attempt/ledger 收敛 | 禁止引入第四套主状态源 |
+| 编排层 | `scripts/coder4/coder4_bootstrap_kernel.py` | 本地模式、状态迁移、推进触发 | 禁止在 shell 脚本中复制决策逻辑 |
+| 执行层 | `scripts/coder4/wt-flow.sh` | worktree 生命周期与 gate 校验 | 禁止回写业务状态到 VK 作为真理源 |
+| 状态层 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/*` | state/attempt/ledger 收敛 | 禁止引入第四套主状态源 |
 | 展示层 | VK 同步 | 只读异步推送 | 禁止让 VK 推送结果反向驱动执行 |
 
 ### 1.2 状态契约
@@ -47,8 +47,8 @@
 | `task_key` | 当前任务唯一标识 | `_active_task.json` > `task-runner-state.json` | 任务启动写入，任务结束归档 |
 | `card_order` | 卡片顺序与硬依赖范围 | `vk_cards.json` > `task-runner-state.json` | 计划冻结后只允许增量扩展 |
 | `card_status_map/card_status` | 卡片运行态 | `task-runner-state.json` | 每轮执行读写，任务完成归档 |
-| `attempt_*` | 单轮执行证据 | `.omc/state/attempts/<task_key>/` | 每轮新增，按保留策略清理 |
-| `ledger` | 阶段性可审计台账 | `.omc/state/task-ledger.jsonl` | 全流程追加，禁止覆盖 |
+| `attempt_*` | 单轮执行证据 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/<task_key>/` | 每轮新增，按保留策略清理 |
+| `ledger` | 阶段性可审计台账 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl` | 全流程追加，禁止覆盖 |
 
 ### 1.3 路由闭环
 
@@ -134,13 +134,13 @@ test_strategy:
 | feature_id | 目标与边界 | 代码锚点 | 回滚锚点 |
 |-----------|-----------|---------|---------|
 | P0-01 | hooks 本地安全基线（监听、token、权限） | `~/.openclaw-dev/openclaw.json`, `scripts/coder4_watchdog.py` | 恢复上一个 openclaw 配置快照 |
-| P0-02 | 触发互斥锁 + 幂等键防重复执行 | `scripts/coder4_bootstrap_kernel.py` | 关闭幂等扩展分支并恢复旧执行路径 |
-| P1-01 | `task-runner-state.json` 原子写 + 锁 | `scripts/coder4_bootstrap_kernel.py` | 使用 `.bak` 恢复 state |
-| P1-02 | kernel 本地模式收口（读本地状态、完成后 wake） | `scripts/coder4_bootstrap_kernel.py` | 切回旧参数并暂停自动推进 |
-| P1-03 | wt-flow 扩展 + done_gate 命令白名单 | `scripts/wt-flow.sh` | 回退到仅 create/merge/cleanup 版本 |
-| P1-04 | attempt/ledger 本地化与清理策略 | `.omc/state/attempts/`, `.omc/state/task-ledger.jsonl` | 停止清理并恢复归档快照 |
+| P0-02 | 触发互斥锁 + 幂等键防重复执行 | `scripts/coder4/coder4_bootstrap_kernel.py` | 关闭幂等扩展分支并恢复旧执行路径 |
+| P1-01 | `task-runner-state.json` 原子写 + 锁 | `scripts/coder4/coder4_bootstrap_kernel.py` | 使用 `.bak` 恢复 state |
+| P1-02 | kernel 本地模式收口（读本地状态、完成后 wake） | `scripts/coder4/coder4_bootstrap_kernel.py` | 切回旧参数并暂停自动推进 |
+| P1-03 | wt-flow 扩展 + done_gate 命令白名单 | `scripts/coder4/wt-flow.sh` | 回退到仅 create/merge/cleanup 版本 |
+| P1-04 | attempt/ledger 本地化与清理策略 | `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/`, `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl` | 停止清理并恢复归档快照 |
 | P2-01 | 3000 payload 迁移与仓外规则重写 | `WORKFLOW_AUTO.md`, `VK_AGENT_PROMPTS.md` | 恢复仓外备份 |
-| P3-01 | VK 只读同步与定时全量对账 | `scripts/coder4_vk_sync.py` | 禁用同步任务，仅保留本地运行 |
+| P3-01 | VK 只读同步与定时全量对账 | `scripts/coder4/coder4_vk_sync.py` | 禁用同步任务，仅保留本地运行 |
 | G-1 | 安全门禁闭环 | Ch15/Ch17 + hooks 验证脚本 | 失败即 No-Go |
 | G-2 | 执行链路闭环门禁 | kernel + wt-flow + done_gate | 失败即冻结推进 |
 | G-3 | 迁移一致性门禁 | payload 31 项迁移清单 | 失败即回退到 `/jjk-plan` |
@@ -171,7 +171,7 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 - 目标与边界：并发触发场景下最多一次有效执行。
 - 触发条件与状态流转：收到触发 -> 获取 run lock -> 校验幂等键 -> 执行或跳过。
-- 代码锚点：`scripts/coder4_bootstrap_kernel.py`。
+- 代码锚点：`scripts/coder4/coder4_bootstrap_kernel.py`。
 - 关键契约字段：`coder4-run.lock`、`idempotency_key`、`SKIP_DUPLICATE_EVENT`。
 - 回滚锚点：关闭幂等判定逻辑并恢复旧触发节奏。
 - 验证命令：见 `T-02`。
@@ -188,7 +188,7 @@ def should_execute(event_key: str, lock_path: Path) -> bool:
 
 - 目标与边界：状态文件在中断与并发下仍保持可恢复。
 - 触发条件与状态流转：状态更新 -> 写临时文件 -> `os.replace` -> 更新完成。
-- 代码锚点：`scripts/coder4_bootstrap_kernel.py`。
+- 代码锚点：`scripts/coder4/coder4_bootstrap_kernel.py`。
 - 关键契约字段：`schema_version`、`task_key`、`card_status_map`。
 - 回滚锚点：恢复 `.json.bak`。
 - 验证命令：见 `T-03`。
@@ -205,39 +205,39 @@ def atomic_write(path: Path, payload: dict) -> None:
 
 - 目标与边界：去除执行路径对 VK 读取依赖，推进后自动触发下一轮。
 - 触发条件与状态流转：`load_context(local)` -> `decide_action` -> `apply_action` -> `trigger_next_round`。
-- 代码锚点：`scripts/coder4_bootstrap_kernel.py`。
+- 代码锚点：`scripts/coder4/coder4_bootstrap_kernel.py`。
 - 关键契约字段：`--local-mode`、`state_file`、`last_action_result`。
 - 回滚锚点：禁用自动 wake，恢复手动触发。
 - 验证命令：见 `T-04`。
 - 来源证据：SRC-01 Ch5。
 
 ```bash
-python3 scripts/coder4_bootstrap_kernel.py \
+python3 scripts/coder4/coder4_bootstrap_kernel.py \
   --local-mode --apply-bootstrap \
-  --active-task docs/内部参考/任务拆解/_active_task.json
+  --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
 ```
 
 #### P1-03 wt-flow 扩展与 done_gate 白名单
 
 - 目标与边界：新增 `next/verify/list` 并确保验证命令可控。
 - 触发条件与状态流转：next 选卡 -> verify 验收 -> merge/cleanup。
-- 代码锚点：`scripts/wt-flow.sh`。
+- 代码锚点：`scripts/coder4/wt-flow.sh`。
 - 关键契约字段：`ALLOWED_PREFIXES`、`execution_mode`。
 - 回滚锚点：回退到旧脚本版本。
 - 验证命令：见 `T-05`。
 - 来源证据：SRC-01 Ch6。
 
 ```bash
-bash scripts/wt-flow.sh next
-bash scripts/wt-flow.sh verify C01
-bash scripts/wt-flow.sh list
+bash scripts/coder4/wt-flow.sh next
+bash scripts/coder4/wt-flow.sh verify C01
+bash scripts/coder4/wt-flow.sh list
 ```
 
 #### P1-04 attempt/ledger 本地化
 
 - 目标与边界：每次执行都有结构化证据与可追溯台账。
 - 触发条件与状态流转：dispatch 开始创建 attempt -> gate 后写结果 -> ledger 追加。
-- 代码锚点：`.omc/state/attempts/`、`.omc/state/task-ledger.jsonl`。
+- 代码锚点：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/`、`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl`。
 - 关键契约字段：`attempt_id`、`worktree_path`、`commit_sha`。
 - 回滚锚点：恢复最近归档目录。
 - 验证命令：见 `T-06`。
@@ -271,7 +271,7 @@ python3 scripts/docs_guard.py --strict
 
 - 目标与边界：VK 仅做展示层，推送失败不阻断执行。
 - 触发条件与状态流转：状态变更 -> 异步同步 -> 定时全量校验。
-- 代码锚点：`scripts/coder4_vk_sync.py`。
+- 代码锚点：`scripts/coder4/coder4_vk_sync.py`。
 - 关键契约字段：`sync_result`、`last_sync_at`。
 - 回滚锚点：禁用同步脚本与定时任务。
 - 验证命令：见 `T-08`。
@@ -309,8 +309,8 @@ python3 scripts/docs_guard.py --strict && echo "G-1 PASS"
 - 来源证据：SRC-02 Phase Exit Gate。
 
 ```bash
-bash scripts/wt-flow.sh list
-python3 scripts/coder4_bootstrap_kernel.py --local-mode
+bash scripts/coder4/wt-flow.sh list
+python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode
 ```
 
 #### G-3 迁移一致性门禁
@@ -367,69 +367,69 @@ implementation_tasks:
     feature_id: P0-02
     phase: P0
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     symbols:
       - with_run_lock
       - should_skip_duplicate
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --help
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --help
     rollback_point: 暂时关闭互斥幂等逻辑并回退到单触发入口
 
   - task_id: T-03
     feature_id: P1-01
     phase: P1
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     symbols:
       - atomic_write_json
       - load_local_state
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     rollback_point: 使用 task-runner-state.json.bak 回滚
 
   - task_id: T-04
     feature_id: P1-02
     phase: P1
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     symbols:
       - build_kernel_context
       - apply_action
     change_type: modify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     rollback_point: 停用自动 wake，仅保留手工触发
 
   - task_id: T-05
     feature_id: P1-03
     phase: P1
     file_paths:
-      - scripts/wt-flow.sh
+      - scripts/coder4/wt-flow.sh
     symbols:
       - cmd_next
       - cmd_verify
       - cmd_list
     change_type: modify
     acceptance_cmds:
-      - bash scripts/wt-flow.sh status
-      - bash scripts/wt-flow.sh guard
+      - bash scripts/coder4/wt-flow.sh status
+      - bash scripts/coder4/wt-flow.sh guard
     rollback_point: 回退到仅 create/merge/cleanup 版本
 
   - task_id: T-06
     feature_id: P1-04
     phase: P1
     file_paths:
-      - .omc/state/attempts/
-      - .omc/state/task-ledger.jsonl
+      - docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json::gate_results/merge_results/
+      - docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl
     symbols:
       - create_attempt
       - record_attempt_evidence
     change_type: add
     acceptance_cmds:
-      - test -d .omc/state/attempts || true
-      - test -f .omc/state/task-ledger.jsonl || true
+      - test -f docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json || true
+      - test -f docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl || true
     rollback_point: 从最近 archive 恢复 attempts 与 ledger
 
   - task_id: T-07
@@ -451,13 +451,13 @@ implementation_tasks:
     feature_id: P3-01
     phase: P3
     file_paths:
-      - scripts/coder4_vk_sync.py
+      - scripts/coder4/coder4_vk_sync.py
     symbols:
       - sync_to_vk
       - sync_all_cards
     change_type: add
     acceptance_cmds:
-      - python3 scripts/coder4_vk_sync.py --dry-run
+      - python3 scripts/coder4/coder4_vk_sync.py --dry-run
     rollback_point: 禁用 VK 同步定时任务与 hooks 后置同步
 
   - task_id: T-09
@@ -478,14 +478,14 @@ implementation_tasks:
     feature_id: G-2
     phase: Gate
     file_paths:
-      - scripts/coder4_bootstrap_kernel.py
-      - scripts/wt-flow.sh
+      - scripts/coder4/coder4_bootstrap_kernel.py
+      - scripts/coder4/wt-flow.sh
     symbols:
       - decide_action
       - verify_done_gate
     change_type: verify
     acceptance_cmds:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     rollback_point: 失败后冻结推进并保留当前 worktree
 
   - task_id: T-11
@@ -543,10 +543,10 @@ card_seed:
     hard_depends_on: [C00]
     soft_depends_on: []
     file_scope:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     owner_fields: [backend]
     check_cmd:
-      - python3 scripts/coder4_bootstrap_kernel.py --help
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --help
     done_gate:
       - 并发触发场景仅一次有效执行
 
@@ -556,10 +556,10 @@ card_seed:
     hard_depends_on: [C01]
     soft_depends_on: []
     file_scope:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     owner_fields: [backend]
     check_cmd:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     done_gate:
       - state 写入中断可恢复
 
@@ -569,10 +569,10 @@ card_seed:
     hard_depends_on: [C02]
     soft_depends_on: []
     file_scope:
-      - scripts/coder4_bootstrap_kernel.py
+      - scripts/coder4/coder4_bootstrap_kernel.py
     owner_fields: [backend]
     check_cmd:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     done_gate:
       - 本地模式闭环可运行
 
@@ -582,10 +582,10 @@ card_seed:
     hard_depends_on: [C03]
     soft_depends_on: []
     file_scope:
-      - scripts/wt-flow.sh
+      - scripts/coder4/wt-flow.sh
     owner_fields: [backend]
     check_cmd:
-      - bash scripts/wt-flow.sh status
+      - bash scripts/coder4/wt-flow.sh status
     done_gate:
       - next/verify/list 命令可用
 
@@ -595,10 +595,10 @@ card_seed:
     hard_depends_on: [C04]
     soft_depends_on: []
     file_scope:
-      - .omc/state/
+      - docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/
     owner_fields: [backend]
     check_cmd:
-      - test -d .omc/state/attempts || true
+      - test -f docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json || true
     done_gate:
       - attempt 与 ledger 均可写入
 
@@ -623,10 +623,10 @@ card_seed:
     hard_depends_on: [C06]
     soft_depends_on: []
     file_scope:
-      - scripts/coder4_vk_sync.py
+      - scripts/coder4/coder4_vk_sync.py
     owner_fields: [backend]
     check_cmd:
-      - python3 scripts/coder4_vk_sync.py --dry-run
+      - python3 scripts/coder4/coder4_vk_sync.py --dry-run
     done_gate:
       - VK 断连不阻断主链路
 
@@ -649,11 +649,11 @@ card_seed:
     hard_depends_on: [G01]
     soft_depends_on: []
     file_scope:
-      - scripts/coder4_bootstrap_kernel.py
-      - scripts/wt-flow.sh
+      - scripts/coder4/coder4_bootstrap_kernel.py
+      - scripts/coder4/wt-flow.sh
     owner_fields: [backend]
     check_cmd:
-      - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+      - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
     done_gate:
       - seed->done 闭环验证通过
 
@@ -732,7 +732,7 @@ planning_contract:
         - 并发触发仅一次有效执行
         - 重复事件命中 SKIP_DUPLICATE_EVENT
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --help
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --help
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md
 
     - card_id: C02
@@ -746,7 +746,7 @@ planning_contract:
         - state 原子写通过中断测试
         - schema 与锁机制校验通过
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md
 
     - card_id: C03
@@ -760,7 +760,7 @@ planning_contract:
         - load_context 不依赖 VK 读取
         - 触发下一轮 wake 生效
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/_active_task.json
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md
 
     - card_id: C04
@@ -774,8 +774,8 @@ planning_contract:
         - next/verify/list 可用
         - 主仓 dirty fail-fast 生效
       acceptance_checks:
-        - bash scripts/wt-flow.sh status
-        - bash scripts/wt-flow.sh guard
+        - bash scripts/coder4/wt-flow.sh status
+        - bash scripts/coder4/wt-flow.sh guard
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md
 
     - card_id: C05
@@ -788,8 +788,8 @@ planning_contract:
       done_gate:
         - attempts 与 ledger 均可写入并可追溯
       acceptance_checks:
-        - test -d .omc/state/attempts || true
-        - test -f .omc/state/task-ledger.jsonl || true
+        - test -f docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json || true
+        - test -f docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-ledger.jsonl || true
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md
 
     - card_id: C06
@@ -816,7 +816,7 @@ planning_contract:
       done_gate:
         - VK 不可用不阻断主链路
       acceptance_checks:
-        - python3 scripts/coder4_vk_sync.py --dry-run
+        - python3 scripts/coder4/coder4_vk_sync.py --dry-run
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_主机方案_implementation_plan.md
 
     - card_id: G01
@@ -842,7 +842,7 @@ planning_contract:
       done_gate:
         - seed->done 闭环通过
       acceptance_checks:
-        - python3 scripts/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/_active_task.json
+        - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task docs/内部参考/任务拆解/<task_split_dir>/_active_task.json
       evidence_entry: docs/内部参考/迭代需求/自动化大型任务开发_全量打钩板清单.md
 
     - card_id: G03
@@ -906,4 +906,3 @@ implementation_readiness:
     - DESIGN_APPROVAL_FALLBACK_ACK 已记录，后续需补齐 docs/plans 审批归档
     - SUPERPOWERS_ARTIFACT_UNALIGNED 已记录，不阻断当前规划落地
 ```
-

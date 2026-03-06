@@ -12,48 +12,18 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 > **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
-
-1. `test-driven-development`：提供“先定义行为约束，再重构实现”的方法。
-2. `systematic-debugging`：重构引入异常时用于根因定位。
-3. `verification-before-completion`：提供完成前证据校验机制。
-4. `team`（OMX）：大范围重构并行拆分与汇总。
-5. `$jjk-refactor`：负责输入追溯校验、等价性约束、重构执行与报告沉淀。
-
-约束：
-
-1. 禁止在 `$jjk-refactor` 复制上游 skill 正文；仅保留调用契约与本地增强。
-2. 禁止把 `$jjk-team-refactor` 作为主入口，统一由 `$jjk-refactor` 按规模自动升级 Team。
-3. 禁止把“需求变更/新功能”伪装成重构提交。
-
 ## 跨 IDE 调用方式
-
-1. Cursor / Claude Code：`$jjk-refactor`
-2. Codex：`$jjk-refactor`
-
-> 说明：Codex 推荐显式调用 `$jjk-refactor`。
-
 ## 模板来源优先级（跨项目，强制）
 
 `$jjk-refactor` 的模板按以下优先级读取：
 
 1. 全局共享模板（默认主模板）：
-   `/Users/jijingkun/.codex/engineering/templates/jjk_refactor_templates.md`
+   `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_refactor_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
    `docs/内部参考/迭代需求/_templates/jjk_refactor_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 `GLOBAL_TEMPLATE_MISSING` 属于全局预检失败标记，可与命令级 `FAIL_FAST` 标记并存。
-
-## 何时使用
-
-| 场景 | 推荐命令 |
-|---|---|
-| 代码可读性/可维护性差，需要结构性改造 | `$jjk-refactor` ✅ |
-| 已明确是功能缺陷修复 | `$jjk-debug` |
-| 需要新增业务能力 | `$jjk-imp` 或 `$jjk-feature` |
-| 重构后给最终验收结论 | `$jjk-verify` |
-
----
 
 ## 输入前置（强制）
 
@@ -95,7 +65,7 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 1. **有 Team 能力时**：按模块/异味类型并行拆分重构，Leader 汇总统一报告。
 2. **无 Team 能力时**：降级单代理执行，并输出 `TEAM_UNAVAILABLE_FALLBACK`。
 
-### 0.6) Team 交叉质检约束（新增，强制）
+### 0.6) Team 交叉质检约束
 
 1. Team 模式下，每个成员提交阶段结果后，必须由另一名成员执行反方审查，至少包含：`1` 个质疑点、`1` 条验证命令、`1` 个通过/驳回结论。
 2. `2` 人任务执行双向互审；`3+` 人任务执行环形互审（A 审 B，B 审 C，...，最后一人审 A）。
@@ -145,7 +115,7 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 
 ## 输出模板（推荐）
 
-见全局模板：`/Users/jijingkun/.codex/engineering/templates/jjk_refactor_templates.md`（`输出模板` 段）。
+见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_refactor_templates.md`（`输出模板` 段）。
 若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_refactor_templates.md`。
 
 ## 禁止项（强制）
