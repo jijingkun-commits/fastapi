@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -14,6 +16,105 @@ from typing import Any, Callable, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
+USAGE_LOG_PATH = ROOT / "logs" / "workflow-gate-usage.jsonl"
+USAGE_OBSERVED_MODES = {"clarify_plan", "clarify_consistency", "plan_vk_coverage", "gate_contract", "integration_gate"}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _resolve_jsonl_path(raw_path: str | None, *, default_path: Path) -> Path:
+    if not raw_path:
+        return default_path
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path.resolve()
+
+
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def usage_record_schema_v1(*, mode: str, caller: str, exit_code: int, log_path: Path | None = None) -> dict[str, Any]:
+    resolved_log_path = (log_path or USAGE_LOG_PATH).resolve()
+    return {
+        "schema_version": "usage_record_schema_v1",
+        "record_type": "usage_event",
+        "recorded_at": _utc_now_iso(),
+        "mode": mode,
+        "caller": caller,
+        "legacy_entry": caller.startswith("legacy:"),
+        "ok": exit_code == 0,
+        "exit_code": exit_code,
+        "log_path": str(resolved_log_path),
+    }
+
+
+def emit_usage_log(*, mode: str, caller: str, exit_code: int, log_path: Path | None = None) -> dict[str, Any]:
+    resolved_log_path = (log_path or USAGE_LOG_PATH).resolve()
+    record = usage_record_schema_v1(mode=mode, caller=caller, exit_code=exit_code, log_path=resolved_log_path)
+    _append_jsonl(resolved_log_path, record)
+    return record
+
+
+def aggregate_usage_window(window_days: int, *, log_path: Path | None = None) -> dict[str, Any]:
+    resolved_log_path = (log_path or USAGE_LOG_PATH).resolve()
+    resolved_log_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_log_path.touch(exist_ok=True)
+
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events: list[dict[str, Any]] = []
+    per_mode: dict[str, int] = {}
+    legacy_calls = 0
+    total_calls = 0
+
+    for line in resolved_log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("record_type") != "usage_event":
+            continue
+        recorded_at_raw = str(payload.get("recorded_at") or "").strip()
+        if not recorded_at_raw:
+            continue
+        try:
+            recorded_at = datetime.fromisoformat(recorded_at_raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if recorded_at < cutoff:
+            continue
+        total_calls += 1
+        mode = str(payload.get("mode") or "unknown").strip()
+        per_mode[mode] = per_mode.get(mode, 0) + 1
+        if bool(payload.get("legacy_entry")):
+            legacy_calls += 1
+        events.append(payload)
+
+    return {
+        "ok": True,
+        "window_days": window_days,
+        "log_path": str(resolved_log_path),
+        "summary": {
+            "total_calls": total_calls,
+            "legacy_calls": legacy_calls,
+            "unified_entry_calls": total_calls - legacy_calls,
+            "zero_call_window_met": legacy_calls == 0,
+            "per_mode": dict(sorted(per_mode.items())),
+        },
+        "events": events,
+    }
 
 
 @dataclass(frozen=True)
@@ -378,6 +479,18 @@ def _run_legacy_wrapper_compat(passthrough_args: Sequence[str]) -> int:
     return 0 if all_ok else 1
 
 
+def _run_usage_report(passthrough_args: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description="旧入口调用观测报告")
+    parser.add_argument("--window-days", type=int, default=7, help="统计窗口（天）")
+    parser.add_argument("--output", default=str(USAGE_LOG_PATH.relative_to(ROOT)), help="usage jsonl 路径")
+    args = parser.parse_args(list(passthrough_args))
+
+    log_path = _resolve_jsonl_path(args.output, default_path=USAGE_LOG_PATH)
+    payload = aggregate_usage_window(args.window_days, log_path=log_path)
+    print(_serialize(payload))
+    return 0
+
+
 MODE_REGISTRY: dict[str, ModeSpec] = {
     "clarify_plan": ModeSpec(
         mode="clarify_plan",
@@ -412,8 +525,7 @@ MODE_REGISTRY: dict[str, ModeSpec] = {
     "usage-report": ModeSpec(
         mode="usage-report",
         description="旧入口调用观测报告",
-        available=False,
-        planned_card="C05",
+        runner=_run_usage_report,
     ),
     "ttl-audit": ModeSpec(
         mode="ttl-audit",
@@ -457,23 +569,30 @@ def run_mode(mode: str, passthrough_args: Sequence[str]) -> int:
         return 2
 
     if spec.runner is not None:
-        return spec.runner(passthrough_args)
-
-    if spec.available and spec.script:
-        return _run_subprocess(spec.script, passthrough_args)
-
-    _emit_payload(
-        {
-            "ok": False,
-            "mode": normalized_mode,
-            "error": {
-                "code": "WORKFLOW_CONTRACT_MODE_NOT_READY",
-                "message": f"mode={normalized_mode} 计划在 {spec.planned_card or '后续卡片'} 实现",
+        exit_code = spec.runner(passthrough_args)
+    elif spec.available and spec.script:
+        exit_code = _run_subprocess(spec.script, passthrough_args)
+    else:
+        _emit_payload(
+            {
+                "ok": False,
+                "mode": normalized_mode,
+                "error": {
+                    "code": "WORKFLOW_CONTRACT_MODE_NOT_READY",
+                    "message": f"mode={normalized_mode} 计划在 {spec.planned_card or '后续卡片'} 实现",
+                },
             },
-        },
-        output_target,
-    )
-    return 3
+            output_target,
+        )
+        return 3
+
+    if normalized_mode in USAGE_OBSERVED_MODES:
+        emit_usage_log(
+            mode=normalized_mode,
+            caller=os.environ.get("WORKFLOW_GATE_CALLER", "unified_entry"),
+            exit_code=exit_code,
+        )
+    return exit_code
 
 
 def main(argv: Sequence[str] | None = None) -> int:
