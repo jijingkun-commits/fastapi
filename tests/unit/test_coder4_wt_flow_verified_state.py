@@ -200,3 +200,137 @@ def test_wt_flow_merge_requires_verified_state_not_done(tmp_path: Path):
     assert result.returncode != 0
     assert "当前状态=done" in result.stderr
     assert "verified" in result.stderr
+
+
+
+def test_wt_flow_merge_from_card_worktree_uses_common_repo_driver(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "verified", "C02": "todo"},
+        },
+    )
+
+    sanitized = _sanitize_task_key_segment(TASK_KEY)
+    session_id = "session-merge-common-root"
+    branch = f"feature/{sanitized}/C01/{session_id}"
+    worktree_path = tmp_path / ".worktrees" / sanitized / "C01" / session_id
+    subprocess.run(
+        ["git", "worktree", "add", "-b", branch, str(worktree_path), "master"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    readme_path = worktree_path / "README.md"
+    readme_path.write_text("# fixture\nfeature merge change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=worktree_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "feature merge change"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+    )
+    _write_json(
+        task_state_root / f"active-session-{session_id}.json",
+        {
+            "branch": branch,
+            "worktree": str(worktree_path),
+            "base_branch": "master",
+            "task_key": TASK_KEY,
+            "session_id": session_id,
+        },
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path), "merge", "--no-cleanup", f"--state-dir={task_state_root.parent}"],
+        cwd=worktree_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+            "WT_FLOW_SESSION_ID": session_id,
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "feature merge change" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state_payload["card_status_map"]["C01"] == "done"
+    assert state_payload["merge_results"]["C01"]["merged"] is True
+    assert state_payload["merge_results"]["C01"]["branch"] == branch
+
+
+
+def test_wt_flow_merge_from_card_worktree_cleans_up_with_common_repo_driver(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "verified", "C02": "todo"},
+        },
+    )
+
+    sanitized = _sanitize_task_key_segment(TASK_KEY)
+    session_id = "session-merge-cleanup"
+    branch = f"feature/{sanitized}/C01/{session_id}"
+    worktree_path = tmp_path / ".worktrees" / sanitized / "C01" / session_id
+    subprocess.run(
+        ["git", "worktree", "add", "-b", branch, str(worktree_path), "master"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (worktree_path / "README.md").write_text("# fixture\ncleanup merge change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=worktree_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "cleanup merge change"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+    )
+    session_file = task_state_root / f"active-session-{session_id}.json"
+    _write_json(
+        session_file,
+        {
+            "branch": branch,
+            "worktree": str(worktree_path),
+            "base_branch": "master",
+            "task_key": TASK_KEY,
+            "session_id": session_id,
+        },
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path), "merge", f"--state-dir={task_state_root.parent}"],
+        cwd=worktree_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+            "WT_FLOW_SESSION_ID": session_id,
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not worktree_path.exists()
+    assert not session_file.exists()
+    branch_exists = subprocess.run(
+        ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert branch_exists.returncode != 0
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state_payload["card_status_map"]["C01"] == "done"

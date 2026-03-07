@@ -4,6 +4,8 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-07｜聊天控制面恢复/终止语义冻结（ACTIVE）→ `docs/API文档/接口文档.md`
+- 2026-03-07｜DB 驱动渐进式 Skill Loader Phase A 冻结（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-05｜规则分层落地（ACTIVE）→ `AGENTS.md`
 - 2026-03-06｜MCP 权威配置收敛（ACTIVE）→ `docs/plans/2026-03-06-mcp-governance-design.md`
 - 2026-03-06｜复合提问多模态响应契约收敛（ACTIVE）→ `docs/plans/2026-03-06-composite-query-multimodal-response-design.md`
@@ -11,6 +13,7 @@
 - 2026-03-07｜`/ask` 退化为 clarify 兼容壳（ACTIVE）→ `.cursor/commands/ask.md`
 - 2026-03-06｜cardrun 默认执行器切换至 wtimp（ACTIVE）→ `docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`
 - 2026-03-06｜工程减法退役流程冻结（ACTIVE）→ `docs/plans/2026-03-06-workflow-gate-retirement-design.md`
+- 2026-03-07｜wt-flow merge 统一收口到 common repo（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
 
 ## 记录模板
 - 日期：YYYY-MM-DD
@@ -30,6 +33,26 @@
 - 历史记录按月归档至 `docs/内部参考/决策归档/`，本文件保留近期生效与关键里程碑。
 
 ## 决策记录
+
+### 2026-03-07 DB 驱动渐进式 Skill Loader Phase A 冻结
+- 状态：ACTIVE
+- 决策主题：Skill 运行时收敛到 progressive loader，Phase A 的 schema 真理源、会话态与 canonical replay 一次冻结
+- 背景与问题：当前聊天主链仍依赖 hybrid 检索后静默注入 `skill_context`，导致命中决策、状态归属与回放语义散落；同时 catalog metadata 若继续落在 `t_agent_skills` 兼容表，会形成双真理源
+- 最终决策：聊天主路径统一为 `catalog preload -> load_skills -> additional_kwargs.skill_runtime`；catalog/runtime metadata 真理源固定为 `t_agent_skill_definitions + t_agent_skill_versions`；Phase A 持久化字段最小集冻结为 `catalog_path/catalog_order/catalog_description/when_to_use`
+- 取舍理由：先在正确层级消除“后端替模型选 Skill + 双源 metadata + replay 不可还原”的结构性问题，再按需演进目录树与资源包能力
+- 影响范围：`app/services/skill_service.py`、`app/ai/workflow/multi_agent_graph.py`、`app/ai/state.py`、`app/ai/protocol.py`、`app/models/agent_skill.py`、`app/api/v1/endpoints/skill_admin_api.py`、`alembic/versions/*`
+- 回退/失效条件：若仅靠 `catalog_path` 派生无法满足权限/排序/运营配置，可升级到 Phase B 增加层级字段或资源表；回退时关闭 `feature.enable_progressive_skill_loading` 并切回 `skill.runtime_mode=hybrid_rag`
+- 关联文档/代码：`docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
+
+### 2026-03-07 聊天控制面恢复/终止语义冻结
+- 状态：ACTIVE
+- 决策主题：`interrupt/resume/cancel/disconnect` 与普通聊天消息彻底分离，恢复旧 run 只能走控制面
+- 背景与问题：用户在流式处理中遇到中断、断流或网关报错时，容易把“继续”“你刚刚中断了”作为普通消息发送，导致控制动作与新用户意图混杂，放大旧瞬态状态污染风险
+- 最终决策：`interrupt` 后只能调用 `POST /api/v1/chat/resume`；`cancel/stopped` 属于终态，不允许 resume；`disconnect/transport error` 不得被翻译成聊天文本“继续”，应等待当前 run 收口或先 cancel 再重发；同线程历史继续保留，但当前轮只处理最后一条 `HumanMessage`
+- 取舍理由：优先保持控制面与意图层职责单一，避免通过自然语言兼容层掩盖状态机问题，也避免把半成品 AI 回复当最终历史展示
+- 影响范围：聊天前端状态机、`app/services/chat_service.py`、`app/services/run_control_service.py`、`app/ai/workflow/multi_agent_graph.py`、`app/repositories/chat_repo.py`、聊天 API/架构文档
+- 回退/失效条件：若后续引入显式 reconnect/reset-checkpoint 能力，并把瞬态状态改为真正非持久化字段，可重新评估“断流后直接续跑/重发”的交互口径
+- 关联文档/代码：`docs/API文档/接口文档.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/services/chat_service.py`、`app/ai/workflow/multi_agent_graph.py`
 
 ### 2026-03-06 MCP 权威配置收敛
 - 状态：ACTIVE
@@ -110,6 +133,17 @@
 - 影响范围：`scripts/coder4/coder4_bootstrap_kernel.py`、`.cursor/commands/jjk-cardrun.md`、`.cursor/commands/jjk-wtimp.md`、`.cursor/commands/jjk-vkplan.md`、`.cursor/commands/jjk-create-pr.md` 及对应 skills
 - 回退/失效条件：若 `wtimp` 执行链异常，可通过 `--dispatch-executor`/`CODER4_DISPATCH_EXECUTOR` 临时切回兼容执行器；若后续出现统一执行编排器，应将本决策升级为平台级执行契约
 - 关联文档/代码：`docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md`
+
+
+### 2026-03-07 wt-flow merge 统一收口到 common repo
+- 状态：ACTIVE
+- 决策主题：`wt-flow merge` 的基线分支合并上下文固定归属 `common repo root`，不再依赖当前 card worktree checkout
+- 背景与问题：当前 `cmd_merge` 在 card worktree 内执行时，会把当前 checkout 当成 merge 驱动仓并尝试 `git checkout master`；当 `master` 已被主工作区占用时，Git 会直接报 `already used by worktree`，导致已 verified 的卡片无法在原位完成 merge
+- 最终决策：保留 `rebase` 在 card worktree 执行，但把 `dirty policy`、`checkout base_branch`、`git merge --no-ff` 与 merge 结果回写统一收口到 `common repo root`；执行目录不再作为 merge 成败前提
+- 取舍理由：先修正“会话 worktree 与基线仓职责混淆”的结构性问题，保证 cardrun / wt-flow 在 worktree 体系下行为一致，而不是继续依赖“退回主仓手工 merge”的人工绕行
+- 影响范围：`scripts/coder4/wt-flow.sh`、`tests/unit/test_coder4_wt_flow_verified_state.py`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 回退/失效条件：若后续引入专用 merge-driver worktree 或平台级 merge service，可将本决策升级为新的 merge 执行抽象；若 common repo root 不再承担基线仓职责，本决策失效
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-06 工程减法退役流程冻结
 - 状态：ACTIVE

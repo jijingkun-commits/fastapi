@@ -438,6 +438,14 @@ _format_dirty_preview() {
   printf "%s\n" "$lines" | sed '/^$/d' | head -n 8 | tr '\n' '; ' | sed 's/; $//'
 }
 
+_git_driver_root() {
+  if [[ -n "${COMMON_ROOT:-}" ]]; then
+    echo "$COMMON_ROOT"
+    return 0
+  fi
+  echo "$REPO_ROOT"
+}
+
 _normalize_status() {
   local status="$1"
   status="$(printf "%s" "$status" | tr '[:upper:]' '[:lower:]')"
@@ -1067,16 +1075,18 @@ cmd_merge() {
     _log "rebase 成功"
   fi
 
-  # 切回主仓库执行合并
-  cd "$REPO_ROOT"
+  # 切到 common repo root 执行基线分支 merge，避免在 card worktree 内强切基线分支。
+  local merge_root
+  merge_root="$(_git_driver_root)"
+  cd "$merge_root"
 
-  # 主仓库不干净时 fail-fast（白名单内变更放行）。
+  # 基线仓不干净时 fail-fast（白名单内变更放行）。
   local whitelist_csv disallowed preview
   whitelist_csv="$(_dirty_whitelist_csv)"
   disallowed="$(_collect_disallowed_dirty_lines "$whitelist_csv")"
   if [[ -n "$disallowed" ]]; then
     preview="$(_format_dirty_preview "$disallowed")"
-    _die "主仓库存在非白名单变更，policy=${DIRTY_POLICY_VERSION} whitelist=${whitelist_csv} preview=${preview}。请先提交或清理后再执行 merge"
+    _die "基线仓存在非白名单变更，policy=${DIRTY_POLICY_VERSION} whitelist=${whitelist_csv} preview=${preview}。请先提交或清理后再执行 merge"
   fi
 
   git checkout "${base_branch}"
@@ -1106,7 +1116,9 @@ cmd_cleanup() {
   branch="$(echo "$state" | grep '"branch"' | sed 's/.*: *"\(.*\)".*/\1/')"
   wt_path="$(echo "$state" | grep '"worktree"' | sed 's/.*: *"\(.*\)".*/\1/')"
 
-  cd "$REPO_ROOT"
+  local driver_root
+  driver_root="$(_git_driver_root)"
+  cd "$driver_root"
 
   if [[ -d "$wt_path" ]]; then
     _log "移除 worktree: ${wt_path}"
