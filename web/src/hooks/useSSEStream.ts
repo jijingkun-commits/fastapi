@@ -179,7 +179,13 @@ export function useSSEStream(): StreamContextValue {
     const isStreamingRef = useRef<boolean>(false);
 
     const [threadId, setThreadId] = useQueryState("threadId");
+    const initialThreadIdExistsRef = useRef(threadId !== null);
+    const threadIdRef = useRef<string | null>(threadId);
     const { refreshThreads } = useThreads();
+
+    useEffect(() => {
+        threadIdRef.current = threadId;
+    }, [threadId]);
 
     const bindMessageIdToAiMessage = useCallback((aiId: string, messageId?: number) => {
         if (!messageId) return;
@@ -323,7 +329,13 @@ export function useSSEStream(): StreamContextValue {
             if (!latestThreadId) {
                 return false;
             }
-            setThreadId(latestThreadId);
+
+            // 若用户已主动切换到某个会话，不再用“最新会话”覆盖用户选择。
+            if (threadIdRef.current !== null) {
+                return false;
+            }
+
+            await setThreadId(latestThreadId);
             return true;
         } catch (err) {
             console.warn("加载最近会话失败:", err);
@@ -386,8 +398,19 @@ export function useSSEStream(): StreamContextValue {
                 return;
             }
 
+            const shouldResolveLatestOnInitialEmptyThread =
+                initialThreadIdExistsRef.current === false
+                && !latestThreadResolvedRef.current;
+
+            if (!shouldResolveLatestOnInitialEmptyThread) {
+                if (!cancelled) {
+                    setMessages([]);
+                }
+                return;
+            }
+
             const switchedToLatest = await resolveLatestThread();
-            if (!cancelled && !switchedToLatest) {
+            if (!cancelled && !switchedToLatest && threadIdRef.current === null) {
                 setMessages([]);
             }
         };

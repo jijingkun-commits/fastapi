@@ -116,11 +116,21 @@ function ThreadItem({
           "app-sidebar-item group relative flex w-full items-center rounded-lg px-3 py-2.5 transition-all duration-150",
           (isSelected || isActive) && "app-sidebar-item-active"
         )}
+        role="button"
+        tabIndex={0}
+        onClick={handleClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleClick();
+          }
+        }}
       >
         {/* 批量选择模式：显示 Checkbox */}
         {isSelectMode ? (
           <Checkbox
             checked={isSelected}
+            onClick={(e) => e.stopPropagation()}
             onCheckedChange={() => onToggleSelect?.(thread.thread_id)}
             className="mr-2.5 h-4 w-4 shrink-0"
           />
@@ -136,7 +146,10 @@ function ThreadItem({
         )}
 
         {isEditing ? (
-          <div className="flex flex-1 items-center gap-1">
+          <div
+            className="flex flex-1 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+          >
             <Input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
@@ -149,7 +162,10 @@ function ThreadItem({
               variant="ghost"
               size="icon"
               className="app-sidebar-item h-7 w-7 hover:text-[var(--app-sidebar-icon-active)]"
-              onClick={handleRename}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleRename();
+              }}
             >
               <Check className="h-3.5 w-3.5" />
             </Button>
@@ -157,7 +173,8 @@ function ThreadItem({
               variant="ghost"
               size="icon"
               className="app-sidebar-item h-7 w-7"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setEditTitle(thread.title);
                 setIsEditing(false);
               }}
@@ -167,16 +184,15 @@ function ThreadItem({
           </div>
         ) : (
           <>
-            <button
+            <div
               className={`flex-1 truncate text-left text-[13px] leading-snug ${
                 isActive || isSelected
                   ? "font-medium text-[var(--app-sidebar-item-active-fg)]"
                   : "text-[var(--app-sidebar-item-fg)]"
               }`}
-              onClick={handleClick}
             >
               {thread.title || "新对话"}
-            </button>
+            </div>
 
             {/* 操作按钮 - 悬停时显示（非选择模式） */}
             {!isSelectMode && isHovered && (
