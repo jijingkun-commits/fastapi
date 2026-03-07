@@ -15,8 +15,17 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-WT_BASE="${REPO_ROOT}/.worktrees"
+CHECKOUT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+COMMON_GIT_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [[ -n "$COMMON_GIT_DIR" && -n "$CHECKOUT_ROOT" && "$COMMON_GIT_DIR" != /* ]]; then
+  COMMON_GIT_DIR="$(cd "$CHECKOUT_ROOT" && cd "$COMMON_GIT_DIR" && pwd -P)"
+fi
+COMMON_ROOT="$CHECKOUT_ROOT"
+if [[ -n "$COMMON_GIT_DIR" ]]; then
+  COMMON_ROOT="$(cd "${COMMON_GIT_DIR}/.." 2>/dev/null && pwd -P || printf '%s' "$CHECKOUT_ROOT")"
+fi
+REPO_ROOT="$CHECKOUT_ROOT"
+WT_BASE="${COMMON_ROOT}/.worktrees"
 ACTIVE_TASK_FILE=""
 ALLOWED_PREFIXES=(
   "bash"
@@ -35,6 +44,8 @@ ALLOWED_PREFIXES=(
   "venv/bin/alembic"
   "${REPO_ROOT}/venv/bin/python"
   "${REPO_ROOT}/venv/bin/alembic"
+  "${COMMON_ROOT}/venv/bin/python"
+  "${COMMON_ROOT}/venv/bin/alembic"
   "npm"
 )
 DIRTY_POLICY_VERSION="v1_docs_templates"
@@ -103,6 +114,36 @@ _sanitize_task_key_segment() {
   echo "$value"
 }
 
+_resolve_task_split_file_from_hint() {
+  local raw_hint="$1"
+  local normalized_hint candidate
+  normalized_hint="$(_trim_spaces "$raw_hint")"
+  [[ -n "$normalized_hint" ]] || return 1
+
+  if [[ "$normalized_hint" == /* ]]; then
+    candidate="$normalized_hint"
+  elif [[ "$normalized_hint" == *_active_task.json ]]; then
+    candidate="${REPO_ROOT}/${normalized_hint}"
+  elif [[ "$normalized_hint" == docs/内部参考/任务拆解/* ]]; then
+    candidate="${REPO_ROOT}/${normalized_hint}/_active_task.json"
+  else
+    candidate="${REPO_ROOT}/docs/内部参考/任务拆解/${normalized_hint}/_active_task.json"
+  fi
+
+  [[ -f "$candidate" ]] || return 1
+  echo "$candidate"
+}
+
+_current_branch_task_key_hint() {
+  local branch
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ "$branch" =~ ^feature/([^/]+)/([^/]+)/([^/]+)$ ]]; then
+    echo "$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
+    return 0
+  fi
+  echo ""
+}
+
 _active_task_file() {
   local explicit_file="${WT_FLOW_ACTIVE_TASK_FILE:-$ACTIVE_TASK_FILE}"
   if [[ -n "$explicit_file" && -f "$explicit_file" ]]; then
@@ -111,9 +152,10 @@ _active_task_file() {
   fi
 
   local split_dir="${WT_FLOW_TASK_SPLIT_DIR:-}"
+  local split_candidate=""
   if [[ -n "$split_dir" ]]; then
-    local split_candidate="${REPO_ROOT}/docs/内部参考/任务拆解/${split_dir}/_active_task.json"
-    [[ -f "$split_candidate" ]] || _die "未找到任务级 _active_task.json: ${split_candidate}"
+    split_candidate="$(_resolve_task_split_file_from_hint "$split_dir" || true)"
+    [[ -n "$split_candidate" ]] || _die "未找到任务级 _active_task.json: ${split_dir}"
     echo "$split_candidate"
     return 0
   fi
@@ -130,7 +172,26 @@ _active_task_file() {
   fi
 
   if [[ "${#candidates[@]}" -gt 1 ]]; then
-    _die "检测到多个任务级 _active_task.json（${#candidates[@]} 个），请显式设置 WT_FLOW_ACTIVE_TASK_FILE 或 WT_FLOW_TASK_SPLIT_DIR"
+    local branch_task_key preview
+    local matched=()
+    branch_task_key="$(_current_branch_task_key_hint)"
+    if [[ -n "$branch_task_key" ]]; then
+      for candidate in "${candidates[@]}"; do
+        local candidate_task_key
+        candidate_task_key="$(jq -r '.task_key // ""' "$candidate" 2>/dev/null || echo "")"
+        candidate_task_key="$(_sanitize_task_key_segment "$candidate_task_key")"
+        if [[ -n "$candidate_task_key" && "$candidate_task_key" == "$branch_task_key" ]]; then
+          matched+=("$candidate")
+        fi
+      done
+      if [[ "${#matched[@]}" -eq 1 ]]; then
+        echo "${matched[0]}"
+        return 0
+      fi
+    fi
+
+    preview="$(printf '%s\n' "${candidates[@]}" | head -n 5 | paste -sd '; ' -)"
+    _die "检测到多个任务级 _active_task.json（${#candidates[@]} 个），请显式设置 WT_FLOW_ACTIVE_TASK_FILE 或 WT_FLOW_TASK_SPLIT_DIR；候选: ${preview}"
   fi
 
   _die "未找到任务级 _active_task.json，请设置 WT_FLOW_ACTIVE_TASK_FILE 或 WT_FLOW_TASK_SPLIT_DIR"
@@ -400,7 +461,7 @@ _default_state_dir() {
   local split_dir
   split_dir="$(_active_task_split_dir)"
   if [[ -n "$split_dir" ]]; then
-    echo "${REPO_ROOT}/docs/内部参考/任务拆解/${split_dir}/.state"
+    echo "${COMMON_ROOT}/docs/内部参考/任务拆解/${split_dir}/.state"
     return 0
   fi
 
@@ -564,13 +625,19 @@ _normalize_check_for_worktree() {
     target="${target#\'}"
     target="${target%\'}"
 
-    if [[ "$target" == "$REPO_ROOT" || "$target" == "$worktree_path" ]]; then
+    if [[ "$target" == "$REPO_ROOT" || "$target" == "$COMMON_ROOT" || "$target" == "$worktree_path" ]]; then
       echo "$rest"
       return
     fi
 
     if [[ "$target" == "$REPO_ROOT/"* ]]; then
       rel="${target#"$REPO_ROOT/"}"
+      echo "cd ${rel} && ${rest}"
+      return
+    fi
+
+    if [[ "$target" == "$COMMON_ROOT/"* ]]; then
+      rel="${target#"$COMMON_ROOT/"}"
       echo "cd ${rel} && ${rest}"
       return
     fi
@@ -602,6 +669,19 @@ _resolve_worktree_path_for_card() {
 
   active_task_key="$(_active_task_key)"
   sanitized_task_key="$(_sanitize_task_key_segment "$active_task_key")"
+
+  local current_branch current_card_id current_task_key
+  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ "$current_branch" =~ ^feature/([^/]+)/([^/]+)/([^/]+)$ ]]; then
+    current_task_key="$(_sanitize_task_key_segment "${BASH_REMATCH[1]}")"
+    current_card_id="$(_to_upper "${BASH_REMATCH[2]}")"
+    if [[ "$current_card_id" == "$card_id" && -d "$REPO_ROOT" ]]; then
+      if [[ -z "$sanitized_task_key" || "$current_task_key" == "$sanitized_task_key" ]]; then
+        echo "$REPO_ROOT"
+        return 0
+      fi
+    fi
+  fi
 
   if [[ -n "$sanitized_task_key" ]]; then
     if [[ -n "$session_id" ]]; then
