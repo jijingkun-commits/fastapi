@@ -303,13 +303,11 @@ def _run_integration_gate(passthrough_args: Sequence[str]) -> int:
     repo_root = Path(args.repo_root).expanduser().resolve()
     try:
         task_split_dir = module._resolve_task_split_dir(repo_root, args.task_split_dir)
-        state_dir = Path(args.state_dir).expanduser()
-        if state_dir.is_absolute():
-            resolved_state_dir = state_dir.resolve()
-        elif args.state_dir in {".state", "./.state"}:
-            resolved_state_dir = (task_split_dir / ".state").resolve()
-        else:
-            resolved_state_dir = (repo_root / state_dir).resolve()
+        resolved_state_dir = _resolve_integration_state_dir(
+            repo_root=repo_root,
+            task_split_dir=task_split_dir,
+            raw_state_dir=args.state_dir,
+        )
         result = module.run_check(
             repo_root=repo_root,
             task_split_dir=task_split_dir,
@@ -334,6 +332,41 @@ def _run_integration_gate(passthrough_args: Sequence[str]) -> int:
         print(f"- {issue}", file=sys.stderr)
     module._write_output(args.output, result)
     return 1
+
+
+def _detect_common_repo_root(repo_root: Path) -> Path:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    raw = str(completed.stdout or "").strip()
+    if completed.returncode != 0 or not raw:
+        return repo_root.resolve()
+
+    common_dir = Path(raw).expanduser()
+    if not common_dir.is_absolute():
+        common_dir = (repo_root / common_dir).resolve()
+    if common_dir.name == ".git":
+        return common_dir.parent.resolve()
+    return common_dir.resolve()
+
+
+def _resolve_integration_state_dir(*, repo_root: Path, task_split_dir: Path, raw_state_dir: str) -> Path:
+    state_dir = Path(str(raw_state_dir or ".state")).expanduser()
+    if state_dir.is_absolute():
+        return state_dir.resolve()
+
+    if str(raw_state_dir).strip() in {".state", "./.state", ""}:
+        common_repo_root = _detect_common_repo_root(repo_root)
+        try:
+            task_split_relative = task_split_dir.resolve().relative_to(repo_root.resolve())
+        except ValueError:
+            return (task_split_dir / ".state").resolve()
+        return (common_repo_root / task_split_relative / ".state").resolve()
+
+    return (repo_root / state_dir).resolve()
 
 
 def _resolve_task_split_dir_arg(repo_root: Path, raw_value: str) -> Path:
@@ -784,7 +817,11 @@ def _run_full_gate(passthrough_args: Sequence[str]) -> int:
             integration_payload = integration_module.run_check(
                 repo_root=repo_root,
                 task_split_dir=task_split_dir,
-                state_dir=(task_split_dir / '.state').resolve(),
+                state_dir=_resolve_integration_state_dir(
+                    repo_root=repo_root,
+                    task_split_dir=task_split_dir,
+                    raw_state_dir=".state",
+                ),
                 baseline=args.baseline,
             )
             integration_ok = bool(integration_payload.get("ok"))
