@@ -26,12 +26,12 @@
 - 治理层（P0）：冻结删除口径并建立 NO-GO 清单。
 - 入口层（P1）：统一门禁入口承载契约与模式分发。
 - 兼容层（P1）：L1 旧脚本保留 wrapper 语义并透传。
-- 可观测层（P2）：旧入口调用日志与零调用判定。
+- 可观测层（P2）：旧入口调用日志与 legacy 调用判定。
 - 退役层（P3）：达标后删除旧实现并完成验收。
 
 ### 1.2 状态契约
 
-- 旧脚本状态：`active_impl -> wrapper -> zero_call_observed -> retired`
+- 旧脚本状态：`active_impl -> wrapper -> usage_observed -> retired`
 - 过程产物状态：`active -> done/archived -> ttl_eligible -> archived_trimmed`
 - 回退原则：任一阶段失败均可回切到旧入口主链，禁止“删后补救”。
 
@@ -133,7 +133,7 @@ implementation_tasks:
     change_type: add
     owner: workflow-governance
     depends_on_tasks: [P1-REFERENCE-MIGRATION]
-    risk_point: 观测字段不完整会导致零调用判定失真
+    risk_point: 观测字段不完整会导致 legacy 调用判定失真
     file_paths:
       - scripts/check_workflow_contract.py
       - logs/workflow-gate-usage.jsonl
@@ -142,7 +142,7 @@ implementation_tasks:
       - usage_record_schema_v1
       - aggregate_usage_window
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
   - task_id: P2-TTL-ARCHIVE
@@ -264,9 +264,9 @@ planning_contract:
       merge_required: true
       done_gate:
         - workflow-gate-usage 日志开始落盘
-        - 支持 7 天零调用聚合判定
+        - 支持 legacy 调用聚合判定
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C06
@@ -290,7 +290,7 @@ planning_contract:
       merge_required: true
       done_gate:
         - 旧实现删除或收敛为极薄兼容壳
-        - 删除后主链路验收通过
+        - 删除后 pre-merge 收口门禁通过
       acceptance_checks:
         - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
@@ -303,10 +303,11 @@ planning_contract:
       merge_required: false
       done_gate:
         - clarify->plan->vkplan 三段契约全绿
-        - cardrun 可安全进入 C01
+        - integration_gate 主干可见性校验通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_plan_vk_coverage.py --task-split-dir 2026-03-06_工程减法治理 --output -
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir 2026-03-06_工程减法治理 --output -
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
       evidence_entry: docs/内部参考/任务拆解/2026-03-06_工程减法治理/consumption_report.json
 
   task_to_pr_mapping:
@@ -352,7 +353,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "P2调用观测与TTL归档"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P2-TTL-ARCHIVE
@@ -397,7 +398,7 @@ tc_task_mapping:
   - tc_id: TC-WG-05
     task_id: P2-OBSERVABILITY
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
   - tc_id: TC-WG-06
     task_id: P2-TTL-ARCHIVE
     pr_id: PR-03

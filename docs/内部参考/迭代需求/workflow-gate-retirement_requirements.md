@@ -63,7 +63,7 @@ product_contract_matrix:
     - 删除前可观测旧入口调用并可回退
   business_goal_metrics:
     - 迁移期间命令中断次数 = 0
-    - 删除前连续7天旧入口调用量 = 0
+    - 删除前 legacy 入口调用阻断 = 0
     - 主入口收敛到1个且旧入口仅兼容壳
   non_goals:
     - 不改L0硬门禁
@@ -143,15 +143,15 @@ fr_contract_matrix:
   - fr_id: FR-05
     source_seed_ref: clarify_handoff_contract.required.requirement_seeds[4]
     user_value: 退役判定可证据化
-    trigger: 进入退役前观测窗口
+    trigger: 进入退役前验证阶段
     input_contract:
-      required_fields: [usage_logs, window_days]
+      required_fields: [usage_logs]
       source_of_truth: logs/workflow-gate-usage.jsonl
     output_contract:
-      required_fields: [legacy_call_count, zero_call_days]
+      required_fields: [legacy_call_count, last_call_at]
       consumer: 退役审批人
     failure_semantics: 观测期发现旧入口调用返回 RETIREMENT_NOT_READY
-    observability_fields: [window_days, legacy_call_count, last_call_at]
+    observability_fields: [legacy_call_count, last_call_at]
     rollback_anchor: WORKFLOW_GATE_UNIFIED_ENABLED=false
     owner: workflow-governance
 
@@ -184,8 +184,8 @@ nfr_contract_matrix:
     threshold: "wrapper兼容成功率 >= 99.5%"
     metric_source: workflow-gate-usage.jsonl.ok
   - nfr_id: NFR-03
-    name: zero_call_observation_integrity
-    threshold: "连续7天零调用判定准确率 = 100%"
+    name: legacy_usage_observation_integrity
+    threshold: "legacy 调用阻断判定准确率 = 100%"
     metric_source: usage-report聚合结果
   - nfr_id: NFR-04
     name: ttl_cleanup_safety
@@ -199,7 +199,7 @@ nfr_contract_matrix:
 - `TC-WG-02`: 统一入口 `--mode` 行为等价
 - `TC-WG-03`: 4 个 L1 wrapper 参数兼容与透传
 - `TC-WG-04`: 命令/技能/文档引用迁移收敛
-- `TC-WG-05`: 7 天零调用观测判定
+- `TC-WG-05`: legacy 调用阻断判定
 - `TC-WG-06`: TTL 归档边界与活跃保护
 - `TC-WG-07`: 删除旧实现后全量门禁验收
 
@@ -244,7 +244,7 @@ traceability_matrix:
     feature_id: P2-usage-observability
     task_id: P2-OBSERVABILITY
     tc_id: TC-WG-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-06 TTL归档边界

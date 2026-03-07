@@ -168,3 +168,4 @@ automation_contract:
 - [ ] 若 `implementation_plan` 出现 Gate（如 `G-1~G-4`），`planning_contract.gate_contract` 已显式声明
 - [ ] 若 `gate_contract.mode=as_cards`，所有 `gate_ids` 已完整进入 `card_order` 且都存在对应卡片定义
 - [ ] 若 Gate 契约不完整，本次计划标记 `BLOCKED`（FAIL_FAST），不得进入 `/jjk-vkplan`
+- [ ] 任何依赖自然时间成熟的条件不得进入 `card_order`、`done_gate` 或 `acceptance_checks`

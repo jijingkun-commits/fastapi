@@ -59,7 +59,7 @@ automation_contract:
 | C02 | P1 | P1-unified-entry | P1-UNIFIED-ENTRY | 新建统一入口 `check_workflow_contract.py` | clarify_plan mode |
 | C03 | P1 | P1-legacy-wrapper | P1-WRAPPER-L1 | 4 个 L1 旧脚本 wrapper 化 | legacy_wrapper_compat |
 | C04 | P1 | P1-reference-migration | P1-REFERENCE-MIGRATION | 命令/技能/文档引用迁移 | rg legacy refs |
-| C05 | P2 | P2-usage-observability | P2-OBSERVABILITY | usage 日志落盘与零调用判定 | usage-report |
+| C05 | P2 | P2-usage-observability | P2-OBSERVABILITY | usage 日志落盘与 legacy 调用判定 | usage-report |
 | C06 | P2 | P2-ttl-archive | P2-TTL-ARCHIVE | TTL 归档边界与活跃保护 | ttl-audit |
 | C07 | P3 | P3-retire-legacy | P3-RETIRE-LEGACY | 删除旧实现并保留必要兼容壳 | full-gate |
 | G01 | Gate | G-01 | G01 | 下游执行前的 vkplan/cardrun 放行门禁 | clarify+coverage |

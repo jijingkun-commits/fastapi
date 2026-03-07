@@ -14,7 +14,7 @@
 
 - 在满足零调用与验收前提后删除旧实现
 - 必要时保留极薄兼容壳
-- 完成删除后的全链路放行
+- 完成删除后的 pre-merge 收口放行
 
 ## 2. 测试与验收
 
@@ -22,7 +22,7 @@
   - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -`
 - 验收标准:
   - 旧实现删除或收敛为极薄兼容壳
-  - 删除后主链路验收通过
+  - 删除后 pre-merge 收口门禁通过
 
 ## 3. card_export（机读）
 
@@ -58,6 +58,6 @@ card_export:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
   done_gate:
     - 旧实现删除或收敛为极薄兼容壳
-    - 删除后主链路验收通过
+    - 删除后 pre-merge 收口门禁通过
   source_ws_file: docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C07_P3_删除旧实现与兼容壳收口.md
 ```

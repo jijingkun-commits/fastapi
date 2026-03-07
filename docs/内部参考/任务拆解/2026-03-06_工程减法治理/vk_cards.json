@@ -388,7 +388,7 @@
       ],
       "mechanism_summary": [
         "旧入口 usage 日志落盘",
-        "支持 7 天零调用聚合",
+        "支持 legacy 调用聚合",
         "为退役提供审计证据"
       ],
       "code_anchor_refs": [
@@ -399,7 +399,7 @@
         "docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md#L126"
       ],
       "acceptance_checks": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl"
       ],
       "rollback_anchors": [
         "WORKFLOW_GATE_UNIFIED_ENABLED=false"
@@ -413,10 +413,10 @@
       ],
       "done_gate": [
         "workflow-gate-usage 日志开始落盘",
-        "支持 7 天零调用聚合判定"
+        "支持 legacy 调用聚合判定"
       ],
       "check_cmd": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C05_P2_旧入口调用观测.md",
       "pr_id": "PR-03",
@@ -547,7 +547,7 @@
       ],
       "done_gate": [
         "旧实现删除或收敛为极薄兼容壳",
-        "删除后主链路验收通过"
+        "删除后 pre-merge 收口门禁通过"
       ],
       "check_cmd": [
         "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -"
@@ -601,8 +601,9 @@
         "docs/内部参考/任务拆解/2026-03-06_工程减法治理/consumption_report.json"
       ],
       "acceptance_checks": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_plan_vk_coverage.py --task-split-dir 2026-03-06_工程减法治理 --output -"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir 2026-03-06_工程减法治理 --output -",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -"
       ],
       "rollback_anchors": [
         "保持 G01 为 NO-GO，阻断 jjk-cardrun"
@@ -616,11 +617,12 @@
       ],
       "done_gate": [
         "clarify->plan->vkplan 三段契约全绿",
-        "cardrun 可安全进入 C01"
+        "integration_gate 主干可见性校验通过"
       ],
       "check_cmd": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_plan_vk_coverage.py --task-split-dir 2026-03-06_工程减法治理 --output -"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir 2026-03-06_工程减法治理 --output -",
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-G01_G01_全链路验收门禁.md",
       "pr_id": "PR-G01",
@@ -686,7 +688,7 @@
       ],
       "pr_subject": "P2调用观测与TTL归档",
       "acceptance_cmds": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl"
       ]
     },
     {

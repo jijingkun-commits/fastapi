@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,14 @@ USAGE_LOG_PATH = ROOT / "logs" / "workflow-gate-usage.jsonl"
 USAGE_OBSERVED_MODES = {"clarify_plan", "clarify_consistency", "plan_vk_coverage", "gate_contract", "integration_gate"}
 TRUTH_SOURCE_FILENAMES = {"_active_task.json", "task-ledger.jsonl", "coder4-idempotency.json", "task-runner-state.json", "task-runner-state.json.lock"}
 
+
+
+TEMPORAL_GATE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("temporal_zero_call_requirement", re.compile(r"(?:连续|删除前)?\s*7\s*天.*零调用|7\s*天.*零调用")),
+    ("temporal_window_hint", re.compile(r"观测窗口|时间窗")),
+    ("temporal_window_flag", re.compile(r"--window-days(?:=|\s+)")),
+    ("temporal_window_field", re.compile(r"ZERO_CALL_WINDOW_NOT_MATURE|eligible_after|window_days")),
+)
 
 
 def _utc_now() -> datetime:
@@ -562,6 +571,99 @@ def _workflow_usage_log_path(repo_root: Path) -> Path:
     return (repo_root / "logs" / "workflow-gate-usage.jsonl").resolve()
 
 
+def _scan_temporal_gate_text(path: Path, text: str) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        candidate = str(line or "").strip()
+        if not candidate:
+            continue
+        for label, pattern in TEMPORAL_GATE_PATTERNS:
+            if not pattern.search(candidate):
+                continue
+            errors.append({
+                "code": "TEMPORAL_GATE_BLOCKER_DETECTED",
+                "rule": label,
+                "file": str(path),
+                "line": line_no,
+                "snippet": candidate,
+            })
+            break
+    return errors
+
+
+def _resolve_optional_repo_file(repo_root: Path, raw_value: str | None) -> Path | None:
+    raw = str(raw_value or "").strip()
+    if not raw:
+        return None
+    return _resolve_repo_relative(raw, repo_root=repo_root)
+
+
+def check_temporal_gate_contract(task_split_dir: Path | None, repo_root: Path, implementation_path: Path | None = None) -> dict[str, Any]:
+    files_to_scan: list[Path] = []
+    if implementation_path is not None:
+        files_to_scan.append(implementation_path.resolve())
+
+    if task_split_dir is not None:
+        task_split_dir = task_split_dir.resolve()
+        files_to_scan.append((task_split_dir / "parallel_plan.md").resolve())
+        files_to_scan.append((task_split_dir / "vk_cards.json").resolve())
+        source_files = _load_task_source_files(task_split_dir)
+        impl_candidate = _resolve_optional_repo_file(repo_root, source_files.get("implementation_plan"))
+        if impl_candidate is not None:
+            files_to_scan.append(impl_candidate)
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for file_path in files_to_scan:
+        if file_path in seen or not file_path.exists() or not file_path.is_file():
+            continue
+        seen.add(file_path)
+        deduped.append(file_path)
+
+    errors: list[dict[str, Any]] = []
+    for file_path in deduped:
+        errors.extend(_scan_temporal_gate_text(file_path, file_path.read_text(encoding="utf-8")))
+
+    return {
+        "ok": len(errors) == 0,
+        "files": [str(item) for item in deduped],
+        "errors": errors,
+    }
+
+
+def _run_planning_temporal_gate(passthrough_args: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description="规划期时间窗阻断检查")
+    parser.add_argument("--task-split-dir", help="任务拆解目录名或绝对路径")
+    parser.add_argument("--implementation-path", help="implementation_plan 路径")
+    parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
+    parser.add_argument("--output", default="-", help="输出路径；默认 stdout")
+    args = parser.parse_args(list(passthrough_args))
+
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    task_split_dir = _resolve_task_split_dir_arg(repo_root, args.task_split_dir) if args.task_split_dir else None
+    implementation_path = _resolve_optional_repo_file(repo_root, args.implementation_path)
+
+    if task_split_dir is None and implementation_path is None:
+        payload = {
+            "ok": False,
+            "error": {
+                "code": "PLANNING_TEMPORAL_GATE_INPUT_REQUIRED",
+                "message": "缺少 --task-split-dir 或 --implementation-path",
+            },
+        }
+        _emit_payload(payload, args.output)
+        return 2
+
+    payload = check_temporal_gate_contract(task_split_dir, repo_root, implementation_path)
+    if not payload.get("ok"):
+        payload["error"] = {
+            "code": "VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN" if task_split_dir is not None else "PLAN_TEMPORAL_GATE_FORBIDDEN",
+            "message": "检测到依赖自然时间成熟的阻断条件，请改为观测证据或人工放行说明",
+        }
+    _emit_payload(payload, args.output)
+    return 0 if payload.get("ok") else 2
+
+
 def _resolve_repo_relative(path_str: str, *, repo_root: Path = ROOT) -> Path:
     path = Path(path_str)
     if path.is_absolute():
@@ -597,7 +699,8 @@ def _wrapper_shell_report(*, repo_root: Path) -> dict[str, Any]:
     }
 
 
-def retirement_guard(*, wrapper_report: dict[str, Any], usage_report: dict[str, Any], ttl_report: dict[str, Any], checked_at: datetime, window_days: int) -> dict[str, Any]:
+def retirement_guard(*, wrapper_report: dict[str, Any], usage_report: dict[str, Any], ttl_report: dict[str, Any]) -> dict[str, Any]:
+
     blockers: list[dict[str, Any]] = []
     if not wrapper_report.get("ok"):
         blockers.append({
@@ -605,38 +708,12 @@ def retirement_guard(*, wrapper_report: dict[str, Any], usage_report: dict[str, 
             "files": [item["path"] for item in wrapper_report.get("entries", []) if not item.get("ok")],
         })
 
-    events = usage_report.get("events") or []
     legacy_calls = int(((usage_report.get("summary") or {}).get("legacy_calls") or 0))
     if legacy_calls > 0:
         blockers.append({
             "code": "LEGACY_USAGE_DETECTED",
             "legacy_calls": legacy_calls,
         })
-
-    if events:
-        recorded_ats = []
-        for event in events:
-            raw = str(event.get("recorded_at") or "").strip()
-            if not raw:
-                continue
-            try:
-                recorded_ats.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
-            except ValueError:
-                continue
-        if recorded_ats:
-            oldest = min(recorded_ats)
-            eligible_after = oldest + timedelta(days=window_days)
-            if checked_at < eligible_after:
-                blockers.append({
-                    "code": "ZERO_CALL_WINDOW_NOT_MATURE",
-                    "oldest_observed_at_utc": oldest.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    "eligible_after_utc": eligible_after.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    "window_days": window_days,
-                })
-        else:
-            blockers.append({"code": "USAGE_WINDOW_EMPTY", "window_days": window_days})
-    else:
-        blockers.append({"code": "USAGE_WINDOW_EMPTY", "window_days": window_days})
 
     if int(((ttl_report.get("summary") or {}).get("active_truth_source_harmed") or 0)) != 0:
         blockers.append({
@@ -651,11 +728,12 @@ def retirement_guard(*, wrapper_report: dict[str, Any], usage_report: dict[str, 
 
 
 def _run_full_gate(passthrough_args: Sequence[str]) -> int:
-    parser = argparse.ArgumentParser(description="全链路门禁验收")
+    parser = argparse.ArgumentParser(description="C07 pre-merge 收口门禁验收")
     parser.add_argument("--task-split-dir", required=True, help="任务拆解目录名或绝对路径")
     parser.add_argument("--baseline", default="master", help="主干基线")
-    parser.add_argument("--window-days", type=int, default=7, help="零调用观测窗口")
+    parser.add_argument("--window-days", type=int, default=7, help="usage 统计窗口（仅报表，不阻断放行）")
     parser.add_argument("--ttl-days", type=int, default=14, help="TTL 审计窗口")
+    parser.add_argument("--include-integration", action="store_true", help="显式纳入 post-merge integration_gate 阻断")
     parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
     parser.add_argument("--output", default="-", help="输出路径；默认 stdout")
     args = parser.parse_args(list(passthrough_args))
@@ -667,7 +745,6 @@ def _run_full_gate(passthrough_args: Sequence[str]) -> int:
     import check_clarify_plan_alignment as clarify_module
     import check_plan_vk_coverage as vk_module
     import check_gate_contract_consistency as gate_module
-    from coder4 import check_integration_gate as integration_module
 
     checked_at = _utc_now()
     requirements = str(source_files.get("requirements") or "").strip()
@@ -700,17 +777,28 @@ def _run_full_gate(passthrough_args: Sequence[str]) -> int:
         gate_payload = {"ok": False, "error": str(exc)}
         gate_ok = False
 
-    try:
-        integration_payload = integration_module.run_check(
-            repo_root=repo_root,
-            task_split_dir=task_split_dir,
-            state_dir=(task_split_dir / '.state').resolve(),
-            baseline=args.baseline,
-        )
-        integration_ok = bool(integration_payload.get("ok"))
-    except Exception as exc:  # noqa: BLE001
-        integration_payload = {"ok": False, "error": str(exc)}
-        integration_ok = False
+    if args.include_integration:
+        from coder4 import check_integration_gate as integration_module
+
+        try:
+            integration_payload = integration_module.run_check(
+                repo_root=repo_root,
+                task_split_dir=task_split_dir,
+                state_dir=(task_split_dir / '.state').resolve(),
+                baseline=args.baseline,
+            )
+            integration_ok = bool(integration_payload.get("ok"))
+        except Exception as exc:  # noqa: BLE001
+            integration_payload = {"ok": False, "error": str(exc)}
+            integration_ok = False
+    else:
+        integration_payload = {
+            "ok": True,
+            "skipped": True,
+            "reason": "pre_merge_full_gate",
+            "message": "integration_gate 属于 post-merge 主干可见性校验；默认不纳入 C07 pre-merge 阻断",
+        }
+        integration_ok = True
 
     usage_payload = aggregate_usage_window(args.window_days, log_path=_workflow_usage_log_path(repo_root))
     ttl_payload = ttl_archive_runner(task_split_dir.parent, args.ttl_days)
@@ -719,8 +807,6 @@ def _run_full_gate(passthrough_args: Sequence[str]) -> int:
         wrapper_report=wrapper_payload,
         usage_report=usage_payload,
         ttl_report=ttl_payload,
-        checked_at=checked_at,
-        window_days=args.window_days,
     )
 
     payload = {
@@ -760,7 +846,7 @@ def _run_ttl_audit(passthrough_args: Sequence[str]) -> int:
 
 def _run_usage_report(passthrough_args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="旧入口调用观测报告")
-    parser.add_argument("--window-days", type=int, default=7, help="统计窗口（天）")
+    parser.add_argument("--window-days", type=int, default=7, help="统计窗口（仅报表使用，不作为退役阻断）")
     parser.add_argument("--output", default=str(USAGE_LOG_PATH.relative_to(ROOT)), help="usage jsonl 路径")
     args = parser.parse_args(list(passthrough_args))
 
@@ -785,6 +871,11 @@ MODE_REGISTRY: dict[str, ModeSpec] = {
         mode="plan_vk_coverage",
         description="校验 /jjk-vkplan 是否完整消费 /jjk-plan 产物",
         runner=_run_plan_vk_coverage,
+    ),
+    "planning_temporal_gate": ModeSpec(
+        mode="planning_temporal_gate",
+        description="禁止把时间窗口成熟条件建模为阻断型计划门禁",
+        runner=_run_planning_temporal_gate,
     ),
     "gate_contract": ModeSpec(
         mode="gate_contract",
@@ -813,7 +904,7 @@ MODE_REGISTRY: dict[str, ModeSpec] = {
     ),
     "full-gate": ModeSpec(
         mode="full-gate",
-        description="全链路门禁验收",
+        description="C07 pre-merge 收口门禁验收",
         runner=_run_full_gate,
     ),
 }
