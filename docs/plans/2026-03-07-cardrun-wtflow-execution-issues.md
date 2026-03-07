@@ -51,8 +51,8 @@
 | WF-11 | P0 | `C07` 退役门禁依赖 7 天 wall-clock 观测窗口 | 单轮 `jjk-cardrun` 无法在同一执行波次内自然闭环 | 待修复 | 先以 `full-gate` 真实阻断，不跳过 7 天窗口 | 拆分“门禁建设”与“退役放行”两个阶段性完成定义 |
 | WF-12 | P1 | `G01` 工作流文档仍引用旧脚本命令 | 验收文档口径与统一入口迁移结果不一致 | 待修复 | 以 `v3` 退役口径和统一入口实现为准 | 同步 `G01`、命令文档、技能文档的验收命令引用 |
 | WF-13 | P0 | `C03` wrapper 验收未覆盖“物理薄壳化” | `C07` 才首次暴露 legacy 大体量实现仍驻留 | 待修复 | 由 `full-gate` 的 `LEGACY_WRAPPER_NOT_THIN` 真实阻断 | 区分“CLI 兼容完成”与“旧实现已物理退役”两个完成定义 |
-| WF-14 | P0 | `wt-flow verify` 多任务场景下无法自动解析 active task | `C07` verify 直接阻断，无法进入真实 done_gate | 待修复 | 显式设置 `WT_FLOW_ACTIVE_TASK_FILE` 或 `WT_FLOW_TASK_SPLIT_DIR` | 给 `wt-flow` 增加 worktree 上下文优先级与更稳健的 active task 发现逻辑 |
-| WF-15 | P0 | `wt-flow verify` 在 worktree 内错误拼接 worktree 根路径 | `C07` 在正确 worktree 内仍无法直接 verify | 待修复 | 从主仓根目录执行 `verify` | 统一以 `git rev-parse --show-toplevel` 解析 repo 根，禁止依赖当前 cwd 猜测 |
+| WF-14 | P0 | `wt-flow verify` 多任务场景下无法自动解析 active task | `C07` verify 直接阻断，无法进入真实 done_gate | 已现场修复 | 新增 branch-task 提示解析 + `WT_FLOW_TASK_SPLIT_DIR` 直接解析 | 给 `wt-flow` 增加 worktree 上下文优先级与更稳健的 active task 发现逻辑 |
+| WF-15 | P0 | `wt-flow verify` 在 worktree 内错误拼接 worktree 根路径 | `C07` 在正确 worktree 内仍无法直接 verify | 已现场修复 | 拆分 `CHECKOUT_ROOT/COMMON_ROOT`，并把主仓绝对路径归一化到当前 worktree | 统一以 `git rev-parse --show-toplevel` 解析 repo 根，禁止依赖当前 cwd 猜测 |
 
 ---
 
@@ -339,6 +339,11 @@
   - `WT_FLOW_ACTIVE_TASK_FILE` 或 `WT_FLOW_TASK_SPLIT_DIR`
 - 先让 `wt-flow` 锁定当前任务，再继续验证真实 blocker。
 
+**本轮修复进展**
+- 已在 `scripts/coder4/wt-flow.sh` 增加分支 `task_key` 提示解析；
+- `WT_FLOW_TASK_SPLIT_DIR` 现在可直接解析 task split dir，而不要求必须额外提供完整 active_task 文件路径；
+- 主仓根目录下仅传 `WT_FLOW_TASK_SPLIT_DIR=2026-03-06_工程减法治理` 即可跑到真实 `C07` done_gate。
+
 **后续修复建议**
 1. `wt-flow` 优先使用当前 worktree 相邻的任务拆解目录解析 active task；
 2. 当存在多个 `_active_task.json` 时，输出候选列表和推荐值，而不是直接把 state 路径解析成根目录；
@@ -360,6 +365,11 @@
 
 **现场处理**
 - 本轮改回主仓根目录执行 `verify`，避免 worktree 根解析偏移。
+
+**本轮修复进展**
+- 已将 `wt-flow` 的 `CHECKOUT_ROOT` 与 `COMMON_ROOT` 拆开；
+- `WT_BASE`、默认 `.state` 根与 worktree 解析现在不再错误依赖当前 `pwd`；
+- 同时补了主仓绝对路径到当前 worktree 的命令归一化，使 `C07` worktree 内的 `verify` 能直接打到当前卡分支代码。
 
 **后续修复建议**
 1. 一律使用 `git rev-parse --show-toplevel` 解析当前 checkout 根，而不是依赖 `pwd` 推断；
