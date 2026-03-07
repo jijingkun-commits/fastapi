@@ -68,6 +68,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 2. 禁止弱化 `depends_on`；
 3. `execution_mode=serial` 必须保持单活卡推进语义；
 4. 每张实现卡必须可映射唯一 `pr_id`。
+5. 禁止把依赖自然时间流逝、观察窗口成熟、TTL 到期的条件生成到 `cards[].done_gate` 或 `cards[].acceptance_checks`。
 
 ### 2) 生成拆解产物
 
@@ -91,6 +92,12 @@ python3 scripts/check_workflow_contract.py --mode plan_vk_coverage \
   --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/consumption_report.json
 ```
 
+```bash
+python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
+  --task-split-dir <YYYY-MM-DD_主题> \
+  --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/temporal_gate_report.json
+```
+
 通过标准：
 
 1. `ok=true`
@@ -101,6 +108,7 @@ python3 scripts/check_workflow_contract.py --mode plan_vk_coverage \
 6. `missing_task_id_fields=[]`
 7. `empty_task_ids=[]`
 8. `clarify_plan_alignment.ok=true`
+9. 无 `VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN`
 
 失败码：
 
@@ -110,6 +118,7 @@ python3 scripts/check_workflow_contract.py --mode plan_vk_coverage \
 4. `VKPLAN_TASK_IDS_REQUIRED`
 5. `CLARIFY_PLAN_ALIGNMENT_FAILED`
 6. `PLAN_IMPLEMENTATION_DETAIL_INSUFFICIENT`
+7. `VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN`
 
 ### 4) 真理源写入与回读（必做）
 
@@ -159,6 +168,7 @@ python3 scripts/set_active_task.py \
 3. 禁止缺失 `task_ids` 的卡片“先生成后补齐”。
 4. 禁止只写文档 Gate、不实体化 Gate 卡。
 5. 禁止 `execution_contract` 缺失时用默认值继续执行。
+6. 禁止生成依赖时间窗口成熟的串行阻断卡。
 
 ---
 

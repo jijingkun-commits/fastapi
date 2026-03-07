@@ -128,6 +128,12 @@ description: 正式规划入口：产出 requirements + implementation_plan，�
 1. 若上游是轻量 `implementation_seeds`，本步骤必须补齐 `feature_id/acceptance_cmds/rollback_point/pr_id/phase/depends_on_tasks`。
 2. 补齐前禁止标记 `implementation_ready=true`。
 
+时间窗门禁约束：
+
+1. 禁止把依赖自然时间流逝、观察窗口成熟、TTL 到期、排班窗口的条件写入 `business_goal_metrics` 的阻断门禁语义、`acceptance_gates`、`implementation_tasks[*].acceptance_cmds` 或 `done_gate`。
+2. 这类条件只能表达为观测事实、审计证据或人工放行说明，不得占用串行 `card_order` 主链。
+3. 命中上述情况时必须返回 `PLAN_TEMPORAL_GATE_FORBIDDEN`，禁止进入 `/jjk-vkplan`。
+
 ### 3) 执行承接校验（必做）
 
 ```bash
@@ -137,6 +143,12 @@ python3 scripts/check_workflow_contract.py --mode clarify_plan \
   --output docs/内部参考/迭代需求/<topic>_clarify_plan_alignment.json
 ```
 
+```bash
+python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
+  --implementation-path docs/内部参考/迭代需求/<topic>_implementation_plan.md \
+  --output docs/内部参考/迭代需求/<topic>_planning_temporal_gate.json
+```
+
 通过标准：
 
 1. `ok=true`
@@ -144,10 +156,11 @@ python3 scripts/check_workflow_contract.py --mode clarify_plan \
 3. 无 `PLAN_TRACEABILITY_MATRIX_BROKEN`
 4. 无 `PLAN_ACCEPTANCE_REF_BROKEN`
 5. 无 `PLAN_IMPLEMENTATION_DETAIL_INSUFFICIENT`
+6. 无 `PLAN_TEMPORAL_GATE_FORBIDDEN`
 
 未通过：
 
-1. 输出 `PLAN_CLARIFY_ALIGNMENT_FAILED`
+1. 输出 `PLAN_CLARIFY_ALIGNMENT_FAILED | PLAN_TEMPORAL_GATE_FORBIDDEN`
 2. 禁止进入 `/jjk-vkplan` 与 `/jjk-imp`
 3. 按错误码回退 `/jjk-clarify` 或继续细化 `/jjk-plan`
 
@@ -187,6 +200,7 @@ python3 scripts/docs_guard.py --strict
 3. 禁止 `implementation_tasks` 缺关键字段就宣称“可执行”。
 4. 禁止跳过 `check_workflow_contract.py --mode clarify_plan` 直接进入下游。
 5. 禁止篡改上游 `task_id/feature_id` 的语义映射。
+6. 禁止把时间窗口/观察期成熟条件直接建模为阻断型验收门禁。
 
 ---
 

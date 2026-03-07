@@ -158,3 +158,16 @@ implementation_readiness:
 2. `delivery_mode=one_shot` 时，`stop_boundary` 只能是 `none`。
 3. `delivery_mode=staged` 时，`stop_boundary` 必须与 `execution_unit` 对齐（`per_pr` 或 `per_task`）。
 4. `commit_policy=single_commit` 仅允许与 `delivery_mode=one_shot` 组合。
+
+
+```yaml
+temporal_gate_policy:
+  wall_clock_blockers_forbidden: true
+  forbidden_examples:
+    - 连续7天零调用
+    - 观察24h后放行
+    - TTL到期后再执行
+  allowed_expression:
+    - observation_evidence_only
+    - manual_release_note
+```

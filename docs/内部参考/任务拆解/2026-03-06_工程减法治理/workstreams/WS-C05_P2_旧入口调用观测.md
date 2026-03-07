@@ -13,16 +13,16 @@
 ## 1. 目标
 
 - 为旧入口调用建立日志台账
-- 支持连续 7 天零调用聚合判定
+- 支持 legacy 调用聚合判定
 - 为退役放行提供证据源
 
 ## 2. 测试与验收
 
 - 最小测试集:
-  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl`
+  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl`
 - 验收标准:
   - `workflow-gate-usage` 日志开始落盘
-  - 支持 7 天零调用聚合判定
+  - 支持 legacy 调用聚合判定
 
 ## 3. card_export（机读）
 
@@ -45,16 +45,16 @@ card_export:
     - logs/workflow-gate-usage.jsonl
   mechanism_summary:
     - 旧入口 usage 日志落盘
-    - 支持 7 天零调用聚合
+    - 支持 legacy 调用聚合
   acceptance_checks:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
   rollback_anchors:
     - WORKFLOW_GATE_UNIFIED_ENABLED=false
   evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
   check_cmd:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output logs/workflow-gate-usage.jsonl
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
   done_gate:
     - workflow-gate-usage 日志开始落盘
-    - 支持 7 天零调用聚合判定
+    - 支持 legacy 调用聚合判定
   source_ws_file: docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C05_P2_旧入口调用观测.md
 ```

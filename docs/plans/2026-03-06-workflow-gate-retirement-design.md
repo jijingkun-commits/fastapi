@@ -7,7 +7,7 @@
   - 新增统一入口 `scripts/check_workflow_contract.py`，聚合 4 个 L1 门禁能力。
   - 将 4 个 L1 旧脚本改为 wrapper，保持参数兼容并输出 deprecation 提示。
   - 迁移 `.cursor/commands/*`、`.agents/skills/*`、文档中的旧脚本引用到统一入口。
-  - 增加旧入口调用观测与 7 天零调用判定。
+  - 增加旧入口调用观测与 legacy 调用阻断判定。
   - 对过程文件执行生命周期 + TTL 归档，仅处理 `done/archived` 且 14 天无写入条目。
 - 边界：
   - 不删除 `scripts/check_special_doc_sync.py`（L0 硬门禁）。
@@ -16,7 +16,7 @@
 - 成功标准：
   - 团队不再执行 `rm scripts/check_*.py`。
   - 旧命令可继续使用且行为等价（参数、退出码、关键输出）。
-  - 删除前观测到旧入口连续 7 天零调用。
+  - 删除前确认旧入口未检出 legacy 调用阻断。
   - 阶段验收矩阵（Clarify/Plan/VK/G01/IG01）一次通过。
 
 ## 2. product_contract（PRD-Lite）
@@ -30,7 +30,7 @@
   - 退役期间可追踪调用、可执行回退、可证明门禁未降级。
 - business_goals（KPI）：
   - 命令连续性：迁移期间命令中断次数 = 0。
-  - 退役确定性：删除旧实现前旧入口调用量连续 7 天 = 0。
+  - 退役确定性：删除旧实现前 legacy 入口调用阻断 = 0。
   - 治理收敛度：主入口收敛到 1 个（统一入口），旧入口仅兼容壳。
 - non_goals：
   - 本轮不做 L0 硬门禁重构。
@@ -39,7 +39,7 @@
 - acceptance_gates：
   - P0 冻结删除口径并发布 NO-GO 执行清单。
   - P1 统一入口上线并完成 wrapper 与引用迁移。
-  - P2 旧入口 7 天零调用且 TTL 归档满足边界。
+  - P2 旧入口调用观测与 TTL 归档满足边界。
   - P3 删除旧实现后全量验收通过。
 - release_constraints：
   - 项目未上线，以设计合理性优先，不接受“先删后补”。
@@ -49,6 +49,7 @@
 - 模块边界与职责：
   - `scripts/check_workflow_contract.py`：单一门禁契约源，负责参数解析、模式分发、结构化输出、退出码归一。
   - `scripts/check_clarify_plan_alignment.py` / `scripts/check_plan_vk_coverage.py` / `scripts/check_gate_contract_consistency.py` / `scripts/check_integration_gate.py`：迁移期兼容壳，仅做参数透传 + 提示。
+  - `full-gate` 用于 C07 的 pre-merge 收口校验；`integration_gate` 仅用于 G01 / post-merge 的主干可见性校验。
   - `logs/workflow-gate-usage.jsonl`：旧入口观测台账，作为退役 GO/NO-GO 判定证据。
   - `docs/内部参考/任务拆解/*/.state/*`：运行态证据域，仅按生命周期 + TTL 定向归档。
 - 端到端数据流：
@@ -66,13 +67,13 @@
 
 ## 4. 最终方案
 - 方案描述：
-  - 采用四阶段退役：`Phase 0 冻结删除 -> Phase 1 统一入口与 wrapper -> Phase 2 观测零调用与 TTL 归档 -> Phase 3 删除旧实现并全量验收`。
+  - 采用四阶段退役：`Phase 0 冻结删除 -> Phase 1 统一入口与 wrapper -> Phase 2 调用观测与 TTL 归档 -> Phase 3 删除旧实现并全量验收`。
 - requirement_seeds：
   - `REQ-WF-001`：冻结直接删除口径并统一到 v3。
   - `REQ-WF-002`：统一入口支持 `--mode` 且保持与旧链路等价输出。
   - `REQ-WF-003`：4 个 L1 旧脚本 wrapper 化且参数兼容。
   - `REQ-WF-004`：命令/技能/文档引用迁移到统一入口。
-  - `REQ-WF-005`：新增调用观测并支持连续 7 天零调用判定。
+  - `REQ-WF-005`：新增调用观测并支持 legacy 调用阻断判定。
   - `REQ-WF-006`：过程文件仅按生命周期 + TTL 归档，不触碰活跃任务与真理源。
 - implementation_seeds：
   - `P0-FREEZE-COMMANDS`
@@ -185,7 +186,7 @@ clarify_handoff_contract:
         - "退役可观测可回退"
       business_goal_metrics:
         - "迁移期间命令中断=0"
-        - "删除前7天零调用"
+        - "删除前无 legacy 调用阻断"
         - "主入口收敛到1个"
       non_goals:
         - "不改L0硬门禁"
@@ -205,7 +206,7 @@ clarify_handoff_contract:
       - requirement_id: "REQ-WF-004"
         summary: "命令/技能/文档引用迁移到统一入口"
       - requirement_id: "REQ-WF-005"
-        summary: "新增调用观测并支持7天零调用判定"
+        summary: "新增调用观测并支持 legacy 调用阻断判定"
       - requirement_id: "REQ-WF-006"
         summary: "过程文件仅按生命周期+TTL归档"
     implementation_seeds:
