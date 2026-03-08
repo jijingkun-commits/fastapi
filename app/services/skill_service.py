@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-from sqlalchemy import select, text
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.orm import Session
 
 from app.ai.utils.embedding_util import get_embedding
@@ -75,6 +75,19 @@ class SkillService:
         RUNTIME_SOURCE_MODE_COMPAT,
         RUNTIME_SOURCE_MODE_STRICT_USER,
     }
+    SKILL_RUNTIME_MODE_PROGRESSIVE = "progressive_loader"
+    SKILL_RUNTIME_MODE_HYBRID = "hybrid_rag"
+    SKILL_RUNTIME_MODE_CATALOG_TOOL = "catalog_tool"
+    VALID_SKILL_RUNTIME_MODES = {
+        SKILL_RUNTIME_MODE_PROGRESSIVE,
+        SKILL_RUNTIME_MODE_HYBRID,
+        SKILL_RUNTIME_MODE_CATALOG_TOOL,
+    }
+    SKILL_CATALOG_SOURCE = "definition_version_runtime_view"
+    SKILL_CATALOG_HEADER = (
+        "可用技能目录（仅暴露用途；确需正文时请调用 load_skills，单次最多 3 个 skill_id）："
+    )
+    MAX_LOAD_SKILLS_COUNT = 3
     USER_BOOTSTRAP_TEMPLATE_KEY = "skill.user_bootstrap_template"
     USER_BOOTSTRAP_TEMPLATE_DEFAULT = {
         "default_version": DEFAULT_VERSION,
@@ -149,9 +162,45 @@ class SkillService:
 
     @classmethod
     def _is_versioning_runtime_enabled(cls) -> bool:
-        """运行时是否启用版本化检索路径。"""
+        """运行时固定使用 definition/version 视图。"""
 
-        return cls._is_skill_versioning_enabled()
+        return True
+
+    @classmethod
+    def _is_progressive_skill_loading_enabled(cls) -> bool:
+        """判断是否启用渐进式 Skill 加载主路径。"""
+
+        return ConfigResolver.get_bool("feature.enable_progressive_skill_loading", True)
+
+    @classmethod
+    def _is_skill_runtime_trace_enabled(cls) -> bool:
+        """判断是否启用 Skill runtime canonical trace。"""
+
+        return ConfigResolver.get_bool("feature.enable_skill_runtime_trace", True)
+
+    @classmethod
+    def _is_skill_catalog_metadata_normalization_enabled(cls) -> bool:
+        """判断是否启用 catalog metadata 归一化。"""
+
+        return ConfigResolver.get_bool("feature.enable_skill_catalog_metadata_normalization", True)
+
+    @classmethod
+    def resolve_runtime_mode(cls) -> str:
+        """解析聊天主运行时模式，统一返回 canonical 值。"""
+
+        if not cls._is_progressive_skill_loading_enabled():
+            return cls.SKILL_RUNTIME_MODE_HYBRID
+
+        raw_value = ConfigResolver.get_string("skill.runtime_mode", cls.SKILL_RUNTIME_MODE_CATALOG_TOOL)
+        normalized = str(raw_value or "").strip().lower() or cls.SKILL_RUNTIME_MODE_CATALOG_TOOL
+
+        if normalized == cls.SKILL_RUNTIME_MODE_HYBRID:
+            return cls.SKILL_RUNTIME_MODE_HYBRID
+        if normalized in {cls.SKILL_RUNTIME_MODE_CATALOG_TOOL, cls.SKILL_RUNTIME_MODE_PROGRESSIVE}:
+            return cls.SKILL_RUNTIME_MODE_PROGRESSIVE
+
+        logger.warning("未知 skill.runtime_mode=%s，已回退 progressive_loader", normalized)
+        return cls.SKILL_RUNTIME_MODE_PROGRESSIVE
 
     @classmethod
     def _get_runtime_source_mode(cls) -> str:
@@ -561,32 +610,69 @@ class SkillService:
         parsed: Dict[str, Any],
         file_hash: str,
         embedding: Optional[List[float]],
-    ) -> None:
+    ) -> bool:
         """同步 Skill 定义层与版本层记录。"""
 
         skill_id = str(parsed["skill_id"])
+        normalized_scope = parsed.get("scope") or cls.DEFAULT_SCOPE
+        normalized_is_enabled = bool(parsed.get("is_enabled", True))
+        normalized_auto_enabled = bool(parsed.get("auto_enabled", True))
+        normalized_priority = int(parsed.get("priority", cls.DEFAULT_PRIORITY))
+        normalized_trigger_phrases = parsed.get("trigger_phrases") or []
+        normalized_conflicts_with = parsed.get("conflicts_with") or []
+        changed = False
 
         definition = db.execute(
             select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
         ).scalar_one_or_none()
+        default_catalog_order = int(parsed.get("priority", cls.DEFAULT_PRIORITY) or cls.DEFAULT_PRIORITY)
+        default_catalog_path = cls._normalize_catalog_path(skill_id, None)
 
         if definition is None:
             definition = AgentSkillDefinition(
                 skill_id=skill_id,
                 name=parsed["name"],
                 description=parsed.get("description"),
-                scope=parsed.get("scope") or cls.DEFAULT_SCOPE,
-                is_enabled=bool(parsed.get("is_enabled", True)),
+                scope=normalized_scope,
+                is_enabled=normalized_is_enabled,
+                catalog_path=default_catalog_path,
+                catalog_order=default_catalog_order,
             )
             db.add(definition)
             db.flush()
+            changed = True
         else:
-            definition.name = parsed["name"]
-            definition.description = parsed.get("description")
-            definition.scope = parsed.get("scope") or cls.DEFAULT_SCOPE
-            definition.is_enabled = bool(parsed.get("is_enabled", True))
+            if definition.name != parsed["name"]:
+                definition.name = parsed["name"]
+                changed = True
+            if definition.description != parsed.get("description"):
+                definition.description = parsed.get("description")
+                changed = True
+            if definition.scope != normalized_scope:
+                definition.scope = normalized_scope
+                changed = True
+            if bool(definition.is_enabled) != normalized_is_enabled:
+                definition.is_enabled = normalized_is_enabled
+                changed = True
+            if not getattr(definition, "catalog_path", None):
+                definition.catalog_path = default_catalog_path
+                changed = True
+            if getattr(definition, "catalog_order", None) is None:
+                definition.catalog_order = default_catalog_order
+                changed = True
 
         version_value, _ = cls._normalize_version_value(parsed.get("version"), default=cls.DEFAULT_VERSION)
+        catalog_description, _ = cls._derive_catalog_description(
+            name=parsed.get("name"),
+            description=parsed.get("description"),
+            content=parsed.get("content"),
+        )
+        when_to_use = cls._derive_when_to_use(
+            when_to_use=None,
+            catalog_description=catalog_description,
+            description=parsed.get("description"),
+            content=parsed.get("content"),
+        )
 
         version_record = db.execute(
             select(AgentSkillVersion).where(
@@ -615,31 +701,77 @@ class SkillService:
                 content=parsed["content"],
                 file_hash=file_hash,
                 embedding=embedding,
-                is_enabled=bool(parsed.get("is_enabled", True)),
-                auto_enabled=bool(parsed.get("auto_enabled", True)),
-                priority=int(parsed.get("priority", cls.DEFAULT_PRIORITY)),
-                scope=parsed.get("scope") or cls.DEFAULT_SCOPE,
-                trigger_phrases=parsed.get("trigger_phrases") or [],
-                conflicts_with=parsed.get("conflicts_with") or [],
+                is_enabled=normalized_is_enabled,
+                auto_enabled=normalized_auto_enabled,
+                priority=normalized_priority,
+                scope=normalized_scope,
+                trigger_phrases=normalized_trigger_phrases,
+                conflicts_with=normalized_conflicts_with,
+                catalog_description=catalog_description,
+                when_to_use=when_to_use,
                 published_at=published_at,
             )
             db.add(version_record)
-            return
+            return True
 
-        version_record.definition_id = definition.id
-        version_record.name = parsed["name"]
-        version_record.description = parsed.get("description")
-        version_record.content = parsed["content"]
-        version_record.file_hash = file_hash
-        version_record.embedding = embedding
-        version_record.is_enabled = bool(parsed.get("is_enabled", True))
-        version_record.auto_enabled = bool(parsed.get("auto_enabled", True))
-        version_record.priority = int(parsed.get("priority", cls.DEFAULT_PRIORITY))
-        version_record.scope = parsed.get("scope") or cls.DEFAULT_SCOPE
-        version_record.trigger_phrases = parsed.get("trigger_phrases") or []
-        version_record.conflicts_with = parsed.get("conflicts_with") or []
+        if version_record.definition_id != definition.id:
+            version_record.definition_id = definition.id
+            changed = True
+        if version_record.name != parsed["name"]:
+            version_record.name = parsed["name"]
+            changed = True
+        if version_record.description != parsed.get("description"):
+            version_record.description = parsed.get("description")
+            changed = True
+        if version_record.content != parsed["content"]:
+            version_record.content = parsed["content"]
+            changed = True
+        if version_record.file_hash != file_hash:
+            version_record.file_hash = file_hash
+            changed = True
+        if version_record.embedding != embedding:
+            version_record.embedding = embedding
+            changed = True
+        if bool(version_record.is_enabled) != normalized_is_enabled:
+            version_record.is_enabled = normalized_is_enabled
+            changed = True
+        if bool(version_record.auto_enabled) != normalized_auto_enabled:
+            version_record.auto_enabled = normalized_auto_enabled
+            changed = True
+        if int(version_record.priority or cls.DEFAULT_PRIORITY) != normalized_priority:
+            version_record.priority = normalized_priority
+            changed = True
+        if version_record.scope != normalized_scope:
+            version_record.scope = normalized_scope
+            changed = True
+        if list(version_record.trigger_phrases or []) != list(normalized_trigger_phrases):
+            version_record.trigger_phrases = list(normalized_trigger_phrases)
+            changed = True
+        if list(version_record.conflicts_with or []) != list(normalized_conflicts_with):
+            version_record.conflicts_with = list(normalized_conflicts_with)
+            changed = True
+        if version_record.catalog_description != catalog_description:
+            version_record.catalog_description = catalog_description
+            changed = True
+        if version_record.when_to_use != when_to_use:
+            version_record.when_to_use = when_to_use
+            changed = True
+
+        published_record = db.execute(
+            select(AgentSkillVersion.id).where(
+                AgentSkillVersion.skill_id == skill_id,
+                AgentSkillVersion.status == cls.VERSION_STATUS_PUBLISHED,
+            )
+        ).first()
+        if published_record is None and version_record.status != cls.VERSION_STATUS_PUBLISHED:
+            version_record.status = cls.VERSION_STATUS_PUBLISHED
+            changed = True
+
         if version_record.status == cls.VERSION_STATUS_PUBLISHED and version_record.published_at is None:
             version_record.published_at = datetime.now(timezone.utc)
+            changed = True
+
+        return changed
 
     @classmethod
     def _build_user_bootstrap_template(cls, db: Session) -> Dict[str, Any]:
@@ -652,54 +784,30 @@ class SkillService:
             select(AgentSkillVersion).where(AgentSkillVersion.status == cls.VERSION_STATUS_PUBLISHED)
         ).scalars().all()
 
-        if version_records:
-            picked_versions: Dict[str, AgentSkillVersion] = {}
-            for record in sorted(version_records, key=cls._version_sort_key, reverse=True):
-                if record.skill_id in picked_versions:
-                    continue
-                picked_versions[record.skill_id] = record
+        picked_versions: Dict[str, AgentSkillVersion] = {}
+        for record in sorted(version_records, key=cls._version_sort_key, reverse=True):
+            if record.skill_id in picked_versions:
+                continue
+            picked_versions[record.skill_id] = record
 
-            for skill_id in sorted(picked_versions):
-                record = picked_versions[skill_id]
-                item: Dict[str, Any] = {
-                    "skill_id": record.skill_id,
-                    "version": record.version or default_version,
-                    "enabled": bool(record.is_enabled),
-                    "priority_override": int(record.priority or cls.DEFAULT_PRIORITY),
-                }
-                config_override: Dict[str, Any] = {}
-                if record.scope and record.scope != cls.DEFAULT_SCOPE:
-                    config_override["scope"] = record.scope
-                if record.trigger_phrases:
-                    config_override["trigger_phrases"] = list(record.trigger_phrases)
-                if record.conflicts_with:
-                    config_override["conflicts_with"] = list(record.conflicts_with)
-                if config_override:
-                    item["config_override"] = config_override
-                template_items.append(item)
-        else:
-            legacy_records = db.execute(
-                select(AgentSkill).where(AgentSkill.is_enabled.is_(True))
-            ).scalars().all()
-            legacy_records.sort(key=lambda item: (int(item.priority or cls.DEFAULT_PRIORITY), str(item.skill_id)))
-
-            for legacy in legacy_records:
-                item = {
-                    "skill_id": legacy.skill_id,
-                    "version": default_version,
-                    "enabled": bool(legacy.is_enabled),
-                    "priority_override": int(legacy.priority or cls.DEFAULT_PRIORITY),
-                }
-                config_override: Dict[str, Any] = {}
-                if legacy.scope and legacy.scope != cls.DEFAULT_SCOPE:
-                    config_override["scope"] = legacy.scope
-                if legacy.trigger_phrases:
-                    config_override["trigger_phrases"] = list(legacy.trigger_phrases)
-                if legacy.conflicts_with:
-                    config_override["conflicts_with"] = list(legacy.conflicts_with)
-                if config_override:
-                    item["config_override"] = config_override
-                template_items.append(item)
+        for skill_id in sorted(picked_versions):
+            record = picked_versions[skill_id]
+            item: Dict[str, Any] = {
+                "skill_id": record.skill_id,
+                "version": record.version or default_version,
+                "enabled": bool(record.is_enabled),
+                "priority_override": int(record.priority or cls.DEFAULT_PRIORITY),
+            }
+            config_override: Dict[str, Any] = {}
+            if record.scope and record.scope != cls.DEFAULT_SCOPE:
+                config_override["scope"] = record.scope
+            if record.trigger_phrases:
+                config_override["trigger_phrases"] = list(record.trigger_phrases)
+            if record.conflicts_with:
+                config_override["conflicts_with"] = list(record.conflicts_with)
+            if config_override:
+                item["config_override"] = config_override
+            template_items.append(item)
 
         return {
             "default_version": default_version,
@@ -757,23 +865,24 @@ class SkillService:
             select(AgentSkill).where(AgentSkill.skill_id == skill_id)
         ).scalar_one_or_none()
 
+        legacy_changed = False
         if existing:
             if not force and existing.file_hash == file_hash:
-                logger.debug("技能 %s 未变化，跳过", skill_id)
-                return False
-
-            existing.name = parsed["name"]
-            existing.description = parsed["description"]
-            existing.content = content
-            existing.file_hash = file_hash
-            existing.embedding = embedding
-            existing.scope = parsed["scope"]
-            existing.priority = parsed["priority"]
-            existing.auto_enabled = parsed["auto_enabled"]
-            existing.is_enabled = parsed["is_enabled"]
-            existing.trigger_phrases = parsed["trigger_phrases"]
-            existing.conflicts_with = parsed["conflicts_with"]
-            logger.info("更新技能: %s", skill_id)
+                logger.debug("技能 %s 兼容层未变化，继续校验版本化记录", skill_id)
+            else:
+                existing.name = parsed["name"]
+                existing.description = parsed["description"]
+                existing.content = content
+                existing.file_hash = file_hash
+                existing.embedding = embedding
+                existing.scope = parsed["scope"]
+                existing.priority = parsed["priority"]
+                existing.auto_enabled = parsed["auto_enabled"]
+                existing.is_enabled = parsed["is_enabled"]
+                existing.trigger_phrases = parsed["trigger_phrases"]
+                existing.conflicts_with = parsed["conflicts_with"]
+                legacy_changed = True
+                logger.info("更新技能: %s", skill_id)
         else:
             skill = AgentSkill(
                 skill_id=skill_id,
@@ -790,15 +899,19 @@ class SkillService:
                 conflicts_with=parsed["conflicts_with"],
             )
             db.add(skill)
+            legacy_changed = True
             logger.info("导入技能: %s", skill_id)
 
-        if cls._is_skill_versioning_enabled():
-            cls._sync_versioned_records(
-                db=db,
-                parsed=parsed,
-                file_hash=file_hash,
-                embedding=embedding,
-            )
+        versioned_changed = cls._sync_versioned_records(
+            db=db,
+            parsed=parsed,
+            file_hash=file_hash,
+            embedding=embedding,
+        )
+
+        if not legacy_changed and not versioned_changed:
+            logger.debug("技能 %s 兼容层与版本层均未变化，跳过提交", skill_id)
+            return False
 
         db.commit()
         return True
@@ -879,92 +992,9 @@ class SkillService:
         return status_rank, ts_value, int(version_record.id or 0)
 
     @classmethod
-    def _sync_legacy_record_from_version(cls, db: Session, version_record: AgentSkillVersion) -> None:
-        """将发布版本同步回兼容表，保证回滚开关可用。"""
-
-        legacy = db.execute(
-            select(AgentSkill).where(AgentSkill.skill_id == version_record.skill_id)
-        ).scalar_one_or_none()
-
-        if legacy is None:
-            legacy = AgentSkill(skill_id=version_record.skill_id, name=version_record.name, content=version_record.content)
-            db.add(legacy)
-
-        legacy.name = version_record.name
-        legacy.description = version_record.description
-        legacy.content = version_record.content
-        legacy.file_hash = version_record.file_hash
-        legacy.embedding = version_record.embedding
-        legacy.is_enabled = bool(version_record.is_enabled)
-        legacy.auto_enabled = bool(version_record.auto_enabled)
-        legacy.priority = int(version_record.priority or cls.DEFAULT_PRIORITY)
-        legacy.scope = version_record.scope or cls.DEFAULT_SCOPE
-        legacy.trigger_phrases = version_record.trigger_phrases or []
-        legacy.conflicts_with = version_record.conflicts_with or []
-
-    @classmethod
-    def _bootstrap_versioned_record_from_legacy(cls, db: Session, skill_id: str) -> None:
-        """当版本表缺失记录时，从兼容表补齐基线版本。"""
-
-        definition = db.execute(
-            select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
-        ).scalar_one_or_none()
-        if definition is not None:
-            return
-
-        legacy = db.execute(
-            select(AgentSkill).where(AgentSkill.skill_id == skill_id)
-        ).scalar_one_or_none()
-        if legacy is None:
-            raise ValueError(f"技能不存在: {skill_id}")
-
-        parsed = {
-            "skill_id": legacy.skill_id,
-            "name": legacy.name,
-            "description": legacy.description,
-            "content": legacy.content,
-            "scope": legacy.scope or cls.DEFAULT_SCOPE,
-            "priority": int(legacy.priority or cls.DEFAULT_PRIORITY),
-            "version": cls.DEFAULT_VERSION,
-            "auto_enabled": bool(legacy.auto_enabled),
-            "is_enabled": bool(legacy.is_enabled),
-            "trigger_phrases": legacy.trigger_phrases or [],
-            "conflicts_with": legacy.conflicts_with or [],
-        }
-        cls._sync_versioned_records(
-            db=db,
-            parsed=parsed,
-            file_hash=legacy.file_hash or cls._compute_file_hash(legacy.content or ""),
-            embedding=legacy.embedding,
-        )
-
-    @classmethod
     def list_skill_versions(cls, db: Session, skill_id: str) -> List[Dict[str, Any]]:
         """列出技能版本信息。"""
 
-        if not cls._is_skill_versioning_enabled():
-            legacy = db.execute(
-                select(AgentSkill).where(AgentSkill.skill_id == skill_id)
-            ).scalar_one_or_none()
-            if legacy is None:
-                return []
-            return [
-                {
-                    "skill_id": legacy.skill_id,
-                    "version": cls.DEFAULT_VERSION,
-                    "status": cls.VERSION_STATUS_PUBLISHED,
-                    "name": legacy.name,
-                    "description": legacy.description,
-                    "is_enabled": bool(legacy.is_enabled),
-                    "auto_enabled": bool(legacy.auto_enabled),
-                    "priority": int(legacy.priority or cls.DEFAULT_PRIORITY),
-                    "scope": legacy.scope or cls.DEFAULT_SCOPE,
-                    "published_at": legacy.updated_at.isoformat() if legacy.updated_at else None,
-                    "updated_at": legacy.updated_at.isoformat() if legacy.updated_at else None,
-                }
-            ]
-
-        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
         versions = db.execute(
             select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
         ).scalars().all()
@@ -993,7 +1023,6 @@ class SkillService:
         if not cls._is_skill_versioning_enabled():
             raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
 
-        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
         target_version, valid_version = cls._normalize_version_value(version, default="")
         if not valid_version or not target_version:
             raise ValueError("version 非法")
@@ -1018,7 +1047,6 @@ class SkillService:
             elif item.status == cls.VERSION_STATUS_PUBLISHED:
                 item.status = cls.VERSION_STATUS_ROLLBACKED
 
-        cls._sync_legacy_record_from_version(db, target)
         db.commit()
 
         return {
@@ -1039,7 +1067,6 @@ class SkillService:
         if not cls._is_skill_versioning_enabled():
             raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
 
-        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
         versions = db.execute(
             select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
         ).scalars().all()
@@ -1072,7 +1099,6 @@ class SkillService:
         target.status = cls.VERSION_STATUS_PUBLISHED
         target.published_at = datetime.now(timezone.utc)
 
-        cls._sync_legacy_record_from_version(db, target)
         db.commit()
 
         return {
@@ -1098,8 +1124,6 @@ class SkillService:
             raise RuntimeError("ENABLE_SKILL_VERSIONING 未开启")
         if not cls._is_user_skill_binding_enabled():
             raise RuntimeError("ENABLE_USER_SKILL_BINDING 未开启")
-
-        cls._bootstrap_versioned_record_from_legacy(db, skill_id)
 
         normalized_version, valid_version = cls._normalize_version_value(version, default="")
         if not valid_version or not normalized_version:
@@ -1143,7 +1167,8 @@ class SkillService:
         }
 
     @classmethod
-    def rollback_user_skill_binding(cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
+    def rollback_user_skill_binding(
+cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
         """回滚用户绑定，使其回退到平台发布版本。"""
 
         if not cls._is_user_skill_binding_enabled():
@@ -1234,6 +1259,376 @@ class SkillService:
                 "config_override": item.config_override or {},
             }
             for item in bindings
+        }
+
+    @classmethod
+    def _list_admin_skill_records(
+        cls,
+        db: Session,
+        *,
+        skill_ids: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        preserve_input_order: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """按 definition/version/binding 聚合管理面技能视图。"""
+
+        normalized_skill_ids: Optional[List[str]] = None
+        if skill_ids is not None:
+            normalized_skill_ids = []
+            seen_skill_ids = set()
+            for item in skill_ids:
+                normalized = str(item or '').strip()
+                if not normalized or normalized in seen_skill_ids:
+                    continue
+                normalized_skill_ids.append(normalized)
+                seen_skill_ids.add(normalized)
+            if not normalized_skill_ids:
+                return []
+
+        definition_query = select(AgentSkillDefinition)
+        if normalized_skill_ids is not None:
+            definition_query = definition_query.where(AgentSkillDefinition.skill_id.in_(normalized_skill_ids))
+
+        definitions = db.execute(definition_query).scalars().all()
+        if not definitions:
+            return []
+
+        definition_map = {item.skill_id: item for item in definitions}
+        if preserve_input_order and normalized_skill_ids is not None:
+            ordered_definitions = [definition_map[skill_id] for skill_id in normalized_skill_ids if skill_id in definition_map]
+        else:
+            ordered_definitions = sorted(
+                definitions,
+                key=lambda item: (
+                    str(item.name or item.skill_id or '').lower(),
+                    str(item.skill_id or '').lower(),
+                ),
+            )
+
+        ordered_skill_ids = [item.skill_id for item in ordered_definitions]
+        version_rows: List[AgentSkillVersion] = []
+        if ordered_skill_ids:
+            version_rows = db.execute(
+                select(AgentSkillVersion).where(AgentSkillVersion.skill_id.in_(ordered_skill_ids))
+            ).scalars().all()
+
+        versions_by_skill: Dict[str, List[AgentSkillVersion]] = {}
+        for row in version_rows:
+            versions_by_skill.setdefault(row.skill_id, []).append(row)
+        for rows in versions_by_skill.values():
+            rows.sort(key=cls._version_sort_key, reverse=True)
+
+        binding_map: Dict[str, UserSkillBinding] = {}
+        if user_id is not None and ordered_skill_ids and cls._is_user_skill_binding_enabled():
+            binding_rows = db.execute(
+                select(UserSkillBinding).where(
+                    UserSkillBinding.user_id == user_id,
+                    UserSkillBinding.skill_id.in_(ordered_skill_ids),
+                )
+            ).scalars().all()
+            binding_map = {row.skill_id: row for row in binding_rows}
+
+        records: List[Dict[str, Any]] = []
+        for definition in ordered_definitions:
+            versions = versions_by_skill.get(definition.skill_id, [])
+            published_version = next(
+                (item for item in versions if item.status == cls.VERSION_STATUS_PUBLISHED),
+                None,
+            )
+            latest_version = versions[0] if versions else None
+            binding = binding_map.get(definition.skill_id)
+            bound_version = binding.version if binding is not None else None
+            bound_version_record = None
+            binding_status = binding.binding_status if binding is not None else None
+            if (
+                binding is not None
+                and binding.binding_status == cls.BINDING_STATUS_ENABLED
+                and bool(binding.is_enabled)
+                and binding.version
+            ):
+                bound_version_record = next((item for item in versions if item.version == binding.version), None)
+
+            effective_version = bound_version_record or published_version or latest_version
+            records.append(
+                {
+                    'definition': definition,
+                    'versions': versions,
+                    'published_version_record': published_version,
+                    'latest_version_record': latest_version,
+                    'binding': binding,
+                    'bound_version': bound_version,
+                    'binding_status': binding_status,
+                    'effective_version_record': effective_version,
+                }
+            )
+
+        return records
+
+    @classmethod
+    def _serialize_admin_skill_record(cls, record: Dict[str, Any]) -> Dict[str, Any]:
+        """序列化管理面技能聚合记录。"""
+
+        definition = record['definition']
+        effective_version = record.get('effective_version_record')
+        published_version = record.get('published_version_record')
+        embedding = getattr(effective_version, 'embedding', None) if effective_version is not None else None
+        content = str(getattr(effective_version, 'content', '') or '') if effective_version is not None else ''
+        created_at = (
+            getattr(effective_version, 'created_at', None)
+            if effective_version is not None and getattr(effective_version, 'created_at', None) is not None
+            else getattr(definition, 'created_at', None)
+        )
+        updated_at = (
+            getattr(effective_version, 'updated_at', None)
+            if effective_version is not None and getattr(effective_version, 'updated_at', None) is not None
+            else getattr(definition, 'updated_at', None)
+        )
+
+        effective_is_enabled = getattr(effective_version, 'is_enabled', None) if effective_version is not None else None
+        effective_auto_enabled = getattr(effective_version, 'auto_enabled', None) if effective_version is not None else None
+        effective_priority = getattr(effective_version, 'priority', None) if effective_version is not None else None
+
+        return {
+            'id': int(getattr(effective_version, 'id', None) or getattr(definition, 'id', 0) or 0),
+            'skill_id': definition.skill_id,
+            'name': getattr(effective_version, 'name', None) or definition.name,
+            'description': getattr(effective_version, 'description', None) if effective_version is not None else definition.description,
+            'content': content,
+            'content_preview': content[:200] + '...' if len(content) > 200 else content,
+            'file_hash': getattr(effective_version, 'file_hash', None) if effective_version is not None else None,
+            'has_embedding': embedding is not None,
+            'embedding_dim': len(embedding) if embedding is not None else None,
+            'is_enabled': bool(definition.is_enabled if effective_is_enabled is None else effective_is_enabled),
+            'auto_enabled': bool(True if effective_auto_enabled is None else effective_auto_enabled),
+            'priority': int(cls.DEFAULT_PRIORITY if effective_priority is None else effective_priority),
+            'scope': getattr(effective_version, 'scope', None) or definition.scope or cls.DEFAULT_SCOPE,
+            'trigger_phrases': [str(item) for item in (getattr(effective_version, 'trigger_phrases', None) or [])]
+            if effective_version is not None
+            else [],
+            'conflicts_with': [str(item) for item in (getattr(effective_version, 'conflicts_with', None) or [])]
+            if effective_version is not None
+            else [],
+            'published_version': getattr(published_version, 'version', None) if published_version is not None else None,
+            'bound_version': record.get('bound_version'),
+            'binding_status': record.get('binding_status'),
+            'effective_version': getattr(effective_version, 'version', None) if effective_version is not None else None,
+            'catalog_path': definition.catalog_path,
+            'catalog_order': int(definition.catalog_order or cls.DEFAULT_PRIORITY),
+            'catalog_description': getattr(effective_version, 'catalog_description', None) if effective_version is not None else None,
+            'when_to_use': getattr(effective_version, 'when_to_use', None) if effective_version is not None else None,
+            'created_at': created_at.isoformat() if created_at else None,
+            'updated_at': updated_at.isoformat() if updated_at else None,
+        }
+
+    @classmethod
+    def list_admin_skills(
+        cls,
+        db: Session,
+        *,
+        skip: int = 0,
+        limit: Optional[int] = 50,
+        search: Optional[str] = None,
+        has_embedding: Optional[bool] = None,
+        user_id: Optional[int] = None,
+        skill_ids: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """查询管理面技能列表，真理源固定为 definition/version/binding。"""
+
+        records = cls._list_admin_skill_records(
+            db,
+            skill_ids=skill_ids,
+            user_id=user_id,
+            preserve_input_order=False,
+        )
+        items = [cls._serialize_admin_skill_record(record) for record in records]
+
+        normalized_search = str(search or '').strip().lower()
+        if normalized_search:
+            items = [
+                item
+                for item in items
+                if normalized_search in str(item.get('skill_id') or '').lower()
+                or normalized_search in str(item.get('name') or '').lower()
+                or normalized_search in str(item.get('description') or '').lower()
+                or normalized_search in str(item.get('catalog_description') or '').lower()
+                or normalized_search in str(item.get('when_to_use') or '').lower()
+            ]
+
+        if has_embedding is not None:
+            items = [item for item in items if bool(item.get('has_embedding')) is has_embedding]
+
+        if skip > 0:
+            items = items[skip:]
+        if limit is not None:
+            items = items[:limit]
+        return items
+
+    @classmethod
+    def get_admin_skill(
+        cls,
+        db: Session,
+        skill_id: str,
+        *,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """读取单个管理面技能详情。"""
+
+        records = cls._list_admin_skill_records(
+            db,
+            skill_ids=[skill_id],
+            user_id=user_id,
+            preserve_input_order=True,
+        )
+        if not records:
+            raise ValueError('技能不存在')
+        return cls._serialize_admin_skill_record(records[0])
+
+    @classmethod
+    def get_admin_vector_status(cls, db: Session) -> Dict[str, Any]:
+        """统计管理面向量状态，口径为 published 优先，否则 latest。"""
+
+        records = cls._list_admin_skill_records(db)
+        total_skills = len(records)
+        with_embedding = 0
+        embedding_dim: Optional[int] = None
+
+        for record in records:
+            target = record.get('published_version_record') or record.get('latest_version_record')
+            embedding = getattr(target, 'embedding', None) if target is not None else None
+            if embedding is None:
+                continue
+            with_embedding += 1
+            if embedding_dim is None:
+                embedding_dim = len(embedding)
+
+        try:
+            test_embedding = get_embedding('test')
+            current_model_dim = len(test_embedding) if test_embedding else None
+        except Exception:
+            current_model_dim = None
+
+        return {
+            'total_skills': total_skills,
+            'with_embedding': with_embedding,
+            'without_embedding': total_skills - with_embedding,
+            'embedding_dim': embedding_dim,
+            'dimension_mismatch': (
+                embedding_dim is not None
+                and current_model_dim is not None
+                and embedding_dim != current_model_dim
+            ),
+            'current_model_dim': current_model_dim,
+        }
+
+    @classmethod
+    def _regenerate_admin_embedding_for_record(cls, record: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[int]]:
+        """为管理面技能记录重新生成向量。"""
+
+        definition = record['definition']
+        skill_id = str(definition.skill_id)
+        target = record.get('published_version_record') or record.get('latest_version_record')
+        if target is None:
+            return False, f'{skill_id}: 技能缺少可写版本记录', None
+
+        seed_text = str(
+            getattr(target, 'description', None)
+            or getattr(target, 'name', None)
+            or getattr(definition, 'description', None)
+            or getattr(definition, 'name', None)
+            or ''
+        ).strip()
+        if not seed_text:
+            return False, f'{skill_id}: 技能缺少可向量化描述', None
+
+        embedding = get_embedding(seed_text)
+        if not embedding:
+            return False, f'{skill_id}: 向量生成失败', None
+
+        target.embedding = embedding
+        return True, None, len(embedding)
+
+    @classmethod
+    def regenerate_admin_skill_embeddings(
+        cls,
+        db: Session,
+        *,
+        skill_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """批量重建管理面技能向量，目标版本为 published 优先，否则 latest。"""
+
+        records = cls._list_admin_skill_records(
+            db,
+            skill_ids=skill_ids,
+            preserve_input_order=skill_ids is not None,
+        )
+        if not records:
+            raise ValueError('没有找到技能')
+
+        success_count = 0
+        errors: List[str] = []
+        processed_skill_ids: List[str] = []
+        for record in records:
+            definition = record['definition']
+            processed_skill_ids.append(str(definition.skill_id))
+            try:
+                updated, error_message, _ = cls._regenerate_admin_embedding_for_record(record)
+            except Exception as exc:  # pragma: no cover - 外部依赖异常
+                errors.append(f'{definition.skill_id}: {str(exc)}')
+                continue
+            if not updated:
+                if error_message:
+                    errors.append(error_message)
+                continue
+            success_count += 1
+
+        if success_count > 0:
+            db.commit()
+
+        return {
+            'success_count': success_count,
+            'total': len(records),
+            'errors': errors,
+            'skill_ids': processed_skill_ids,
+        }
+
+    @classmethod
+    def regenerate_single_admin_skill_embedding(cls, db: Session, skill_id: str) -> Dict[str, Any]:
+        """重建单个管理面技能向量。"""
+
+        records = cls._list_admin_skill_records(
+            db,
+            skill_ids=[skill_id],
+            preserve_input_order=True,
+        )
+        if not records:
+            raise ValueError('技能不存在')
+
+        updated, error_message, embedding_dim = cls._regenerate_admin_embedding_for_record(records[0])
+        if not updated:
+            raise RuntimeError(error_message or '向量生成失败')
+
+        db.commit()
+        return {
+            'message': '向量已重新生成',
+            'skill_id': skill_id,
+            'embedding_dim': embedding_dim,
+        }
+
+    @classmethod
+    def delete_admin_skill(cls, db: Session, skill_id: str) -> Dict[str, Any]:
+        """删除技能定义，并级联删除其版本与绑定。"""
+
+        definition = db.execute(
+            select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
+        ).scalar_one_or_none()
+        if definition is None:
+            raise ValueError('技能不存在')
+
+        db.delete(definition)
+        db.commit()
+        return {
+            'message': '技能已删除',
+            'skill_id': skill_id,
         }
 
     @staticmethod
@@ -1361,30 +1756,7 @@ class SkillService:
 
     @classmethod
     def _build_runtime_source_sql(cls, user_id: Optional[int]) -> Tuple[str, Dict[str, Any]]:
-        """构建技能检索运行时数据源 SQL。"""
-
-        if not cls._is_versioning_runtime_enabled():
-            return (
-                """
-                SELECT
-                    id,
-                    skill_id,
-                    name,
-                    description,
-                    content,
-                    is_enabled,
-                    auto_enabled,
-                    priority,
-                    scope,
-                    trigger_phrases,
-                    conflicts_with,
-                    embedding,
-                    NULL::text AS effective_version,
-                    NULL::text AS binding_status
-                FROM t_agent_skills
-                """,
-                {},
-            )
+        """构建以 definition/version/binding 为真理源的技能运行时数据源 SQL。"""
 
         binding_enabled = cls._is_user_skill_binding_enabled() and user_id is not None
         params: Dict[str, Any] = {
@@ -1535,136 +1907,6 @@ class SkillService:
         }
 
     @classmethod
-    def _fetch_vector_candidates_legacy(
-        cls,
-        db: Session,
-        query_embedding: List[float],
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        """兼容路径：从 t_agent_skills 召回向量候选。"""
-
-        sql = text(
-            """
-            SELECT
-                id,
-                skill_id,
-                name,
-                description,
-                content,
-                is_enabled,
-                auto_enabled,
-                priority,
-                scope,
-                trigger_phrases,
-                conflicts_with,
-                1 - (embedding <=> CAST(:query_vec AS vector)) AS vector_score
-            FROM t_agent_skills
-            WHERE embedding IS NOT NULL
-            ORDER BY embedding <=> CAST(:query_vec AS vector)
-            LIMIT :limit
-            """
-        )
-
-        rows = db.execute(sql, {"query_vec": query_embedding, "limit": limit})
-        candidates: List[Dict[str, Any]] = []
-        for row in rows:
-            candidates.append(
-                {
-                    "id": row.id,
-                    "skill_id": row.skill_id,
-                    "name": row.name,
-                    "description": row.description,
-                    "content": row.content,
-                    "is_enabled": row.is_enabled,
-                    "auto_enabled": row.auto_enabled,
-                    "priority": row.priority,
-                    "scope": row.scope,
-                    "trigger_phrases": row.trigger_phrases or [],
-                    "conflicts_with": row.conflicts_with or [],
-                    "effective_version": None,
-                    "binding_status": None,
-                    "vector_score": cls._normalize_score(row.vector_score),
-                    "lexical_score": 0.0,
-                    "trigger_hit": 0.0,
-                }
-            )
-        return candidates
-
-    @classmethod
-    def _fetch_lexical_candidates_legacy(
-        cls,
-        db: Session,
-        query: str,
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        """兼容路径：从 t_agent_skills 召回关键词候选。"""
-
-        sql = text(
-            """
-            SELECT
-                id,
-                skill_id,
-                name,
-                description,
-                content,
-                is_enabled,
-                auto_enabled,
-                priority,
-                scope,
-                trigger_phrases,
-                conflicts_with,
-                ts_rank_cd(
-                    to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(content, '')),
-                    plainto_tsquery('simple', :query)
-                ) AS lexical_score,
-                CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
-                        WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
-                    ) THEN 1.0
-                    ELSE 0.0
-                END AS trigger_hit
-            FROM t_agent_skills
-            WHERE
-                to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(content, ''))
-                @@ plainto_tsquery('simple', :query)
-                OR EXISTS (
-                    SELECT 1
-                    FROM jsonb_array_elements_text(coalesce(trigger_phrases, '[]'::jsonb)) AS phrase
-                    WHERE lower(:raw_query) LIKE '%' || lower(phrase) || '%'
-                )
-            ORDER BY lexical_score DESC, priority ASC
-            LIMIT :limit
-            """
-        )
-
-        rows = db.execute(sql, {"query": query, "raw_query": query.lower(), "limit": limit})
-        candidates: List[Dict[str, Any]] = []
-        for row in rows:
-            candidates.append(
-                {
-                    "id": row.id,
-                    "skill_id": row.skill_id,
-                    "name": row.name,
-                    "description": row.description,
-                    "content": row.content,
-                    "is_enabled": row.is_enabled,
-                    "auto_enabled": row.auto_enabled,
-                    "priority": row.priority,
-                    "scope": row.scope,
-                    "trigger_phrases": row.trigger_phrases or [],
-                    "conflicts_with": row.conflicts_with or [],
-                    "effective_version": None,
-                    "binding_status": None,
-                    "vector_score": 0.0,
-                    "lexical_score": max(0.0, float(row.lexical_score or 0.0)),
-                    "trigger_hit": cls._normalize_score(row.trigger_hit),
-                }
-            )
-        return candidates
-
-    @classmethod
     def _fetch_vector_candidates(
         cls,
         db: Session,
@@ -1675,8 +1917,6 @@ class SkillService:
         """召回向量候选。"""
 
         source_sql, base_params = cls._build_runtime_source_sql(user_id)
-        strict_user_mode = cls._is_strict_user_runtime_enabled()
-        runtime_source_mode = cls._get_runtime_source_mode()
 
         sql = text(
             f"""
@@ -1712,21 +1952,8 @@ class SkillService:
         }
         try:
             rows = db.execute(sql, params)
-        except Exception as exc:  # pragma: no cover - 兼容路径
-            if cls._is_versioning_runtime_enabled():
-                if strict_user_mode:
-                    logger.warning(
-                        "技能检索: runtime_source_mode=%s 版本化向量召回失败，不允许 legacy 回退 - %s",
-                        runtime_source_mode,
-                        exc,
-                    )
-                    raise
-                logger.warning(
-                    "技能检索: runtime_source_mode=%s 版本化向量召回失败，回退兼容表 - %s",
-                    runtime_source_mode,
-                    exc,
-                )
-                return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
+        except Exception as exc:  # pragma: no cover - 数据库检索异常
+            logger.warning("技能检索: definition/version 向量召回失败 - %s", exc)
             raise
 
         candidates: List[Dict[str, Any]] = []
@@ -1741,9 +1968,6 @@ class SkillService:
             )
             candidates.append(candidate)
 
-        if not candidates and cls._is_versioning_runtime_enabled() and not strict_user_mode:
-            return cls._fetch_vector_candidates_legacy(db, query_embedding=query_embedding, limit=limit)
-
         return candidates
 
     @classmethod
@@ -1757,8 +1981,6 @@ class SkillService:
         """召回关键词候选。"""
 
         source_sql, base_params = cls._build_runtime_source_sql(user_id)
-        strict_user_mode = cls._is_strict_user_runtime_enabled()
-        runtime_source_mode = cls._get_runtime_source_mode()
 
         sql = text(
             f"""
@@ -1813,21 +2035,8 @@ class SkillService:
         }
         try:
             rows = db.execute(sql, params)
-        except Exception as exc:  # pragma: no cover - 兼容路径
-            if cls._is_versioning_runtime_enabled():
-                if strict_user_mode:
-                    logger.warning(
-                        "技能检索: runtime_source_mode=%s 版本化关键词召回失败，不允许 legacy 回退 - %s",
-                        runtime_source_mode,
-                        exc,
-                    )
-                    raise
-                logger.warning(
-                    "技能检索: runtime_source_mode=%s 版本化关键词召回失败，回退兼容表 - %s",
-                    runtime_source_mode,
-                    exc,
-                )
-                return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
+        except Exception as exc:  # pragma: no cover - 数据库检索异常
+            logger.warning("技能检索: definition/version 关键词召回失败 - %s", exc)
             raise
 
         candidates: List[Dict[str, Any]] = []
@@ -1842,13 +2051,11 @@ class SkillService:
             )
             candidates.append(candidate)
 
-        if not candidates and cls._is_versioning_runtime_enabled() and not strict_user_mode:
-            return cls._fetch_lexical_candidates_legacy(db, query=query, limit=limit)
-
         return candidates
 
     @classmethod
     def _merge_candidates(
+
         cls,
         vector_candidates: List[Dict[str, Any]],
         lexical_candidates: List[Dict[str, Any]],
@@ -2500,3 +2707,772 @@ class SkillService:
 
         context, _ = cls.format_skills_as_context_with_meta(skills, max_length=max_length)
         return context
+
+    @classmethod
+    def _build_definition_runtime_source_sql(cls, user_id: Optional[int]) -> Tuple[str, Dict[str, Any]]:
+        """构建以 definition/version/binding 为真理源的运行时视图 SQL。"""
+
+        binding_enabled = cls._is_user_skill_binding_enabled() and user_id is not None
+        params: Dict[str, Any] = {
+            "binding_enabled": binding_enabled,
+            "binding_user_id": int(user_id) if user_id is not None else -1,
+            "default_version": cls.DEFAULT_VERSION,
+        }
+
+        source_sql = """
+            WITH published_versions AS (
+                SELECT DISTINCT ON (v.skill_id)
+                    v.id AS version_id,
+                    v.definition_id,
+                    v.skill_id,
+                    v.version,
+                    v.name,
+                    v.description,
+                    v.content,
+                    v.file_hash,
+                    v.embedding,
+                    v.is_enabled,
+                    v.auto_enabled,
+                    v.priority,
+                    v.scope,
+                    v.trigger_phrases,
+                    v.conflicts_with,
+                    v.catalog_description,
+                    v.when_to_use,
+                    v.status,
+                    v.published_at,
+                    v.updated_at,
+                    v.created_at
+                FROM t_agent_skill_versions v
+                WHERE v.status = 'published'
+                ORDER BY v.skill_id, COALESCE(v.published_at, v.updated_at, v.created_at) DESC, v.id DESC
+            ),
+            active_bindings AS (
+                SELECT
+                    b.user_id,
+                    b.skill_id,
+                    b.version,
+                    b.binding_status,
+                    b.is_enabled,
+                    b.priority_override,
+                    b.config_override
+                FROM t_user_skill_bindings b
+                WHERE (:binding_enabled = true)
+                  AND b.user_id = :binding_user_id
+                  AND b.binding_status = 'enabled'
+                  AND b.is_enabled = true
+            ),
+            binding_versions AS (
+                SELECT
+                    b.user_id,
+                    b.skill_id,
+                    b.version AS bound_version,
+                    b.binding_status,
+                    b.priority_override,
+                    b.config_override,
+                    v.id AS version_id,
+                    v.definition_id,
+                    v.name,
+                    v.description,
+                    v.content,
+                    v.file_hash,
+                    v.embedding,
+                    v.is_enabled AS version_is_enabled,
+                    v.auto_enabled,
+                    v.priority,
+                    v.scope,
+                    v.trigger_phrases,
+                    v.conflicts_with,
+                    v.catalog_description,
+                    v.when_to_use,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'scope') = 'string'
+                        THEN lower(trim(both '"' from (b.config_override -> 'scope')::text))
+                        ELSE NULL
+                    END AS scope_override,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'trigger_phrases') = 'array'
+                        THEN b.config_override -> 'trigger_phrases'
+                        ELSE NULL
+                    END AS trigger_phrases_override,
+                    CASE
+                        WHEN jsonb_typeof(b.config_override -> 'conflicts_with') = 'array'
+                        THEN b.config_override -> 'conflicts_with'
+                        ELSE NULL
+                    END AS conflicts_with_override
+                FROM active_bindings b
+                JOIN t_agent_skill_versions v
+                  ON v.skill_id = b.skill_id
+                 AND v.version = b.version
+            )
+            SELECT
+                COALESCE(bv.version_id, pv.version_id, -d.id) AS id,
+                d.skill_id,
+                COALESCE(bv.name, pv.name, d.name) AS name,
+                COALESCE(bv.description, pv.description, d.description) AS description,
+                COALESCE(bv.content, pv.content, '') AS content,
+                CASE
+                    WHEN bv.version_id IS NOT NULL THEN COALESCE(bv.version_is_enabled, true)
+                    WHEN pv.version_id IS NOT NULL THEN COALESCE(pv.is_enabled, true)
+                    ELSE true
+                END AS is_enabled,
+                COALESCE(bv.auto_enabled, pv.auto_enabled, true) AS auto_enabled,
+                COALESCE(bv.priority_override, bv.priority, pv.priority, 100) AS priority,
+                COALESCE(bv.scope_override, bv.scope, pv.scope, d.scope, 'global') AS scope,
+                COALESCE(
+                    bv.trigger_phrases_override,
+                    bv.trigger_phrases,
+                    pv.trigger_phrases,
+                    '[]'::jsonb
+                ) AS trigger_phrases,
+                COALESCE(
+                    bv.conflicts_with_override,
+                    bv.conflicts_with,
+                    pv.conflicts_with,
+                    '[]'::jsonb
+                ) AS conflicts_with,
+                COALESCE(bv.embedding, pv.embedding) AS embedding,
+                COALESCE(bv.bound_version, pv.version, :default_version) AS effective_version,
+                COALESCE(bv.binding_status, 'default') AS binding_status,
+                COALESCE(d.catalog_path, replace(d.skill_id, '.', '/')) AS catalog_path,
+                COALESCE(d.catalog_order, COALESCE(bv.priority_override, bv.priority, pv.priority, 100)) AS catalog_order,
+                COALESCE(
+                    NULLIF(bv.catalog_description, ''),
+                    NULLIF(pv.catalog_description, ''),
+                    NULLIF(bv.description, ''),
+                    NULLIF(pv.description, ''),
+                    NULLIF(d.description, '')
+                ) AS catalog_description,
+                COALESCE(
+                    NULLIF(bv.when_to_use, ''),
+                    NULLIF(pv.when_to_use, ''),
+                    NULLIF(bv.catalog_description, ''),
+                    NULLIF(pv.catalog_description, ''),
+                    NULLIF(bv.description, ''),
+                    NULLIF(pv.description, ''),
+                    NULLIF(d.description, '')
+                ) AS when_to_use
+            FROM t_agent_skill_definitions d
+            LEFT JOIN published_versions pv
+              ON pv.skill_id = d.skill_id
+            LEFT JOIN binding_versions bv
+              ON bv.skill_id = d.skill_id
+            WHERE d.is_enabled = true
+        """
+        return source_sql, params
+
+    @staticmethod
+    def _rows_from_execute_result(result: Any) -> List[Any]:
+        """统一拉平 execute 返回，兼容 SQLAlchemy Result 与测试假对象。"""
+
+        if result is None:
+            return []
+        if hasattr(result, 'fetchall'):
+            return list(result.fetchall())
+        return list(result)
+
+    @staticmethod
+    def _clean_catalog_text(raw_value: Any, max_length: int) -> str:
+        """压缩 catalog 文本，避免首轮 prompt 出现长正文。"""
+
+        normalized = re.sub(r"\s+", " ", str(raw_value or '').strip())
+        if not normalized:
+            return ''
+        if len(normalized) <= max_length:
+            return normalized
+        return f"{normalized[: max_length - 1].rstrip()}…"
+
+    @staticmethod
+    def _extract_skill_summary(content: Any) -> str:
+        """从 SKILL 正文提取可读摘要，用于派生 catalog 描述。"""
+
+        text_content = str(content or '').strip()
+        if not text_content:
+            return ''
+
+        text_content = re.sub(r"^---\s*\n.*?\n---\s*\n", '', text_content, flags=re.S)
+        for line in text_content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            return re.sub(r"\s+", ' ', stripped)
+        return ''
+
+    @classmethod
+    def _derive_catalog_description(cls, *, name: Any, description: Any, content: Any) -> Tuple[str, str]:
+        """派生首轮 catalog description，并返回来源标签。"""
+
+        raw_description = cls._clean_catalog_text(description, 240)
+        if raw_description and len(raw_description) <= 180:
+            return raw_description, 'description'
+
+        summary = cls._clean_catalog_text(cls._extract_skill_summary(content), 240)
+        if summary:
+            return summary, 'derived_catalog_description'
+
+        display_name = cls._clean_catalog_text(name, 80) or '当前技能'
+        return f'在需要 {display_name} 专业能力时加载该技能。', 'fallback'
+
+    @classmethod
+    def _derive_when_to_use(
+        cls,
+        *,
+        when_to_use: Any,
+        catalog_description: Any,
+        description: Any,
+        content: Any,
+    ) -> str:
+        """派生 when_to_use 短句。"""
+
+        for candidate in (when_to_use, catalog_description, description, cls._extract_skill_summary(content)):
+            normalized = cls._clean_catalog_text(candidate, 160)
+            if normalized:
+                return normalized
+        return '当问题明确需要该技能的专门流程、规则或模板时使用。'
+
+    @classmethod
+    def _normalize_catalog_path(cls, skill_id: str, raw_value: Any) -> str:
+        """标准化 catalog_path。"""
+
+        normalized = str(raw_value or '').strip().strip('/')
+        if not normalized:
+            normalized = skill_id.replace('.', '/')
+        normalized = re.sub(r'/+', '/', normalized)
+        return normalized.lower()
+
+    @classmethod
+    def _normalize_catalog_order(cls, raw_value: Any, default: int) -> int:
+        """标准化 catalog_order。"""
+
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return int(default)
+
+    @classmethod
+    def _list_definition_runtime_rows(
+        cls,
+        db: Session,
+        *,
+        user_id: Optional[int],
+        skill_ids: Optional[List[str]] = None,
+        require_content: bool = False,
+    ) -> List[Any]:
+        """查询 definition/version/binding 运行时视图行。"""
+
+        if skill_ids is not None and not skill_ids:
+            return []
+
+        source_sql, params = cls._build_definition_runtime_source_sql(user_id)
+        where_clauses: List[str] = []
+        if require_content:
+            where_clauses.append("COALESCE(content, '') <> ''")
+        if skill_ids is not None:
+            where_clauses.append('skill_id IN :skill_ids')
+            params['skill_ids'] = list(skill_ids)
+
+        where_sql = ''
+        if where_clauses:
+            where_sql = 'WHERE ' + ' AND '.join(where_clauses)
+
+        statement = text(
+            f"""
+            WITH runtime_skills AS (
+                {source_sql}
+            )
+            SELECT *
+            FROM runtime_skills
+            {where_sql}
+            ORDER BY COALESCE(catalog_order, priority, 100), COALESCE(catalog_path, replace(skill_id, '.', '/')), skill_id
+            """
+        )
+        if skill_ids is not None:
+            statement = statement.bindparams(bindparam('skill_ids', expanding=True))
+        result = db.execute(statement, params)
+        return cls._rows_from_execute_result(result)
+
+    @classmethod
+    def build_catalog_descriptor(cls, row: Any) -> Dict[str, Any]:
+        """将 runtime 行转换为首轮 catalog descriptor。"""
+
+        skill_id = str(getattr(row, 'skill_id', '') or '').strip()
+        if not skill_id:
+            raise ValueError('catalog row 缺少 skill_id')
+
+        display_name = cls._clean_catalog_text(getattr(row, 'name', None) or skill_id, 120) or skill_id
+        raw_catalog_description = ''
+        description_source = 'derived_catalog_description'
+        if cls._is_skill_catalog_metadata_normalization_enabled():
+            raw_catalog_description = cls._clean_catalog_text(getattr(row, 'catalog_description', None), 240)
+            if raw_catalog_description:
+                description_source = 'catalog_description'
+        if not raw_catalog_description:
+            raw_catalog_description, description_source = cls._derive_catalog_description(
+                name=display_name,
+                description=getattr(row, 'description', None),
+                content=getattr(row, 'content', None),
+            )
+
+        when_to_use = cls._derive_when_to_use(
+            when_to_use=getattr(row, 'when_to_use', None),
+            catalog_description=raw_catalog_description,
+            description=getattr(row, 'description', None),
+            content=getattr(row, 'content', None),
+        )
+
+        effective_version = str(getattr(row, 'effective_version', None) or cls.DEFAULT_VERSION)
+        priority_default = int(getattr(row, 'priority', cls.DEFAULT_PRIORITY) or cls.DEFAULT_PRIORITY)
+        catalog_path = cls._normalize_catalog_path(skill_id, getattr(row, 'catalog_path', None))
+        catalog_order = cls._normalize_catalog_order(getattr(row, 'catalog_order', None), default=priority_default)
+
+        return {
+            'skill_id': skill_id,
+            'display_name': display_name,
+            'description': raw_catalog_description,
+            'effective_version': effective_version,
+            'when_to_use': when_to_use,
+            'catalog_path': catalog_path,
+            'catalog_order': catalog_order,
+            'scope': str(getattr(row, 'scope', None) or cls.DEFAULT_SCOPE),
+            'binding_status': getattr(row, 'binding_status', None),
+            'description_source': description_source,
+            'description_length': len(raw_catalog_description),
+        }
+
+    @classmethod
+    def _compute_catalog_version(cls, manifest: List[Dict[str, Any]]) -> str:
+        """根据 manifest 计算稳定版本号。"""
+
+        stable_payload = [
+            {
+                'skill_id': item['skill_id'],
+                'effective_version': item.get('effective_version'),
+                'catalog_path': item.get('catalog_path'),
+                'catalog_order': item.get('catalog_order'),
+                'description': item.get('description'),
+                'when_to_use': item.get('when_to_use'),
+            }
+            for item in manifest
+        ]
+        raw_payload = json.dumps(stable_payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw_payload.encode('utf-8')).hexdigest()[:16]
+
+    @classmethod
+    def build_skill_catalog_manifest(cls, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """构建当前用户可见的 Skill catalog manifest。"""
+
+        with get_db_context() as db:
+            rows = cls._list_definition_runtime_rows(
+                db,
+                user_id=user_id,
+                require_content=True,
+            )
+
+        manifest: List[Dict[str, Any]] = []
+        seen_skill_ids: set[str] = set()
+        for row in rows:
+            if not bool(getattr(row, 'is_enabled', True)):
+                continue
+            skill_id = str(getattr(row, 'skill_id', '') or '').strip()
+            if not skill_id or skill_id in seen_skill_ids:
+                continue
+            manifest.append(cls.build_catalog_descriptor(row))
+            seen_skill_ids.add(skill_id)
+
+        manifest.sort(
+            key=lambda item: (
+                int(item.get('catalog_order', cls.DEFAULT_PRIORITY)),
+                str(item.get('catalog_path') or item['skill_id']),
+                item['skill_id'],
+            )
+        )
+        catalog_version = cls._compute_catalog_version(manifest)
+        return {
+            'manifest': manifest,
+            'catalog_version': catalog_version,
+            'visible_skill_count': len(manifest),
+            'catalog_build_source': cls.SKILL_CATALOG_SOURCE,
+        }
+
+    @classmethod
+    def format_skill_catalog_as_context_with_meta(
+        cls,
+        manifest: List[Dict[str, Any]],
+        max_length: int = 2400,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """将 catalog manifest 渲染为首轮 prompt 上下文。"""
+
+        configured_max_length = ConfigResolver.get_int('skill.context_max_length', max_length)
+        final_limit = min(max_length, configured_max_length) if max_length > 0 else configured_max_length
+        if final_limit <= 0:
+            final_limit = configured_max_length if configured_max_length > 0 else 2400
+
+        if not manifest:
+            return '', {
+                'budget_chars': final_limit,
+                'used_chars': 0,
+                'truncated': False,
+                'included_skill_ids': [],
+                'excluded_skill_ids': [],
+                'visible_skill_count': 0,
+            }
+
+        context_parts: List[str] = [cls.SKILL_CATALOG_HEADER]
+        total_length = len(cls.SKILL_CATALOG_HEADER)
+        included_skill_ids: List[str] = []
+        excluded_skill_ids: List[str] = []
+        truncated = False
+
+        for index, item in enumerate(manifest):
+            line = (
+                f"- {item.get('catalog_path') or item['skill_id']} | {item.get('display_name') or item['skill_id']} "
+                f"| {item.get('effective_version') or cls.DEFAULT_VERSION} | {item.get('when_to_use') or item.get('description') or ''}"
+            )
+            line = cls._clean_catalog_text(line, 320)
+            candidate = f"\n{line}"
+            if total_length + len(candidate) > final_limit:
+                truncated = True
+                excluded_skill_ids.extend([entry['skill_id'] for entry in manifest[index:]])
+                break
+            context_parts.append(candidate)
+            total_length += len(candidate)
+            included_skill_ids.append(item['skill_id'])
+
+        return ''.join(context_parts), {
+            'budget_chars': final_limit,
+            'used_chars': total_length,
+            'truncated': truncated,
+            'included_skill_ids': included_skill_ids,
+            'excluded_skill_ids': excluded_skill_ids,
+            'visible_skill_count': len(manifest),
+        }
+
+    @classmethod
+    def format_skill_catalog_as_context(cls, manifest: List[Dict[str, Any]], max_length: int = 2400) -> str:
+        """将 catalog manifest 渲染为首轮 prompt 文本。"""
+
+        context, _ = cls.format_skill_catalog_as_context_with_meta(manifest, max_length=max_length)
+        return context
+
+    @classmethod
+    def validate_visible_skill_ids(
+        cls,
+        skill_ids: List[str],
+        *,
+        user_id: Optional[int] = None,
+        loaded_skill_registry: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """校验本轮请求的 skill_id 是否属于当前 catalog 或已在会话中加载。"""
+
+        normalized_skill_ids: List[str] = []
+        seen: set[str] = set()
+        for raw_value in skill_ids or []:
+            skill_id = str(raw_value or '').strip()
+            if not skill_id or skill_id in seen:
+                continue
+            normalized_skill_ids.append(skill_id)
+            seen.add(skill_id)
+
+        if len(normalized_skill_ids) > cls.MAX_LOAD_SKILLS_COUNT:
+            return {
+                'normalized_skill_ids': normalized_skill_ids,
+                'valid_skill_ids': [],
+                'errors': [{
+                    'code': 'over_limit',
+                    'message': f'单次最多加载 {cls.MAX_LOAD_SKILLS_COUNT} 个 skill_id',
+                    'requested_count': len(normalized_skill_ids),
+                }],
+                'visible_by_id': {},
+                'catalog_version': None,
+                'visible_skill_count': 0,
+            }
+
+        manifest_payload = cls.build_skill_catalog_manifest(user_id=user_id)
+        visible_by_id = {item['skill_id']: item for item in manifest_payload['manifest']}
+        registry = loaded_skill_registry or {}
+        valid_skill_ids: List[str] = []
+        errors: List[Dict[str, Any]] = []
+
+        for skill_id in normalized_skill_ids:
+            if skill_id in registry or skill_id in visible_by_id:
+                valid_skill_ids.append(skill_id)
+                continue
+            errors.append({
+                'skill_id': skill_id,
+                'code': 'not_visible',
+                'message': 'skill_id 不属于当前用户可见 catalog',
+            })
+
+        return {
+            'normalized_skill_ids': normalized_skill_ids,
+            'valid_skill_ids': valid_skill_ids,
+            'errors': errors,
+            'visible_by_id': visible_by_id,
+            'catalog_version': manifest_payload['catalog_version'],
+            'visible_skill_count': manifest_payload['visible_skill_count'],
+        }
+
+    @classmethod
+    def _load_version_records(
+        cls,
+        db: Session,
+        requested_versions: Dict[str, str],
+    ) -> Dict[Tuple[str, str], AgentSkillVersion]:
+        """按 skill_id/version 批量加载版本记录。"""
+
+        if not requested_versions:
+            return {}
+
+        records = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.skill_id.in_(list(requested_versions.keys())))
+        ).scalars().all()
+        version_map: Dict[Tuple[str, str], AgentSkillVersion] = {}
+        for record in records:
+            normalized_version = str(record.version or cls.DEFAULT_VERSION)
+            if requested_versions.get(record.skill_id) != normalized_version:
+                continue
+            version_map[(record.skill_id, normalized_version)] = record
+        return version_map
+
+    @classmethod
+    def _build_loaded_skill_context_payload(
+        cls,
+        db: Session,
+        loaded_skill_registry: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """根据 loaded_skill_registry 重建后续轮次所需的 Skill 正文上下文。"""
+
+        requested_versions = {
+            skill_id: str((payload or {}).get('version') or cls.DEFAULT_VERSION)
+            for skill_id, payload in loaded_skill_registry.items()
+            if str(skill_id or '').strip()
+        }
+        version_map = cls._load_version_records(db, requested_versions)
+        context_parts: List[str] = []
+        loaded_skills: List[Dict[str, Any]] = []
+        missing_skills: List[Dict[str, Any]] = []
+
+        for skill_id, payload in loaded_skill_registry.items():
+            version = str((payload or {}).get('version') or cls.DEFAULT_VERSION)
+            record = version_map.get((skill_id, version))
+            if record is None or not str(record.content or '').strip():
+                missing_skills.append({'skill_id': skill_id, 'version': version})
+                continue
+
+            loaded_skills.append({
+                'skill_id': skill_id,
+                'version': version,
+                'truncated': bool((payload or {}).get('truncated', False)),
+            })
+            context_parts.append(
+                f"### {record.name or skill_id} | skill_id={skill_id} | version={version}\n{str(record.content or '').strip()}"
+            )
+
+        loaded_skill_context = None
+        if context_parts:
+            loaded_skill_context = '以下技能正文已加载到当前会话，可直接复用：\n\n' + '\n\n'.join(context_parts)
+
+        return {
+            'loaded_skill_context': loaded_skill_context,
+            'loaded_skills': loaded_skills,
+            'missing_skills': missing_skills,
+        }
+
+    @classmethod
+    def build_loaded_skill_context_from_registry(
+        cls,
+        loaded_skill_registry: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """从 registry 直接回源重建 loaded_skill_context。"""
+
+        if not loaded_skill_registry:
+            return {
+                'loaded_skill_context': None,
+                'loaded_skills': [],
+                'missing_skills': [],
+            }
+
+        with get_db_context() as db:
+            return cls._build_loaded_skill_context_payload(db, loaded_skill_registry)
+
+    @classmethod
+    def load_skills_for_session(
+        cls,
+        *,
+        skill_ids: List[str],
+        user_id: Optional[int] = None,
+        loaded_skill_registry: Optional[Dict[str, Dict[str, Any]]] = None,
+        source_turn_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """按当前 catalog 与会话 registry 加载 Skill 正文。"""
+
+        existing_registry = {
+            str(skill_id): dict(payload or {})
+            for skill_id, payload in (loaded_skill_registry or {}).items()
+            if str(skill_id or '').strip()
+        }
+        validation = cls.validate_visible_skill_ids(
+            skill_ids,
+            user_id=user_id,
+            loaded_skill_registry=existing_registry,
+        )
+        errors = list(validation['errors'])
+        if any(item.get('code') == 'over_limit' for item in errors):
+            return {
+                'requested_skill_ids': validation['normalized_skill_ids'],
+                'loaded_skills': [],
+                'errors': errors,
+                'truncated_count': 0,
+                'loaded_skill_registry': existing_registry,
+                'loaded_skill_context': None,
+                'catalog_version': validation['catalog_version'],
+                'visible_skill_count': validation['visible_skill_count'],
+            }
+
+        visible_by_id = validation['visible_by_id']
+        requested_versions: Dict[str, str] = {}
+        for skill_id in validation['valid_skill_ids']:
+            existing = existing_registry.get(skill_id)
+            if existing and existing.get('version'):
+                requested_versions[skill_id] = str(existing['version'])
+                continue
+            descriptor = visible_by_id.get(skill_id)
+            requested_versions[skill_id] = str(
+                (descriptor or {}).get('effective_version') or cls.DEFAULT_VERSION
+            )
+
+        with get_db_context() as db:
+            version_map = cls._load_version_records(db, requested_versions)
+            updated_registry = {skill_id: dict(payload) for skill_id, payload in existing_registry.items()}
+            loaded_skills: List[Dict[str, Any]] = []
+
+            for skill_id in validation['valid_skill_ids']:
+                version = requested_versions[skill_id]
+                record = version_map.get((skill_id, version))
+                if record is None:
+                    errors.append({
+                        'skill_id': skill_id,
+                        'code': 'not_found',
+                        'message': f'未找到 skill_id={skill_id} version={version} 的版本记录',
+                    })
+                    continue
+
+                content = str(record.content or '').strip()
+                if not content:
+                    errors.append({
+                        'skill_id': skill_id,
+                        'code': 'load_failed',
+                        'message': 'Skill 正文为空，无法加载',
+                    })
+                    continue
+
+                if skill_id not in updated_registry:
+                    updated_registry[skill_id] = {
+                        'skill_id': skill_id,
+                        'version': version,
+                        'truncated': False,
+                        'source_turn_id': source_turn_id,
+                    }
+                elif not updated_registry[skill_id].get('source_turn_id') and source_turn_id:
+                    updated_registry[skill_id]['source_turn_id'] = source_turn_id
+
+                loaded_skills.append({
+                    'skill_id': skill_id,
+                    'effective_version': version,
+                    'content': content,
+                    'truncated': False,
+                })
+
+            context_payload = cls._build_loaded_skill_context_payload(db, updated_registry)
+
+        return {
+            'requested_skill_ids': validation['normalized_skill_ids'],
+            'loaded_skills': loaded_skills,
+            'errors': errors,
+            'truncated_count': 0,
+            'loaded_skill_registry': updated_registry,
+            'loaded_skill_context': context_payload['loaded_skill_context'],
+            'catalog_version': validation['catalog_version'],
+            'visible_skill_count': validation['visible_skill_count'],
+            'missing_skills': context_payload['missing_skills'],
+        }
+
+    @classmethod
+    def update_skill_catalog_metadata(
+        cls,
+        db: Session,
+        *,
+        skill_id: str,
+        updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """将 catalog/runtime metadata 写入 definition/version 真理源。"""
+
+        definition = db.execute(
+            select(AgentSkillDefinition).where(AgentSkillDefinition.skill_id == skill_id)
+        ).scalar_one_or_none()
+        if definition is None:
+            raise ValueError('技能不存在')
+
+        version_records = db.execute(
+            select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill_id)
+        ).scalars().all()
+        target_version = None
+        if version_records:
+            target_version = sorted(version_records, key=cls._version_sort_key, reverse=True)[0]
+
+        version_scoped_fields = {
+            'auto_enabled',
+            'priority',
+            'trigger_phrases',
+            'conflicts_with',
+            'catalog_description',
+            'when_to_use',
+        }
+        if target_version is None and version_scoped_fields.intersection(updates.keys()):
+            raise ValueError('技能缺少可写版本记录，无法更新版本级 metadata')
+
+        updated_fields: List[str] = []
+        if 'catalog_path' in updates:
+            definition.catalog_path = cls._normalize_catalog_path(skill_id, updates['catalog_path'])
+            updated_fields.append('catalog_path')
+        if 'catalog_order' in updates:
+            definition.catalog_order = cls._normalize_catalog_order(updates['catalog_order'], cls.DEFAULT_PRIORITY)
+            updated_fields.append('catalog_order')
+        if 'is_enabled' in updates:
+            definition.is_enabled = bool(updates['is_enabled'])
+            updated_fields.append('is_enabled')
+            if target_version is not None:
+                target_version.is_enabled = bool(updates['is_enabled'])
+        if 'scope' in updates:
+            normalized_scope = str(updates['scope'] or cls.DEFAULT_SCOPE).strip().lower() or cls.DEFAULT_SCOPE
+            definition.scope = normalized_scope
+            updated_fields.append('scope')
+            if target_version is not None:
+                target_version.scope = normalized_scope
+
+        if target_version is not None:
+            if 'auto_enabled' in updates:
+                target_version.auto_enabled = bool(updates['auto_enabled'])
+                updated_fields.append('auto_enabled')
+            if 'priority' in updates:
+                target_version.priority = int(updates['priority'])
+                updated_fields.append('priority')
+            if 'trigger_phrases' in updates:
+                target_version.trigger_phrases = list(updates['trigger_phrases'] or [])
+                updated_fields.append('trigger_phrases')
+            if 'conflicts_with' in updates:
+                target_version.conflicts_with = list(updates['conflicts_with'] or [])
+                updated_fields.append('conflicts_with')
+            if 'catalog_description' in updates:
+                target_version.catalog_description = cls._clean_catalog_text(updates['catalog_description'], 240) or None
+                updated_fields.append('catalog_description')
+            if 'when_to_use' in updates:
+                target_version.when_to_use = cls._clean_catalog_text(updates['when_to_use'], 160) or None
+                updated_fields.append('when_to_use')
+
+        db.commit()
+        return {
+            'skill_id': skill_id,
+            'updated': bool(updated_fields),
+            'updated_fields': updated_fields,
+        }

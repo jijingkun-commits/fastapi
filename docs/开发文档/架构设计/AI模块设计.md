@@ -228,6 +228,16 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 
 > 更多背景：参考 LangGraph [Discussion #3192](https://github.com/langchain-ai/langgraph/discussions/3192)
 
+### 中断/终止/断流的会话语义（2026-03-07）
+
+> [!IMPORTANT]
+> 交互规则与按钮语义以《聊天系统需求》为准；本节仅保留会影响实现的底层约束。
+
+1. **当前轮判定**：`messages` 属于 checkpoint 持久化状态；运行时只从最近一条 `HumanMessage` 开始切片，旧消息只作为上下文。
+2. **中间消息语义**：`interrupt` 场景下，若已经产出部分 AI 内容，可保存为 `is_intermediate=true` 的中间消息；历史查询默认过滤，避免把半成品当最终答复。
+3. **状态清理边界**：`pending_handoff`、`pending_operation`、`handoff_queue` 等瞬态状态仅在 `postprocess` 统一清理；因此 `interrupt` 后若跳过控制面直接发送新消息，存在把新输入解释为补充/确认的风险。
+4. **控制面分离**：恢复旧流程只能通过 `/chat/resume`，终止旧流程只能通过 `/runs/{run_id}/cancel`；不要在工作流内部依赖自然语言“继续”来恢复旧 run。
+
 ### 核心节点（简化架构）
 
 | 节点 | 函数 | 职责 |

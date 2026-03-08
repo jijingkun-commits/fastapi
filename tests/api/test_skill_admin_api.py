@@ -12,6 +12,36 @@ from app.repositories import config_repo
 from app.services.skill_service import SkillService
 
 
+def _sample_admin_skill_payload(**overrides):
+    """构造管理面技能响应样本。"""
+
+    payload = {
+        "id": 101,
+        "skill_id": "loan-advice",
+        "name": "贷款分析",
+        "description": "贷款技能",
+        "content": "# Loan Advice",
+        "content_preview": "# Loan Advice",
+        "file_hash": "hash-1",
+        "has_embedding": True,
+        "embedding_dim": 3,
+        "is_enabled": True,
+        "auto_enabled": True,
+        "priority": 10,
+        "scope": "data",
+        "trigger_phrases": ["贷款余额"],
+        "conflicts_with": [],
+        "published_version": "v1",
+        "bound_version": None,
+        "binding_status": None,
+        "effective_version": "v1",
+        "created_at": None,
+        "updated_at": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
 @pytest.fixture
 def skill_admin_client() -> Generator[TestClient, None, None]:
     """构造仅挂载 skill-admin 路由的测试客户端。"""
@@ -323,3 +353,195 @@ def test_bootstrap_template_sync_should_skip_existing_bindings(skill_admin_clien
     assert payload["synced_count"] == 1
     assert payload["skipped_count"] == 1
     assert bind_calls == ["risk-check"]
+
+
+def test_list_skills_endpoint_should_delegate_versioned_admin_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """技能列表接口应委托 SkillService 的 versioned 管理视图。"""
+
+    captured = {}
+
+    def _fake_list(cls, db, **kwargs):  # noqa: ANN001
+        captured["db"] = db
+        captured.update(kwargs)
+        return [_sample_admin_skill_payload(bound_version="v2", binding_status="enabled", effective_version="v2")]
+
+    monkeypatch.setattr(SkillService, "list_admin_skills", classmethod(_fake_list))
+
+    response = skill_admin_client.get(
+        "/api/v1/skill-admin/skills",
+        params={"skip": 1, "limit": 20, "search": "loan", "has_embedding": True, "user_id": 3101},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["effective_version"] == "v2"
+    assert captured["skip"] == 1
+    assert captured["limit"] == 20
+    assert captured["search"] == "loan"
+    assert captured["has_embedding"] is True
+    assert captured["user_id"] == 3101
+
+
+def test_get_skill_endpoint_should_delegate_versioned_admin_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """技能详情接口应委托 SkillService 的 versioned 详情读模型。"""
+
+    captured = {}
+
+    def _fake_get(cls, db, skill_id: str, user_id=None):  # noqa: ANN001
+        captured["db"] = db
+        captured["skill_id"] = skill_id
+        captured["user_id"] = user_id
+        return _sample_admin_skill_payload(skill_id=skill_id, content="完整版技能正文")
+
+    monkeypatch.setattr(SkillService, "get_admin_skill", classmethod(_fake_get))
+
+    response = skill_admin_client.get("/api/v1/skill-admin/skills/loan-advice")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["skill_id"] == "loan-advice"
+    assert payload["content"] == "完整版技能正文"
+    assert captured["skill_id"] == "loan-advice"
+    assert captured["user_id"] is None
+
+
+def test_vector_status_endpoint_should_delegate_versioned_admin_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """向量状态接口应委托 SkillService 的 versioned 聚合统计。"""
+
+    monkeypatch.setattr(
+        SkillService,
+        "get_admin_vector_status",
+        classmethod(
+            lambda cls, db: {
+                "total_skills": 23,
+                "with_embedding": 20,
+                "without_embedding": 3,
+                "embedding_dim": 2048,
+                "dimension_mismatch": False,
+                "current_model_dim": 2048,
+            }
+        ),
+    )
+
+    response = skill_admin_client.get("/api/v1/skill-admin/vector-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_skills"] == 23
+    assert payload["with_embedding"] == 20
+    assert payload["embedding_dim"] == 2048
+
+
+def test_regenerate_embeddings_endpoint_should_delegate_versioned_batch_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """小批量重建应委托 SkillService 的 versioned 批处理。"""
+
+    captured = {}
+
+    monkeypatch.setattr(
+        SkillService,
+        "list_admin_skills",
+        classmethod(
+            lambda cls, db, **kwargs: [
+                _sample_admin_skill_payload(skill_id="loan-advice"),
+                _sample_admin_skill_payload(skill_id="risk-check", id=102, name="风控检查"),
+            ]
+        ),
+    )
+
+    def _fake_regenerate(cls, db, *, skill_ids=None):  # noqa: ANN001
+        captured["db"] = db
+        captured["skill_ids"] = skill_ids
+        return {"success_count": 2, "total": 2, "errors": []}
+
+    monkeypatch.setattr(SkillService, "regenerate_admin_skill_embeddings", classmethod(_fake_regenerate))
+
+    response = skill_admin_client.post(
+        "/api/v1/skill-admin/regenerate-embeddings",
+        json={"skill_ids": ["loan-advice", "risk-check"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success_count"] == 2
+    assert captured["skill_ids"] == ["loan-advice", "risk-check"]
+
+
+def test_regenerate_embeddings_endpoint_should_schedule_background_task_for_large_batch(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """大批量重建应调度后台任务，而不是直接操作旧表。"""
+
+    scheduled = []
+    monkeypatch.setattr(
+        SkillService,
+        "list_admin_skills",
+        classmethod(
+            lambda cls, db, **kwargs: [
+                _sample_admin_skill_payload(skill_id=f"skill-{index}", id=200 + index, name=f"技能{index}")
+                for index in range(11)
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.skill_admin_api._regenerate_embeddings_task",
+        lambda skill_ids: scheduled.append(skill_ids),
+    )
+
+    response = skill_admin_client.post("/api/v1/skill-admin/regenerate-embeddings", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processing"
+    assert payload["total"] == 11
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == "skill-0"
+
+
+def test_delete_skill_endpoint_should_delegate_versioned_admin_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """删除接口应删除 definition 真理源，而不是旧兼容表记录。"""
+
+    captured = {}
+
+    def _fake_delete(cls, db, skill_id: str):  # noqa: ANN001
+        captured["db"] = db
+        captured["skill_id"] = skill_id
+        return {"message": "技能已删除", "skill_id": skill_id}
+
+    monkeypatch.setattr(SkillService, "delete_admin_skill", classmethod(_fake_delete))
+
+    response = skill_admin_client.delete("/api/v1/skill-admin/skills/loan-advice")
+
+    assert response.status_code == 200
+    assert response.json()["skill_id"] == "loan-advice"
+    assert captured["skill_id"] == "loan-advice"
+
+
+def test_regenerate_single_skill_endpoint_should_delegate_versioned_admin_service(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """单技能重建接口应委托 versioned service。"""
+
+    monkeypatch.setattr(
+        SkillService,
+        "regenerate_single_admin_skill_embedding",
+        classmethod(lambda cls, db, skill_id: {"message": "向量已重新生成", "skill_id": skill_id, "embedding_dim": 2048}),
+    )
+
+    response = skill_admin_client.post("/api/v1/skill-admin/skills/loan-advice/regenerate")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["skill_id"] == "loan-advice"
+    assert payload["embedding_dim"] == 2048
+
+
+def test_regenerate_single_skill_endpoint_should_return_409_on_missing_version_record(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """单技能重建遇到 versioned 数据不完整时应显式返回 409。"""
+
+    def _raise_incomplete(cls, db, skill_id: str):  # noqa: ANN001
+        _ = db, skill_id
+        raise RuntimeError("loan-advice: 技能缺少可写版本记录")
+
+    monkeypatch.setattr(SkillService, "regenerate_single_admin_skill_embedding", classmethod(_raise_incomplete))
+
+    response = skill_admin_client.post("/api/v1/skill-admin/skills/loan-advice/regenerate")
+
+    assert response.status_code == 409
+    assert "缺少可写版本记录" in response.json()["detail"]

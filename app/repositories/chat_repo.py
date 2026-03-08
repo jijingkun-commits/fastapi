@@ -93,6 +93,9 @@ def save_message(
 
     # metadata 兜底编码：兼容 date/datetime/Decimal 等类型
     if extra_data is not None:
+        from app.ai.protocol import normalize_skill_runtime_additional_kwargs
+
+        extra_data = normalize_skill_runtime_additional_kwargs(extra_data)
         extra_data = jsonable_encoder(extra_data)
     
     # AI 消息去除首尾换行（LLM 输出常带有多余换行）

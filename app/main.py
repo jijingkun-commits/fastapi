@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from pathlib import Path
 
 
 from app.core.logging import setup_logging
@@ -74,21 +73,13 @@ async def lifespan(app: FastAPI):
 
         logging.exception("结果增强规则初始化失败，将跳过并继续启动")
 
-    # 启动时自动同步技能文件到数据库（失败可观测且不阻断启动）
+    # Skill 运行时以数据库 definition/version 为唯一来源；启动阶段不再扫描本地 SKILL.md。
     try:
         import logging
-        import os
 
-        from app.core.config import PROJECT_ROOT
-        from app.services.skill_service import SkillService
-
-        skills_dir = os.path.join(PROJECT_ROOT, "app/ai/skills")
-        count = SkillService.sync_changed_skills(Path(skills_dir))
-        logging.info("技能同步完成: path=%s, updated=%d", skills_dir, count)
+        logging.info("技能运行时已切换为 DB-only，跳过本地技能文件同步")
     except Exception:
-        import logging
-
-        logging.exception("技能启动同步失败，将跳过并继续启动")
+        pass
 
     yield
     

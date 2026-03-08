@@ -64,6 +64,116 @@ class OperationAdditionalKwargsPayload(TypedDict):
     operation: Dict[str, Any]
 
 
+class SkillRuntimeLoadedSkillPayload(TypedDict):
+    """Skill runtime canonical 中的单条已加载技能条目。"""
+
+    skill_id: str
+    version: str
+    truncated: bool
+
+
+class SkillRuntimeAdditionalKwargsPayload(TypedDict):
+    """Skill runtime canonical additional_kwargs 载荷。"""
+
+    runtime_mode: str
+    catalog_version: str
+    visible_skill_count: int
+    loaded_skills: List[SkillRuntimeLoadedSkillPayload]
+    replay_source: str
+
+
+def _normalize_skill_runtime_loaded_skills(loaded_skills: Any) -> List[SkillRuntimeLoadedSkillPayload]:
+    """标准化 skill_runtime.loaded_skills 列表。"""
+
+    if not isinstance(loaded_skills, list):
+        return []
+
+    normalized: List[SkillRuntimeLoadedSkillPayload] = []
+    seen: Set[Tuple[str, str]] = set()
+    for item in loaded_skills:
+        if not isinstance(item, dict):
+            continue
+        skill_id = str(item.get("skill_id") or "").strip()
+        version = str(item.get("version") or item.get("effective_version") or "v1").strip() or "v1"
+        if not skill_id:
+            continue
+        dedupe_key = (skill_id, version)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized.append({
+            "skill_id": skill_id,
+            "version": version,
+            "truncated": bool(item.get("truncated", False)),
+        })
+    return normalized
+
+
+def build_skill_runtime_additional_kwargs_payload(
+    runtime_mode: Any,
+    catalog_version: Any,
+    visible_skill_count: Any,
+    loaded_skills: Any,
+    replay_source: Any,
+) -> Optional[SkillRuntimeAdditionalKwargsPayload]:
+    """构建 skill_runtime canonical additional_kwargs 载荷。"""
+
+    normalized_runtime_mode = str(runtime_mode or "").strip()
+    if not normalized_runtime_mode:
+        return None
+
+    normalized_catalog_version = str(catalog_version or "").strip()
+    if not normalized_catalog_version:
+        normalized_catalog_version = "-"
+
+    try:
+        normalized_visible_skill_count = max(int(visible_skill_count or 0), 0)
+    except (TypeError, ValueError):
+        normalized_visible_skill_count = 0
+
+    normalized_replay_source = str(replay_source or "live").strip() or "live"
+    return {
+        "runtime_mode": normalized_runtime_mode,
+        "catalog_version": normalized_catalog_version,
+        "visible_skill_count": normalized_visible_skill_count,
+        "loaded_skills": _normalize_skill_runtime_loaded_skills(loaded_skills),
+        "replay_source": normalized_replay_source,
+    }
+
+
+def normalize_skill_runtime_additional_kwargs(additional_kwargs: Any) -> Dict[str, Any]:
+    """规范化 additional_kwargs 中的 skill_runtime 结构。"""
+
+    normalized = dict(additional_kwargs) if isinstance(additional_kwargs, dict) else {}
+    runtime_payload = normalized.get("skill_runtime")
+    if not isinstance(runtime_payload, dict):
+        return normalized
+
+    canonical_payload = build_skill_runtime_additional_kwargs_payload(
+        runtime_mode=runtime_payload.get("runtime_mode"),
+        catalog_version=runtime_payload.get("catalog_version"),
+        visible_skill_count=runtime_payload.get("visible_skill_count"),
+        loaded_skills=runtime_payload.get("loaded_skills"),
+        replay_source=runtime_payload.get("replay_source"),
+    )
+    if canonical_payload is not None:
+        normalized["skill_runtime"] = canonical_payload
+    return normalized
+
+
+def extract_skill_runtime_from_ai_message(message: BaseMessage) -> Optional[Dict[str, Any]]:
+    """从 AIMessage 提取 skill_runtime additional_kwargs。"""
+
+    if not isinstance(message, AIMessage):
+        return None
+
+    additional_kwargs = normalize_skill_runtime_additional_kwargs(getattr(message, "additional_kwargs", {}) or {})
+    skill_runtime = additional_kwargs.get("skill_runtime")
+    if not isinstance(skill_runtime, dict):
+        return None
+    return skill_runtime
+
+
 def build_streaming_tool_start_payload(
     tool_name: Any,
     tool_args: Any,

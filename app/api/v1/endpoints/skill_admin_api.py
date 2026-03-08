@@ -15,9 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.ai.utils.embedding_util import get_embedding
 from app.db.session import get_db
-from app.models.agent_skill import AgentSkill, AgentSkillVersion, UserSkillBinding
 from app.repositories import config_repo
 from app.services.skill_bootstrap_service import load_bootstrap_template_from_config, normalize_bootstrap_template
 from app.services.skill_service import SkillService
@@ -100,6 +98,10 @@ class SkillMetadataUpdateRequest(BaseModel):
     scope: Optional[str] = Field(default=None, min_length=1, max_length=32)
     trigger_phrases: Optional[List[str]] = None
     conflicts_with: Optional[List[str]] = None
+    catalog_path: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    catalog_order: Optional[int] = Field(default=None, ge=0, le=10000)
+    catalog_description: Optional[str] = Field(default=None, max_length=240)
+    when_to_use: Optional[str] = Field(default=None, max_length=160)
 
 
 class SkillVersionItem(BaseModel):
@@ -206,137 +208,27 @@ def list_skills(
 ):
     """获取技能列表。"""
 
-    query = db.query(AgentSkill)
-
-    if search:
-        query = query.filter(
-            (AgentSkill.name.ilike(f"%{search}%"))
-            | (AgentSkill.description.ilike(f"%{search}%"))
-            | (AgentSkill.skill_id.ilike(f"%{search}%"))
-        )
-
-    if has_embedding is not None:
-        if has_embedding:
-            query = query.filter(AgentSkill.embedding.isnot(None))
-        else:
-            query = query.filter(AgentSkill.embedding.is_(None))
-
-    skills = query.order_by(AgentSkill.name).offset(skip).limit(limit).all()
-
-    skill_ids = [skill.skill_id for skill in skills]
-    published_version_map: Dict[str, str] = {}
-    binding_map: Dict[str, UserSkillBinding] = {}
-
-    if skill_ids and SkillService._is_skill_versioning_enabled():
-        try:
-            version_rows = (
-                db.query(AgentSkillVersion)
-                .filter(
-                    AgentSkillVersion.skill_id.in_(skill_ids),
-                    AgentSkillVersion.status == SkillService.VERSION_STATUS_PUBLISHED,
-                )
-                .all()
-            )
-            for row in version_rows:
-                current = published_version_map.get(row.skill_id)
-                if current is None:
-                    published_version_map[row.skill_id] = row.version
-                    continue
-
-                current_row = next((item for item in version_rows if item.skill_id == row.skill_id and item.version == current), None)
-                current_ts = (
-                    current_row.published_at or current_row.updated_at or current_row.created_at
-                    if current_row is not None
-                    else None
-                )
-                row_ts = row.published_at or row.updated_at or row.created_at
-                if current_ts is None or (row_ts is not None and row_ts > current_ts):
-                    published_version_map[row.skill_id] = row.version
-        except Exception as exc:  # pragma: no cover - 兼容迁移期
-            logger.warning("查询发布版本失败，回退兼容响应: %s", exc)
-
-    if skill_ids and user_id is not None and SkillService._is_user_skill_binding_enabled():
-        try:
-            binding_rows = (
-                db.query(UserSkillBinding)
-                .filter(
-                    UserSkillBinding.user_id == user_id,
-                    UserSkillBinding.skill_id.in_(skill_ids),
-                )
-                .all()
-            )
-            binding_map = {row.skill_id: row for row in binding_rows}
-        except Exception as exc:  # pragma: no cover - 兼容迁移期
-            logger.warning("查询用户技能绑定失败，忽略绑定信息: %s", exc)
-
-    response: List[SkillResponse] = []
-    for skill in skills:
-        published_version = published_version_map.get(skill.skill_id)
-        binding = binding_map.get(skill.skill_id)
-        bound_version = binding.version if binding is not None else None
-        binding_status = binding.binding_status if binding is not None else None
-
-        effective_version = published_version
-        if (
-            binding is not None
-            and binding.binding_status == SkillService.BINDING_STATUS_ENABLED
-            and bool(binding.is_enabled)
-            and bound_version
-        ):
-            effective_version = bound_version
-
-        response.append(
-            SkillResponse(
-                id=skill.id,
-                skill_id=skill.skill_id,
-                name=skill.name,
-                description=skill.description,
-                content_preview=skill.content[:200] + "..." if len(skill.content) > 200 else skill.content,
-                file_hash=skill.file_hash,
-                has_embedding=skill.embedding is not None,
-                embedding_dim=len(skill.embedding) if skill.embedding is not None else None,
-                is_enabled=bool(skill.is_enabled),
-                auto_enabled=bool(skill.auto_enabled),
-                priority=int(skill.priority or 100),
-                scope=skill.scope or SkillService.DEFAULT_SCOPE,
-                trigger_phrases=[str(item) for item in (skill.trigger_phrases or [])],
-                conflicts_with=[str(item) for item in (skill.conflicts_with or [])],
-                published_version=published_version,
-                bound_version=bound_version,
-                binding_status=binding_status,
-                effective_version=effective_version,
-                created_at=skill.created_at.isoformat() if skill.created_at else None,
-                updated_at=skill.updated_at.isoformat() if skill.updated_at else None,
-            )
-        )
-
-    return response
+    payload = SkillService.list_admin_skills(
+        db,
+        skip=skip,
+        limit=limit,
+        search=search,
+        has_embedding=has_embedding,
+        user_id=user_id,
+    )
+    return [SkillResponse(**item) for item in payload]
 
 
 @router.get("/skills/{skill_id}", response_model=SkillDetailResponse)
 def get_skill(skill_id: str, db: Session = Depends(get_db)):
     """获取单个技能详情。"""
 
-    skill = db.query(AgentSkill).filter(AgentSkill.skill_id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
+    try:
+        payload = SkillService.get_admin_skill(db, skill_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return SkillDetailResponse(
-        id=skill.id,
-        skill_id=skill.skill_id,
-        name=skill.name,
-        description=skill.description,
-        content=skill.content,
-        file_hash=skill.file_hash,
-        has_embedding=skill.embedding is not None,
-        embedding_dim=len(skill.embedding) if skill.embedding is not None else None,
-        is_enabled=bool(skill.is_enabled),
-        auto_enabled=bool(skill.auto_enabled),
-        priority=int(skill.priority or 100),
-        scope=skill.scope or SkillService.DEFAULT_SCOPE,
-        trigger_phrases=[str(item) for item in (skill.trigger_phrases or [])],
-        conflicts_with=[str(item) for item in (skill.conflicts_with or [])],
-    )
+    return SkillDetailResponse(**payload)
 
 
 @router.get("/skills/{skill_id}/versions", response_model=List[SkillVersionItem])
@@ -584,16 +476,21 @@ def update_skill_metadata(
 ):
     """更新技能元数据。"""
 
-    skill = db.query(AgentSkill).filter(AgentSkill.skill_id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
-
     updates = request.model_dump(exclude_none=True)
     if not updates:
         return {"skill_id": skill_id, "updated": False, "updated_fields": []}
 
     if "scope" in updates:
         updates["scope"] = updates["scope"].strip().lower()
+
+    if "catalog_path" in updates:
+        updates["catalog_path"] = updates["catalog_path"].strip()
+
+    if "catalog_description" in updates:
+        updates["catalog_description"] = updates["catalog_description"].strip()
+
+    if "when_to_use" in updates:
+        updates["when_to_use"] = updates["when_to_use"].strip()
 
     if "trigger_phrases" in updates:
         updates["trigger_phrases"] = [
@@ -608,46 +505,25 @@ def update_skill_metadata(
             raise HTTPException(status_code=400, detail="conflicts_with 不能包含自身")
         updates["conflicts_with"] = list(dict.fromkeys(normalized_conflicts))
 
-    for field, value in updates.items():
-        setattr(skill, field, value)
+    try:
+        payload = SkillService.update_skill_catalog_metadata(
+            db,
+            skill_id=skill_id,
+            updates=updates,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
 
-    db.commit()
-
-    logger.info("技能元数据更新: %s, fields=%s", skill_id, list(updates.keys()))
-    return {"skill_id": skill_id, "updated": True, "updated_fields": list(updates.keys())}
+    logger.info("技能元数据更新: %s, fields=%s", skill_id, payload.get("updated_fields", []))
+    return payload
 
 
 @router.get("/vector-status", response_model=VectorStatusResponse)
 def get_vector_status(db: Session = Depends(get_db)):
     """获取向量状态概览。"""
 
-    total = db.query(AgentSkill).count()
-    with_embedding = db.query(AgentSkill).filter(AgentSkill.embedding.isnot(None)).count()
-    without_embedding = total - with_embedding
-
-    sample = db.query(AgentSkill).filter(AgentSkill.embedding.isnot(None)).first()
-    embedding_dim = len(sample.embedding) if sample is not None and sample.embedding is not None else None
-
-    try:
-        test_embedding = get_embedding("test")
-        current_model_dim = len(test_embedding) if test_embedding else None
-    except Exception:
-        current_model_dim = None
-
-    dimension_mismatch = (
-        embedding_dim is not None
-        and current_model_dim is not None
-        and embedding_dim != current_model_dim
-    )
-
-    return VectorStatusResponse(
-        total_skills=total,
-        with_embedding=with_embedding,
-        without_embedding=without_embedding,
-        embedding_dim=embedding_dim,
-        dimension_mismatch=dimension_mismatch,
-        current_model_dim=current_model_dim,
-    )
+    payload = SkillService.get_admin_vector_status(db)
+    return VectorStatusResponse(**payload)
 
 
 @router.post("/regenerate-embeddings")
@@ -658,42 +534,30 @@ def regenerate_embeddings(
 ):
     """重新生成技能向量（后台任务）。"""
 
-    if request.skill_ids:
-        skills = db.query(AgentSkill).filter(AgentSkill.skill_id.in_(request.skill_ids)).all()
-    else:
-        skills = db.query(AgentSkill).all()
-
+    skills = SkillService.list_admin_skills(
+        db,
+        skip=0,
+        limit=None,
+        skill_ids=request.skill_ids,
+    )
     if not skills:
         raise HTTPException(status_code=400, detail="没有找到技能")
 
-    if len(skills) <= 10:
-        success_count = 0
-        errors: List[str] = []
-
-        for skill in skills:
-            try:
-                embedding = get_embedding(skill.description or skill.name)
-                if embedding:
-                    skill.embedding = embedding
-                    success_count += 1
-            except Exception as exc:  # pragma: no cover - 外部依赖异常
-                errors.append(f"{skill.skill_id}: {str(exc)}")
-
-        db.commit()
-
+    skill_ids = [str(item['skill_id']) for item in skills]
+    if len(skill_ids) <= 10:
+        payload = SkillService.regenerate_admin_skill_embeddings(db, skill_ids=skill_ids)
         return {
-            "message": "重新生成完成",
-            "success_count": success_count,
-            "total": len(skills),
-            "errors": errors if errors else None,
+            'message': '重新生成完成',
+            'success_count': payload['success_count'],
+            'total': payload['total'],
+            'errors': payload['errors'] if payload['errors'] else None,
         }
 
-    skill_ids = [skill.skill_id for skill in skills]
     background_tasks.add_task(_regenerate_embeddings_task, skill_ids)
     return {
-        "message": f"后台任务已启动，正在重新生成 {len(skills)} 个技能的向量",
-        "total": len(skills),
-        "status": "processing",
+        'message': f'后台任务已启动，正在重新生成 {len(skill_ids)} 个技能的向量',
+        'total': len(skill_ids),
+        'status': 'processing',
     }
 
 
@@ -705,68 +569,42 @@ def _regenerate_embeddings_task(skill_ids: List[str]) -> None:
     logger.info("开始重新生成 %d 个技能的向量...", len(skill_ids))
 
     with SessionLocal() as db:
-        success = 0
-        errors = 0
-
-        for skill_id in skill_ids:
-            try:
-                skill = db.query(AgentSkill).filter(AgentSkill.skill_id == skill_id).first()
-                if not skill:
-                    continue
-
-                embedding = get_embedding(skill.description or skill.name)
-                if embedding:
-                    skill.embedding = embedding
-                    success += 1
-                    db.commit()
-            except Exception as exc:  # pragma: no cover - 外部依赖异常
-                errors += 1
-                logger.error("重新生成向量失败 %s: %s", skill_id, exc)
-
-        logger.info("向量重新生成完成: 成功 %d, 失败 %d", success, errors)
+        payload = SkillService.regenerate_admin_skill_embeddings(db, skill_ids=skill_ids)
+        logger.info(
+            "向量重新生成完成: 成功 %d, 失败 %d",
+            int(payload.get('success_count', 0) or 0),
+            len(payload.get('errors') or []),
+        )
 
 
 @router.delete("/skills/{skill_id}")
 def delete_skill(skill_id: str, db: Session = Depends(get_db)):
     """删除技能。"""
 
-    skill = db.query(AgentSkill).filter(AgentSkill.skill_id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
-
-    db.delete(skill)
-    db.commit()
+    try:
+        payload = SkillService.delete_admin_skill(db, skill_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     logger.info("删除技能: %s", skill_id)
-    return {"message": "技能已删除", "skill_id": skill_id}
+    return payload
 
 
 @router.post("/skills/{skill_id}/regenerate")
 def regenerate_single_skill(skill_id: str, db: Session = Depends(get_db)):
     """重新生成单个技能的向量。"""
 
-    skill = db.query(AgentSkill).filter(AgentSkill.skill_id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
-
     try:
-        embedding = get_embedding(skill.description or skill.name)
-        if not embedding:
-            raise HTTPException(status_code=500, detail="向量生成失败")
-
-        skill.embedding = embedding
-        db.commit()
-
-        return {
-            "message": "向量已重新生成",
-            "skill_id": skill_id,
-            "embedding_dim": len(embedding),
-        }
-    except HTTPException:
-        raise
+        return SkillService.regenerate_single_admin_skill_embedding(db, skill_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        detail = str(exc)
+        status_code = 409 if '缺少可写版本记录' in detail or '缺少可向量化描述' in detail else 500
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except Exception as exc:
         logger.exception("重新生成向量失败: %s", skill_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/search")

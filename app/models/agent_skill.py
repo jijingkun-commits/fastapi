@@ -69,6 +69,8 @@ class AgentSkillDefinition(Base):
     )
     is_enabled = Column(Boolean, nullable=False, server_default=text("true"), comment="定义层总开关")
     tags = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="定义标签")
+    catalog_path = Column(String(255), comment="目录层级路径")
+    catalog_order = Column(Integer, nullable=False, server_default=text("100"), comment="目录展示顺序")
 
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -118,6 +120,8 @@ class AgentSkillVersion(Base):
     )
     trigger_phrases = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="触发短语")
     conflicts_with = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="冲突技能")
+    catalog_description = Column(Text, comment="目录展示文案")
+    when_to_use = Column(Text, comment="何时使用该技能")
 
     published_at = Column(TIMESTAMP, comment="发布时间")
     created_at = Column(TIMESTAMP, server_default=func.now())

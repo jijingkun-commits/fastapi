@@ -14,7 +14,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple
+from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple, List
 from pydantic import BaseModel, Field, ValidationError
 
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, trim_messages
@@ -22,7 +22,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
-from langchain_core.tools import tool
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command, Send, interrupt
 from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import InjectedState
@@ -56,9 +56,11 @@ from app.ai.protocol import (
     StreamingToolStartPayload,
     StreamingResultPayload,
     StreamingKbImagesPayload,
+    build_skill_runtime_additional_kwargs_payload,
     build_streaming_tool_start_payload,
     build_streaming_result_payload,
     build_streaming_kb_images_payload,
+    extract_skill_runtime_from_ai_message,
 )
 from app.ai.prompts.agent_prompts import (
     PLANNER_INTENT_PLAN_PROMPT_TEMPLATE,
@@ -3215,14 +3217,24 @@ def _inject_streaming_context_messages(
     pruned_messages: Sequence[BaseMessage],
     state: Dict[str, Any],
 ) -> list[BaseMessage]:
-    """将 system_context / skill_context 注入裁剪后的消息列表。"""
+    """将 system_context / skill catalog / loaded skills 注入裁剪后的消息列表。"""
     from langchain_core.messages import SystemMessage
 
     context_messages = []
     if state.get("system_context"):
         context_messages.append(SystemMessage(content=state["system_context"]))
 
-    if state.get("skill_context"):
+    if state.get("skill_catalog_context"):
+        context_messages.append(SystemMessage(content=state["skill_catalog_context"]))
+
+    if state.get("loaded_skill_context"):
+        context_messages.append(SystemMessage(content=state["loaded_skill_context"]))
+
+    if (
+        not state.get("skill_catalog_context")
+        and not state.get("loaded_skill_context")
+        and state.get("skill_context")
+    ):
         context_messages.append(SystemMessage(content=state["skill_context"]))
 
     if not context_messages:
@@ -3695,7 +3707,7 @@ def _handle_streaming_wrapper_exception(
         )
     emit_token(ctx.writer, error_msg, node=ctx.node_name)
     return {
-        "messages": [create_ai_message(error_msg)],
+        "messages": [_create_ai_message_with_skill_runtime(error_msg, ctx.state)],
         "runtime_recovery_state": runtime_recovery_state,
     }
 
@@ -3968,6 +3980,175 @@ def _get_common_tools():
     return _apply_tool_governance_policy(_get_common_tool_entries(), agent_name="common")
 
 
+
+
+def _restore_loaded_skill_registry_from_messages(
+    messages: Sequence[BaseMessage],
+) -> Dict[str, Dict[str, Any]]:
+    """优先从历史 AIMessage.additional_kwargs.skill_runtime 恢复会话级 Skill registry。"""
+
+    for message in reversed(list(messages or [])):
+        skill_runtime = extract_skill_runtime_from_ai_message(message)
+        if not skill_runtime:
+            continue
+
+        registry: Dict[str, Dict[str, Any]] = {}
+        for item in skill_runtime.get("loaded_skills") or []:
+            if not isinstance(item, dict):
+                continue
+            skill_id = str(item.get("skill_id") or "").strip()
+            if not skill_id:
+                continue
+            registry[skill_id] = {
+                "skill_id": skill_id,
+                "version": str(item.get("version") or "v1").strip() or "v1",
+                "truncated": bool(item.get("truncated", False)),
+                "source_turn_id": None,
+            }
+        if registry:
+            return registry
+
+    return {}
+
+
+
+def _resolve_skill_runtime_replay_source(state: Dict[str, Any]) -> str:
+    """判断当前轮 skill_runtime 的 replay_source。"""
+
+    messages = list(state.get("messages") or [])
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            break
+        if isinstance(message, ToolMessage) and str(getattr(message, "name", "") or "").strip() == "load_skills":
+            return "live"
+
+    if state.get("loaded_skill_registry") or state.get("loaded_skill_context"):
+        return "rehydrated"
+    return "live"
+
+
+
+def _build_skill_runtime_state_payload(
+    state: Dict[str, Any],
+    *,
+    replay_source: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """根据当前 LangGraph state 构造 canonical skill_runtime 载荷。"""
+
+    from app.services.skill_service import SkillService
+
+    if not SkillService._is_skill_runtime_trace_enabled():
+        return None
+
+    resolved_replay_source = str(replay_source or _resolve_skill_runtime_replay_source(state)).strip() or "live"
+    loaded_skill_registry = state.get("loaded_skill_registry") or {}
+    loaded_skills: List[Dict[str, Any]] = []
+    if isinstance(loaded_skill_registry, dict):
+        for skill_id, payload in loaded_skill_registry.items():
+            if not str(skill_id or "").strip():
+                continue
+            payload_dict = payload if isinstance(payload, dict) else {}
+            loaded_skills.append(
+                {
+                    "skill_id": str(skill_id),
+                    "version": str(payload_dict.get("version") or SkillService.DEFAULT_VERSION),
+                    "truncated": bool(payload_dict.get("truncated", False)),
+                }
+            )
+
+    catalog_version = state.get("catalog_version")
+    manifest = state.get("skill_catalog_manifest") or []
+    if not catalog_version and isinstance(manifest, list):
+        try:
+            catalog_version = SkillService._compute_catalog_version(manifest)
+        except Exception:
+            catalog_version = "-"
+
+    visible_skill_count = state.get("visible_skill_count")
+    if visible_skill_count is None:
+        visible_skill_count = len(manifest) if isinstance(manifest, list) else 0
+
+    return build_skill_runtime_additional_kwargs_payload(
+        runtime_mode=SkillService.resolve_runtime_mode(),
+        catalog_version=catalog_version,
+        visible_skill_count=visible_skill_count,
+        loaded_skills=loaded_skills,
+        replay_source=resolved_replay_source,
+    )
+
+
+
+def _create_ai_message_with_skill_runtime(content: str, state: Dict[str, Any]):
+    """创建带 canonical skill_runtime 的 AIMessage。"""
+
+    additional_kwargs: Dict[str, Any] = {}
+    runtime_payload = _build_skill_runtime_state_payload(state)
+    if runtime_payload is not None:
+        additional_kwargs["skill_runtime"] = runtime_payload
+    return create_ai_message(content, additional_kwargs=additional_kwargs or None)
+
+
+
+def _create_load_skills_tool():
+    """创建固定暴露给 Supervisor 的 Skill 正文加载工具。"""
+
+    @tool(
+        "load_skills",
+        description="加载当前技能目录里的完整 Skill 正文。仅能传入当前 catalog 中可见的 skill_id；一次最多 3 个。",
+    )
+    def load_skills(
+        skill_ids: Annotated[list[str], "来自当前技能目录的 skill_id 列表，一次最多 3 个。"],
+        reason: Annotated[Optional[str], "为什么要加载这些技能（可选，便于调试）。"] = None,
+        state: Annotated[Dict[str, Any], InjectedState] = None,
+        tool_call_id: Annotated[str, InjectedToolCallId] = "load_skills",
+    ) -> Command:
+        """加载 Skill 正文并回写会话 registry/context。"""
+
+        from app.services.skill_service import SkillService
+
+        runtime_state = dict(state or {})
+        load_result = SkillService.load_skills_for_session(
+            skill_ids=list(skill_ids or []),
+            user_id=runtime_state.get("user_id"),
+            loaded_skill_registry=runtime_state.get("loaded_skill_registry") or {},
+            source_turn_id=runtime_state.get("turn_id"),
+        )
+        merged_state = {
+            **runtime_state,
+            "loaded_skill_registry": load_result.get("loaded_skill_registry") or {},
+            "catalog_version": load_result.get("catalog_version") or runtime_state.get("catalog_version"),
+            "visible_skill_count": load_result.get("visible_skill_count", runtime_state.get("visible_skill_count", 0)),
+        }
+        runtime_payload = _build_skill_runtime_state_payload(merged_state, replay_source="live")
+        tool_payload = {
+            "loaded_skills": load_result.get("loaded_skills") or [],
+            "errors": load_result.get("errors") or [],
+            "truncated_count": int(load_result.get("truncated_count") or 0),
+            "requested_skill_ids": load_result.get("requested_skill_ids") or [],
+            "reason": str(reason or "").strip() or None,
+        }
+        additional_kwargs: Dict[str, Any] = {
+            "load_skills_result": tool_payload,
+        }
+        if runtime_payload is not None:
+            additional_kwargs["skill_runtime"] = runtime_payload
+
+        return Command(
+            update={
+                "loaded_skill_registry": load_result.get("loaded_skill_registry") or {},
+                "loaded_skill_context": load_result.get("loaded_skill_context"),
+                "messages": [
+                    ToolMessage(
+                        content=json.dumps(tool_payload, ensure_ascii=False),
+                        tool_call_id=str(tool_call_id or "load_skills"),
+                        name="load_skills",
+                        additional_kwargs=additional_kwargs,
+                    )
+                ],
+            }
+        )
+
+    return load_skills
 def _get_supervisor_tools():
     """获取 Supervisor 直接使用的简单工具。
     
@@ -4011,6 +4192,15 @@ def _get_supervisor_tools():
             )
     except Exception as e:
         logger.warning("Supervisor 联网搜索工具加载失败: %s", e)
+
+    try:
+        from app.services.skill_service import SkillService
+
+        if SkillService.resolve_runtime_mode() == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
+            entries.append(_build_tool_entry(_create_load_skills_tool(), {"group:skill", "runtime:progressive"}))
+            logger.debug("Supervisor 工具: 已加载 progressive load_skills")
+    except Exception as e:
+        logger.warning("Supervisor load_skills 工具加载失败: %s", e)
 
     return _apply_tool_governance_policy(entries, agent_name="supervisor")
 
@@ -4275,17 +4465,74 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
 
     updates["system_context"] = "\n".join(context_parts)
     
-    # ========== 4. Skills RAG 检索 ==========
-    # 根据用户消息检索相关技能，为后续 Agent 提供专业知识上下文
+    # ========== 4. Skill Runtime 预装载 ==========
+    # progressive_loader: 预装 catalog；hybrid_rag: 保留旧检索链路作为显式切换路径
     updates["skill_candidates"] = []
     updates["selected_skill_ids"] = []
     updates["skill_context"] = None
     updates["skill_injection_meta"] = None
+    updates["skill_catalog_manifest"] = []
+    updates["skill_catalog_context"] = None
+    updates["catalog_version"] = "-"
+    updates["visible_skill_count"] = 0
 
     try:
         from app.services.skill_service import SkillService
 
-        if content:
+        runtime_mode = SkillService.resolve_runtime_mode()
+        loaded_skill_registry = state.get("loaded_skill_registry") or {}
+        if not isinstance(loaded_skill_registry, dict):
+            loaded_skill_registry = {}
+
+        if not loaded_skill_registry:
+            restored_registry = _restore_loaded_skill_registry_from_messages(messages)
+            if restored_registry:
+                loaded_skill_registry = restored_registry
+                updates["loaded_skill_registry"] = restored_registry
+                logger.info(
+                    "预处理节点: 已从历史 AIMessage.skill_runtime 恢复 loaded_skill_registry, count=%d",
+                    len(restored_registry),
+                )
+
+        if loaded_skill_registry and not state.get("loaded_skill_context"):
+            context_payload = SkillService.build_loaded_skill_context_from_registry(loaded_skill_registry)
+            updates["loaded_skill_context"] = context_payload.get("loaded_skill_context") or None
+            missing_skills = context_payload.get("missing_skills") or []
+            if missing_skills:
+                logger.warning("预处理节点: loaded_skill_context 回源缺失 skills=%s", missing_skills)
+                emit_status(
+                    writer,
+                    message="部分已加载技能版本缺失，已按可回源正文继续本轮推理。",
+                    node="preprocess",
+                )
+
+        if runtime_mode == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
+            catalog_payload = SkillService.build_skill_catalog_manifest(user_id=state.get("user_id"))
+            manifest = list(catalog_payload.get("manifest") or [])
+            catalog_context, catalog_meta = SkillService.format_skill_catalog_as_context_with_meta(manifest)
+            visible_skill_count = int(catalog_payload.get("visible_skill_count") or len(manifest))
+
+            updates["skill_catalog_manifest"] = manifest
+            updates["skill_catalog_context"] = catalog_context or None
+            updates["catalog_version"] = str(catalog_payload.get("catalog_version") or "-")
+            updates["visible_skill_count"] = visible_skill_count
+            updates["skill_injection_meta"] = {
+                "runtime_mode": runtime_mode,
+                "catalog_build_source": catalog_payload.get("catalog_build_source"),
+                **catalog_meta,
+            }
+
+            logger.info(
+                "预处理节点: progressive skill catalog 已装载, visible_skill_count=%d, catalog_version=%s",
+                visible_skill_count,
+                updates["catalog_version"],
+            )
+            emit_status(
+                writer,
+                message=f"已预装 {visible_skill_count} 个可见技能目录，模型可按需调用 load_skills。",
+                node="preprocess",
+            )
+        elif content:
             debug_payload = SkillService.search_skills_debug(
                 content,
                 top_k=2,
@@ -4300,11 +4547,14 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             updates["skill_candidates"] = skill_candidates
             updates["selected_skill_ids"] = selected_skill_ids
             updates["skill_context"] = skill_context or None
-            updates["skill_injection_meta"] = skill_injection_meta
+            updates["skill_injection_meta"] = {
+                "runtime_mode": runtime_mode,
+                **(skill_injection_meta if isinstance(skill_injection_meta, dict) else {}),
+            }
 
             if selected_skill_ids:
                 logger.info(
-                    "预处理节点: 检索到 %d 个相关技能: %s", len(selected_skill_ids), selected_skill_ids
+                    "预处理节点: hybrid 技能检索命中 %d 个技能: %s", len(selected_skill_ids), selected_skill_ids
                 )
                 emit_status(
                     writer,
@@ -4313,11 +4563,26 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                 )
             else:
                 logger.info(
-                    "预处理节点: 技能检索完成但未命中，候选=%d",
+                    "预处理节点: hybrid 技能检索完成但未命中，候选=%d",
                     len(skill_candidates),
                 )
     except Exception as e:
-        logger.warning("预处理节点: 技能检索失败 - %s", e)
+        from app.services.skill_service import SkillService
+
+        if SkillService.resolve_runtime_mode() == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
+            logger.warning("预处理节点: progressive skill catalog 构建失败 - %s", e)
+            updates["skill_injection_meta"] = {
+                "runtime_mode": SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE,
+                "catalog_warning": str(e),
+                "visible_skill_count": 0,
+            }
+            emit_status(
+                writer,
+                message="技能目录构建失败，本轮将以无 catalog 继续，不回退 hybrid 注入。",
+                node="preprocess",
+            )
+        else:
+            logger.warning("预处理节点: 技能检索失败 - %s", e)
     
     # 检测是否包含图片 URL（Markdown 格式）
     image_urls = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', content)
@@ -4520,6 +4785,10 @@ async def create_multi_agent_graph(
             "selected_skill_ids": [],
             "skill_context": None,
             "skill_injection_meta": None,
+            "skill_catalog_manifest": [],
+            "skill_catalog_context": None,
+            "catalog_version": None,
+            "visible_skill_count": 0,
             "turn_id": None,
 
             # === 交付导向状态 ===
@@ -4696,7 +4965,7 @@ async def create_multi_agent_graph(
                 node="coverage_gate",
             )
             return {
-                "messages": [create_ai_message(blocked_answer)],
+                "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
@@ -4743,7 +5012,7 @@ async def create_multi_agent_graph(
                 node="final_composer",
             )
             return {
-                "messages": [create_ai_message(blocked_answer)],
+                "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
                 "decomposed_goals": list(active_goals),
                 "deliverables": deliverables,
                 "coverage_report": coverage_report,
@@ -4789,7 +5058,7 @@ async def create_multi_agent_graph(
             emit_token(writer, final_answer, node="final_composer")
 
         return {
-            "messages": [create_ai_message(final_answer)],
+            "messages": [_create_ai_message_with_skill_runtime(final_answer, state)],
             "decomposed_goals": list(active_goals),
             "deliverables": deliverables,
             "coverage_report": coverage_report,
@@ -4822,7 +5091,7 @@ async def create_multi_agent_graph(
         emit_token(writer, summary_text, node="summarize")
 
         return {
-            "messages": [create_ai_message(summary_text)],
+            "messages": [_create_ai_message_with_skill_runtime(summary_text, state)],
             "evaluation": "complete",
             "evaluation_route": "postprocess",
         }

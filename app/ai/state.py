@@ -122,8 +122,14 @@ class MultiAgentState(BaseAgentState, total=False):
     intent_route: str
     intent_mode: Literal["model_primary", "heuristic_only"]
     
-    # Skills RAG
-    skill_context: str            # 检索到的相关技能上下文（由 preprocess 节点填充）
+    # Skills Runtime（Progressive Loader）
+    skill_context: str            # 兼容字段：旧检索注入上下文（deprecated，只读回放，不再作为真理源）
+    skill_catalog_manifest: List[Dict[str, Any]]  # 当前轮可见 Skill 目录 descriptor 列表
+    skill_catalog_context: str    # 由 catalog manifest 渲染的首轮上下文
+    loaded_skill_registry: Dict[str, Dict[str, Any]]  # 会话级已加载 Skill 唯一状态源
+    loaded_skill_context: str     # 由 loaded_skill_registry 派生的正文上下文
+    catalog_version: str          # 当前轮 catalog 稳定版本号
+    visible_skill_count: int      # 当前轮可见 Skill 数量
     
     # 系统上下文
     system_context: str           # 系统级上下文信息（当前时间、用户信息等）

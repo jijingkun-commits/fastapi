@@ -52,6 +52,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest==8.3.4",
+  "pytest-asyncio==0.24.0",
   "pytest-cov==4.1.0",
   "httpx==0.27.2",
 ]
@@ -63,6 +64,7 @@ include = ["app*"]
 minversion = "8.0"
 addopts = "-q --cov=app --cov-report=term-missing --cov-report=html"
 testpaths = ["app/tests", "tests"]
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
 source = ["app"]

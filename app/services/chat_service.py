@@ -39,6 +39,7 @@ from app.repositories import chat_repo
 from app.services.document_memory_service import (
     flush as flush_document_memory,
     recall as recall_document_memory,
+    upsert_preference_documents_from_input as upsert_preference_document_memory,
 )
 from app.services.user_memory_intent_job_service import (
     enqueue_from_chat_message as enqueue_memory_intent_job,
@@ -216,25 +217,38 @@ def _persist_document_memory_context(
             source_thread_id=thread_id,
             source_message_id=source_message_id,
         )
+        persisted_preference_count = upsert_preference_document_memory(
+            db,
+            user_id=user_id,
+            user_text=prompt,
+            source_thread_id=thread_id,
+            source_message_id=source_message_id,
+        )
         if persisted_doc_count:
             logger.info(
                 "压缩前文档记忆 flush 成功: user_id=%s, count=%d",
                 user_id,
                 persisted_doc_count,
             )
-            if document_memory_recall_enabled:
-                latest_document_context = recall_document_memory(
-                    db,
-                    user_id=user_id,
-                    query_text=prompt,
-                    max_results=document_memory_max_results,
-                    max_injected_chars=document_memory_max_injected_chars,
-                    min_score=document_hybrid_min_score,
-                    vector_weight=document_vector_weight,
-                    text_weight=document_text_weight,
-                )
-                if latest_document_context:
-                    return latest_document_context
+        if persisted_preference_count:
+            logger.info(
+                "偏好文档记忆 upsert 成功: user_id=%s, count=%d",
+                user_id,
+                persisted_preference_count,
+            )
+        if document_memory_recall_enabled and (persisted_doc_count or persisted_preference_count):
+            latest_document_context = recall_document_memory(
+                db,
+                user_id=user_id,
+                query_text=prompt,
+                max_results=document_memory_max_results,
+                max_injected_chars=document_memory_max_injected_chars,
+                min_score=document_hybrid_min_score,
+                vector_weight=document_vector_weight,
+                text_weight=document_text_weight,
+            )
+            if latest_document_context:
+                return latest_document_context
     except Exception as memory_error:
         logger.warning("写入文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
 
@@ -752,13 +766,9 @@ class ChatService:
             except Exception as memory_error:
                 logger.warning("读取文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         memory_context = document_memory_context
-            
-        input_messages = []
-        if memory_context:
-            input_messages.append(SystemMessage(content=memory_context))
 
         human_message = create_human_message(final_prompt)
-        input_messages.append(human_message)
+        input_messages = [human_message]
         current_human_message_id = getattr(human_message, "id", None)
         control_flags = _build_control_flags(
             run_control_enabled=run_control_enabled,
@@ -785,6 +795,7 @@ class ChatService:
         # 构建输入 state（包含 user_id、thread_id、enable_thinking、model_id、current_todo_id）
         input_state = {
             "messages": input_messages,
+            "memory_context": memory_context,
             "user_id": user_id,
             "thread_id": thread_id,
             "enable_thinking": enable_thinking,
@@ -865,8 +876,7 @@ class ChatService:
 
             if document_memory_context:
                 memory_context = document_memory_context
-                input_messages = [SystemMessage(content=document_memory_context), human_message]
-                input_state["messages"] = input_messages
+                input_state["memory_context"] = memory_context
                 logger.info(
                     "本轮写入后即时注入记忆上下文: user_id=%s, has_document=%s, has_preference=%s, document_hybrid=%s",
                     user_id,

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from app.models.agent_skill import AgentSkillVersion, UserSkillBinding
+from app.models.agent_skill import AgentSkillDefinition, AgentSkillVersion, UserSkillBinding
 from app.repositories import config_repo
 from app.services.skill_service import SkillService
 
@@ -436,31 +436,30 @@ class _RuntimeExecuteSession:
         return list(self._rows)
 
 
-def test_skill_retrieval_strict_user_vector_should_not_fallback_legacy_when_empty(monkeypatch) -> None:  # noqa: ANN001
-    """strict_user 模式命中空结果时不应回退 legacy 向量召回。"""
+def test_skill_runtime_source_sql_should_not_fallback_to_legacy_table_when_flag_disabled(monkeypatch) -> None:  # noqa: ANN001
+    """即使旧版本开关关闭，runtime 仍必须固定走 definition/version 视图。"""
+
+    monkeypatch.setattr(SkillService, "_is_versioning_runtime_enabled", classmethod(lambda cls: False))
+    monkeypatch.setattr(SkillService, "_is_user_skill_binding_enabled", classmethod(lambda cls: False))
+
+    sql, params = SkillService._build_runtime_source_sql(user_id=101)
+
+    assert "t_agent_skill_versions" in sql
+    assert "FROM t_agent_skills" not in sql
+    assert params["binding_enabled"] is False
+    assert params["binding_user_id"] == 101
+
+
+def test_skill_retrieval_vector_should_return_empty_without_legacy_fallback(monkeypatch) -> None:  # noqa: ANN001
+    """runtime 视图命中空结果时，应直接返回空，不得回退旧表。"""
 
     db = _RuntimeExecuteSession(rows=[])
-    legacy_called = {"value": False}
 
     monkeypatch.setattr(
         SkillService,
         "_build_runtime_source_sql",
         classmethod(lambda cls, user_id: ("SELECT 1", {"binding_user_id": user_id or -1})),
     )
-    monkeypatch.setattr(SkillService, "_is_versioning_runtime_enabled", classmethod(lambda cls: True))
-    monkeypatch.setattr(
-        SkillService,
-        "_is_strict_user_runtime_enabled",
-        classmethod(lambda cls: True),
-        raising=False,
-    )
-
-    def _legacy(cls, db, query_embedding, limit):  # noqa: ANN001
-        _ = cls, db, query_embedding, limit
-        legacy_called["value"] = True
-        return [{"skill_id": "legacy"}]
-
-    monkeypatch.setattr(SkillService, "_fetch_vector_candidates_legacy", classmethod(_legacy))
 
     candidates = SkillService._fetch_vector_candidates(
         db=db,
@@ -470,34 +469,19 @@ def test_skill_retrieval_strict_user_vector_should_not_fallback_legacy_when_empt
     )
 
     assert candidates == []
-    assert legacy_called["value"] is False
 
 
-def test_skill_retrieval_strict_user_lexical_should_raise_without_legacy_fallback(monkeypatch) -> None:  # noqa: ANN001
-    """strict_user 模式下 runtime SQL 异常应直接抛出，不回退 legacy 关键词召回。"""
+
+def test_skill_retrieval_lexical_should_raise_without_legacy_fallback(monkeypatch) -> None:  # noqa: ANN001
+    """runtime SQL 异常时应直接抛错，不得回退旧表。"""
 
     db = _RuntimeExecuteSession(error=RuntimeError("runtime sql failed"))
-    legacy_called = {"value": False}
 
     monkeypatch.setattr(
         SkillService,
         "_build_runtime_source_sql",
         classmethod(lambda cls, user_id: ("SELECT 1", {"binding_user_id": user_id or -1})),
     )
-    monkeypatch.setattr(SkillService, "_is_versioning_runtime_enabled", classmethod(lambda cls: True))
-    monkeypatch.setattr(
-        SkillService,
-        "_is_strict_user_runtime_enabled",
-        classmethod(lambda cls: True),
-        raising=False,
-    )
-
-    def _legacy(cls, db, query, limit):  # noqa: ANN001
-        _ = cls, db, query, limit
-        legacy_called["value"] = True
-        return [{"skill_id": "legacy"}]
-
-    monkeypatch.setattr(SkillService, "_fetch_lexical_candidates_legacy", classmethod(_legacy))
 
     with pytest.raises(RuntimeError, match="runtime sql failed"):
         SkillService._fetch_lexical_candidates(
@@ -507,7 +491,26 @@ def test_skill_retrieval_strict_user_lexical_should_raise_without_legacy_fallbac
             user_id=101,
         )
 
-    assert legacy_called["value"] is False
+
+def test_skill_retrieval_vector_should_raise_without_legacy_fallback(monkeypatch) -> None:  # noqa: ANN001
+    """向量 runtime SQL 异常时应直接抛错，不得回退旧表。"""
+
+    db = _RuntimeExecuteSession(error=RuntimeError("runtime vector sql failed"))
+
+    monkeypatch.setattr(
+        SkillService,
+        "_build_runtime_source_sql",
+        classmethod(lambda cls, user_id: ("SELECT 1", {"binding_user_id": user_id or -1})),
+    )
+
+    with pytest.raises(RuntimeError, match="runtime vector sql failed"):
+        SkillService._fetch_vector_candidates(
+            db=db,
+            query_embedding=[0.01, 0.02],
+            limit=3,
+            user_id=101,
+        )
+
 
 
 class _FakeSkill:
@@ -586,11 +589,47 @@ description: 优化文案表达
 
     session = _FakeSession(records={"copywriter": _FakeSkill("copywriter", file_hash)})
     monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2])
+    monkeypatch.setattr(SkillService, "_sync_versioned_records", classmethod(lambda cls, db, parsed, file_hash, embedding: None))
 
     updated = SkillService.import_skill(skill_file, session, force=False)
 
     assert updated is False
     assert session.commit_count == 0
+
+
+def test_skill_ingest_import_should_backfill_versioned_records_when_legacy_unchanged(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """旧兼容层命中但版本层缺失时，仍应回填 definition/version。"""
+
+    skill_file = _build_skill_file(
+        tmp_path,
+        "copywriter",
+        """---
+name: 文案润色专家
+description: 优化文案表达
+---
+
+# 文案润色专家
+""",
+    )
+
+    parsed = SkillService._parse_skill_file(skill_file)
+    assert parsed is not None
+    file_hash = SkillService._compute_file_hash(parsed["content"])
+
+    session = _FakeSession(records={"copywriter": _FakeSkill("copywriter", file_hash)})
+    sync_calls = []
+    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2])
+    monkeypatch.setattr(
+        SkillService,
+        "_sync_versioned_records",
+        classmethod(lambda cls, db, parsed, file_hash, embedding: sync_calls.append(parsed["skill_id"]) or True),
+    )
+
+    updated = SkillService.import_skill(skill_file, session, force=False)
+
+    assert updated is True
+    assert sync_calls == ["copywriter"]
+    assert session.commit_count == 1
 
 
 def test_skill_ingest_import_updates_existing_record(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
@@ -612,6 +651,7 @@ priority: 5
     existing = _FakeSkill("copywriter", "old-hash")
     session = _FakeSession(records={"copywriter": existing})
     monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.9])
+    monkeypatch.setattr(SkillService, "_sync_versioned_records", classmethod(lambda cls, db, parsed, file_hash, embedding: None))
 
     updated = SkillService.import_skill(skill_file, session, force=False)
 
@@ -753,8 +793,6 @@ def test_skill_version_publish_should_switch_active_version(monkeypatch) -> None
     session = _SequentialSession(results=[_SequentialResult(scalars=[version_v1, version_v2])])
 
     monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
-    monkeypatch.setattr(SkillService, "_bootstrap_versioned_record_from_legacy", classmethod(lambda cls, db, skill_id: None))
-    monkeypatch.setattr(SkillService, "_sync_legacy_record_from_version", classmethod(lambda cls, db, version: None))
 
     payload = SkillService.publish_skill_version(session, "loan-advice", "v2")
 
@@ -803,6 +841,26 @@ description: SQL 检索
 
     assert updated == 1
     assert template_calls == [session]
+
+
+def test_skill_version_template_should_not_fallback_to_legacy_records() -> None:
+    """无发布版本时模板应返回空技能列表，不得回退旧表。"""
+
+    session = _SequentialSession(results=[_SequentialResult(scalars=[])])
+
+    payload = SkillService._build_user_bootstrap_template(session)
+
+    assert payload == {"default_version": SkillService.DEFAULT_VERSION, "skills": []}
+
+
+def test_skill_version_list_should_return_empty_when_no_version_records() -> None:
+    """无版本记录时列表应为空，不得再 bootstrap 旧表。"""
+
+    session = _SequentialSession(results=[_SequentialResult(scalars=[])])
+
+    payload = SkillService.list_skill_versions(session, "loan-advice")
+
+    assert payload == []
 
 
 def test_skill_version_template_config_should_upsert_when_missing(monkeypatch) -> None:  # noqa: ANN001
@@ -873,7 +931,6 @@ def test_skill_binding_bind_user_skill_should_create_binding(monkeypatch) -> Non
 
     monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
     monkeypatch.setattr(SkillService, "_is_user_skill_binding_enabled", classmethod(lambda cls: True))
-    monkeypatch.setattr(SkillService, "_bootstrap_versioned_record_from_legacy", classmethod(lambda cls, db, skill_id: None))
 
     payload = SkillService.bind_user_skill(
         db=session,
@@ -915,3 +972,152 @@ def test_skill_binding_rollback_user_binding_should_disable_override(monkeypatch
     assert binding.version is None
     assert binding.is_enabled is False
     assert session.commit_count == 1
+
+
+def test_admin_skill_list_should_prefer_enabled_binding_over_published(monkeypatch) -> None:  # noqa: ANN001
+    """管理面列表应优先展示用户启用绑定版本。"""
+
+    definition = AgentSkillDefinition(
+        id=1,
+        skill_id="loan-advice",
+        name="贷款分析",
+        description="定义描述",
+        scope="data",
+        is_enabled=True,
+        catalog_order=10,
+    )
+    version_v1 = AgentSkillVersion(
+        id=11,
+        definition_id=1,
+        skill_id="loan-advice",
+        version="v1",
+        status=SkillService.VERSION_STATUS_PUBLISHED,
+        name="贷款分析 v1",
+        description="发布版本",
+        content="v1",
+        priority=10,
+    )
+    version_v2 = AgentSkillVersion(
+        id=12,
+        definition_id=1,
+        skill_id="loan-advice",
+        version="v2",
+        status=SkillService.VERSION_STATUS_DRAFT,
+        name="贷款分析 v2",
+        description="绑定版本",
+        content="v2",
+        priority=5,
+    )
+    binding = UserSkillBinding(
+        user_id=3101,
+        skill_id="loan-advice",
+        version="v2",
+        binding_status=SkillService.BINDING_STATUS_ENABLED,
+        is_enabled=True,
+    )
+    session = _SequentialSession(
+        results=[
+            _SequentialResult(scalars=[definition]),
+            _SequentialResult(scalars=[version_v1, version_v2]),
+            _SequentialResult(scalars=[binding]),
+        ]
+    )
+
+    monkeypatch.setattr(SkillService, "_is_user_skill_binding_enabled", classmethod(lambda cls: True))
+
+    payload = SkillService.list_admin_skills(session, user_id=3101)
+
+    assert len(payload) == 1
+    assert payload[0]["published_version"] == "v1"
+    assert payload[0]["bound_version"] == "v2"
+    assert payload[0]["effective_version"] == "v2"
+    assert payload[0]["name"] == "贷款分析 v2"
+
+
+def test_admin_skill_list_should_fallback_to_latest_version_without_published() -> None:
+    """无 published 版本时管理面应回退 latest version，而不是旧表。"""
+
+    definition = AgentSkillDefinition(
+        id=2,
+        skill_id="risk-check",
+        name="风控检查",
+        description="定义描述",
+        scope="admin",
+        is_enabled=False,
+        catalog_order=20,
+    )
+    version_v3 = AgentSkillVersion(
+        id=21,
+        definition_id=2,
+        skill_id="risk-check",
+        version="v3",
+        status=SkillService.VERSION_STATUS_DRAFT,
+        name="风控检查 v3",
+        description="草稿版本",
+        content="v3-content",
+        file_hash="hash-v3",
+        priority=30,
+    )
+    session = _SequentialSession(
+        results=[
+            _SequentialResult(scalars=[definition]),
+            _SequentialResult(scalars=[version_v3]),
+        ]
+    )
+
+    payload = SkillService.list_admin_skills(session)
+
+    assert len(payload) == 1
+    assert payload[0]["effective_version"] == "v3"
+    assert payload[0]["published_version"] is None
+    assert payload[0]["content_preview"] == "v3-content"
+    assert payload[0]["is_enabled"] is False
+
+
+def test_admin_skill_regenerate_should_update_published_version_embedding(monkeypatch) -> None:  # noqa: ANN001
+    """批量重建向量时应优先写 published 版本记录。"""
+
+    definition = AgentSkillDefinition(
+        id=3,
+        skill_id="sql-expert",
+        name="SQL Expert",
+        description="SQL 诊断",
+        scope="data",
+        is_enabled=True,
+        catalog_order=30,
+    )
+    version_v1 = AgentSkillVersion(
+        id=31,
+        definition_id=3,
+        skill_id="sql-expert",
+        version="v1",
+        status=SkillService.VERSION_STATUS_PUBLISHED,
+        name="SQL Expert v1",
+        description="发布描述",
+        content="v1",
+    )
+    version_v2 = AgentSkillVersion(
+        id=32,
+        definition_id=3,
+        skill_id="sql-expert",
+        version="v2",
+        status=SkillService.VERSION_STATUS_DRAFT,
+        name="SQL Expert v2",
+        description="草稿描述",
+        content="v2",
+    )
+    session = _SequentialSession(
+        results=[
+            _SequentialResult(scalars=[definition]),
+            _SequentialResult(scalars=[version_v1, version_v2]),
+        ]
+    )
+
+    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2, 0.3])
+
+    payload = SkillService.regenerate_admin_skill_embeddings(session, skill_ids=["sql-expert"])
+
+    assert payload["success_count"] == 1
+    assert session.commit_count == 1
+    assert version_v1.embedding == [0.1, 0.2, 0.3]
+    assert version_v2.embedding is None

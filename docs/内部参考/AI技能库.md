@@ -70,12 +70,20 @@ Agent 会根据用户 Query 的语义相似度自动挂载相关技能。
 
 ## 5. 同步机制
 
-1. **文件即真理**: 所有技能源文件位于 `app/ai/skills/<skill-id>/SKILL.md`
-2. **自动同步**: 应用启动时 (`app/main.py:lifespan`) 自动扫描目录，同步到 `t_agent_skills` 表
-3. **手动维护**: 更新技能请直接修改 `SKILL.md` 文件，然后重启应用
+1. **文件即导入源**: 所有技能源文件位于 `app/ai/skills/<skill-id>/SKILL.md`
+2. **definition/version 即 runtime 真理源**: 导入流程会同步 `t_agent_skill_definitions` / `t_agent_skill_versions`；聊天运行态 catalog 与正文加载只读这两层
+3. **`t_agent_skills` 仅保留兼容用途**: 仅用于兼容、导入回写与调试检索，不再作为 progressive loader 主路径真理源
+4. **手动维护**: 更新技能请直接修改 `SKILL.md` 文件，然后重启应用或执行导入
+
+## 6. Progressive Loader 运行时口径
+
+- 首轮预装：`preprocess` 按当前用户可见范围构建 `skill_catalog_manifest / skill_catalog_context`
+- 会话累积：模型通过 `load_skills` 显式加载正文，状态统一沉淀到 `loaded_skill_registry / loaded_skill_context`
+- 回放 canonical：最终 AIMessage 统一写 `additional_kwargs.skill_runtime`，字段至少包含 `runtime_mode / catalog_version / visible_skill_count / loaded_skills / replay_source`
+- 元数据字段：`catalog_path / catalog_order` 属于 definition 层；`catalog_description / when_to_use` 属于 version 层
 
 ---
 
-## 6. 维护日志
+## 7. 维护日志
 
 - **2026-01-27**: 初始化引入核心开发包及办公三件套

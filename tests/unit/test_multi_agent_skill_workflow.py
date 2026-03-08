@@ -21,6 +21,11 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
             return True, content, None
 
     monkeypatch.setattr("app.ai.guardrails.guardrail_runner", _GuardrailRunner())
+    monkeypatch.setattr(
+        SkillService,
+        "resolve_runtime_mode",
+        classmethod(lambda cls: cls.SKILL_RUNTIME_MODE_HYBRID),
+    )
 
     def _fake_search_debug(  # noqa: ANN001
         cls,
