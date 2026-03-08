@@ -12,8 +12,9 @@
    - 运行时镜像：`.claude/commands/*.md`（Claude Code）与 `~/.codex/prompts/*.md`（Codex）。
    - 触发方式：Claude Code / Cursor 用 `/jjk-xxx`；Codex 用 `/prompts:jjk-xxx`。
 2. 本文职责：保留命令百科、场景建议与链路示例，不替代权威命令文档。
-3. 统计口径：按 `.cursor/commands/*.md` 文件计数（不含 `.bak`），统计时间 `2026-03-06`，当前共 `17` 个命令文件。
+3. 统计口径：按 `.cursor/commands/*.md` 文件计数（不含 `.bak`），统计时间 `2026-03-06`，当前共 `20` 个命令文件。
 4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
+5. 热点文件命中 `Lean Guard` 时，优先外移职责，禁止继续在超阈值文件中堆 `_helper`。
 
 ### 0.1 产品运行时 Skill 文档门禁（2026-03-08 校准）
 
@@ -527,6 +528,8 @@ npx ai-agent-skills update --all    # 更新全部
 
 # 交付与通用补充
 /jjk-create-pr     # 创建/更新 PR，校验交付证据
+/jjk-commit        # 提交当前分支并合并到 master
+/jjk-deleteworktree # 删除当前分支与当前 worktree
 /plan              # 通用规划命令（非 JJK 主链）
 /do                # 通用执行命令（非 JJK 主链）
 
@@ -555,7 +558,7 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（19 个）
+### 9.2 Commands（20 个）
 
 ```
 .cursor/commands/
@@ -565,8 +568,10 @@ npx ai-agent-skills update --all    # 更新全部
 ├── jjk-arch-gate.md       # 四段式架构门禁
 ├── jjk-cardrun.md         # 串行卡片执行调度
 ├── jjk-clarify.md         # 设计冻结 + handoff 契约
+├── jjk-commit.md          # 提交当前分支并合并到 master
 ├── jjk-create-pr.md       # PR 交付入口
 ├── jjk-debug.md           # 调试问题
+├── jjk-deleteworktree.md  # 删除当前分支与当前 worktree
 ├── jjk-imp-ws.md          # 子任务实现（WS）
 ├── jjk-imp.md             # 实现代码
 ├── jjk-plan.md            # 正式规划入口（core/parallel）

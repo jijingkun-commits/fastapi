@@ -96,6 +96,7 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 1. 对照重构前后的行为、复杂度、可维护性指标。
 2. 校验性能是否满足目标（若涉及性能优化）。
 3. 证据不足时 `FAIL_FAST` 输出 `REFACTOR_EVIDENCE_MISSING`。
+4. 若本次重构命中 Lean Guard 热点文件，完成重构前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `REFACTOR_LEAN_GUARD_FAILED`。
 
 ### 5) 报告产出与交接
 

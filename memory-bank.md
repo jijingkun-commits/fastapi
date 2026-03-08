@@ -4,6 +4,8 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-08｜Lean Guard 上线：热点文件进入 shrink-only，禁止继续新增内部函数（ACTIVE）→ `docs/工程规范/lean-guard.md`
+- 2026-03-08｜Git 生命周期收口命令显式化：`/jjk-commit` 与 `/jjk-deleteworktree`（ACTIVE）→ `.cursor/commands/jjk-commit.md`
 - 2026-03-08｜治理前置命令显式化：`/jjk-arch-gate` 与 `/jjk-api-doc-sync`（ACTIVE）→ `docs/plans/2026-03-08-jjk-governance-skills-design.md`
 - 2026-03-08｜数据库证据门禁左移到 plan→vkplan→cardrun→wtimp→test→verify 主链（ACTIVE）→ `docs/plans/2026-03-08-engineering-flow-db-evidence-gate-design.md`
 - 2026-03-08｜产品运行时 Skill 文档同步矩阵冻结为强制门禁（ACTIVE）→ `.cursor/rules/doc_sync.mdc`
@@ -330,3 +332,23 @@
 - 回退/失效条件：若未来编排层被完全替换为统一的 schema-driven contract adapter，且语义规则可由中心化 policy 自动校验，可将静态测试迁移到新的治理入口；在此之前保持仓级 fail-fast
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`tests/unit/test_semantic_keyword_boundary_gate.py`
 
+
+### 2026-03-08 Git 生命周期收口命令显式化
+- 状态：ACTIVE
+- 决策主题：把“提交并合并到 master”与“删除当前分支/worktree”从零散 Git 口头操作提升为显式命令 `/jjk-commit`、`/jjk-deleteworktree`
+- 背景与问题：此前工程流虽覆盖规划、实现、验收与 PR 交付，但本地 Git 收尾仍依赖临时口述，容易出现“未验证先 merge”“删错 worktree”“在主工作区误删”等高风险操作
+- 最终决策：新增 `/jjk-commit` 负责当前分支提交 + 合并到主工作区 `master`；新增 `/jjk-deleteworktree` 负责当前附加 worktree 与当前分支的生命周期清理；两者都必须做上下文、干净度、合并状态与证据门禁
+- 取舍理由：把高风险 Git 生命周期动作收敛到清晰边界，避免继续把流程知识散落在聊天指令和人工习惯里
+- 影响范围：`.cursor/commands/jjk-commit.md`、`.cursor/commands/jjk-deleteworktree.md`、`.agents/skills/jjk-commit/`、`.agents/skills/jjk-deleteworktree/`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
+- 回退/失效条件：若未来统一由单一工程流编排器接管本地 merge/cleanup 生命周期，可将两条命令退役并收敛到新入口；在此之前保持显式命令入口
+- 关联文档/代码：`.cursor/commands/jjk-commit.md`、`.cursor/commands/jjk-deleteworktree.md`、`docs/开发文档/工作流/开发工作流.md`
+
+### 2026-03-08 Lean Guard 上线：热点文件进入 shrink-only
+- 状态：ACTIVE
+- 决策主题：把“热点文件禁止继续膨胀”从软约束升级为 `lean-guard` 硬门禁
+- 背景与问题：此前虽已在 `AGENTS.md` 与 `core.mdc` 强调 lean/refactor，但没有自动阻断；执行者会自然选择在大文件中继续添加 `_helper`、嵌套函数与包装层
+- 最终决策：对 `app/ai/workflow/**/*.py`、`app/services/**/*.py`、`scripts/**/*.py` 启用 Lean Guard；超阈值文件进入 shrink-only，并禁止继续新增私有 helper 与嵌套函数
+- 取舍理由：项目未上线，优先把结构债务阻断在继续扩散之前，而不是依赖后续人工治理
+- 影响范围：`AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`scripts/ci/check_lean_budget.py`、工作流/速查文档
+- 回退/失效条件：若未来热点目录和阈值有统一配置中心，可将脚本内阈值迁移到配置文件；在此之前保持脚本单一真理源
+- 关联文档/代码：`docs/工程规范/lean-guard.md`、`scripts/ci/check_lean_budget.py`

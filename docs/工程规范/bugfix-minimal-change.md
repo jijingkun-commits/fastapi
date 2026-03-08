@@ -63,3 +63,10 @@
 - Bugfix 平均净新增行数。
 - 修复后 7 天内同类问题回归率。
 - “超预算 PR”占比与成因分布。
+
+
+## 与 Lean Guard 的关系
+
+- 本规范解决 bugfix 场景的最小变更控制。
+- `docs/工程规范/lean-guard.md` 解决热点文件的持续膨胀问题。
+- 若 bugfix 同时命中热点大文件，则 **同时** 受 `Bugfix Guard` 与 `Lean Guard` 约束。

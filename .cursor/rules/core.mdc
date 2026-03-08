@@ -26,6 +26,7 @@ alwaysApply: true
     - 若 MCP 工具不可用，必须明确标注”基于本地知识推断，需人工复核”并说明降级原因
 
 15. **语义判定边界**: 编排层（如 `app/services/**`、`app/api/**`、router/controller）禁止通过关键词词表、正则词表、substring 命中或 `*_HINTS/*_KEYWORDS/*_TRIGGERS` 常量执行自然语言语义识别；语义判定必须归属于 `intent/policy/resolver` 层，并以结构化 contract（如 `decision/reason_code/slot_key/needs_clarification`）对外输出；若现有判定置信度不足，应返回拒绝/澄清 contract，而不是把语义 fallback 下沉到编排层
+16. **Lean 硬门禁**: 命中热点目录（默认 `app/ai/workflow/**/*.py`、`app/services/**/*.py`、`scripts/**/*.py`）时，超阈值文件必须进入 shrink-only 模式：继续修改该文件时默认不得净增长；超阈值文件默认禁止新增私有 helper（`def _*` / `async def _*`）与新增嵌套函数；若确属新增能力，应优先外移到新模块/新职责边界，而不是继续向热点文件追加内部函数，执行细则以 `docs/工程规范/lean-guard.md` 与 `scripts/ci/check_lean_budget.py` 为准
 # 技术栈
 
 - **后端**: FastAPI + LangGraph + SQLAlchemy 2.0

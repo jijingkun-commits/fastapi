@@ -84,6 +84,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 2. 可用 `verification-before-completion` 时，必须遵循其证据优先原则。
 3. 不可用时输出 `VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK`，并手工附命令结果证据。
 4. 无新鲜命令证据，禁止宣称“修复完成”。
+5. 若本次修复命中 Lean Guard 热点文件，完成修复前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `DEBUG_LEAN_GUARD_FAILED`。
 
 ### 5) 文档回填（强制）
 

@@ -59,6 +59,7 @@ description: 代码实现入口：按 implementation_plan 执行、验证与回�
 1. 可用时优先 TDD；不可用输出 `TDD_UNAVAILABLE_FALLBACK`。
 2. 必须执行计划中的 `acceptance_cmds`。
 3. 可用时执行 `verification-before-completion`；不可用输出 `VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK` 并附手工证据。
+4. 若本次变更命中 Lean Guard 热点文件，完成实现前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `IMP_LEAN_GUARD_FAILED`。
 
 ### 3) 文档回填与交接
 

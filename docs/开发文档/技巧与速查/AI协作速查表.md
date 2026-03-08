@@ -96,9 +96,12 @@ python3 scripts/check_workflow_contract.py --mode clarify_plan \
 | 执行单个 WS | `/jjk-imp-ws @workstreams/WS-*.md` | 按白名单改动并回填自检卡 |
 | 单任务实现 | `/jjk-imp` | 不走并行流程时使用 |
 | Worktree 隔离实现 | `/jjk-wtimp` | 大任务隔离分支执行，降低并发污染 |
+| 本地提交并合并主干 | `/jjk-commit` | 已验收后提交当前分支并合并到主工作区 `master` |
+| 清理当前分支与 worktree | `/jjk-deleteworktree` | 生命周期收尾；要求当前分支已并入 `master` 且 worktree 干净 |
 | 一站式验证 | `/jjk-verify` | 审查 + 测试 + 交互式 UAT，一次完成 |
 | 代码审查 | `/jjk-review` | 质量与风险检查 |
 | 测试验证 | `/jjk-test` | 回归验证与报告沉淀 |
+| 热点文件瘦身门禁 | `python3 scripts/ci/check_lean_budget.py --cached --strict` | 超阈值热点文件不得继续净增长，也不得继续新增私有 helper / 嵌套函数 |
 
 ---
 
