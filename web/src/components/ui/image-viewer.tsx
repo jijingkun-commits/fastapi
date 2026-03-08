@@ -10,6 +10,7 @@ interface ImageViewerProps {
   src: string;
   alt?: string;
   className?: string;
+  isActive?: boolean;
   onRequestClose?: () => void;
 }
 
@@ -21,9 +22,14 @@ interface ImageLightboxProps {
   className?: string;
 }
 
-interface PointerPosition {
+interface Point {
   x: number;
   y: number;
+}
+
+interface Size {
+  width: number;
+  height: number;
 }
 
 const MIN_SCALE = 1;
@@ -33,7 +39,7 @@ const WHEEL_SCALE_STEP = 0.1;
 const DOUBLE_TAP_SCALE = 2;
 const DRAG_THRESHOLD = 3;
 
-function getPointerDistance(points: PointerPosition[]) {
+function getPointerDistance(points: Point[]) {
   if (points.length < 2) {
     return 0;
   }
@@ -42,22 +48,48 @@ function getPointerDistance(points: PointerPosition[]) {
   return Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y);
 }
 
+function getContainScale(imageSize: Size, containerSize: Size) {
+  if (
+    imageSize.width <= 0 ||
+    imageSize.height <= 0 ||
+    containerSize.width <= 0 ||
+    containerSize.height <= 0
+  ) {
+    return 1;
+  }
+
+  return Math.min(
+    containerSize.width / imageSize.width,
+    containerSize.height / imageSize.height,
+  );
+}
+
 export const ImageViewer: React.FC<ImageViewerProps> = ({
   src,
   alt,
   className,
+  isActive = true,
   onRequestClose,
 }) => {
   const [scale, setScale] = useState(MIN_SCALE);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [imageSize, setImageSize] = useState<Size>({ width: 0, height: 0 });
+  const [containerSize, setContainerSize] = useState<Size>({
+    width: 0,
+    height: 0,
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const activePointerIdRef = useRef<number | null>(null);
-  const pointerPositionsRef = useRef<Map<number, PointerPosition>>(new Map());
+  const pointerPositionsRef = useRef<Map<number, Point>>(new Map());
   const pinchStartDistanceRef = useRef<number | null>(null);
   const pinchStartScaleRef = useRef(MIN_SCALE);
   const dragMovedRef = useRef(false);
+
+  const containScale = getContainScale(imageSize, containerSize);
+  const renderedScale = scale * containScale;
+  const imageReady = imageSize.width > 0 && imageSize.height > 0;
 
   const clampScale = useCallback((nextScale: number) => {
     return Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
@@ -192,7 +224,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         try {
           e.currentTarget.releasePointerCapture(e.pointerId);
         } catch {
-          // ignore release errors from already released pointers
+          // noop
         }
       }
 
@@ -270,6 +302,31 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, [handleWheel]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateContainerSize = () => {
+      setContainerSize({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+    };
+
+    updateContainerSize();
+
+    const observer = new ResizeObserver(() => {
+      updateContainerSize();
+    });
+
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key;
 
@@ -312,8 +369,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, [scale]);
 
   useEffect(() => {
-    handleReset();
-  }, [handleReset, src]);
+    if (isActive) {
+      handleReset();
+    }
+  }, [handleReset, isActive, src]);
 
   return (
     <div
@@ -340,9 +399,20 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         <img
           src={src}
           alt={alt || "图片"}
-          className="max-h-full max-w-full object-contain transition-transform duration-200 will-change-transform"
+          className={cn(
+            "object-contain transition-transform duration-200 will-change-transform",
+            !imageReady && "opacity-0",
+          )}
+          onLoad={(e) => {
+            setImageSize({
+              width: e.currentTarget.naturalWidth,
+              height: e.currentTarget.naturalHeight,
+            });
+          }}
           style={{
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            width: imageReady ? imageSize.width : undefined,
+            height: imageReady ? imageSize.height : undefined,
+            transform: `translate(${position.x}px, ${position.y}px) scale(${renderedScale})`,
             userSelect: "none",
           }}
           draggable={false}
@@ -410,6 +480,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           <ImageViewer
             src={src}
             alt={imageName}
+            isActive={open}
             onRequestClose={() => onOpenChange(false)}
           />
           <CloseButton
