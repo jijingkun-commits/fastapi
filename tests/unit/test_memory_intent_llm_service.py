@@ -12,6 +12,17 @@ class _Message:
     content: object
 
 
+class _ModelDumpMessage:
+    def __init__(self, content: object):
+        self.content = content
+
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "content": self.content,
+            "type": "ai",
+        }
+
+
 class _FakeLLM:
     def __init__(self, response: object, *, should_raise: bool = False):
         self._response = response
@@ -91,6 +102,33 @@ def test_decide_should_parse_markdown_json_block() -> None:
 
     assert decision["decision"] == "accept"
     assert decision["memories"][0]["memory_kind"] == "assistant_persona"
+
+
+def test_decide_should_parse_content_when_message_has_model_dump() -> None:
+    """AIMessage 风格对象应优先解析 content，不得误判缺字段。"""
+
+    llm = _FakeLLM(
+        _ModelDumpMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": (
+                        '{"decision":"accept","reason_code":"accepted",'
+                        '"confidence":0.9,"memories":[{"memory_kind":"response_preference",'
+                        '"operation":"upsert","slot_key":"user.preference.response_style",'
+                        '"normalized_value":"detailed","canonical_text":"用户偏好表述详细",'
+                        '"evidence_span":"更详细地交流"}]}'
+                    ),
+                }
+            ]
+        )
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="以后用更详细的表述方式交流")
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "accepted"
+    assert decision["memories"][0]["slot_key"] == "user.preference.response_style"
 
 
 def test_decide_should_reject_when_required_field_missing() -> None:

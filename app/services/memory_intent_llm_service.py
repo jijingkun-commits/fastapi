@@ -140,18 +140,32 @@ def _extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
     raise ValueError("invalid_json")
 
 
+def _has_decision_contract_keys(payload: dict[str, Any]) -> bool:
+    return any(
+        key in payload
+        for key in (
+            "decision",
+            "reason_code",
+            "confidence",
+            "memories",
+        )
+    )
+
+
 def _coerce_contract_payload(raw_output: Any) -> dict[str, Any]:
     if isinstance(raw_output, dict):
-        return raw_output
+        if _has_decision_contract_keys(raw_output):
+            return raw_output
+        content = raw_output.get("content")
+    else:
+        content = getattr(raw_output, "content", None)
 
-    if hasattr(raw_output, "model_dump"):
-        dumped = raw_output.model_dump()
-        if isinstance(dumped, dict):
-            return dumped
-
-    content = getattr(raw_output, "content", None)
     if isinstance(content, dict):
-        return content
+        if _has_decision_contract_keys(content):
+            return content
+        text_part = content.get("text")
+        if isinstance(text_part, str):
+            return _extract_json_object_from_text(text_part)
     if isinstance(content, list):
         pieces: list[str] = []
         for item in content:
@@ -159,15 +173,23 @@ def _coerce_contract_payload(raw_output: Any) -> dict[str, Any]:
                 pieces.append(item)
                 continue
             if isinstance(item, dict):
+                if _has_decision_contract_keys(item):
+                    return item
                 text_part = item.get("text")
                 if isinstance(text_part, str):
                     pieces.append(text_part)
-        return _extract_json_object_from_text("\n".join(piece for piece in pieces if piece))
+        if pieces:
+            return _extract_json_object_from_text("\n".join(piece for piece in pieces if piece))
     if isinstance(content, str):
         return _extract_json_object_from_text(content)
 
     if isinstance(raw_output, str):
         return _extract_json_object_from_text(raw_output)
+
+    if hasattr(raw_output, "model_dump"):
+        dumped = raw_output.model_dump()
+        if isinstance(dumped, dict):
+            return _coerce_contract_payload(dumped)
 
     raise ValueError("unsupported_output_type")
 
