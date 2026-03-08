@@ -170,6 +170,62 @@ def _normalize_result_additional_kwargs_for_replay(additional_kwargs: Any) -> Di
     return normalized
 
 
+def _result_event_identity(event: Dict[str, Any]) -> tuple[Any, ...]:
+    """生成 result_event 的去重键。"""
+
+    envelope = event.get("envelope")
+    if isinstance(envelope, dict):
+        envelope_id = str(envelope.get("id") or "").strip()
+        if envelope_id:
+            return ("envelope_id", envelope_id)
+
+    sequence_number = _to_non_negative_int(event.get("sequence_number"))
+    if sequence_number is None and isinstance(envelope, dict):
+        sequence_number = _to_non_negative_int(envelope.get("sequence_number"))
+    if sequence_number is not None:
+        return ("sequence", str(event.get("data_type") or "").strip(), sequence_number)
+
+    try:
+        normalized_data = json.dumps(event.get("data") or {}, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        normalized_data = repr(event.get("data"))
+    return (
+        "payload",
+        str(event.get("data_type") or "").strip(),
+        str(event.get("message") or "").strip(),
+        normalized_data,
+    )
+
+
+def _merge_turn_result_events_into_additional_kwargs(
+    base_additional_kwargs: Any,
+    ai_messages: List[Any],
+) -> Dict[str, Any]:
+    """将当前轮 AI 消息中的结构化结果归并到最终落库 additional_kwargs。"""
+
+    merged = dict(base_additional_kwargs) if isinstance(base_additional_kwargs, dict) else {}
+    collected_events: list[Dict[str, Any]] = []
+    seen_keys: set[tuple[Any, ...]] = set()
+
+    for message in ai_messages or []:
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        if not isinstance(additional_kwargs, dict):
+            continue
+        result_events, _compat_source = _resolve_result_events_for_replay(additional_kwargs)
+        for event in result_events:
+            identity = _result_event_identity(event)
+            if identity in seen_keys:
+                continue
+            seen_keys.add(identity)
+            collected_events.append(dict(event))
+
+    if not collected_events:
+        return _normalize_result_additional_kwargs_for_replay(merged)
+
+    merged["result_events"] = _sort_result_events_by_sequence(collected_events)
+    return _normalize_result_additional_kwargs_for_replay(merged)
+
+
 def _extract_tool_image_urls(content: str) -> list[str]:
     """从 ToolMessage 内容中提取图片 URL。
 
@@ -586,6 +642,7 @@ def save_conversation_from_messages(
     # 1. 从后往前查找最后一条 human 消息和最后一条 ai 消息
     last_human = None
     last_ai = None
+    turn_ai_messages: list[Any] = []
     tool_images: set[str] = set()  # 收集该轮工具返回的图片
     kb_images = {}    # 知识库图片映射 {索引: URL}
     
@@ -600,8 +657,10 @@ def save_conversation_from_messages(
         if msg_type == "human" and last_human is None:
             last_human = msg
             break  # 找到 human 后停止（一轮对话结束）
-        elif msg_type == "ai" and last_ai is None:
-            last_ai = msg  # 只取最后一条 AI 消息
+        elif msg_type == "ai":
+            turn_ai_messages.append(msg)
+            if last_ai is None:
+                last_ai = msg  # 只取最后一条 AI 消息
         elif msg_type == "tool":
             # 提取工具返回中的图片链接（用于图表图片补充）
             content = str(getattr(msg, "content", ""))
@@ -622,6 +681,13 @@ def save_conversation_from_messages(
             else:
                 logger.info("Tool消息中未找到 KB_IMAGES 标记")
     
+    turn_ai_messages.reverse()
+
+    merged_additional_kwargs = _merge_turn_result_events_into_additional_kwargs(
+        getattr(last_ai, "additional_kwargs", None) if last_ai else None,
+        turn_ai_messages,
+    )
+
     # 提取内容
     human_content = getattr(last_human, "content", "") if last_human else ""
     ai_content = normalize_message_content(getattr(last_ai, "content", "")) if last_ai else ""
@@ -637,7 +703,7 @@ def save_conversation_from_messages(
     #         将其包装后添加到内容开头，确保历史加载时前端能正确解析
     # ============================================================
     if last_ai:
-        additional_kwargs = getattr(last_ai, "additional_kwargs", {}) or {}
+        additional_kwargs = merged_additional_kwargs
         thinking = (
             additional_kwargs.get("reasoning_content") or 
             additional_kwargs.get("thinking_content") or 
@@ -714,7 +780,7 @@ def save_conversation_from_messages(
     extra_data = None  # 在外部定义，确保日志可访问
     if last_ai:  # 使用 last_ai 对象判断，确保能获取 metadata
         # 提取 metadata (additional_kwargs)
-        extra_data = getattr(last_ai, "additional_kwargs", None)
+        extra_data = merged_additional_kwargs or None
         save_message(
             db,
             user_id=user_id,

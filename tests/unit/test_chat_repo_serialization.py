@@ -88,3 +88,74 @@ def test_normalize_legacy_message_content_keeps_plain_text():
     plain_content = "普通 Markdown 正文"
 
     assert normalize_legacy_message_content(plain_content) == plain_content
+
+
+
+def test_save_conversation_from_messages_preserves_structured_sql_result_for_refresh_replay():
+    """最终总结消息不带结构化结果时，落库仍应保留本轮 sql_result 图表/表格。"""
+
+    chart_payload = {
+        "type": "bar",
+        "x_key": "客户名称",
+        "y_key": "贷款余额",
+        "data": [
+            {"客户名称": "张三", "贷款余额": 100},
+            {"客户名称": "李四", "贷款余额": 80},
+        ],
+    }
+    sql_payload = {
+        "data_type": "sql_result",
+        "data": {
+            "rows": [
+                {"客户名称": "张三", "贷款余额": 100},
+                {"客户名称": "李四", "贷款余额": 80},
+            ],
+            "columns": ["客户名称", "贷款余额"],
+            "chart": chart_payload,
+            "total_rows": 2,
+            "sql": "select * from loan_balance order by 贷款余额 desc limit 2",
+        },
+        "message": "数据查询完成，共返回 2 条记录。",
+        "sequence_number": 4,
+        "envelope": {"id": "evt-sql-1", "sequence_number": 4},
+    }
+    messages = [
+        SimpleNamespace(type="human", content="查前两名贷款客户", id="human-1", name=None),
+        SimpleNamespace(
+            type="ai",
+            content="数据查询完成，共返回 2 条记录。",
+            additional_kwargs={
+                "data_type": "sql_result",
+                "data": sql_payload["data"],
+                "message": sql_payload["message"],
+                "sequence_number": sql_payload["sequence_number"],
+                "envelope": sql_payload["envelope"],
+            },
+            name=None,
+        ),
+        SimpleNamespace(
+            type="ai",
+            content="按你的问题顺序，逐项回复如下：1. 外部信息... 2. 数据查询...",
+            additional_kwargs={
+                "skill_runtime": {"runtime_mode": "session", "catalog_version": "v1", "visible_skill_count": 1, "loaded_skills": [], "replay_source": "live"},
+            },
+            name=None,
+        ),
+    ]
+
+    with patch("app.repositories.chat_repo.save_message") as mock_save:
+        chat_repo.save_conversation_from_messages(
+            db=object(),
+            user_id=1,
+            thread_id="thread-refresh-sql",
+            messages=messages,
+        )
+
+    kwargs = mock_save.call_args.kwargs
+    extra_data = kwargs["extra_data"]
+    assert extra_data["skill_runtime"]["runtime_mode"] == "session"
+    assert extra_data["data_type"] == "sql_result"
+    assert extra_data["data"]["chart"] == chart_payload
+    assert extra_data["data"]["rows"][0]["客户名称"] == "张三"
+    assert extra_data["result_events"][0]["data"]["chart"] == chart_payload
+    assert extra_data["result_events"][0]["envelope"]["id"] == "evt-sql-1"
