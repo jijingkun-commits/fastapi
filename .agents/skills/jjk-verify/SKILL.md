@@ -6,6 +6,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 <!-- source: .cursor/commands/jjk-verify.md -->
 
 > 参考规则: @dual-database
+> 测试质量门禁：`.cursor/rules/test_quality.mdc`
 
 # 组合验证工作流 (Verify Workflow)
 
@@ -51,6 +52,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 5. 必须区分“本轮问题”与“历史问题”。
 6. `PASS` 必须满足 `mandatory_evidence` 全量命中。
 7. DB 风险任务缺少 DB 类证据不得降级为 `WARN`。
+8. 若 review/test 证据无法证明测试质量达标，`FAIL_FAST` 输出 `VERIFY_TEST_QUALITY_UNPROVEN`。
 
 ---
 
@@ -63,6 +65,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 1. 变更范围（相对 `main/master` + 工作区未提交改动）。
 2. 风险边界（AI workflow/API/DB/前端/SSE）。
 3. 输入证据是否满足最小验收要求。
+4. review/test 证据是否已覆盖 `.cursor/rules/test_quality.mdc` 的风险模型、失败模式覆盖与评分卡要求。
 
 ### 0.5) 大范围验收自动启用 Team（强制判定）
 
@@ -102,17 +105,20 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 2. 按变更类型选择最小必要验证集（后端/API/前端/AI/数据库）。
 3. 生成验证计划（命令清单 + 断言点）。
 4. 读取 `mandatory_evidence` 并构建“必需证据对账表”。
+5. 若命中测试变更或关键 bugfix，必须把 `风险模型`、`失败模式覆盖`、`测试质量评分卡` 纳入验收计划。
 
 ### 2) 快速审查复核
 
 1. 消费 `review_report` 或当前审查证据。
 2. 若存在 `P0/P1` 未关闭项，标记 `VERIFY_BLOCKER_UNRESOLVED` 并阻断。
+3. 若 review 未显式给出测试质量评分卡或评分结论不可复核，标记 `VERIFY_TEST_QUALITY_UNPROVEN` 并阻断。
 
 ### 3) 自动测试执行
 
 1. 仅跑与变更相关的必要测试。
 2. 记录每条命令的退出码与结果统计。
 3. 测试失败不应静默吞掉，必须入报告。
+4. 验收阶段必须确认关键失败模式已被验证，而不是只确认 Happy Path 通过。
 
 ### 4) UAT 判定
 
@@ -125,9 +131,9 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 
 结论规则：
 
-1. `PASS`：审查无阻断 + 关键测试通过 + `mandatory_evidence` 全量满足。
-2. `WARN`：仅允许出现在非 mandatory 证据缺口，且核心链路通过。
-3. `FAIL`：阻断问题未解、关键测试/UAT 失败或 mandatory 证据缺失。
+1. `PASS`：审查无阻断 + 关键测试通过 + `mandatory_evidence` 全量满足 + 测试质量评分卡达标。
+2. `WARN`：仅允许出现在非 mandatory 证据缺口，且核心链路通过；不得用来掩盖测试质量不达标。
+3. `FAIL`：阻断问题未解、关键测试/UAT 失败、mandatory 证据缺失，或测试质量达不到 `.cursor/rules/test_quality.mdc` 门槛。
 
 必须输出：
 
@@ -135,9 +141,10 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 2. 审查结果摘要
 3. 测试统计
 4. UAT 结论
-5. 自动证据与降级记录
-6. 文档同步状态（命中产品运行时 Skill 变更时，需逐项核对专项映射是否齐套）
-7. 下一步建议命令（`合并/发布`、`$jjk-debug`、`$jjk-imp(-ws)`）
+5. 测试质量结论（风险模型 / 失败模式覆盖 / 评分卡）
+6. 自动证据与降级记录
+7. 文档同步状态（命中产品运行时 Skill 变更时，需逐项核对专项映射是否齐套）
+8. 下一步建议命令（`合并/发布`、`$jjk-debug`、`$jjk-imp(-ws)`）
 
 ---
 
@@ -147,6 +154,8 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 1. `VERIFY_MANDATORY_EVIDENCE_MISSING`
 2. `VERIFY_CHAT_DB_UNPROVEN`
 3. `VERIFY_DATA_DB_UNPROVEN`
+4. `VERIFY_TEST_QUALITY_UNPROVEN`
+5. `VERIFY_FAILURE_MODE_UNCOVERED`
 
 ## 输出模板（推荐）
 
@@ -160,6 +169,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 2. 禁止无证据直接给 `PASS`。
 3. 禁止忽略阻断项继续推进到交付阶段。
 4. 禁止把历史问题全部算作本次问题。
+5. 禁止用“测试都通过了”替代“测试质量达标”。
 
 ## 推荐链路
 

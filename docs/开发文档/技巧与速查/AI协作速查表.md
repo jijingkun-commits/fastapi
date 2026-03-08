@@ -177,3 +177,4 @@ python3 scripts/check_workflow_contract.py --mode clarify_plan \
 5. 所有实现卡必须完成 `verify -> merge -> done`，并产出 `merge_result.json`。
 6. `G01` 与 `IG01` 必须分别通过，`IG01` 未过不得宣称最终完成。
 7. `review/test` 在门禁收口后统一执行。
+8. `review/test/verify` 统一受 `.cursor/rules/test_quality.mdc` 约束：`/jjk-test` 要回填风险模型与失败模式覆盖，`/jjk-review` 要输出测试质量评分卡，`/jjk-verify` 只在质量达标时允许 `PASS`。

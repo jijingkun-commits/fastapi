@@ -3,6 +3,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 ---
 
 > 参考规则: @dual-database
+> 测试质量门禁：`.cursor/rules/test_quality.mdc`
 
 # 代码审查工作流 (Code Review)
 
@@ -37,6 +38,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 2. 若 manifest 与 `implementation_plan.task_to_pr_mapping` 不一致，`FAIL_FAST` 输出 `REVIEW_MAPPING_MISMATCH`。
 3. 必须明确审查基线（`main/master`）；否则 `FAIL_FAST` 输出 `REVIEW_BASELINE_MISSING`。
 4. 若无可复核的验证证据（`acceptance_cmds`/测试结果），`FAIL_FAST` 输出 `REVIEW_EVIDENCE_MISSING`。
+5. 若审查对象涉及测试变更但无法给出测试质量判定，`FAIL_FAST` 输出 `REVIEW_TEST_QUALITY_UNPROVEN`。
 
 ## 执行流程（强制顺序）
 
@@ -47,6 +49,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 1. 需求/计划/WS 与当前改动映射关系。
 2. 变更文件范围与关键风险点（API/DB/权限/并发/跨端协议）。
 3. 历史相关缺陷与已知豁免项。
+4. 若命中测试变更，读取 `.cursor/rules/test_quality.mdc` 并锁定本轮测试质量审查范围。
 
 ### 0.5) 大范围审查自动启用 Team（强制判定）
 
@@ -82,11 +85,27 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 3. **安全与稳定性**：输入校验、权限、敏感信息、并发/资源风险。
 4. **测试与文档一致性**：`acceptance_cmds`、测试覆盖、文档同步；命中产品运行时 Skill 变更时，必须逐项核对 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”。
 
+### 2.5) 测试质量评分卡（强制）
+
+若变更命中测试脚本、测试真理源、回归场景或关键 bugfix，必须按 `.cursor/rules/test_quality.mdc` 显式打分：
+
+1. `风险覆盖`：是否覆盖关键风险而非只跑通路径；
+2. `失败模式覆盖`：是否覆盖最可能出错的真实失败模式；
+3. `断言质量`：是否断言业务契约与失败语义；
+4. `脆弱性`：是否过度依赖实现细节；
+5. `可维护性`：是否清晰、聚焦、可定位。
+
+放行规则：
+1. 任一维度 `0`：默认 `BLOCKED`；
+2. 总分 `< 7`：默认 `CONDITIONAL_PASS` 起步，若命中 P0/P1 风险则直接 `BLOCKED`；
+3. 命中 `TEST_ASSERTION_WEAK`、`TEST_IMPL_COUPLED`、`TEST_LOW_VALUE_CASE_DETECTED`、`TEST_FAILURE_MODE_UNCOVERED` 时，默认至少记为 `P1`。
+
 ### 3) 证据校验（强制）
 
 1. 引用并核验 `acceptance_cmds` 执行结果。
 2. 无法验证的项必须显式标记 `REVIEW_EVIDENCE_MISSING`。
-3. 禁止“凭感觉通过”或“只看代码不看证据”。
+3. 若测试质量评分所需证据不足，显式标记 `REVIEW_TEST_QUALITY_UNPROVEN`。
+4. 禁止“凭感觉通过”或“只看代码不看证据”。
 
 ### 4) 发现分级与结论
 
@@ -99,9 +118,9 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 
 结论类型：
 
-1. `PASS`：可进入 `/jjk-verify` 或合并流程。
+1. `PASS`：可进入 `/jjk-verify` 或合并流程，且测试质量评分卡无 `0` 分项。
 2. `CONDITIONAL_PASS`：存在非阻断项，需明确后续工单。
-3. `BLOCKED`：存在阻断项，输出 `REVIEW_BLOCKER_FOUND` 并回退修复命令。
+3. `BLOCKED`：存在阻断项、测试质量评分卡任一维度为 `0`，或命中关键坏测试反模式；输出 `REVIEW_BLOCKER_FOUND` 并回退修复命令。
 
 ### 5) 产物回填与交接
 
@@ -113,8 +132,9 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 
 1. 审查范围与输入映射（`task_id/card_id/pr_id`）
 2. 发现清单（分级 + 证据 + 建议动作）
-3. 结论（`PASS`/`CONDITIONAL_PASS`/`BLOCKED`）
-4. 下一步建议命令（`/jjk-debug`、`/jjk-imp(-ws)`、`/jjk-verify`）
+3. 测试质量评分卡（风险覆盖 / 失败模式覆盖 / 断言质量 / 脆弱性 / 可维护性）
+4. 结论（`PASS`/`CONDITIONAL_PASS`/`BLOCKED`）
+5. 下一步建议命令（`/jjk-debug`、`/jjk-imp(-ws)`、`/jjk-verify`）
 
 ---
 
@@ -130,6 +150,7 @@ description: 审查入口（消费 PR/manifest）：结构化评审、风险分�
 3. 禁止发现阻断项后仍给 `PASS`。
 4. 禁止把实现修复直接混入审查阶段提交。
 5. 禁止忽略文档/测试同步影响。
+6. 禁止跳过测试质量评分卡，只用“有测试/有报告”替代质量判定。
 
 ## 推荐链路
 

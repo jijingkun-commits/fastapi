@@ -20,6 +20,7 @@
 8. **去重约束**：Layer1 只保留治理口径与交付门禁，不复述 Layer2 技术细则；同主题仅保留“门禁 + 引用”。
 9. **语义判定边界门禁**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract，技术细则统一引用 `.cursor/rules/core.mdc` 第 15 条。
 10. **Lean 硬门禁**：热点目录/热点文件必须通过 `lean-guard`；超阈值文件继续净增长、继续新增私有 helper、继续新增嵌套函数时默认阻断，禁止以“后续再治理”替代当前收口，技术细则统一引用 `.cursor/rules/core.mdc` 第 16 条与 `docs/工程规范/lean-guard.md`。
+11. **测试质量门禁**：`tests/**`、`app/tests/**`、`docs/开发文档/测试管理/**` 为覆盖关键风险可允许合理净增长；高质量测试定义、坏测试反模式、评分卡与阻断规则统一引用 `.cursor/rules/test_quality.mdc`。
 
 ## `patch` 模式附加门槛（强制）
 - 必须包含：影响范围、临时性说明、回退路径、后续治理任务。
@@ -79,6 +80,7 @@
   - 文档同步与映射：`.cursor/rules/doc_sync.mdc`
   - LangGraph 约束：`.cursor/rules/langgraph.mdc`
   - 语言风格：`.cursor/rules/python_style.mdc`、`.cursor/rules/typescript_style.mdc`
+  - 测试质量与坏测试治理：`.cursor/rules/test_quality.mdc`
 
 ## Layer3 技能入口（功能级）
 - Skills / tools 用于功能级执行策略。

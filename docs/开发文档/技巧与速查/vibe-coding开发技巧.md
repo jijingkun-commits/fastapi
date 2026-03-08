@@ -134,10 +134,10 @@ npx ai-agent-skills info <skill-name>
 | **澄清冻结** | `/jjk-clarify` | `design.md` + `design_freeze_summary` + `clarify_handoff_contract` | 开发前冻结边界/语义/回退口径 |
 | **规划** | `/jjk-plan` | `requirements.md` + `implementation_plan.md` | 形成 WHAT + HOW，可直接承接实现 |
 | **实现** | `/jjk-imp` | 代码 + 文档 | AI 实现功能 |
-| **一站式验证** | `/jjk-verify` | 验证报告 | 审查 + 测试 + 交互式 UAT |
-| **测试** | `/jjk-test` | 测试报告 | 验证功能 |
+| **一站式验证** | `/jjk-verify` | 验证报告 | 审查 + 测试 + 交互式 UAT + 测试质量达标判定 |
+| **测试** | `/jjk-test` | 测试报告 | 验证功能 + 风险模型 / 失败模式覆盖 |
 | **调试** | `/jjk-debug` | 修复方案 | 排查问题 |
-| **审查** | `/jjk-review` | 审查意见 | 代码质量检查 |
+| **审查** | `/jjk-review` | 审查意见 | 代码质量检查 + 测试质量评分卡 |
 | **并行拆解** | `/jjk-vkplan` + `/jjk-cardrun` | `parallel_plan` + 卡片执行证据 | 多任务并行与串行收口 |
 
 ### 2.1.1 Clarify v3.2 必过门禁（工程模式）
@@ -425,9 +425,9 @@ description: 命令的简短描述
 | `/jjk-vktodo` | create-only 幂等建卡，不负责状态推进 | VK 卡片 |
 | `/jjk-cardrun` | 串行卡片执行与收口（`verify -> merge -> done`） | 卡片执行轨迹 + merge 证据 |
 | `/jjk-imp-ws` | 单个 WS 白名单实现并回填自检卡 | WS 实现证据 |
-| `/jjk-review` | 代码审查与风险分级 | 审查报告 |
-| `/jjk-test` | 测试执行与报告沉淀 | 测试报告 |
-| `/jjk-verify` | 一站式验收（审查 + 测试 + UAT） | 验收结论 |
+| `/jjk-review` | 代码审查与风险分级（含测试质量评分卡） | 审查报告 |
+| `/jjk-test` | 测试执行与报告沉淀（含风险模型 / 失败模式覆盖） | 测试报告 |
+| `/jjk-verify` | 一站式验收（审查 + 测试 + UAT + 测试质量门禁） | 验收结论 |
 | `/jjk-debug` | 系统化问题排查与最小修复 | 修复说明 + 验证证据 |
 | `/jjk-refactor` | 行为等价重构与结构治理 | 重构结果 + 验证证据 |
 | `/jjk-create-pr` | PR 交付入口（消费 `pr_ready_manifest`） | PR 链接 + 交付摘要 |
@@ -440,6 +440,13 @@ description: 命令的简短描述
 |------|------|----------|
 | `/jjk-create-pr` | 创建/更新 PR，校验任务映射与验收证据 | `/jjk-create-pr` |
 
+### 7.3.1 测试质量门禁速记
+
+1. 测试不是“命令跑通”就算通过；`/jjk-test` 必须显式给出风险模型、失败模式覆盖与 `Test Quality Review`。
+2. `/jjk-review` 默认检查测试质量评分卡，任一维度 `0` 分不得给 `PASS`。
+3. `/jjk-verify` 只有在测试质量达标时才允许 `PASS`；不得用“测试都过了”替代质量结论。
+4. 统一规则真理源为 `.cursor/rules/test_quality.mdc`。
+
 ### 7.4 代码质量
 
 优先采用“审查 + 测试 + 验收 + 根因修复”的闭环。
@@ -447,9 +454,9 @@ description: 命令的简短描述
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
 | `/jjk-arch-gate` | 动手前先做四段式架构结论，防止结构性误改 | `/jjk-arch-gate @app/services/chat_service.py` |
-| `/jjk-review` | 结构化代码审查，定位高风险点 | `/jjk-review` |
-| `/jjk-test` | 执行测试矩阵并输出测试报告 | `/jjk-test` |
-| `/jjk-verify` | 审查 + 测试 + UAT 一体化验收 | `/jjk-verify` |
+| `/jjk-review` | 结构化代码审查，定位高风险点并输出测试质量评分卡 | `/jjk-review` |
+| `/jjk-test` | 执行测试矩阵并输出测试报告（含 `Risk Model` / `Test Quality Review`） | `/jjk-test` |
+| `/jjk-verify` | 审查 + 测试 + UAT 一体化验收，并确认测试质量达标 | `/jjk-verify` |
 | `/jjk-debug` | 出现缺陷时做根因定位与最小修复 | `/jjk-debug` |
 | `/jjk-refactor` | 行为等价重构，降低复杂度与重复 | `/jjk-refactor @app/services/chat_service.py` |
 

@@ -3,6 +3,7 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 ---
 
 > 参考规则: @dual-database
+> 测试质量门禁：`.cursor/rules/test_quality.mdc`
 
 # 测试执行工作流 (Test Workflow)
 
@@ -38,6 +39,8 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 3. 若在线测试前置门禁失败（端口/健康检查），`FAIL_FAST` 输出 `TEST_ONLINE_GATE_FAILED`。
 4. 若执行结束仍未产出报告，`FAIL_FAST` 输出 `TEST_REPORT_MISSING`。
 5. DB 风险任务缺少 DB 证据闭环时，`FAIL_FAST` 输出 `TEST_DB_CHAIN_INCOMPLETE`。
+6. 若无法建立本次变更的风险模型，`FAIL_FAST` 输出 `TEST_RISK_MODEL_MISSING`。
+7. 若测试矩阵未覆盖关键失败模式，`FAIL_FAST` 输出 `TEST_FAILURE_MODE_UNCOVERED`。
 
 ## 执行流程（强制顺序）
 
@@ -46,8 +49,9 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 至少检查：
 
 1. 变更范围与风险边界（后端/API/前端/AI/数据库）。
-2. 测试用例来源（模块案例文档 + 用例库）。
+2. 测试用例来源（模块案例文档 + 用例库 + `.cursor/rules/test_quality.mdc`）。
 3. 当前端口与服务状态（worktree 场景优先 `scripts/vk_ports.sh`）。
+4. 本次变更命中的高风险维度（边界、状态迁移、权限、幂等、部分失败、可观测性、外部依赖退化等）。
 
 ### 0.5) 大范围测试自动启用 Team（强制判定）
 
@@ -77,12 +81,13 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 2. 需要在线测试时先做后端健康检查与端口检查。
 3. 自动拉起失败即阻断（`TEST_ENV_NOT_READY`）。
 
-### 2) 生成测试矩阵（AAA）
+### 2) 生成测试矩阵（AAA + 风险建模）
 
 1. 按 `feature_id` 生成最小可追溯测试矩阵。
-2. 必测覆盖：Happy Path / Edge Cases / Error Handling。
-3. 高风险链路补充稳定性/超时/重试场景。
-4. 矩阵必须显式列出：`Required Evidence`、`Actual Evidence`、`Scripted Flow Status`、`Historical Gap vs Current Gap`。
+2. 先建立风险模型：至少识别本次变更命中的 `Happy Path / Boundary / State Transition / Failure Mode / Error Contract` 适用项；命中 workflow/router/handoff/coverage/queue/streaming 时，必须补 `pending/blocked/success` 收口语义。
+3. 测试矩阵不得只停留在 `Happy Path / Edge Cases / Error Handling` 三分法；必须显式列出关键失败模式与高风险维度。
+4. 高风险链路补充稳定性/超时/重试/部分失败/外部依赖退化场景。
+5. 矩阵必须显式列出：`Risk Model`、`Required Evidence`、`Actual Evidence`、`Scripted Flow Status`、`Historical Gap vs Current Gap`。
 
 ### 3) 执行三层验证
 
@@ -96,6 +101,8 @@ description: 测试入口（消费 review/plan/manifest）：执行可追溯测�
 2. 失败项必须记录命令、退出码、摘要与责任归属。
 3. Playwright 不可用时输出 `PLAYWRIGHT_UNAVAILABLE_FALLBACK`，并给替代验证路径。
 4. `scripted_flow` 证据必须纳入主矩阵，不得作为口头补充。
+5. 每个关键测试至少核对两类断言：`主结果断言` + `失败语义断言`；涉及状态/副作用时，继续补 `状态/副作用/可观测性` 断言。
+6. 命中弱断言、实现耦合、快照滥用、绕开真实边界等坏测试反模式时，记录 `TEST_ASSERTION_WEAK` / `TEST_IMPL_COUPLED` / `TEST_SNAPSHOT_OVERUSE` / `TEST_REAL_BOUNDARY_SKIPPED`。
 
 ### 4) Gate 回填（并行拆解场景）
 
@@ -122,10 +129,12 @@ venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 2. `Defect List`（含证据）
 3. `Trace Matrix`（用例ID/结果/状态）
 4. 本轮问题与历史问题区分
-5. `Required Evidence`（必需证据集合）
-6. `Actual Evidence`（本轮实际执行证据）
-7. `Scripted Flow Status`（脚本链路执行/缺失状态）
-8. `Historical Gap vs Current Gap`（历史缺口与本轮新增缺口）
+5. `Risk Model`（本轮命中的风险维度与失败模式）
+6. `Required Evidence`（必需证据集合）
+7. `Actual Evidence`（本轮实际执行证据）
+8. `Scripted Flow Status`（脚本链路执行/缺失状态）
+9. `Historical Gap vs Current Gap`（历史缺口与本轮新增缺口）
+10. `Test Quality Review`（风险模型、失败模式覆盖、断言质量、实现耦合风险、低价值测试识别）
 
 并同步：
 
@@ -141,6 +150,11 @@ venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 1. `TEST_EVIDENCE_COVERAGE_GAP`
 2. `TEST_SCRIPTED_FLOW_UNTRACKED`
 3. `TEST_DB_CHAIN_INCOMPLETE`
+4. `TEST_RISK_MODEL_MISSING`
+5. `TEST_FAILURE_MODE_UNCOVERED`
+6. `TEST_ASSERTION_WEAK`
+7. `TEST_IMPL_COUPLED`
+8. `TEST_LOW_VALUE_CASE_DETECTED`
 
 ## 输出模板（推荐）
 
@@ -153,6 +167,8 @@ venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 2. 禁止在线测试门禁失败后以 `SKIP` 冒充通过。
 3. 禁止测试失败后直接在本命令内“顺手修复”。
 4. 禁止无报告结束测试流程。
+5. 禁止以“有测试命令”替代“有风险模型与失败模式覆盖”。
+6. 禁止接受只断言 200 / 非空 / mock 次数的弱测试作为关键回归。
 
 ## 推荐链路
 
