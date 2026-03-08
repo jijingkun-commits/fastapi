@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Sequence, Optional, Literal, Any, Dict, Tuple, List
 from pydantic import BaseModel, Field, ValidationError
 
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, trim_messages
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
@@ -133,6 +133,11 @@ class StreamingContext:
 
 
 # SUPERVISOR_PROMPT 已迁移到 app/ai/prompts/agent_prompts.py
+
+
+ROUTER_RESULT_V2_VERSION = "v2"
+LEGACY_ROUTER_RESULT_FIELDS = ("route_decisions", "router_result", "router_result_v1")
+DECOMPOSE_GOALS_RECENT_TURN_LIMIT = 5
 
 
 MODEL_ACCESS_ERROR_HINTS = (
@@ -444,6 +449,98 @@ def _resolve_semantic_user_query(state: MultiAgentState) -> str:
     return _extract_latest_human_content(messages)
 
 
+def _extract_router_result_v2(*sources: Any) -> Dict[str, Any]:
+    """提取运行态 canonical Router 结果（v2）。"""
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        payload = source.get("router_result_v2")
+        if not isinstance(payload, dict):
+            continue
+        normalized = dict(payload)
+        normalized["version"] = ROUTER_RESULT_V2_VERSION
+        return normalized
+
+    return {
+        "version": ROUTER_RESULT_V2_VERSION,
+        "route_decisions": [],
+        "router_contract_blocked": [],
+    }
+
+
+def _detect_legacy_router_result_fields(*sources: Any) -> list[str]:
+    """检测旧版 Router 结构化字段。"""
+    detected: set[str] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for field in LEGACY_ROUTER_RESULT_FIELDS:
+            if field in source:
+                detected.add(field)
+    return sorted(detected)
+
+
+def _build_router_result_v2_payload(
+    *,
+    existing_payload: Optional[Dict[str, Any]] = None,
+    accepted_decisions: Optional[Sequence[Dict[str, Any]]] = None,
+    blocked_handoffs: Optional[Sequence[Dict[str, Any]]] = None,
+    pending_goals: Optional[Sequence[Dict[str, Any]]] = None,
+    turn_id: str = "",
+    event: str = "",
+    reason: str = "",
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构建运行态 canonical Router 结果（additional_kwargs.router_result_v2）。"""
+    existing = dict(existing_payload or {})
+    existing_decisions = [
+        dict(item)
+        for item in list(existing.get("route_decisions") or [])
+        if isinstance(item, dict)
+    ]
+    new_decisions = [
+        dict(item)
+        for item in list(accepted_decisions or [])
+        if isinstance(item, dict)
+    ]
+    blocked = [
+        dict(item)
+        for item in list(blocked_handoffs or [])
+        if isinstance(item, dict)
+    ]
+    pending = [
+        {
+            "goal_id": str(goal.get("goal_id") or ""),
+            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
+        }
+        for goal in list(pending_goals or [])
+        if isinstance(goal, dict)
+    ]
+
+    payload: Dict[str, Any] = {
+        "version": ROUTER_RESULT_V2_VERSION,
+        "route_decisions": existing_decisions + new_decisions,
+        "router_contract_blocked": blocked,
+        "router_contract_blocked_count": len(blocked),
+        "pending_goals": pending,
+        "field_version": ROUTER_RESULT_V2_VERSION,
+    }
+    if turn_id:
+        payload["turn_id"] = turn_id
+    if event:
+        payload["event"] = event
+    if reason:
+        payload["reason"] = reason
+
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            if value is None:
+                continue
+            payload[key] = value
+
+    return payload
+
+
 def _first_hint_position(text: str, hints: Sequence[str]) -> int:
     """返回首个关键词命中的位置，未命中返回大值。"""
     normalized = str(text or "").lower()
@@ -651,7 +748,7 @@ def _resolve_active_goals(
     *,
     runtime_goals: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> list[Dict[str, Any]]:
-    """统一解析活动目标：优先使用运行时与 `decomposed_goals`。"""
+    """统一解析活动目标：运行态仅消费 decomposed_goals。"""
     runtime_list = [goal for goal in list(runtime_goals or []) if isinstance(goal, dict)]
     if runtime_list:
         return _normalize_active_goals(runtime_list)
@@ -660,18 +757,7 @@ def _resolve_active_goals(
     if isinstance(decomposed, list) and decomposed:
         return _normalize_active_goals([goal for goal in decomposed if isinstance(goal, dict)])
 
-    intent_plan = state.get("intent_plan")
-    if isinstance(intent_plan, dict):
-        intent_goals = [goal for goal in list(intent_plan.get("goals") or []) if isinstance(goal, dict)]
-        if intent_goals:
-            return _normalize_active_goals(intent_goals)
-
-    heuristic_plan = _infer_initial_intent_plan(state)
-    heuristic_goals = [goal for goal in list(heuristic_plan.get("goals") or []) if isinstance(goal, dict)]
-    if heuristic_goals:
-        return _normalize_active_goals(heuristic_goals)
-
-    return [_build_default_general_goal()]
+    return []
 
 
 def _build_active_goal_plan(
@@ -2148,61 +2234,6 @@ def _augment_data_handoff_payload(
     return enriched
 
 
-def _infer_todo_handoff_from_text(user_text: str) -> Optional[Dict[str, Any]]:
-    """在 Supervisor 不可用时，基于关键词构造待办兜底委派。"""
-    if not user_text:
-        return None
-
-    normalized = user_text.lower().strip()
-    has_todo_domain = any(hint in normalized for hint in TODO_DOMAIN_HINTS)
-    if not has_todo_domain:
-        return None
-
-    has_query_signal = any(hint in normalized for hint in TODO_QUERY_HINTS)
-    has_create_signal = any(hint in normalized for hint in TODO_CREATE_HINTS)
-
-    todo_action = "query" if has_query_signal else ""
-    todo_fields: Dict[str, Any] = {}
-    detected_intent = "query_todo"
-
-    if todo_action == "query":
-        if "全部" in normalized or "所有" in normalized:
-            pass
-        elif "已完成" in normalized and "未完成" not in normalized:
-            todo_fields["status"] = "completed"
-        else:
-            todo_fields["status"] = "pending"
-    elif has_create_signal:
-        todo_action = "create"
-        detected_intent = "create_todo"
-    else:
-        todo_action = "query"
-        todo_fields["status"] = "pending"
-
-    return {
-        "action": "handoff",
-        "target_agent": AgentType.TODO,
-        "detected_intent": detected_intent,
-        "task_description": (
-            "Supervisor 模型服务暂不可用，已启用关键词兜底路由。"
-            f"请按待办流程处理用户请求：{user_text}"
-        ),
-        "frame": {
-            "todo_action": todo_action,
-            "todo_fields": todo_fields,
-        },
-    }
-
-
-def _build_supervisor_fallback_handoff(state: MultiAgentState, error_text: str) -> Optional[Dict[str, Any]]:
-    """构造 Supervisor 失败后的兜底委派。"""
-    if not _is_model_access_error(error_text):
-        return None
-
-    latest_user_text = _extract_latest_human_content(state.get("messages", []))
-    return _infer_todo_handoff_from_text(latest_user_text)
-
-
 def _build_stream_error_message(error_text: str) -> str:
     """将底层异常转换为面向用户的稳定文案。"""
     if _is_model_access_error(error_text):
@@ -2225,22 +2256,18 @@ def fallback_router(node_name: str, state: MultiAgentState, error_text: str) -> 
             ),
         }
 
-    if node_name == "supervisor":
-        fallback_handoff = _build_supervisor_fallback_handoff(state, error_text)
-        if fallback_handoff:
-            target_agent = str(fallback_handoff.get("target_agent") or "unknown")
-            return {
-                "route": "handoff",
-                "pending_handoff": fallback_handoff,
-                "status_message": "模型服务暂不可用，已切换到待办兜底路由继续处理。",
-                "runtime_recovery_state": _build_runtime_recovery_state(
-                    state,
-                    fallback_route=f"handoff:{target_agent}",
-                    error_text=error_text,
-                    fallback_triggered=True,
-                    plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
-                ),
-            }
+    if node_name == "supervisor" and _is_model_access_error(error_text):
+        return {
+            "route": "friendly_error",
+            "message": _build_stream_error_message(error_text),
+            "runtime_recovery_state": _build_runtime_recovery_state(
+                state,
+                fallback_route="supervisor_fallback",
+                error_text=error_text,
+                fallback_triggered=True,
+                plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
+            ),
+        }
 
     if _resolve_plugin_lifecycle_status(state, error_text) == "unhealthy":
         degrade_message = "插件能力暂不可用，已自动降级为核心能力回答。"
@@ -2456,6 +2483,38 @@ def _prepare_messages_for_supervisor_inference(
     return prepared
 
 
+TAVILY_ERROR_HINTS = (
+    "no search results found for",
+    "suggestions: remove time_range argument",
+    "try a more detailed search using 'advanced' search_depth",
+)
+
+
+def _is_tool_message_error(message: ToolMessage) -> bool:
+    """判定 ToolMessage 是否为错误状态。"""
+    status = str(getattr(message, "status", "") or "").strip().lower()
+    return status in {"error", "failed", "failure"}
+
+
+def _is_tavily_tool_error_output(tool_content: str, payload: Any = None) -> bool:
+    """识别 Tavily 的无结果/报错输出，避免直接回显给用户。"""
+    normalized = str(tool_content or "").strip().lower()
+    if any(hint in normalized for hint in TAVILY_ERROR_HINTS):
+        return True
+
+    if isinstance(payload, dict):
+        status = str(payload.get("status") or "").strip().lower()
+        if status in {"error", "failed", "failure"}:
+            return True
+        if payload.get("error"):
+            return True
+        answer = str(payload.get("answer") or "").strip().lower()
+        if answer.startswith("no search results found for"):
+            return True
+
+    return False
+
+
 def _summarize_tavily_tool_output(tool_content: str) -> str:
     """从 Tavily 工具输出中提取可用于待办补充的摘要。"""
     stripped = str(tool_content or "").strip()
@@ -2471,6 +2530,9 @@ def _summarize_tavily_tool_output(tool_content: str) -> str:
         except json.JSONDecodeError:
             payload = None
 
+    if _is_tavily_tool_error_output(stripped, payload=payload):
+        return ""
+
     if isinstance(payload, dict):
         answer = _normalize_tool_summary_text(payload.get("answer"), limit=220)
         if answer:
@@ -2482,7 +2544,7 @@ def _summarize_tavily_tool_output(tool_content: str) -> str:
         return _normalize_tool_summary_text(stripped, limit=220)
 
     if not isinstance(results, list):
-        return _normalize_tool_summary_text(stripped, limit=220)
+        return ""
 
     lines = []
     for item in results[:2]:
@@ -2511,6 +2573,9 @@ def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> li
             continue
 
         tool_name = str(getattr(msg, "name", "") or "unknown")
+        if _is_tool_message_error(msg):
+            continue
+
         tool_content = str(getattr(msg, "content", "") or "")
         if not tool_content:
             continue
@@ -2706,7 +2771,7 @@ def _apply_router_contract_guard(
     *,
     state: MultiAgentState,
 ) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]], list[Dict[str, Any]]]:
-    """按 allowed_agents 门禁筛选 handoff，并返回阻塞原因。"""
+    """按运行态单轨合同筛选 handoff，并返回阻塞原因。"""
     normalized_handoffs = [dict(item) for item in handoffs if isinstance(item, dict)]
     if not normalized_handoffs:
         return [], [], []
@@ -2714,23 +2779,30 @@ def _apply_router_contract_guard(
     if not _is_router_contract_guard_enabled():
         return normalized_handoffs, [], []
 
-    intent_plan = state.get("intent_plan")
-    decomposed_goals = state.get("decomposed_goals")
-    has_explicit_contract = bool(
-        isinstance(intent_plan, dict)
-        and isinstance(intent_plan.get("goals"), list)
-        and intent_plan.get("goals")
-    )
-    has_runtime_contract = bool(
-        isinstance(decomposed_goals, list) and decomposed_goals
-    )
-    if not (has_explicit_contract or has_runtime_contract):
-        return normalized_handoffs, [], []
+    legacy_fields = _detect_legacy_router_result_fields(state)
+    if legacy_fields:
+        blocked: list[Dict[str, Any]] = []
+        for handoff in normalized_handoffs:
+            entry = _build_router_blocked_entry(
+                handoff=handoff,
+                reason="legacy_field_detected",
+            )
+            entry["legacy_fields"] = list(legacy_fields)
+            blocked.append(entry)
+        pending = _build_router_dispatch_goal_queue(_resolve_active_goals(state))
+        return [], blocked, pending
 
     active_goals = _resolve_active_goals(state)
     dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
     if not dispatch_queue:
-        return normalized_handoffs, [], []
+        blocked = [
+            _build_router_blocked_entry(
+                handoff=handoff,
+                reason="no_pending_goal",
+            )
+            for handoff in normalized_handoffs
+        ]
+        return [], blocked, []
 
     accepted: list[Dict[str, Any]] = []
     blocked: list[Dict[str, Any]] = []
@@ -2743,6 +2815,16 @@ def _apply_router_contract_guard(
                 _build_router_blocked_entry(
                     handoff=handoff,
                     reason="invalid_target_agent",
+                )
+            )
+            continue
+
+        task_description = str(handoff.get("task_description") or "").strip()
+        if not task_description:
+            blocked.append(
+                _build_router_blocked_entry(
+                    handoff=handoff,
+                    reason="invalid_task_description",
                 )
             )
             continue
@@ -2773,7 +2855,7 @@ def _apply_router_contract_guard(
         enriched_handoff["route_decision"] = {
             "goal_id": str(current_goal.get("goal_id") or ""),
             "target_agent": target_agent,
-            "dispatch_reason": "intent_plan_allowed_agents",
+            "dispatch_reason": "decomposed_goals_allowed_agents",
             "priority": int(current_goal.get("order") or 0),
             "blocked_by": [],
         }
@@ -2849,6 +2931,9 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
             continue
 
         tool_name = str(getattr(message, "name", "") or "")
+        if _is_tool_message_error(message):
+            continue
+
         lowered_name = tool_name.lower()
         content = str(getattr(message, "content", "") or "")
         if not content:
@@ -3587,22 +3672,6 @@ def _dispatch_values_mode_chunk(
             )
             final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
 
-        raw_runtime_goals = final_state.get("decomposed_goals")
-        if not isinstance(raw_runtime_goals, list):
-            raw_runtime_goals = ctx.state.get("decomposed_goals")
-        raw_intent_plan = final_state.get("intent_plan")
-        if not isinstance(raw_intent_plan, dict):
-            raw_intent_plan = ctx.state.get("intent_plan")
-        has_explicit_router_contract = bool(
-            extracted_goals
-            or (isinstance(raw_runtime_goals, list) and raw_runtime_goals)
-            or (
-                isinstance(raw_intent_plan, dict)
-                and isinstance(raw_intent_plan.get("goals"), list)
-                and raw_intent_plan.get("goals")
-            )
-        )
-
         runtime_goals = final_state.get("decomposed_goals")
         if not isinstance(runtime_goals, list):
             runtime_goals = ctx.state.get("decomposed_goals")
@@ -3613,9 +3682,8 @@ def _dispatch_values_mode_chunk(
         )
 
         guard_state = dict(ctx.state)
-        if has_explicit_router_contract:
-            final_state["decomposed_goals"] = active_goals
-            guard_state["decomposed_goals"] = active_goals
+        final_state["decomposed_goals"] = list(active_goals)
+        guard_state["decomposed_goals"] = list(active_goals)
 
         handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
@@ -3632,15 +3700,23 @@ def _dispatch_values_mode_chunk(
                 has_direct_lookup=has_direct_lookup,
                 state=guard_state,
             )
-            if has_explicit_router_contract:
+            legacy_fields = _detect_legacy_router_result_fields(final_state, guard_state)
+            if legacy_fields:
+                guarded_batch = []
+                blocked_handoffs = []
+                for handoff in normalized_batch:
+                    blocked_entry = _build_router_blocked_entry(
+                        handoff=handoff,
+                        reason="legacy_field_detected",
+                    )
+                    blocked_entry["legacy_fields"] = list(legacy_fields)
+                    blocked_handoffs.append(blocked_entry)
+                pending_goals = _build_router_dispatch_goal_queue(active_goals)
+            else:
                 guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
                     normalized_batch,
                     state=guard_state,
                 )
-            else:
-                guarded_batch = list(normalized_batch)
-                blocked_handoffs = []
-                pending_goals = []
 
             existing_meta = (
                 final_state.get("delivery_meta")
@@ -3648,12 +3724,17 @@ def _dispatch_values_mode_chunk(
                 else ctx.state.get("delivery_meta")
             )
             delivery_meta = dict(existing_meta or {})
+            blocked_goal_ids = [
+                str(item.get("goal_id") or "")
+                for item in blocked_handoffs
+                if str(item.get("goal_id") or "")
+            ]
+            accepted_decisions = [
+                dict(item.get("route_decision") or {})
+                for item in guarded_batch
+                if isinstance(item.get("route_decision"), dict)
+            ]
             if blocked_handoffs:
-                blocked_goal_ids = [
-                    str(item.get("goal_id") or "")
-                    for item in blocked_handoffs
-                    if str(item.get("goal_id") or "")
-                ]
                 delivery_meta.update(
                     {
                         "router_contract_blocked_count": len(blocked_handoffs),
@@ -3666,6 +3747,29 @@ def _dispatch_values_mode_chunk(
                     message=f"路由门禁拦截 {len(blocked_handoffs)} 条无效委派，正在按目标合同重试。",
                     node=ctx.node_name,
                 )
+
+            router_event = "intent_router_dispatch_ready"
+            router_reason = ""
+            if blocked_handoffs:
+                router_event = "intent_router_handoff_blocked"
+                router_reason = "router_contract_blocked"
+            if legacy_fields:
+                router_event = "intent_router_legacy_field_detected"
+                router_reason = "legacy_field_detected"
+
+            existing_router_result = _extract_router_result_v2(final_state, guard_state)
+            final_state["router_result_v2"] = _build_router_result_v2_payload(
+                existing_payload=existing_router_result,
+                accepted_decisions=accepted_decisions,
+                blocked_handoffs=blocked_handoffs,
+                pending_goals=pending_goals,
+                turn_id=str(guard_state.get("turn_id") or ""),
+                event=router_event,
+                reason=router_reason,
+                extra={
+                    "legacy_fields": list(legacy_fields) if legacy_fields else None,
+                },
+            )
             final_state["delivery_meta"] = delivery_meta
 
             if not guarded_batch and blocked_handoffs:
@@ -3699,15 +3803,6 @@ def _dispatch_values_mode_chunk(
                     first_handoff["supervisor_excerpt"] = supervisor_excerpt
                 remaining_handoffs = guarded_batch[1:]
                 target_agent = str(first_handoff.get("target_agent") or "unknown")
-                existing_decisions = final_state.get("route_decisions")
-                if not isinstance(existing_decisions, list):
-                    existing_decisions = list(ctx.state.get("route_decisions") or [])
-                accepted_decisions = [
-                    dict(item.get("route_decision") or {})
-                    for item in guarded_batch
-                    if isinstance(item.get("route_decision"), dict)
-                ]
-                final_state["route_decisions"] = list(existing_decisions) + accepted_decisions
                 logger.info(
                     "[%s] values模式检测到 handoff_batch: total=%d, accepted=%d, blocked=%d, first_target=%s, direct_findings=%d, planned_goals=%d, multi_intent=%s",
                     ctx.node_name,
@@ -4228,12 +4323,21 @@ def _build_skill_runtime_state_payload(
 
 
 def _create_ai_message_with_skill_runtime(content: str, state: Dict[str, Any]):
-    """创建带 canonical skill_runtime 的 AIMessage。"""
+    """创建带 canonical skill_runtime/router_result_v2 的 AIMessage。"""
 
     additional_kwargs: Dict[str, Any] = {}
     runtime_payload = _build_skill_runtime_state_payload(state)
     if runtime_payload is not None:
         additional_kwargs["skill_runtime"] = runtime_payload
+
+    router_result_v2 = state.get("router_result_v2")
+    if isinstance(router_result_v2, dict):
+        additional_kwargs["router_result_v2"] = _build_router_result_v2_payload(
+            existing_payload=router_result_v2,
+            event=str(router_result_v2.get("event") or "intent_router_replay"),
+            reason=str(router_result_v2.get("reason") or ""),
+        )
+
     return create_ai_message(content, additional_kwargs=additional_kwargs or None)
 
 
@@ -4408,10 +4512,114 @@ def _merge_goal_candidates(
     return _normalize_active_goals(merged)
 
 
+def _normalize_persisted_chat_role(raw_role: Any) -> str:
+    """将落库角色归一为 decompose_goals 输入角色。"""
+    normalized = str(raw_role or "").strip().lower()
+    if normalized in {"human", "user"}:
+        return "user"
+    if normalized in {"ai", "assistant"}:
+        return "assistant"
+    return ""
+
+
+def _load_recent_persisted_user_visible_messages(
+    *,
+    thread_id: str,
+    user_query: str,
+    turn_limit: int = DECOMPOSE_GOALS_RECENT_TURN_LIMIT,
+) -> list[BaseMessage]:
+    """读取已落库且面向用户可见的最近对话窗口（user/assistant）。"""
+    normalized_thread_id = str(thread_id or "").strip()
+    if not normalized_thread_id:
+        return []
+
+    try:
+        from app.db.session import get_db_context
+        from app.repositories import chat_repo
+
+        with get_db_context() as db:
+            persisted_messages = chat_repo.get_messages_by_thread(
+                db,
+                normalized_thread_id,
+                limit=200,
+                exclude_intermediate=True,
+            )
+    except Exception as exc:
+        logger.warning("decompose_goals_persisted_messages_load_failed: %s", exc)
+        return []
+
+    user_visible_messages: list[Dict[str, str]] = []
+    for item in persisted_messages or []:
+        role = _normalize_persisted_chat_role(getattr(item, "role", ""))
+        if role not in {"user", "assistant"}:
+            continue
+        content = _normalize_text_content(getattr(item, "content", ""))
+        if not content:
+            continue
+        user_visible_messages.append({"role": role, "content": content})
+
+    normalized_query = str(user_query or "").strip()
+    if user_visible_messages and user_visible_messages[-1]["role"] == "user":
+        latest_user_content = str(user_visible_messages[-1].get("content") or "").strip()
+        if normalized_query and latest_user_content == normalized_query:
+            user_visible_messages = user_visible_messages[:-1]
+
+    turns: list[list[Dict[str, str]]] = []
+    current_turn: list[Dict[str, str]] = []
+    for message in user_visible_messages:
+        if message["role"] == "user":
+            if current_turn:
+                turns.append(current_turn)
+            current_turn = [message]
+            continue
+
+        if not current_turn:
+            continue
+        current_turn.append(message)
+        turns.append(current_turn)
+        current_turn = []
+
+    if current_turn:
+        turns.append(current_turn)
+
+    selected_turns = turns[-max(turn_limit, 0) :]
+    flattened_messages: list[BaseMessage] = []
+    for turn in selected_turns:
+        for message in turn:
+            content = str(message.get("content") or "")
+            if message.get("role") == "user":
+                flattened_messages.append(HumanMessage(content=content))
+            else:
+                flattened_messages.append(AIMessage(content=content))
+
+    return flattened_messages
+
+
+def _build_decompose_goals_state_seed(
+    *,
+    user_query: str,
+    runtime_state: Optional[MultiAgentState] = None,
+) -> MultiAgentState:
+    """构建 decompose_goals 的规划态输入（user_query + persisted messages）。"""
+    thread_id = ""
+    if isinstance(runtime_state, dict):
+        thread_id = str(runtime_state.get("thread_id") or "").strip()
+
+    messages = _load_recent_persisted_user_visible_messages(
+        thread_id=thread_id,
+        user_query=user_query,
+    )
+    return {
+        "messages": messages,
+        "semantic_payload": {"user_query": str(user_query or "")},
+    }
+
+
 def _resolve_decomposed_goals_for_query(
     user_query: str,
     *,
     llm: Any = None,
+    runtime_state: Optional[MultiAgentState] = None,
 ) -> Tuple[list[Dict[str, Any]], str]:
     """生成 decompose_goals 产物：优先模型规划，失败时回退规则拆解。"""
     normalized_query = str(user_query or "").strip()
@@ -4420,9 +4628,10 @@ def _resolve_decomposed_goals_for_query(
     if llm is None:
         return fallback_goals, "supervisor_rule_based"
 
-    state_seed: MultiAgentState = {
-        "messages": [HumanMessage(content=normalized_query)],
-    }
+    state_seed = _build_decompose_goals_state_seed(
+        user_query=normalized_query,
+        runtime_state=runtime_state,
+    )
     planner_settings = _resolve_intent_planner_settings(state_seed)
     planner_mode = _normalize_intent_mode(planner_settings.get("intent_mode"), default="model_primary")
 
@@ -4454,9 +4663,13 @@ def _resolve_decomposed_goals_for_query(
 @tool("decompose_goals", description="将复合请求拆解为结构化目标列表，供 Supervisor 路由与门禁使用")
 def decompose_goals(
     user_query: Annotated[str, "用户原始请求（可包含复合目标）"],
+    state: Annotated[Dict[str, Any], InjectedState] = None,
 ) -> str:
     """将用户请求拆解为 goals（规则兜底版本），返回标准 JSON。"""
-    goals, source = _resolve_decomposed_goals_for_query(str(user_query or ""))
+    goals, source = _resolve_decomposed_goals_for_query(
+        str(user_query or ""),
+        runtime_state=state,
+    )
     payload = {
         "action": "decompose_goals",
         "source": source,
@@ -4471,8 +4684,13 @@ def _create_decompose_goals_tool(llm: Any):
     @tool("decompose_goals", description="将复合请求拆解为结构化目标列表，供 Supervisor 路由与门禁使用")
     def _decompose_goals_with_model(
         user_query: Annotated[str, "用户原始请求（可包含复合目标）"],
+        state: Annotated[Dict[str, Any], InjectedState] = None,
     ) -> str:
-        goals, source = _resolve_decomposed_goals_for_query(str(user_query or ""), llm=llm)
+        goals, source = _resolve_decomposed_goals_for_query(
+            str(user_query or ""),
+            llm=llm,
+            runtime_state=state,
+        )
         payload = {
             "action": "decompose_goals",
             "source": source,
@@ -4951,7 +5169,7 @@ async def create_multi_agent_graph(
             "coverage_retry_count": 0,
             "coverage_gate_route": "final_composer",
             "coverage_partial_gap_allowed": False,
-            "route_decisions": [],
+            "router_result_v2": {},
 
             # === 稳态恢复观测 ===
             "runtime_recovery_state": _build_runtime_recovery_state(

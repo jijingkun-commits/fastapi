@@ -123,3 +123,39 @@ def test_intent_shadow_settings_prefers_db_dynamic_over_env(monkeypatch) -> None
 
     assert settings["intent_mode"] == "heuristic_only"
     assert settings["intent_shadow_enabled"] is False
+
+
+
+def test_decompose_goals_accepts_empty_persisted_window(monkeypatch) -> None:
+    """历史不足 5 轮时允许空窗口，不应因窗口不足触发额外澄清。"""
+    monkeypatch.setattr(graph, "_load_recent_persisted_user_visible_messages", lambda **_kwargs: [])
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+
+    def _fake_build_plan(state, *, llm, mode):
+        assert state.get("messages") == []
+        assert state.get("semantic_payload", {}).get("user_query") == "查询"
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "查询",
+        llm=object(),
+        runtime_state={"thread_id": "thread-1"},
+    )
+
+    assert source == "model_primary"
+    assert [goal["kind"] for goal in goals] == ["general.reply"]

@@ -1,6 +1,6 @@
 """意图目标分解：模型主判定与兜底策略测试。"""
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import ValidationError
 
 import app.ai.workflow.multi_agent_graph as graph
@@ -243,3 +243,51 @@ def test_json_object_primary_unrecoverable_validation_still_fallback() -> None:
 
     assert plan["source"] == "heuristic_fallback"
     assert plan.get("fallback_meta", {}).get("reason_code") == "invalid_output"
+
+
+
+def test_resolve_decomposed_goals_uses_persisted_user_visible_window(monkeypatch) -> None:
+    """decompose_goals 规划输入应为 user_query + 已落库 user/assistant 视图。"""
+    history_messages = [
+        HumanMessage(content="上轮用户问题"),
+        AIMessage(content="上轮助手答复"),
+    ]
+    captured_state = {}
+
+    monkeypatch.setattr(
+        graph,
+        "_load_recent_persisted_user_visible_messages",
+        lambda **_kwargs: history_messages,
+    )
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+
+    def _fake_build_plan(state, *, llm, mode):
+        captured_state["messages"] = list(state.get("messages") or [])
+        captured_state["semantic_payload"] = dict(state.get("semantic_payload") or {})
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "当前轮用户问题",
+        llm=object(),
+        runtime_state={"thread_id": "thread-1"},
+    )
+
+    assert source == "model_primary"
+    assert [goal["kind"] for goal in goals] == ["todo.query"]
+    assert captured_state["messages"] == history_messages
+    assert captured_state["semantic_payload"]["user_query"] == "当前轮用户问题"

@@ -23,6 +23,7 @@ from app.services.system_config_service import SystemConfigService
 from app.ai.workflow.multi_agent_graph import (
     StreamingContext,
     _apply_router_contract_guard,
+    _build_direct_lookup_findings,
     _build_streaming_delta_return,
     _create_streaming_agent_wrapper,
     _dispatch_messages_mode_chunk,
@@ -30,6 +31,7 @@ from app.ai.workflow.multi_agent_graph import (
     _execute_streaming_wrapper,
     _emit_messages_mode_thinking,
     _emit_messages_mode_token,
+    _extract_supervisor_tool_observations,
     fallback_router,
     _handle_streaming_wrapper_exception,
     _handle_messages_mode_tool_message,
@@ -541,7 +543,28 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
     """supervisor values 模式应保留 handoff 顺序并构造队列。"""
     ctx = _make_ctx(
         node_name="supervisor",
-        state={"messages": [HumanMessage(content="复合任务")], "thread_id": "thread-1"},
+        state={
+            "messages": [HumanMessage(content="复合任务")],
+            "thread_id": "thread-1",
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                },
+                {
+                    "goal_id": "GOAL-02",
+                    "order": 2,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                    "allowed_agents": ["todo_expert"],
+                },
+            ],
+        },
     )
 
     final_state = {
@@ -586,18 +609,16 @@ def test_apply_router_contract_guard_blocks_disallowed_targets() -> None:
         {"target_agent": "todo_expert", "task_description": "再查待办"},
     ]
     state = {
-        "intent_plan": {
-            "goals": [
-                {
-                    "goal_id": "GOAL-01",
-                    "order": 1,
-                    "kind": "todo.query",
-                    "title": "待办事项",
-                    "must_answer": True,
-                    "allowed_agents": ["todo_expert"],
-                }
-            ]
-        }
+        "decomposed_goals": [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "todo.query",
+                "title": "待办事项",
+                "must_answer": True,
+                "allowed_agents": ["todo_expert"],
+            }
+        ]
     }
 
     accepted, blocked, pending = _apply_router_contract_guard(handoffs, state=state)
@@ -619,18 +640,16 @@ def test_dispatch_values_mode_chunk_filters_disallowed_handoff_by_contract() -> 
         state={
             "messages": [HumanMessage(content="先查待办")],
             "thread_id": "thread-1",
-            "intent_plan": {
-                "goals": [
-                    {
-                        "goal_id": "GOAL-01",
-                        "order": 1,
-                        "kind": "todo.query",
-                        "title": "待办事项",
-                        "must_answer": True,
-                        "allowed_agents": ["todo_expert"],
-                    }
-                ]
-            },
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                    "allowed_agents": ["todo_expert"],
+                }
+            ],
         },
     )
 
@@ -667,6 +686,8 @@ def test_dispatch_values_mode_chunk_filters_disallowed_handoff_by_contract() -> 
     assert handoff_return["pending_handoff"]["target_agent"] == "todo_expert"
     assert handoff_return["pending_handoff"]["goal_id"] == "GOAL-01"
     assert handoff_return["delivery_meta"]["router_contract_blocked_count"] == 1
+    assert handoff_return["router_result_v2"]["version"] == "v2"
+    assert handoff_return["router_result_v2"]["route_decisions"][0]["target_agent"] == "todo_expert"
 
 
 def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> None:
@@ -677,18 +698,16 @@ def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> N
         state={
             "messages": [HumanMessage(content="先查待办")],
             "thread_id": "thread-1",
-            "intent_plan": {
-                "goals": [
-                    {
-                        "goal_id": "GOAL-01",
-                        "order": 1,
-                        "kind": "todo.query",
-                        "title": "待办事项",
-                        "must_answer": True,
-                        "allowed_agents": ["todo_expert"],
-                    }
-                ]
-            },
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                    "allowed_agents": ["todo_expert"],
+                }
+            ],
             "system_context": "当前时间: 2026-02-28",
         },
     )
@@ -720,6 +739,7 @@ def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> N
     assert handoff_return is None
     assert final_state["multi_intent_mode"] is True
     assert final_state["delivery_meta"]["router_contract_blocked_count"] == 1
+    assert final_state["router_result_v2"]["event"] == "intent_router_handoff_blocked"
     assert "【交付补齐提示】" in final_state["system_context"]
 
 
@@ -727,7 +747,20 @@ def test_dispatch_values_mode_chunk_marks_multi_intent_for_direct_lookup_plus_si
     """supervisor 仅 1 个 handoff + 直连检索结果时也应进入 multi_intent_mode。"""
     ctx = _make_ctx(
         node_name="supervisor",
-        state={"messages": [HumanMessage(content="查待办并看天气")], "thread_id": "thread-1"},
+        state={
+            "messages": [HumanMessage(content="查待办并看天气")],
+            "thread_id": "thread-1",
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "todo.query",
+                    "title": "待办事项",
+                    "must_answer": True,
+                    "allowed_agents": ["todo_expert"],
+                }
+            ],
+        },
     )
 
     final_state = {
@@ -767,19 +800,49 @@ def test_dispatch_values_mode_chunk_marks_multi_intent_for_direct_lookup_plus_si
     assert handoff_return["pending_handoff"]["frame"]["tool_observations"][0]["tool"] == "tavily_search"
 
 
-def test_dispatch_values_mode_chunk_uses_intent_plan_to_enable_multi_intent_mode() -> None:
-    """当 intent_plan 含多个必答目标时，单 handoff 也应进入 multi_intent_mode。"""
+def test_build_direct_lookup_findings_ignores_tavily_error_output() -> None:
+    """Tavily 错误输出不应进入用户可见的外部信息摘要。"""
+    messages = [
+        ToolMessage(
+            content="No search results found for '嘉兴 未来7天 天气 预报'. Suggestions: Remove time_range argument",
+            tool_call_id="tc-err",
+            name="tavily_search",
+            status="error",
+        )
+    ]
+
+    findings = _build_direct_lookup_findings(messages)
+
+    assert findings == []
+
+
+def test_extract_supervisor_tool_observations_ignores_tavily_error_output() -> None:
+    """handoff frame 不应携带 Tavily 错误文本。"""
+    messages = [
+        ToolMessage(
+            content="No search results found for '嘉兴 未来7天 天气 预报'. Suggestions: Remove time_range argument",
+            tool_call_id="tc-err",
+            name="tavily_search",
+            status="error",
+        )
+    ]
+
+    observations = _extract_supervisor_tool_observations(messages)
+
+    assert observations == []
+
+
+def test_dispatch_values_mode_chunk_uses_decomposed_goals_to_enable_multi_intent_mode() -> None:
+    """当 decomposed_goals 含多个必答目标时，单 handoff 也应进入 multi_intent_mode。"""
     ctx = _make_ctx(
         node_name="supervisor",
         state={
             "messages": [HumanMessage(content="先查待办，再看天气")],
             "thread_id": "thread-1",
-            "intent_plan": {
-                "goals": [
-                    {"goal_id": "GOAL-01", "kind": "todo.query", "must_answer": True},
-                    {"goal_id": "GOAL-02", "kind": "external.lookup", "must_answer": True},
-                ]
-            },
+            "decomposed_goals": [
+                {"goal_id": "GOAL-01", "kind": "todo.query", "must_answer": True},
+                {"goal_id": "GOAL-02", "kind": "external.lookup", "must_answer": True},
+            ],
         },
     )
 
@@ -908,12 +971,12 @@ async def test_run_streaming_dispatch_loop_filters_invalid_custom_chunks() -> No
         )
 
     assert handoff_return is None
-    assert final_state == {"messages": []}
+    assert final_state == {"messages": [], "decomposed_goals": []}
     assert custom_events == [{"type": "status", "data": {"stage": "ok"}, "node": "supervisor"}]
 
 
 def test_handle_streaming_wrapper_exception_uses_supervisor_fallback(monkeypatch) -> None:
-    """supervisor 命中模型权限错误时应优先返回待办兜底 handoff。"""
+    """supervisor 命中模型权限错误时应回到 supervisor_fallback，而非专家兜底。"""
     monkeypatch.setenv("ENABLE_RUNTIME_RECOVERY", "true")
     monkeypatch.delenv("ENABLE_PLUGIN_REGISTRY", raising=False)
 
@@ -932,13 +995,13 @@ def test_handle_streaming_wrapper_exception_uses_supervisor_fallback(monkeypatch
             ctx=ctx,
         )
 
-    assert result["messages"] == []
-    assert result["pending_handoff"]["target_agent"] == "todo_expert"
-    assert result["runtime_recovery_state"]["fallback_route"] == "handoff:todo_expert"
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].content.startswith("模型服务当前不可用")
+    assert result["runtime_recovery_state"]["fallback_route"] == "supervisor_fallback"
     assert result["runtime_recovery_state"]["plugin_lifecycle_status"] == "disabled"
     assert result["runtime_recovery_state"]["recovery_metrics"]["fallback_count"] == 1
-    assert status_events
-    assert token_events == []
+    assert status_events == []
+    assert token_events == [(result["messages"][0].content, "supervisor")]
 
 
 def test_handle_streaming_wrapper_exception_plugin_unhealthy_fallback(monkeypatch) -> None:

@@ -689,16 +689,21 @@ llm = get_scene_llm(
 - 非实验 provider 继续走既有 `get_llm()` 逻辑，无额外协议分支。
 - 实验逻辑仅在命中条件时读取 `extra_config` 并注入参数，避免全量路径开销。
 
-### 意图目标分解治理（2026-02-28）
+### 意图运行态契约收敛（v2，2026-03-07）
 
-`multi_agent_graph` 的 planner 节点从“关键词主判定”调整为“模型主判定 + 规则兜底”：
+`multi_agent_graph` 已按“规划保留、运行剥离”收敛到单轨运行态合同：
 
-1. planner 首选模型结构化输出 `intent_plan`（`source=model_primary`），目标按语义拆分，不再因动作词（如“查询”）直接扩增 `data.query`。
-2. `json_object` 主路径对“弱结构”输出（如 `goals: ["todo.query"]`）先做规范化再进入 `_IntentPlanModel` 校验，尽量留在 `model_primary`，避免把可恢复数据误判成失败。
-3. 当模型输出不可恢复异常（不可解析/超时/结构非法）时，自动降级为 `heuristic_fallback`，并记录 `fallback_meta.reason`。
-4. fallback 分类维持 `timeout / invalid_output / model_failure` 语义，日志区分“弱结构已恢复”和“不可恢复非法输出”，便于线上快速定位。
-5. 关键词规则仅保留兜底职责；执行收口仍由 `handoff_execution_trace + deliverables + coverage_report` 完成。
-6. 状态事件仍通过 `plan_ready -> coverage_check -> final_answer` 三段输出，前端应以覆盖率收口结果作为最终口径。
+1. **运行态目标源唯一化**：运行阶段只消费 `decomposed_goals`，不再读取 `state.intent_plan`。
+2. **运行态委派字段唯一化**：Router Guard 只校验 `handoff.target_agent` + `task_description`，缺失即阻塞（`invalid_target_agent` / `invalid_task_description`）。
+3. **运行态结构化结果唯一化**：仅写入 `additional_kwargs.router_result_v2`（`version=v2`）；历史字段（如 `route_decisions`）命中即 `legacy_field_detected` 并 fail-fast。
+4. **planner 输入冻结**：`decompose_goals` 输入固定为 `user_query + recent_5_persisted_user_visible_chat_turns`；窗口仅含已落库 `user/assistant`，`tool/system/内部中间态` 不入窗。
+5. **当前输入隔离**：当前轮用户输入仅作为 `user_query`；不计入 recent-5 历史窗口。
+6. **异常语义统一**：运行态合同异常统一 `block -> supervisor_fallback`，禁止专家兜底；指代无法消解走 `clarify_needed -> supervisor`。
+
+**当前口径（实现态）**：
+- 路由判定：`decompose_goals -> router_guard -> dispatch/blocked`。
+- 可观测字段：`event/turn_id/reason/goal_id/target_agent`（承载于 `router_result_v2`）。
+- 收口链路：`coverage_gate -> final_composer`，缺口优先回流 `supervisor`。
 
 ### internal 调用输入兼容（2026-02-08）
 
@@ -2116,7 +2121,7 @@ graph TD
 - 推荐结构：`[{"tool":"tavily_search","topic":"web_search","summary":"...","status":"ok"}]`
 - 兼容策略：缺失时按旧逻辑处理，不影响原有 handoff
 
-原则：**先加字段，不改旧字段语义**，确保 supervisor 与专家图可以灰度切换。
+原则：默认“先加字段、不改旧语义”；但**意图路由运行态合同**采用单轨 canonical（`router_result_v2`），不保留旧字段双轨。
 
 ### 6. 澄清状态机约束
 

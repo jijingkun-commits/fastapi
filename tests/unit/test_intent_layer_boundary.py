@@ -3,7 +3,11 @@
 from langchain_core.messages import HumanMessage
 
 import app.ai.workflow.multi_agent_graph as graph
-from app.ai.workflow.multi_agent_graph import _build_planner_intent_plan, _infer_initial_intent_plan
+from app.ai.workflow.multi_agent_graph import (
+    _build_planner_intent_plan,
+    _infer_initial_intent_plan,
+    _resolve_active_goals,
+)
 
 
 def test_infer_initial_intent_plan_prefers_semantic_payload_user_query() -> None:
@@ -68,3 +72,55 @@ def test_infer_model_intent_plan_uses_semantic_payload_for_prompt() -> None:
     assert "请帮我看看天气" in llm.structured.prompt
     assert "严格 JSON 对象" in llm.structured.prompt
     assert plan["user_query"] == "请帮我看看天气"
+
+
+
+def test_resolve_active_goals_prefers_decomposed_goals_over_intent_plan() -> None:
+    """运行态目标只允许来自 decomposed_goals。"""
+    state = {
+        "decomposed_goals": [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "todo.query",
+                "title": "待办事项",
+                "must_answer": True,
+                "allowed_agents": ["todo_expert"],
+            }
+        ],
+        "intent_plan": {
+            "goals": [
+                {
+                    "goal_id": "GOAL-X",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                }
+            ]
+        },
+    }
+
+    goals = _resolve_active_goals(state)
+
+    assert len(goals) == 1
+    assert goals[0]["kind"] == "todo.query"
+    assert goals[0]["goal_id"] == "GOAL-01"
+
+
+def test_resolve_active_goals_returns_empty_when_runtime_contract_missing() -> None:
+    """运行态缺少 decomposed_goals 时不应回退读取 intent_plan。"""
+    state = {
+        "intent_plan": {
+            "goals": [
+                {
+                    "goal_id": "GOAL-X",
+                    "kind": "todo.query",
+                    "must_answer": True,
+                }
+            ]
+        }
+    }
+
+    assert _resolve_active_goals(state) == []
