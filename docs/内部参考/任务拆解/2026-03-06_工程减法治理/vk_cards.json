@@ -387,9 +387,9 @@
         "P2-OBSERVABILITY"
       ],
       "mechanism_summary": [
-        "旧入口 usage 日志落盘",
+        "旧入口 usage 运行日志落盘",
         "支持 legacy 调用聚合",
-        "为退役提供审计证据"
+        "导出可提交 usage 证据"
       ],
       "code_anchor_refs": [
         "scripts/check_workflow_contract.py::emit_usage_log",
@@ -399,7 +399,7 @@
         "docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md#L126"
       ],
       "acceptance_checks": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
       ],
       "rollback_anchors": [
         "WORKFLOW_GATE_UNIFIED_ENABLED=false"
@@ -409,14 +409,14 @@
       "merge_required": true,
       "file_scope": [
         "scripts/check_workflow_contract.py",
-        "logs/workflow-gate-usage.jsonl"
+        "docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
       ],
       "done_gate": [
-        "workflow-gate-usage 日志开始落盘",
+        "docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json 已生成",
         "支持 legacy 调用聚合判定"
       ],
       "check_cmd": [
-        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl"
+        "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
       ],
       "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C05_P2_旧入口调用观测.md",
       "pr_id": "PR-03",

@@ -50,7 +50,8 @@
   - `scripts/check_workflow_contract.py`：单一门禁契约源，负责参数解析、模式分发、结构化输出、退出码归一。
   - `scripts/check_clarify_plan_alignment.py` / `scripts/check_plan_vk_coverage.py` / `scripts/check_gate_contract_consistency.py` / `scripts/check_integration_gate.py`：迁移期兼容壳，仅做参数透传 + 提示。
   - `full-gate` 用于 C07 的 pre-merge 收口校验；`integration_gate` 仅用于 G01 / post-merge 的主干可见性校验。
-  - `logs/workflow-gate-usage.jsonl`：旧入口观测台账，作为退役 GO/NO-GO 判定证据。
+  - `logs/workflow-gate-usage.jsonl`：旧入口运行态观测台账，持续记录 wrapper / unified entry 调用事件。
+  - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`：从运行态日志聚合导出的提交证据，作为退役 GO/NO-GO 判定材料。
   - `docs/内部参考/任务拆解/*/.state/*`：运行态证据域，仅按生命周期 + TTL 定向归档。
 - 端到端数据流：
   - 命令/技能/文档入口 -> 旧脚本 wrapper（可选）-> 统一入口（`--mode`）-> 对应门禁执行 -> 结果输出与日志记录。
@@ -98,7 +99,7 @@
     - change_type: `refactor`
   - `P2-OBSERVABILITY`
     - blocked_by: `["P1-REFERENCE-MIGRATION"]`
-    - file_paths: `scripts/check_workflow_contract.py`, `logs/workflow-gate-usage.jsonl`
+    - file_paths: `scripts/check_workflow_contract.py`, `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`
     - symbols: `emit_usage_log`, `usage_record_schema_v1`
     - change_type: `add`
   - `P2-TTL-ARCHIVE`
@@ -260,7 +261,7 @@ clarify_handoff_contract:
         - "P3-RETIRE-LEGACY"
   extended:
     observability_hints:
-      - "统一写入 logs/workflow-gate-usage.jsonl"
+      - "运行态统一写入 logs/workflow-gate-usage.jsonl，验收统一导出 docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
       - "结果canonical字段固定为 payload"
       - "历史字段按读旧写新兼容"
     risk_counterexample_map:

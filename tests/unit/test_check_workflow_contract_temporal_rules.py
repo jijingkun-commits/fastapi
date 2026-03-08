@@ -78,7 +78,7 @@ def test_temporal_gate_contract_detects_window_blockers(tmp_path):
                 "cards": [
                     {
                         "card_id": "C07",
-                        "acceptance_checks": ["python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --output -"],
+                        "acceptance_checks": ["python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"],
                         "done_gate": ["支持7天零调用聚合判定"],
                     }
                 ],

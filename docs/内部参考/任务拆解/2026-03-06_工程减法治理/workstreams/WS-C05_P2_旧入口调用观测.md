@@ -12,16 +12,16 @@
 
 ## 1. 目标
 
-- 为旧入口调用建立日志台账
+- 为旧入口调用建立运行态日志台账
 - 支持 legacy 调用聚合判定
-- 为退役放行提供证据源
+- 为退役放行导出可提交证据
 
 ## 2. 测试与验收
 
 - 最小测试集:
-  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl`
+  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`
 - 验收标准:
-  - `workflow-gate-usage` 日志开始落盘
+  - `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json` 已生成
   - 支持 legacy 调用聚合判定
 
 ## 3. card_export（机读）
@@ -42,19 +42,19 @@ card_export:
   depends_on: [C04]
   file_whitelist:
     - scripts/check_workflow_contract.py
-    - logs/workflow-gate-usage.jsonl
+    - docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
   mechanism_summary:
-    - 旧入口 usage 日志落盘
+    - 旧入口 usage 运行日志落盘
     - 支持 legacy 调用聚合
   acceptance_checks:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
   rollback_anchors:
     - WORKFLOW_GATE_UNIFIED_ENABLED=false
   evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
   check_cmd:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
   done_gate:
-    - workflow-gate-usage 日志开始落盘
+    - docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json 已生成
     - 支持 legacy 调用聚合判定
   source_ws_file: docs/内部参考/任务拆解/2026-03-06_工程减法治理/workstreams/WS-C05_P2_旧入口调用观测.md
 ```

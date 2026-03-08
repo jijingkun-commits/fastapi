@@ -19,7 +19,7 @@
 - 门禁统一入口：`scripts/check_workflow_contract.py`
 - L1 兼容壳脚本：`check_clarify_plan_alignment.py`、`check_plan_vk_coverage.py`、`check_gate_contract_consistency.py`、`check_integration_gate.py`
 - 流程引用迁移：`.cursor/commands/*`、`.agents/skills/*`、`docs/开发文档/*`
-- 观测与归档：`logs/workflow-gate-usage.jsonl`、`docs/内部参考/任务拆解/*`
+- 观测与归档：`logs/workflow-gate-usage.jsonl`（运行态观测）、`docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`（提交证据）、`docs/内部参考/任务拆解/*`
 
 ### 1.3 非范围
 
@@ -149,6 +149,7 @@ fr_contract_matrix:
       source_of_truth: logs/workflow-gate-usage.jsonl
     output_contract:
       required_fields: [legacy_call_count, last_call_at]
+      evidence_artifact: docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
       consumer: 退役审批人
     failure_semantics: 观测期发现旧入口调用返回 RETIREMENT_NOT_READY
     observability_fields: [legacy_call_count, last_call_at]
@@ -244,7 +245,7 @@ traceability_matrix:
     feature_id: P2-usage-observability
     task_id: P2-OBSERVABILITY
     tc_id: TC-WG-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-06 TTL归档边界

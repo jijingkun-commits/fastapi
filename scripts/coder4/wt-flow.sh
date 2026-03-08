@@ -259,6 +259,37 @@ _task_state_file_for_read() {
   echo "$scoped_candidate"
 }
 
+_list_stale_state_task_keys() {
+  local state_dir="$1" active_task_key="$2"
+  [[ -d "$state_dir" ]] || return 0
+
+  local candidate candidate_task_key
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    candidate_task_key="$(basename "$candidate")"
+    if [[ -n "$active_task_key" && "$candidate_task_key" == "$active_task_key" ]]; then
+      continue
+    fi
+    echo "$candidate_task_key"
+  done < <(find "$state_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)
+}
+
+_emit_state_context() {
+  local active_file active_task_key active_task_split_dir state_dir task_state_root stale_candidates
+  active_file="$(_active_task_file)"
+  active_task_key="$(_sanitize_task_key_segment "$(_active_task_key)")"
+  active_task_split_dir="$(_active_task_split_dir)"
+  state_dir="$(_default_state_dir)"
+  task_state_root="$(_task_state_root "$state_dir" "$active_task_key")"
+  stale_candidates="$(_list_stale_state_task_keys "$state_dir" "$active_task_key" | paste -sd ',' -)"
+
+  echo "ACTIVE_TASK_FILE=${active_file}"
+  echo "ACTIVE_TASK_SPLIT_DIR=${active_task_split_dir}"
+  echo "ACTIVE_TASK_KEY=${active_task_key}"
+  echo "TASK_STATE_ROOT=${task_state_root}"
+  echo "STALE_STATE_CANDIDATES=${stale_candidates}"
+}
+
 _session_state_root() {
   local task_key_override="${1:-}"
   local state_dir
@@ -358,10 +389,22 @@ _normalize_dirty_prefix() {
   echo "${prefix}/"
 }
 
+_active_task_state_dirty_prefix() {
+  local split_dir task_key
+  split_dir="$(_active_task_split_dir)"
+  task_key="$(_sanitize_task_key_segment "$(_active_task_key)")"
+
+  [[ -n "$split_dir" ]] || return 0
+  [[ -n "$task_key" ]] || return 0
+
+  _normalize_dirty_prefix "docs/内部参考/任务拆解/${split_dir}/.state/${task_key}" || true
+}
+
 _dirty_whitelist_csv() {
   local raw="${WT_FLOW_DIRTY_WHITELIST:-}"
   local prefixes=()
   local prefix normalized csv=""
+  local derived_state_prefix=""
 
   if [[ -n "$raw" ]]; then
     IFS=',' read -r -a prefixes <<< "$raw"
@@ -369,9 +412,17 @@ _dirty_whitelist_csv() {
     prefixes=("${DEFAULT_DIRTY_WHITELIST[@]}")
   fi
 
+  derived_state_prefix="$(_active_task_state_dirty_prefix)"
+  if [[ -n "$derived_state_prefix" ]]; then
+    prefixes+=("$derived_state_prefix")
+  fi
+
   for prefix in "${prefixes[@]}"; do
     normalized="$(_normalize_dirty_prefix "$prefix" || true)"
     [[ -n "$normalized" ]] || continue
+    case ",${csv}," in
+      *,"${normalized}",*) continue ;;
+    esac
     if [[ -n "$csv" ]]; then
       csv="${csv},${normalized}"
     else
@@ -387,20 +438,6 @@ _dirty_whitelist_csv() {
   fi
 
   echo "$csv"
-}
-
-_extract_dirty_path_from_status_line() {
-  local line="$1"
-  local path="$line"
-  if [[ "${#line}" -ge 3 ]]; then
-    path="${line:3}"
-  fi
-  if [[ "$path" == *" -> "* ]]; then
-    path="${path##* -> }"
-  fi
-  path="${path#./}"
-  path="${path#/}"
-  echo "$path"
 }
 
 _is_dirty_path_allowed() {
@@ -419,14 +456,20 @@ _is_dirty_path_allowed() {
 
 _collect_disallowed_dirty_lines() {
   local whitelist_csv="$1"
-  local line path
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    path="$(_extract_dirty_path_from_status_line "$line")"
-    if ! _is_dirty_path_allowed "$path" "$whitelist_csv"; then
-      echo "$line"
+  local entry status path extra_path
+  while IFS= read -r -d '' entry; do
+    [[ -z "$entry" ]] && continue
+    status="${entry:0:3}"
+    path="${entry:3}"
+    if [[ "${status:0:1}" == "R" || "${status:0:1}" == "C" ]]; then
+      IFS= read -r -d '' extra_path || true
     fi
-  done < <(git status --porcelain --untracked-files=no)
+    path="${path#./}"
+    path="${path#/}"
+    if ! _is_dirty_path_allowed "$path" "$whitelist_csv"; then
+      echo "${status}${path}"
+    fi
+  done < <(git status --porcelain -z --untracked-files=no)
 }
 
 _format_dirty_preview() {
@@ -1137,8 +1180,10 @@ cmd_cleanup() {
 # --- 命令: status ---
 
 cmd_status() {
+  _log "状态上下文:"
+  _emit_state_context
   if ! _resolve_session_state_file_for_read; then
-    _log "没有活跃的 worktree 会话"
+  _log "没有活跃的 worktree 会话"
     return 0
   fi
   local state_file

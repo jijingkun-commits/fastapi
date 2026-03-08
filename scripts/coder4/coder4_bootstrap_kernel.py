@@ -67,6 +67,7 @@ STATE_BACKUP_SUFFIX = ".bak"
 DEFAULT_DIRTY_POLICY_VERSION = "v1_docs_templates"
 DEFAULT_DISPATCH_EXECUTOR = "wtimp"
 DEFAULT_DISPATCH_EXECUTOR_MODE = "cardrun_dispatch"
+DEFAULT_DISPATCH_TIMEOUT_SECONDS = 600
 DEFAULT_DIRTY_WHITELIST = (
     "docs/plans/",
     "docs/内部参考/迭代需求/",
@@ -77,6 +78,7 @@ IDEMPOTENCY_DISABLE_ENV = "DISABLE_IDEMPOTENCY_WINDOW"
 AUTO_WAKE_DISABLE_ENV = "DISABLE_AUTO_WAKE"
 VK_SYNC_DISABLE_ENV = "DISABLE_VK_SYNC"
 DIRTY_WHITELIST_ENV = "CODER4_DIRTY_WHITELIST"
+DISPATCH_TIMEOUT_ENV = "CODER4_DISPATCH_TIMEOUT_SECONDS"
 OPENCLAW_GATEWAY_ENV = "OPENCLAW_GATEWAY"
 OPENCLAW_HOOKS_TOKEN_ENV = "OPENCLAW_HOOKS_TOKEN"
 
@@ -129,6 +131,7 @@ class KernelContext:
     dirty_whitelist: list[str] = field(default_factory=lambda: list(DEFAULT_DIRTY_WHITELIST))
     dispatch_executor: str = DEFAULT_DISPATCH_EXECUTOR
     dispatch_executor_mode: str = DEFAULT_DISPATCH_EXECUTOR_MODE
+    dispatch_timeout_seconds: int = DEFAULT_DISPATCH_TIMEOUT_SECONDS
 
 
 class CardrunContractError(RuntimeError):
@@ -157,6 +160,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--commit-sha", default="")
     parser.add_argument("--merge-sha", default="")
     parser.add_argument("--dispatch-executor", default=os.getenv("CODER4_DISPATCH_EXECUTOR", ""))
+    parser.add_argument("--dispatch-timeout-seconds", type=int, default=0)
     parser.add_argument("--dirty-whitelist", default=os.getenv(DIRTY_WHITELIST_ENV, ""))
     parser.add_argument("--dirty-policy-version", default=DEFAULT_DIRTY_POLICY_VERSION)
     parser.add_argument("--output", default="")
@@ -967,6 +971,28 @@ def resolve_dispatch_executor(*, active_payload: dict[str, Any], cli_override: s
     return executor, mode
 
 
+def resolve_dispatch_timeout_seconds(*, active_payload: dict[str, Any], cli_override: int = 0) -> int:
+    candidates: list[Any] = []
+    if cli_override and cli_override > 0:
+        candidates.append(cli_override)
+    env_override = str(os.getenv(DISPATCH_TIMEOUT_ENV) or "").strip()
+    if env_override:
+        candidates.append(env_override)
+    active_value = active_payload.get("dispatch_timeout_seconds")
+    if active_value not in (None, ""):
+        candidates.append(active_value)
+
+    for raw in candidates:
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+
+    return DEFAULT_DISPATCH_TIMEOUT_SECONDS
+
+
 def _validate_vk_cards_contract(vk_cards: dict[str, Any], *, task_split_dir: str) -> None:
     execution_mode = str(vk_cards.get("execution_mode") or "").strip().lower()
     if execution_mode != "serial":
@@ -1423,6 +1449,7 @@ def build_wtimp_dispatch_request(
         ws_file=ws_file,
         worktree_path=worktree_path,
         executor_mode=str(ctx.dispatch_executor_mode or DEFAULT_DISPATCH_EXECUTOR_MODE),
+        timeout_seconds=int(ctx.dispatch_timeout_seconds or DEFAULT_DISPATCH_TIMEOUT_SECONDS),
     )
 
 
@@ -1435,6 +1462,11 @@ def run_wtimp_dispatch(
         raise CardrunContractError(exc.code, str(exc), exc.details) from exc
 
 
+def _normalize_dirty_prefix(prefix: str) -> str:
+    normalized = str(prefix or "").strip().lstrip("./").strip("/")
+    return f"{normalized}/" if normalized else ""
+
+
 def parse_dirty_whitelist(raw: str | None) -> list[str]:
     value = str(raw or "").strip()
     if not value:
@@ -1442,18 +1474,63 @@ def parse_dirty_whitelist(raw: str | None) -> list[str]:
 
     parsed: list[str] = []
     for segment in value.split(","):
-        prefix = segment.strip().strip("/")
-        if not prefix:
+        normalized = _normalize_dirty_prefix(segment)
+        if not normalized:
             continue
-        parsed.append(f"{prefix}/")
+        parsed.append(normalized)
     return parsed or list(DEFAULT_DIRTY_WHITELIST)
 
 
-def _extract_dirty_path(status_line: str) -> str:
-    body = status_line[3:] if len(status_line) >= 3 else status_line
-    if " -> " in body:
-        body = body.split(" -> ", 1)[1]
-    return body.strip()
+def build_active_task_state_dirty_whitelist(*, task_split_dir: str, task_key: str) -> list[str]:
+    normalized_split_dir = str(task_split_dir or "").strip()
+    normalized_task_key = sanitize_task_key_segment(task_key)
+    if not normalized_split_dir or not normalized_task_key:
+        return []
+
+    prefix = _normalize_dirty_prefix(
+        f"docs/内部参考/任务拆解/{normalized_split_dir}/.state/{normalized_task_key}"
+    )
+    return [prefix] if prefix else []
+
+
+def merge_dirty_whitelist(base_whitelist: list[str] | None, *, task_split_dir: str, task_key: str) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for prefix in list(base_whitelist or DEFAULT_DIRTY_WHITELIST) + build_active_task_state_dirty_whitelist(
+        task_split_dir=task_split_dir,
+        task_key=task_key,
+    ):
+        normalized = _normalize_dirty_prefix(prefix)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return merged or list(DEFAULT_DIRTY_WHITELIST)
+
+
+def _decode_porcelain_path(path_bytes: bytes) -> str:
+    return path_bytes.decode("utf-8", errors="surrogateescape").strip()
+
+
+def _parse_porcelain_z_output(stdout: bytes) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    tokens = stdout.split(b"\0")
+    index = 0
+    while index < len(tokens):
+        entry = tokens[index]
+        index += 1
+        if not entry:
+            continue
+        if len(entry) < 3:
+            raise ValueError(f"invalid_porcelain_entry:{entry!r}")
+        status = entry[:3].decode("ascii", errors="strict")
+        path = _decode_porcelain_path(entry[3:])
+        if status[:1] in {"R", "C"}:
+            if index >= len(tokens) or not tokens[index]:
+                raise ValueError("rename_source_missing")
+            index += 1
+        entries.append((status, path))
+    return entries
 
 
 def _is_whitelisted_dirty_path(path: str, whitelist: list[str]) -> bool:
@@ -1467,27 +1544,30 @@ def inspect_repo_clean(
     dirty_whitelist: list[str],
 ) -> tuple[bool, list[str], list[str], str | None]:
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+        ["git", "-C", str(repo_root), "status", "--porcelain", "-z", "--untracked-files=no"],
         capture_output=True,
-        text=True,
+        text=False,
         check=False,
     )
     if proc.returncode != 0:
-        stderr = proc.stderr.strip()
-        stdout = proc.stdout.strip()
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        stdout = proc.stdout.decode("utf-8", errors="replace").strip()
         detail = stderr or stdout or f"returncode={proc.returncode}"
         return False, [], [], f"git_status_failed:{detail}"
 
     disallowed_dirty: list[str] = []
     allowed_dirty: list[str] = []
-    for line in proc.stdout.splitlines():
-        if not line.strip():
-            continue
-        path = _extract_dirty_path(line)
+    try:
+        status_entries = _parse_porcelain_z_output(proc.stdout)
+    except ValueError as exc:
+        return False, [], [], f"git_status_parse_failed:{exc}"
+
+    for status, path in status_entries:
+        line = f"{status}{path}"
         if path and _is_whitelisted_dirty_path(path, dirty_whitelist):
-            allowed_dirty.append(line.rstrip())
+            allowed_dirty.append(line)
         else:
-            disallowed_dirty.append(line.rstrip())
+            disallowed_dirty.append(line)
     return len(disallowed_dirty) == 0, disallowed_dirty[:8], allowed_dirty[:8], None
 
 
@@ -1610,6 +1690,7 @@ def build_kernel_context(
     dirty_whitelist: list[str] | None = None,
     dirty_policy_version: str = DEFAULT_DIRTY_POLICY_VERSION,
     dispatch_executor_override: str = "",
+    dispatch_timeout_seconds_override: int = 0,
 ) -> KernelContext:
     active_task_path = active_task_path.resolve()
     active = load_json(active_task_path)
@@ -1620,6 +1701,10 @@ def build_kernel_context(
     dispatch_executor, dispatch_executor_mode = resolve_dispatch_executor(
         active_payload=active,
         cli_override=dispatch_executor_override,
+    )
+    dispatch_timeout_seconds = resolve_dispatch_timeout_seconds(
+        active_payload=active,
+        cli_override=dispatch_timeout_seconds_override,
     )
     project_id = str(active.get("project_id") or "").strip()
     task_split_dir = str(active.get("task_split_dir") or "").strip()
@@ -1710,7 +1795,11 @@ def build_kernel_context(
             single_active_card=single_active_card,
         )
 
-    effective_dirty_whitelist = list(dirty_whitelist or DEFAULT_DIRTY_WHITELIST)
+    effective_dirty_whitelist = merge_dirty_whitelist(
+        list(dirty_whitelist or DEFAULT_DIRTY_WHITELIST),
+        task_split_dir=task_split_dir,
+        task_key=task_key,
+    )
     (
         main_repo_clean,
         main_repo_dirty_preview,
@@ -1780,6 +1869,7 @@ def build_kernel_context(
         dirty_whitelist=effective_dirty_whitelist,
         dispatch_executor=dispatch_executor,
         dispatch_executor_mode=dispatch_executor_mode,
+        dispatch_timeout_seconds=dispatch_timeout_seconds,
     )
 
 
@@ -2180,6 +2270,7 @@ def main() -> int:
                 dirty_whitelist=dirty_whitelist,
                 dirty_policy_version=dirty_policy_version,
                 dispatch_executor_override=str(getattr(args, "dispatch_executor", "") or ""),
+                dispatch_timeout_seconds_override=int(getattr(args, "dispatch_timeout_seconds", 0) or 0),
             )
             action, first_not_done, target_task_id, target_status, blocked_details = decide_action(ctx)
 

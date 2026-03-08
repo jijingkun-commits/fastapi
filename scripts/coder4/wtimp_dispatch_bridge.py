@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +16,21 @@ from typing import Any
 
 DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_SANDBOX = "workspace-write"
+PREVIEW_LIMIT = 500
+DISPATCH_RESULT_REQUIRED_KEYS = frozenset(
+    {
+        "ok",
+        "executor",
+        "executor_mode",
+        "card_id",
+        "ws_file",
+        "subagent_id",
+        "commit_sha",
+        "merge_sha",
+        "changed_files",
+        "acceptance_results",
+    }
+)
 
 
 class WtimpDispatchError(RuntimeError):
@@ -77,10 +94,12 @@ def build_codex_exec_command(request: WtimpDispatchRequest) -> list[str]:
     ]
 
 
-def _extract_last_json_object(text: str) -> dict[str, Any]:
+def _preview_text(value: Any) -> str:
+    return str(value or "")[:PREVIEW_LIMIT]
+
+
+def _iter_json_objects(text: str):
     decoder = json.JSONDecoder()
-    candidate: dict[str, Any] | None = None
-    fallback: dict[str, Any] | None = None
     for index, char in enumerate(text):
         if char != "{":
             continue
@@ -90,27 +109,46 @@ def _extract_last_json_object(text: str) -> dict[str, Any]:
             continue
         if not isinstance(payload, dict):
             continue
-        if fallback is None:
-            fallback = payload
-        if any(key in payload for key in ("ok", "executor", "card_id", "ws_file", "commit_sha")):
-            candidate = payload
-    if candidate is not None:
-        return candidate
-    if fallback is None:
+        yield payload
+
+
+def _is_dispatch_result_payload(payload: dict[str, Any]) -> bool:
+    return DISPATCH_RESULT_REQUIRED_KEYS.issubset(payload.keys())
+
+
+def _extract_dispatch_result_payload(text: str) -> dict[str, Any]:
+    matched_payloads = [payload for payload in _iter_json_objects(text) if _is_dispatch_result_payload(payload)]
+    if len(matched_payloads) == 1:
+        return matched_payloads[0]
+    if not matched_payloads:
         raise WtimpDispatchError(
             "CARDRUN_EXECUTION_RESULT_INVALID",
-            "wtimp dispatch 未返回可解析 JSON",
-            {"stdout_preview": text[:500]},
+            "wtimp dispatch 未返回符合 contract 的 JSON",
+            {"stdout_preview": _preview_text(text), "matched_payload_count": 0},
         )
-    return fallback
+    raise WtimpDispatchError(
+        "CARDRUN_EXECUTION_RESULT_INVALID",
+        "wtimp dispatch 返回多个候选 JSON 结果对象",
+        {"stdout_preview": _preview_text(text), "matched_payload_count": len(matched_payloads)},
+    )
 
 
 def _normalize_string_list(values: Any) -> list[str]:
     if not isinstance(values, list):
-        return []
+        raise WtimpDispatchError(
+            "CARDRUN_EXECUTION_RESULT_INVALID",
+            "wtimp dispatch changed_files 类型非法",
+            {"field": "changed_files", "actual_type": type(values).__name__},
+        )
     result: list[str] = []
     for item in values:
-        value = str(item or "").strip()
+        if not isinstance(item, str):
+            raise WtimpDispatchError(
+                "CARDRUN_EXECUTION_RESULT_INVALID",
+                "wtimp dispatch changed_files 元素类型非法",
+                {"field": "changed_files", "actual_type": type(item).__name__},
+            )
+        value = item.strip()
         if value:
             result.append(value)
     return result
@@ -118,28 +156,134 @@ def _normalize_string_list(values: Any) -> list[str]:
 
 def _normalize_dict_list(values: Any) -> list[dict[str, Any]]:
     if not isinstance(values, list):
-        return []
-    return [item for item in values if isinstance(item, dict)]
+        raise WtimpDispatchError(
+            "CARDRUN_EXECUTION_RESULT_INVALID",
+            "wtimp dispatch acceptance_results 类型非法",
+            {"field": "acceptance_results", "actual_type": type(values).__name__},
+        )
+    result: list[dict[str, Any]] = []
+    for item in values:
+        if not isinstance(item, dict):
+            raise WtimpDispatchError(
+                "CARDRUN_EXECUTION_RESULT_INVALID",
+                "wtimp dispatch acceptance_results 元素类型非法",
+                {"field": "acceptance_results", "actual_type": type(item).__name__},
+            )
+        result.append(item)
+    return result
+
+
+def _require_string(payload: dict[str, Any], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str):
+        raise WtimpDispatchError(
+            "CARDRUN_EXECUTION_RESULT_INVALID",
+            f"wtimp dispatch {field_name} 类型非法",
+            {"field": field_name, "actual_type": type(value).__name__},
+        )
+    return value.strip()
+
+
+def _require_string_or_none(payload: dict[str, Any], field_name: str) -> str | None:
+    value = payload.get(field_name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise WtimpDispatchError(
+            "CARDRUN_EXECUTION_RESULT_INVALID",
+            f"wtimp dispatch {field_name} 类型非法",
+            {"field": field_name, "actual_type": type(value).__name__},
+        )
+    normalized = value.strip()
+    return normalized or None
+
+
+def _require_bool(payload: dict[str, Any], field_name: str) -> bool:
+    value = payload.get(field_name)
+    if not isinstance(value, bool):
+        raise WtimpDispatchError(
+            "CARDRUN_EXECUTION_RESULT_INVALID",
+            f"wtimp dispatch {field_name} 类型非法",
+            {"field": field_name, "actual_type": type(value).__name__},
+        )
+    return value
+
+
+def _cleanup_process_group(process: Any) -> dict[str, Any]:
+    pgid = int(getattr(process, "pid", 0) or 0)
+    details: dict[str, Any] = {
+        "attempted": pgid > 0,
+        "pgid": pgid or None,
+        "signals": [],
+        "result": "skipped" if pgid <= 0 else "pending",
+    }
+    if pgid <= 0:
+        return details
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+        details["signals"].append("SIGTERM")
+        process.wait(timeout=5)
+        details["result"] = "terminated"
+        details["returncode"] = getattr(process, "returncode", None)
+        return details
+    except ProcessLookupError:
+        details["result"] = "already_gone"
+        return details
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            details["signals"].append("SIGKILL")
+            process.wait(timeout=1)
+            details["result"] = "killed"
+            details["returncode"] = getattr(process, "returncode", None)
+            return details
+        except ProcessLookupError:
+            details["result"] = "already_gone"
+            return details
+        except Exception as exc:  # noqa: BLE001
+            details["result"] = "kill_failed"
+            details["error"] = str(exc)
+            return details
+    except Exception as exc:  # noqa: BLE001
+        details["result"] = "cleanup_failed"
+        details["error"] = str(exc)
+        return details
+
+
+def _with_session_cleanup(details: dict[str, Any], process: Any, *, stdout: str = "", stderr: str = "") -> dict[str, Any]:
+    payload = dict(details)
+    if stdout:
+        payload.setdefault("stdout_preview", _preview_text(stdout))
+    if stderr:
+        payload.setdefault("stderr_preview", _preview_text(stderr))
+    payload["session_cleanup"] = _cleanup_process_group(process)
+    return payload
 
 
 def _validate_payload(request: WtimpDispatchRequest, payload: dict[str, Any]) -> WtimpDispatchResult:
-    executor = str(payload.get("executor") or "").strip().lower()
-    executor_mode = str(payload.get("executor_mode") or "").strip().lower()
-    card_id = str(payload.get("card_id") or "").strip().upper()
-    ws_file = str(payload.get("ws_file") or "").strip()
-    commit_sha = str(payload.get("commit_sha") or "").strip() or None
-    merge_sha = str(payload.get("merge_sha") or "").strip() or None
-    subagent_id = str(payload.get("subagent_id") or "").strip() or None
+    ok = _require_bool(payload, "ok")
+    executor = _require_string(payload, "executor").lower()
+    executor_mode = _require_string(payload, "executor_mode").lower()
+    card_id = _require_string(payload, "card_id").upper()
+    ws_file = _require_string(payload, "ws_file")
+    commit_sha = _require_string_or_none(payload, "commit_sha")
+    merge_sha = _require_string_or_none(payload, "merge_sha")
+    subagent_id = _require_string_or_none(payload, "subagent_id")
+    changed_files = _normalize_string_list(payload.get("changed_files"))
+    acceptance_results = _normalize_dict_list(payload.get("acceptance_results"))
+    error_code = _require_string_or_none(payload, "error_code")
+    error_message = _require_string_or_none(payload, "error_message")
 
-    if not bool(payload.get("ok")):
+    if not ok:
         raise WtimpDispatchError(
             "CARDRUN_SUBAGENT_FAILED",
-            str(payload.get("error_message") or "wtimp dispatch 返回失败结果"),
+            error_message or "wtimp dispatch 返回失败结果",
             {
                 "card_id": request.card_id,
                 "ws_file": request.ws_file,
-                "downstream_error_code": str(payload.get("error_code") or "").strip() or None,
-                "downstream_error_message": str(payload.get("error_message") or "").strip() or None,
+                "downstream_error_code": error_code,
+                "downstream_error_message": error_message,
             },
         )
 
@@ -183,24 +327,24 @@ def _validate_payload(request: WtimpDispatchRequest, payload: dict[str, Any]) ->
         subagent_id=subagent_id,
         commit_sha=commit_sha,
         merge_sha=merge_sha,
-        changed_files=_normalize_string_list(payload.get("changed_files")),
-        acceptance_results=_normalize_dict_list(payload.get("acceptance_results")),
+        changed_files=changed_files,
+        acceptance_results=acceptance_results,
         worktree_path=request.worktree_path,
-        error_code=str(payload.get("error_code") or "").strip() or None,
-        error_message=str(payload.get("error_message") or "").strip() or None,
+        error_code=error_code,
+        error_message=error_message,
     )
 
 
 def run_dispatch(request: WtimpDispatchRequest) -> WtimpDispatchResult:
     command = build_codex_exec_command(request)
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=str(Path(request.worktree_path).resolve()),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=request.timeout_seconds,
-            check=False,
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise WtimpDispatchError(
@@ -208,32 +352,52 @@ def run_dispatch(request: WtimpDispatchRequest) -> WtimpDispatchResult:
             "未找到 codex 命令，无法执行 wtimp dispatch",
             {"card_id": request.card_id, "worktree_path": request.worktree_path},
         ) from exc
+
+    stdout = ""
+    stderr = ""
+    try:
+        stdout, stderr = process.communicate(timeout=request.timeout_seconds)
     except subprocess.TimeoutExpired as exc:
+        stdout = str(getattr(exc, "output", None) or getattr(exc, "stdout", None) or "")
+        stderr = str(getattr(exc, "stderr", None) or "")
         raise WtimpDispatchError(
             "CARDRUN_SUBAGENT_FAILED",
             f"wtimp dispatch 执行超时: {request.timeout_seconds}s",
-            {
-                "card_id": request.card_id,
-                "worktree_path": request.worktree_path,
-                "timeout_seconds": request.timeout_seconds,
-                "stdout_preview": str(exc.stdout or "")[:500],
-                "stderr_preview": str(exc.stderr or "")[:500],
-            },
+            _with_session_cleanup(
+                {
+                    "card_id": request.card_id,
+                    "worktree_path": request.worktree_path,
+                    "timeout_seconds": request.timeout_seconds,
+                },
+                process,
+                stdout=stdout,
+                stderr=stderr,
+            ),
         ) from exc
 
-    if completed.returncode != 0:
+    if int(process.returncode or 0) != 0:
         raise WtimpDispatchError(
             "CARDRUN_SUBAGENT_FAILED",
-            f"wtimp dispatch 执行失败: exit_code={completed.returncode}",
-            {
-                "card_id": request.card_id,
-                "ws_file": request.ws_file,
-                "exit_code": completed.returncode,
-                "stdout_preview": str(completed.stdout or "")[:500],
-                "stderr_preview": str(completed.stderr or "")[:500],
-                "command": command,
-            },
+            f"wtimp dispatch 执行失败: exit_code={process.returncode}",
+            _with_session_cleanup(
+                {
+                    "card_id": request.card_id,
+                    "ws_file": request.ws_file,
+                    "exit_code": process.returncode,
+                    "command": command,
+                },
+                process,
+                stdout=stdout,
+                stderr=stderr,
+            ),
         )
 
-    payload = _extract_last_json_object(str(completed.stdout or ""))
-    return _validate_payload(request, payload)
+    try:
+        payload = _extract_dispatch_result_payload(stdout)
+        return _validate_payload(request, payload)
+    except WtimpDispatchError as exc:
+        raise WtimpDispatchError(
+            exc.code,
+            str(exc),
+            _with_session_cleanup(exc.details, process, stdout=stdout, stderr=stderr),
+        ) from exc

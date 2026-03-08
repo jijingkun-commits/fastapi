@@ -120,6 +120,38 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
     return active_task_path, state_path, card_order, cards_by_id
 
 
+
+
+
+def test_build_kernel_context_auto_whitelists_active_task_state_dir(monkeypatch, tmp_path):
+    module = _load_kernel_module()
+    active_task_path, state_path, _, _ = _prepare_workspace(tmp_path)
+
+    task_state_dir = active_task_path.parent / TASK_SPLIT_DIR / ".state" / module.sanitize_task_key_segment(TASK_KEY)
+    task_state_file = task_state_dir / "task-runner-state.json"
+    _write_json(task_state_file, {"task_key": TASK_KEY, "card_status_map": {"C01": "done"}})
+    subprocess.run(["git", "add", str(task_state_file.relative_to(tmp_path))], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "track task scoped state"], cwd=tmp_path, check=True, capture_output=True)
+
+    _write_json(task_state_file, {"task_key": TASK_KEY, "card_status_map": {"C01": "done"}, "last_updated": "2026-03-07T12:34:56Z"})
+
+    def _unexpected_list_tasks(*args, **kwargs):
+        raise AssertionError("local-mode 不应调用 list_tasks")
+
+    monkeypatch.setattr(module, "list_tasks", _unexpected_list_tasks)
+
+    ctx = module.build_kernel_context(
+        active_task_path,
+        "http://127.0.0.1:3001",
+        local_mode=True,
+        state_path=state_path,
+        dirty_whitelist=["docs/plans/"],
+    )
+
+    assert ctx.main_repo_clean is True
+    assert ctx.main_repo_dirty_preview == []
+    assert ctx.main_repo_dirty_ignored_preview
+    assert any("task-runner-state.json" in line for line in ctx.main_repo_dirty_ignored_preview)
 def test_build_kernel_context_local_mode_skips_vk_task_fetch(monkeypatch, tmp_path):
     """local-mode 构建上下文不应调用 VK 任务列表接口。"""
 
@@ -387,7 +419,7 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
     assert result["auto_wake"]["ok"] is True
     assert result["execution_mode"] == "serial"
     assert result["attempt"]["result"] == "card_activated"
-    assert Path(result["attempt"]["attempt_file"]).exists()
+    assert result["attempt"]["attempt_id"]
     assert Path(result["task_ledger_file"]).exists()
     assert len(wake_calls) == 1
 
@@ -556,3 +588,32 @@ def test_decide_action_blocks_when_main_repo_dirty(monkeypatch, tmp_path):
     action, _, _, _, blocked_details = module.decide_action(ctx)
     assert action == "preflight_blocked"
     assert blocked_details[0]["reason"] == "main_repo_dirty"
+
+
+def test_inspect_repo_clean_allows_whitelisted_utf8_rename_with_arrow_in_name(tmp_path):
+    module = _load_kernel_module()
+    _prepare_workspace(tmp_path)
+
+    dirty_dir = tmp_path / "目录 空格"
+    dirty_dir.mkdir(parents=True, exist_ok=True)
+    old_path = dirty_dir / "旧名字.txt"
+    new_path = dirty_dir / "新 -> 名字.txt"
+    old_path.write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", str(old_path.relative_to(tmp_path))], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "track rename fixture"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "mv", str(old_path.relative_to(tmp_path)), str(new_path.relative_to(tmp_path))],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    clean, disallowed_dirty, allowed_dirty, error = module.inspect_repo_clean(
+        tmp_path,
+        dirty_whitelist=["目录 空格/"],
+    )
+
+    assert error is None
+    assert clean is True
+    assert disallowed_dirty == []
+    assert any("新 -> 名字.txt" in line for line in allowed_dirty)

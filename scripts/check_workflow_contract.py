@@ -884,12 +884,13 @@ def _run_ttl_audit(passthrough_args: Sequence[str]) -> int:
 def _run_usage_report(passthrough_args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="旧入口调用观测报告")
     parser.add_argument("--window-days", type=int, default=7, help="统计窗口（仅报表使用，不作为退役阻断）")
-    parser.add_argument("--output", default=str(USAGE_LOG_PATH.relative_to(ROOT)), help="usage jsonl 路径")
+    parser.add_argument("--log-path", default=str(USAGE_LOG_PATH.relative_to(ROOT)), help="usage 运行态 jsonl 路径")
+    parser.add_argument("--report-output", default="-", help="聚合报告输出路径；默认 stdout")
     args = parser.parse_args(list(passthrough_args))
 
-    log_path = _resolve_jsonl_path(args.output, default_path=USAGE_LOG_PATH)
+    log_path = _resolve_jsonl_path(args.log_path, default_path=USAGE_LOG_PATH)
     payload = aggregate_usage_window(args.window_days, log_path=log_path)
-    print(_serialize(payload))
+    _emit_payload(payload, args.report_output)
     return 0
 
 

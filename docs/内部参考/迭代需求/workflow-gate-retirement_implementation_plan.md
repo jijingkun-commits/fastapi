@@ -136,13 +136,13 @@ implementation_tasks:
     risk_point: 观测字段不完整会导致 legacy 调用判定失真
     file_paths:
       - scripts/check_workflow_contract.py
-      - logs/workflow-gate-usage.jsonl
+      - docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
     symbols:
       - emit_usage_log
       - usage_record_schema_v1
       - aggregate_usage_window
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
   - task_id: P2-TTL-ARCHIVE
@@ -266,7 +266,7 @@ planning_contract:
         - workflow-gate-usage 日志开始落盘
         - 支持 legacy 调用聚合判定
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C06
@@ -353,7 +353,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "P2调用观测与TTL归档"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P2-TTL-ARCHIVE
@@ -398,7 +398,7 @@ tc_task_mapping:
   - tc_id: TC-WG-05
     task_id: P2-OBSERVABILITY
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --output logs/workflow-gate-usage.jsonl
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
   - tc_id: TC-WG-06
     task_id: P2-TTL-ARCHIVE
     pr_id: PR-03

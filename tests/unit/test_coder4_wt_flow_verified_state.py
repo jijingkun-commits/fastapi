@@ -334,3 +334,151 @@ def test_wt_flow_merge_from_card_worktree_cleans_up_with_common_repo_driver(tmp_
     assert branch_exists.returncode != 0
     state_payload = json.loads(state_file.read_text(encoding="utf-8"))
     assert state_payload["card_status_map"]["C01"] == "done"
+
+
+
+def test_wt_flow_merge_allows_active_task_state_dirty_files(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "verified", "C02": "todo"},
+        },
+    )
+
+    subprocess.run(["git", "add", "docs"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "track task docs"], cwd=tmp_path, check=True, capture_output=True)
+
+    sanitized = _sanitize_task_key_segment(TASK_KEY)
+    session_id = "session-merge-state-dirty"
+    branch = f"feature/{sanitized}/C01/{session_id}"
+    worktree_path = tmp_path / ".worktrees" / sanitized / "C01" / session_id
+    subprocess.run(
+        ["git", "worktree", "add", "-b", branch, str(worktree_path), "master"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (worktree_path / "README.md").write_text("# fixture\nstate dirty merge change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=worktree_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "state dirty merge change"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+    )
+    _write_json(
+        task_state_root / f"active-session-{session_id}.json",
+        {
+            "branch": branch,
+            "worktree": str(worktree_path),
+            "base_branch": "master",
+            "task_key": TASK_KEY,
+            "session_id": session_id,
+        },
+    )
+
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    state_payload["last_updated"] = "2026-03-07T12:34:56Z"
+    _write_json(state_file, state_payload)
+
+    result = subprocess.run(
+        ["bash", str(script_path), "merge", f"--state-dir={task_state_root.parent}"],
+        cwd=worktree_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+            "WT_FLOW_SESSION_ID": session_id,
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "state dirty merge change" in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+def test_wt_flow_create_allows_whitelisted_utf8_rename_with_arrow_in_name(tmp_path: Path):
+    script_path, active_task_path, task_state_root, _ = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "verified", "C02": "todo"},
+        },
+    )
+
+    dirty_dir = tmp_path / "目录 空格"
+    dirty_dir.mkdir(parents=True, exist_ok=True)
+    old_path = dirty_dir / "旧名字.txt"
+    new_path = dirty_dir / "新 -> 名字.txt"
+    old_path.write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", str(old_path.relative_to(tmp_path))], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "track utf8 rename fixture"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "mv", str(old_path.relative_to(tmp_path)), str(new_path.relative_to(tmp_path))],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path), "create", "C01", "master"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+            "WT_FLOW_DIRTY_WHITELIST": "目录 空格/",
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    sanitized = _sanitize_task_key_segment(TASK_KEY)
+    created_paths = list((tmp_path / ".worktrees" / sanitized / "C01").glob("*"))
+    assert created_paths
+    assert any(path.is_dir() for path in created_paths)
+    assert task_state_root.exists()
+
+
+def test_wt_flow_status_reports_active_state_root_and_stale_candidates(tmp_path: Path):
+    script_path, active_task_path, task_state_root, _ = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "card_status_map": {"C01": "inprogress", "C02": "todo"},
+        },
+    )
+
+    stale_root = task_state_root.parent / "PP-20260306-ENGINEERING-LEAN-GOV"
+    stale_root.mkdir(parents=True, exist_ok=True)
+    _write_json(stale_root / "task-runner-state.json", {"task_key": "PP-20260306-ENGINEERING-LEAN-GOV"})
+
+    result = subprocess.run(
+        ["bash", str(script_path), "status"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ACTIVE_TASK_KEY=PP-20260307-VERIFIED-STATE" in result.stdout
+    assert f"TASK_STATE_ROOT={task_state_root}" in result.stdout
+    assert "STALE_STATE_CANDIDATES=PP-20260306-ENGINEERING-LEAN-GOV" in result.stdout
+    assert "没有活跃的 worktree 会话" in result.stdout

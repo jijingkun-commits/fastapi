@@ -23,7 +23,7 @@ def _load_kernel_module():
     return module
 
 
-def _build_ctx(module, *, dispatch_executor: str = "wtimp", dispatch_executor_mode: str = "cardrun_dispatch"):
+def _build_ctx(module, *, dispatch_executor: str = "wtimp", dispatch_executor_mode: str = "cardrun_dispatch", dispatch_timeout_seconds: int = 600):
     return module.KernelContext(
         project_id="proj-1",
         task_key="PP-20260306-CARDRUN-WTIMP",
@@ -53,6 +53,7 @@ def _build_ctx(module, *, dispatch_executor: str = "wtimp", dispatch_executor_mo
         main_repo_error=None,
         dispatch_executor=dispatch_executor,
         dispatch_executor_mode=dispatch_executor_mode,
+        dispatch_timeout_seconds=dispatch_timeout_seconds,
     )
 
 
@@ -80,6 +81,19 @@ def test_resolve_dispatch_executor_uses_active_then_default_then_cli_override():
     assert mode == "cardrun_dispatch"
 
 
+
+
+
+def test_resolve_dispatch_timeout_seconds_uses_cli_then_env_then_active_then_default(monkeypatch):
+    module = _load_kernel_module()
+
+    monkeypatch.delenv(module.DISPATCH_TIMEOUT_ENV, raising=False)
+    assert module.resolve_dispatch_timeout_seconds(active_payload={}) == module.DEFAULT_DISPATCH_TIMEOUT_SECONDS
+    assert module.resolve_dispatch_timeout_seconds(active_payload={"dispatch_timeout_seconds": 90}) == 90
+
+    monkeypatch.setenv(module.DISPATCH_TIMEOUT_ENV, "75")
+    assert module.resolve_dispatch_timeout_seconds(active_payload={"dispatch_timeout_seconds": 90}) == 75
+    assert module.resolve_dispatch_timeout_seconds(active_payload={"dispatch_timeout_seconds": 90}, cli_override=45) == 45
 def test_apply_dispatch_action_returns_executor_evidence_and_executed_result(monkeypatch, tmp_path):
     module = _load_kernel_module()
     ctx = _build_ctx(module)
@@ -177,3 +191,26 @@ def test_apply_dispatch_action_maps_bridge_error_to_subagent_failed(monkeypatch,
 
     assert exc_info.value.code == "CARDRUN_SUBAGENT_FAILED"
     assert exc_info.value.details["card_id"] == "C01"
+
+
+
+def test_build_wtimp_dispatch_request_propagates_dispatch_timeout(monkeypatch, tmp_path):
+    module = _load_kernel_module()
+    ctx = _build_ctx(module, dispatch_timeout_seconds=45)
+
+    worktree_path = (tmp_path / "wt-C01").resolve()
+    monkeypatch.setattr(
+        module,
+        "resolve_card_source_ws_file",
+        lambda *_args, **_kwargs: "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+    )
+    monkeypatch.setattr(module, "resolve_active_session_worktree_path", lambda *_args, **_kwargs: str(worktree_path))
+
+    request = module.build_wtimp_dispatch_request(
+        ctx,
+        "C01",
+        active_task_path=tmp_path / "active-task.json",
+    )
+
+    assert request.timeout_seconds == 45
+    assert request.worktree_path == str(worktree_path)

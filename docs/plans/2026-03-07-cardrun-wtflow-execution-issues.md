@@ -2,7 +2,7 @@
 
 > **文档类型**: 问题记录与后续修复输入
 > **创建日期**: 2026-03-07
-> **更新日期**: 2026-03-07
+> **更新日期**: 2026-03-08
 > **问题范围**: `jjk-cardrun`, `jjk-wtimp`, `scripts/coder4/wt-flow.sh`, `coder4_bootstrap_kernel`, `check_workflow_contract`
 > **触发任务**: `PP-20260306-workflow-gate-retirement`
 > **记录目的**: 沉淀本轮实际执行中暴露的工程流缺陷，供后续专项修复
@@ -24,11 +24,11 @@
    - `jjk-plan/jjk-vkplan` 缺少“时间窗阻断禁止”约束，导致类似卡片可再次被生成；
    - `G01` 文档口径仍引用旧命令，且 `C07 full-gate` 曾把 post-merge `integration_gate` 混入 pre-merge verify；
    - `C03` 兼容壳只做了 CLI 转发，未完成物理薄壳化；
-   - `integration_gate` 在 gate worktree 内默认读取 worktree-local `.state`，导致 `G01` 误判 merge_results 缺失。
+   - `integration_gate` 在 gate worktree 内默认读取 worktree-local `.state`，导致 `G01` 误判 merge_results 缺失；
+   - `wt-flow` / `bootstrap kernel` 已自动把 active task 的 `.state/<task_key>/` 纳入 dirty whitelist，merge/bootstrap 不再要求手传整段 whitelist。
 2. **仍需后续系统性修复**的问题包括：
    - `wtimp dispatch` JSON 回执/超时机制不稳；
-   - `.state` 运行态文件对白名单依赖过强；
-   - 中文路径 dirty 检测依赖 `core.quotePath=false` 临时配置；
+   - 中文路径 dirty 检测虽已不再依赖 `core.quotePath=false`，但仍建议后续切到 `git status --porcelain -z` 做更稳健解析；
    - `scripts/wt-flow.sh` wrapper 脱离仓库路径后不可移植；
    - `C03` 卡片契约本身自冲突，无法在不违约的前提下继续执行；
    - `logs/` 产物被忽略，usage 观测结果默认不会进入提交证据；
@@ -43,15 +43,15 @@
 | 编号 | 优先级 | 问题 | 影响 | 当前状态 | 临时绕过/现场处理 | 后续建议 |
 |---|---|---|---|---|---|---|
 | WF-01 | P0 | `wt-flow verify` 白名单缺少 `rg` | `C01` 无法 done_gate | 已现场修复 | 将 `rg` 加入 `ALLOWED_PREFIXES` | 补更系统的命令白名单回归测试 |
-| WF-02 | P0 | `wtimp dispatch` 未及时返回 JSON 回执 | `cardrun` 主控卡在 dispatch | 待修复 | 终止挂起进程，改为手工收口 `verify -> merge` | 给 dispatch 增加超时、JSON 校验、失败回收 |
-| WF-03 | P0 | `.state` 运行态文件会持续污染工作区 | `bootstrap/merge` 易被 dirty policy 阻断 | 待修复 | 显式传 `WT_FLOW_DIRTY_WHITELIST` | 将 active task 作用域下 `.state/<task_key>/` 内建加入白名单 |
-| WF-04 | P1 | 中文路径 dirty 检测依赖 `core.quotePath=false` | 白名单对中文路径匹配失败 | 待修复 | 仓库本地 `git config core.quotePath false` | 改用 `git status --porcelain -z` 或做路径反转义 |
-| WF-05 | P1 | `scripts/wt-flow.sh` 只是 wrapper，脱离仓库复制会失效 | 调试脚本副本容易误用 | 待修复 | 必须复制 `scripts/coder4/wt-flow.sh` 真正源码 | 明确单一真理源，避免 wrapper 被误当实体脚本 |
-| WF-06 | P1 | 历史 `.state` 路径与当前 task_key 容易混淆 | 容易误判真理源、误读状态 | 待修复 | 人工确认当前 task_key=`PP-20260306-workflow-gate-retirement` | 增加状态目录发现器和 stale state 提示 |
-| WF-07 | P0 | `C03` 卡片契约自冲突 | 不能“干净地”继续 wrapper 卡 | 待修复 | 暂停执行 `C03` | 先修 `C03` 契约/白名单，再继续 cardrun |
+| WF-02 | P0 | `wtimp dispatch` 未及时返回 JSON 回执 | `cardrun` 主控卡在 dispatch | 已修复 | 已补 dispatch timeout 契约下传、process-group 清理、唯一 JSON contract 校验 | 后续仅保留分级 timeout 策略评估，不再把 session 清理留给人工 |
+| WF-03 | P0 | `.state` 运行态文件会持续污染工作区 | `bootstrap/merge` 易被 dirty policy 阻断 | 已现场修复 | `wt-flow` / `bootstrap kernel` 已自动追加 active task `.state/<task_key>/` whitelist | 继续细化 lock/session 文件分层与运行态产物治理 |
+| WF-04 | P1 | 中文路径 dirty 检测依赖 `core.quotePath=false` | 白名单对中文路径匹配失败 | 已修复 | `wt-flow` / `bootstrap kernel` 已统一切到 `git status --porcelain -z`，并补中文/空格/rename/箭头文件名回归 | 后续只保留 parser 复用与 stale dirty 分层治理 |
+| WF-05 | P1 | `scripts/wt-flow.sh` 只是 wrapper，脱离仓库复制会失效 | 调试脚本副本容易误用 | 已修复 | wrapper 脱离仓库布局时会 fail-fast 提示“单一真理源=实体脚本” | 后续可再统一其他 wrapper 的错误提示风格 |
+| WF-06 | P1 | 历史 `.state` 路径与当前 task_key 容易混淆 | 容易误判真理源、误读状态 | 已修复 | `wt-flow status` 已显式输出 active task/state root/stale candidates 对照 | 后续只补归档/清理策略，不再让人工靠目录名猜真理源 |
+| WF-07 | P0 | `C03` 卡片契约自冲突 | 不能“干净地”继续 wrapper 卡 | 已修复 | 已确认 `WS-C03` / `vk_cards.json` 均纳入 `scripts/check_workflow_contract.py`，且 `legacy_wrapper_compat` 验收命令可通过 | 后续以回归测试防止 contract 漂移回流 |
 | WF-08 | P1 | `clarify_consistency_check` 缺字段导致 coverage 检查误报 | `cardrun` 前置校验初始失败 | 已现场修复 | 已补 4 个缺失字段 | 给契约字段完整性补回归测试 |
 | WF-09 | P1 | `vk_cards.json` 顶层缺少 `task_to_pr_mapping` | `bootstrap` 报 `CARDRUN_PR_MAPPING_MISSING` | 已现场修复 | 已补顶层映射 | 给 `vkplan` 产物增加 schema 级校验 |
-| WF-10 | P1 | `logs/` 被 `.gitignore` 忽略 | `C05` usage 观测证据默认不会随提交落库 | 待修复 | 提交时需 `git add -f logs/workflow-gate-usage.jsonl` | 明确日志产物策略，避免证据与代码分离 |
+| WF-10 | P1 | `logs/` 被 `.gitignore` 忽略 | `C05` usage 观测证据默认不会随提交落库 | 已修复 | 运行态日志仍留在 `logs/`，提交证据改由 `usage-report` 显式导出到 tracked `evidence/` 目录 | 后续只需让相关验收入口统一消费 report，不再依赖 `git add -f logs/...` |
 | WF-11 | P0 | `C07 full-gate` 把 7 天观察窗口建模为阻断型退役门禁 | `full-gate` 被 wall-clock 条件拦住，真实 blocker 容易被掩盖 | 已现场修复（已合入主线） | 移除 `ZERO_CALL_WINDOW_NOT_MATURE` / `USAGE_WINDOW_EMPTY`；`window-days` 仅保留报表语义 | 给 `full-gate` 补回归测试，禁止时间成熟条件再次回流到退役阻断 |
 | WF-12 | P1 | `G01` 工作流文档仍引用旧脚本命令 | 验收文档口径与统一入口迁移结果不一致 | 已现场修复（已合入主线） | 已切换到统一入口，并补入 `integration_gate` 主干可见性校验 | 将 `G01` 命令漂移检查纳入默认回归，避免再次回退到 legacy 命令 |
 | WF-13 | P0 | `C03` wrapper 验收未覆盖“物理薄壳化” | `C07` 才首次暴露 legacy 大体量实现仍驻留 | 已现场修复（已合入主线） | 将实现迁到 `workflow_contract_*_impl.py`，旧脚本收敛为 31 行薄壳 | 为“模块导入面 + CLI 壳厚度”补双重回归，防止再次只包一层壳 |
@@ -61,9 +61,9 @@
 | WF-17 | P0 | `C07 full-gate` 曾把 post-merge `integration_gate` 混入 pre-merge verify | `verify -> merge` 流程天然冲突，导致 C07 未合并前无法通过 full-gate | 已现场修复（已合入主线） | `full-gate` 默认跳过 `integration_gate`；显式 `--include-integration` 才阻断 | 将 post-merge 主干可见性校验下沉到 `G01` / 独立命令，固化 pre/post-merge 边界 |
 | WF-18 | P1 | `wt-flow merge` 在 card worktree 内直接切回基线分支 | 当 `master` 已被主工作区占用时，merge 在 worktree 内直接失败 | 已现场修复 | merge/cleanup 统一切到 `common repo root` 执行，card worktree 仅承担 rebase 与会话工作目录 | 为主仓/卡片 worktree merge 与 cleanup 持续补回归，防止再次把 checkout_root 当基线仓 |
 | WF-19 | P0 | `integration_gate` 默认读取 worktree-local `.state` 副本 | `G01` 在 gate worktree 内误报 `state.merge_results` 缺失 | 已现场修复（已合入主线） | 新增 common repo state 解析，默认回到主仓运行态真理源 | 为 worktree gate / integration_gate / canonical state path 补回归测试，防止再次读取 checkout 副本 |
-| WF-20 | P1 | `apply_patch` 指令与实际可用工具集不一致 | 代理容易因“应使用 apply_patch”告警反复空转，影响单卡执行效率 | 待修复 | 本轮改用 Python 文件写回，绕开 `exec_command -> apply_patch` 告警 | 对齐系统提示、技能提示与实际工具暴露；若无专用工具则禁止生成该告警 |
-| WF-21 | P1 | 默认 `python3` 与项目虚拟环境不一致 | 定向测试会先失败在 `No module named pytest`，掩盖真实回归结果 | 待修复 | 本轮显式改用 `venv/bin/python -m pytest` | 在测试/验证指令中先探测仓库解释器，再输出统一测试命令模板 |
-| WF-22 | P1 | 单测红绿循环被全局 coverage 门槛干扰 | RED 阶段即使命中真实失败，也会被仓库总 coverage<阈值二次覆盖，降低问题定位效率 | 待修复 | 本轮定向回归使用 `--no-cov`，最后再做收口验证 | 明确区分“开发期定向红绿验证”和“最终收口 coverage 门禁”，不要混成同一命令 |
+| WF-20 | P1 | `apply_patch` 指令与实际可用工具集不一致 | 代理容易因“应使用 apply_patch”告警反复空转，影响单卡执行效率 | 已修复（仓内侧） | `AGENTS` / 工程流手册已冻结“按实际工具面编辑 + `APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK`”契约 | 后续只需推动平台侧提示与真实工具暴露对齐 |
+| WF-21 | P1 | 默认 `python3` 与项目虚拟环境不一致 | 定向测试会先失败在 `No module named pytest`，掩盖真实回归结果 | 已修复 | 已新增 `scripts/repo_python.sh` 作为仓级测试解释器入口，当前解析到 `venv/bin/python` | 后续统一让测试/验证入口复用该脚本，不再裸用 `python3 -m pytest` |
+| WF-22 | P1 | 单测红绿循环被全局 coverage 门槛干扰 | RED 阶段即使命中真实失败，也会被仓库总 coverage<阈值二次覆盖，降低问题定位效率 | 已修复 | 已新增 `scripts/pytest_targeted.sh` 作为开发期定向入口，固定 `--no-cov` 并拒绝 `--cov*` 混用 | 最终收口继续保留 coverage 门禁，但不得回流到定向红绿命令 |
 
 ---
 
@@ -102,10 +102,21 @@
 - 终止挂起 dispatch 进程。
 - 使用已创建 worktree 手工执行：实现/提交/`wt-flow verify`/`wt-flow merge`。
 
+**本轮修复进展（2026-03-07）**
+1. 已确认 bridge 并非完全没有超时逻辑，而是默认超时固定为 `1800s`，且 kernel 没有配置入口把更短超时下传给 dispatch；
+2. 已新增 `dispatch_timeout_seconds` 契约，解析优先级为：`CLI override -> env(CODER4_DISPATCH_TIMEOUT_SECONDS) -> active_task.dispatch_timeout_seconds -> 默认值`；
+3. 当前 `build_wtimp_dispatch_request()` 会把 timeout 显式下传到 `WtimpDispatchRequest`；
+4. 已补回归测试，覆盖 timeout 解析、timeout 下传、timeout 错误映射。
+
+**本窗口收尾结果（2026-03-08）**
+1. `wtimp_dispatch_bridge` 已从 `subprocess.run(...)` 切换到受控 `Popen(..., start_new_session=True)` 路径，timeout / 非零退出 / 非法回执都会附带 `session_cleanup` 证据，并尝试回收当前 process-group；
+2. JSON 提取已废弃“任意 dict 兜底”策略，改为只接受唯一一个满足 dispatch contract 的结果对象；无 contract payload 或出现多个候选 payload 都会 `fail-fast` 为 `CARDRUN_EXECUTION_RESULT_INVALID`；
+3. payload 校验已升级为强类型收口：`ok` 必须为 `bool`，`changed_files` 必须为 `list[str]`，`acceptance_results` 必须为 `list[dict]`，避免日志漂移或宽松 coercion 伪造成功证据；
+4. 定向回归已通过：`tests/unit/test_coder4_wtimp_dispatch_bridge.py` 与 `tests/unit/test_coder4_dispatch_executor.py` 当前合计 `13 passed`。
+
 **后续修复建议**
-1. 给 dispatch 增加硬超时与超时错误码；
-2. 对 JSON 回执做 schema 校验与超时回收；
-3. 明确挂起时的 session 清理策略，避免残留活动会话。
+1. 后续若 `wtimp` 引入主动 `double-fork`/脱离 session 的后台任务，需要再评估跨 session 清理策略；
+2. 视真实卡片耗时分布，再决定默认 `600s` 是否拆成不同卡片类型的分级 timeout。
 
 ---
 
@@ -126,10 +137,22 @@
 - 每次执行显式传：
   - `WT_FLOW_DIRTY_WHITELIST='docs/plans/,docs/内部参考/迭代需求/,docs/内部参考/任务拆解/2026-03-06_工程减法治理/.state/PP-20260306-workflow-gate-retirement/'`
 
+**本次修复策略（2026-03-07）**
+1. `wt-flow` 与 `bootstrap kernel` 都应基于当前 `active_task.task_split_dir + task_key` 自动推导 `.state/<task_key>/` 前缀；
+2. 自动推导出的 `.state/<task_key>/` 只作为 dirty whitelist 的追加项，不覆盖调用方显式传入的自定义白名单；
+3. 运行态 `.state/<task_key>/` 内的 `task-runner-state.json`、`task-ledger.jsonl`、`coder4-idempotency.json`、lock/session 文件默认放行，但其他仓库脏改动仍应继续阻断。
+
+**本轮现场修复（已完成）**
+1. `scripts/coder4/wt-flow.sh` 新增 active-task state prefix 推导，`_dirty_whitelist_csv()` 会自动追加：
+   - `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/`
+2. `scripts/coder4/coder4_bootstrap_kernel.py` 新增 `merge_dirty_whitelist()`，会把 active task 的 `.state/<task_key>/` 自动并入 dirty whitelist；
+3. `wt-flow merge` 与 `build_kernel_context()` 现在都能在 active task 运行态文件变脏时继续执行，不再要求每次手传整段 whitelist；
+4. 为了让新增 whitelist 在中文路径下也生效，本轮同时补了 git quoted path 解码，避免再次依赖 `core.quotePath=false`。
+
 **后续修复建议**
-1. 基于当前 active task 自动推导 `.state/<task_key>/` 白名单；
-2. 区分“运行态真理源脏文件”与“用户未提交变更”；
-3. 对 lock 文件做专门处理，避免反复干扰 merge。
+1. 继续区分“运行态真理源脏文件”与“用户未提交变更”；
+2. 对 lock/session 文件做专门处理，避免反复干扰 merge；
+3. 后续可继续收敛到 `git status --porcelain -z`，进一步提升路径解析稳健性。
 
 ---
 
@@ -138,17 +161,27 @@
 **现象**
 - 初始状态下，中文路径在 `git status --porcelain` 中被转义，导致 dirty whitelist 对中文目录匹配失败。
 
-**现场处理**
-- 临时执行：
+**现场处理（旧绕过）**
+- 早期临时依赖：
   - `git config --local core.quotePath false`
 
+**本轮修复进展**
+1. `wt-flow.sh` 新增 `_decode_git_quoted_path()`，dirty path 提取不再直接依赖未转义路径；
+2. `coder4_bootstrap_kernel.py` 新增 `_decode_git_status_path()`，会把 git quoted path 还原为真实 UTF-8 路径；
+3. `WF-03` 新增回归测试已经覆盖“中文 task split dir + quoted path + active-task state whitelist”场景。
+
+**本窗口收尾结果（2026-03-08）**
+1. `wt-flow.sh` 与 `coder4_bootstrap_kernel.py` 的 dirty path 真理源已统一切到 `git status --porcelain -z --untracked-files=no`，不再依赖文本行级解析；
+2. rename/copy 现在按 NUL 分隔记录读取“目标路径”，不再依赖 `"old -> new"` 的文本箭头切割，因此文件名自身包含 ` -> ` 时也能稳定命中 whitelist；
+3. 旧的 quoted-path decode 补丁已从主路径删除：shell 侧不再做引号/转义还原，Python 侧不再做 `ast.literal_eval` 型补码；
+4. 已补回归：覆盖“中文目录 + 空格 + rename + 文件名包含 ` -> `”场景；定向与相邻回归当前均通过。
+
 **问题本质**
-- 当前 dirty path 提取逻辑默认依赖未转义路径字符串，不够稳健。
+- 当前 dirty path 提取逻辑原本默认依赖未转义路径字符串，不够稳健；本轮已先修正最直接的 quoted path 问题，但底层协议仍可进一步升级。
 
 **后续修复建议**
-1. 优先改为 `git status --porcelain -z` + NUL 分隔解析；
-2. 不再依赖本地 git config；
-3. 给中文路径、空格路径、rename 路径补回归用例。
+1. 后续若 `wt-flow` 与 kernel 继续扩展 dirty policy，优先抽取共享解析契约，避免 shell/python 两侧再次漂移；
+2. 将来可继续细分“运行态真理源脏改”与“真实用户改动”两类 evidence，但不应回退到文本补码方案。
 
 ---
 
@@ -165,9 +198,14 @@
   - `scripts/coder4/wt-flow.sh`
 
 **后续修复建议**
-1. 明确 wrapper 与实体脚本的单一真理源关系；
-2. 给 wrapper 增加更清晰的报错信息，避免脱离仓库执行时静默踩坑；
-3. 在工程流文档里显式标注“调试请使用 `scripts/coder4/wt-flow.sh`”。
+1. 后续把同类 wrapper 的错误提示风格统一到一个 helper，避免文案再次漂移；
+2. 若需脱离仓库调试，始终复制实体脚本 `scripts/coder4/wt-flow.sh`，不要再复制 wrapper；
+3. 新增 wrapper 时应同步声明“单一真理源 + 脱仓 fail-fast”规则。
+
+**本窗口收尾结果（2026-03-08）**
+1. `scripts/wt-flow.sh` 现在会在实体脚本缺失时输出明确报错，说明自己只是 wrapper，并指向单一真理源 `scripts/coder4/wt-flow.sh`；
+2. 仓库内正常布局下，wrapper 仍保持透明转发，不改变既有 CLI 入口行为；
+3. 已在工程流手册中明确：`scripts/wt-flow.sh` 仅是 wrapper，调试复制请使用实体脚本。
 
 ---
 
@@ -180,10 +218,20 @@
 **影响**
 - 若误读历史目录，容易错误判断 active session、ledger、task-runner-state 的真理源。
 
+**根因**
+- `wt-flow status` 之前只展示 session/worktree 级信息，没有把“当前 active task 文件、解析得到的 task_key、命中的 state root、同 split_dir 下的历史 state 候选”显式打印出来；
+- 一旦目录里同时存在历史 `.state/<old_task_key>/` 与当前 `.state/<active_task_key>/`，人工只能靠目录名猜测真理源，状态发现职责与历史残留治理职责被混在一起。
+
+**本窗口收尾结果（2026-03-08）**
+1. `scripts/coder4/wt-flow.sh status` 现在会先输出 `ACTIVE_TASK_FILE`、`ACTIVE_TASK_SPLIT_DIR`、`ACTIVE_TASK_KEY`、`TASK_STATE_ROOT`，把当前解析到的状态真理源显式化；
+2. 同一 `task_split_dir` 下若存在其他 `.state/<task_key>/` 目录，会额外输出 `STALE_STATE_CANDIDATES=<...>`；当前 active task 会被排除，不再要求人工自己比对目录树；
+3. 已补最小回归 `test_wt_flow_status_reports_active_state_root_and_stale_candidates`，覆盖“active state root + stale state candidates 同时存在”的诊断场景；
+4. 相邻回归已通过：`tests/unit/test_coder4_wt_flow_verified_state.py` 与 `tests/unit/test_wt_flow_wrapper_entrypoint.py` 当前合计 `10 passed`。
+
 **后续修复建议**
-1. 给状态探测命令增加“当前 active task_key 与命中 state_dir”的对照输出；
-2. 发现同 split_dir 下存在多个 task_key 时输出 `STALE_STATE_CANDIDATES` 提示；
-3. 设计归档/清理策略，避免历史残留持续干扰人工操作。
+1. 若后续新增历史状态清理/归档能力，应保持为独立命令，不要把 `status` 再做成带副作用的清理入口；
+2. 为历史 `.state/<task_key>/` 制定归档/清理策略，减少 stale candidates 长期堆积；
+3. 后续若引入更强的状态浏览器/UI，也应继续保留“active root 明示 + stale candidates 提示”的只读诊断契约。
 
 ---
 
@@ -203,10 +251,15 @@
 **结论**
 - `C03` 不是“实现没开始”，而是**卡片契约不闭合**，继续编码会违反白名单边界。
 
+**本窗口确认结果（2026-03-08）**
+1. `WS-C03_P1_L1旧脚本wrapper兼容壳.md` 与 `vk_cards.json` 当前都已把 `scripts/check_workflow_contract.py` 纳入白名单 / `file_scope`；
+2. 真实验收命令 `python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -` 当前返回 `ok=true`；
+3. 因此 `WF-07` 的原始 blocker 已被后续主线演进顺带修复，本窗口新增回归测试，仅负责把问题文档状态从“待修复”回填为“已修复”。
+
 **后续修复建议**
-1. 先修 `C03` 契约：把 `scripts/check_workflow_contract.py` 纳入 file whitelist；或
-2. 拆一张独立卡片，专门实现 `legacy_wrapper_compat` mode 与兼容性自检；
-3. 明确 wrapper 兼容测试不应依赖可能递归回流的新入口分发链路。
+1. 为 `C03` 契约闭合补默认回归，防止 `WS` / `vk_cards` / 验收命令再次漂移；
+2. 后续若调整 wrapper 退役策略，应同步校验 `file_scope`、`acceptance_checks` 与 `legacy_wrapper_compat` runner 的一致性；
+3. 执行器侧不应再为这类 contract 漂移添加 fallback，保持“契约先闭合，再执行”的原则。
 
 ---
 
@@ -253,10 +306,20 @@
 - 本轮通过人工约定：提交 usage 观测卡时必须显式执行：
   - `git add -f logs/workflow-gate-usage.jsonl`
 
+**问题本质**
+- 运行态滚动日志与应入提交的验收证据被错误建模成同一个文件，导致“日志路径被忽略”和“证据需要入库”天然冲突。
+
+**本窗口收尾结果（2026-03-08）**
+1. `logs/workflow-gate-usage.jsonl` 继续只承担运行态观测台账；`usage-report` 新增 `--log-path` 与 `--report-output` 契约，把可提交证据显式导出到 tracked report 文件；
+2. `C05` 契约已改为导出 `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`，`file_scope` 不再要求提交 ignored `logs/` 文件；
+3. `workflow-gate-retirement` 的设计/需求/实现计划、WS 文档与 `vk_cards.json` 已统一改为同一条导出命令：
+   - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`
+4. 已补最小回归 `tests/unit/test_workflow_gate_usage_report_contract.py`，并联相邻 `tests/unit/test_check_workflow_contract_temporal_rules.py` 当前合计 `5 passed`。
+
 **后续修复建议**
-1. 为 workflow-gate usage 日志单独定义产物策略：提交基线样本 / 运行态滚动日志二选一；
-2. 若保留提交样本，建议迁到非忽略目录或提供导出命令；
-3. 在 `C05`/`C07` 验收命令中增加“观测证据文件存在性”提示。
+1. 其他需要“运行态日志 + 提交证据”双轨的链路，应复用“runtime log + exported report”模型，不要再把 ignored log 当成提交产物；
+2. 若后续 `full-gate` / `G01` 需要消费 usage 证据，优先消费 tracked report，而不是直接依赖 ignored `logs/`；
+3. 如需保留人工查看日志体验，可继续保留 `logs/` 作为滚动台账，但不再承担提交证据职责。
 
 ---
 
@@ -507,10 +570,16 @@
 **问题本质**
 - 这是“系统提示 / 开发者约束 / 实际工具暴露”三者不一致的问题，本质属于工程流指令冲突，而非业务代码缺陷。
 
+**本窗口收尾结果（2026-03-08）**
+1. `AGENTS.md` 已新增“文件编辑工具契约（强制）”：文件编辑以当前会话**实际暴露**的工具集为准；若没有独立 `apply_patch` 入口，禁止通过 `exec_command` 包装 `apply_patch`；
+2. 工程流手册已新增 `4.6 文件编辑工具契约`，并冻结 `APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK` 作为仓内降级标记；
+3. `CLAUDE.md` 已通过 `python3 scripts/sync_rules_to_cc.py --only rules` 同步镜像，避免 Codex/Claude 入口口径再次分叉；
+4. 已补最小回归 `tests/unit/test_workflow_tooling_contract_docs.py`，红灯先确认缺失，再验证当前 `2 passed`。
+
 **后续修复建议**
-1. 若运行环境没有独立 `apply_patch` 工具，就不要继续给出“必须使用 apply_patch tool”的硬提示；
-2. 若平台要求使用 `apply_patch`，则应把该工具真实暴露给代理，而不是只在文案中要求；
-3. 在 `jjk-imp/jjk-cardrun` 指令模板中增加“文件编辑优先级”约定，避免代理在工具冲突中反复试错。
+1. 平台侧若仍未暴露独立 `apply_patch` 工具，就不应继续向代理发出“必须使用 apply_patch tool”的硬提示；
+2. 若平台后续正式暴露独立 `apply_patch` 工具，应同步收敛系统提示与工具清单，避免仓内 fallback 长期存在；
+3. 其他执行入口（如 `jjk-imp/jjk-cardrun` 的外层平台提示）若仍存在同类工具面冲突，应统一复用本条契约，不再各自发明 workaround。
 
 ---
 
@@ -537,10 +606,16 @@
 **问题本质**
 - 当前执行链没有先解析“仓库测试解释器真理源”，导致命令模板与仓库实际环境漂移。
 
+**本窗口收尾结果（2026-03-08）**
+1. 已新增 `scripts/repo_python.sh` 作为仓级测试解释器单一入口；解析优先级固定为：`VK_RUNTIME_VENV -> venv -> .venv -> .vibe/venv -> python3 -> python`；
+2. `AGENTS.md` 已新增“测试解释器契约（强制）”，要求测试/验证命令先解析仓库解释器，禁止默认裸用 `python3 -m pytest`；
+3. 测试指南已改为通过 `PYTHON_BIN="$(bash scripts/repo_python.sh)"` 运行 pytest；当前仓库实测解析结果为 `/Users/jijingkun/bojxAI/fastapi/venv/bin/python`；
+4. 已补最小回归 `tests/unit/test_repo_python_script.py`，先红灯确认脚本缺位，再验证当前 `3 passed`。
+
 **后续修复建议**
-1. 在测试/验证类技能中先探测 `venv/bin/python`、`.venv/bin/python` 再回落到系统 `python3`；
-2. 在工程流文档中明确“本仓默认测试解释器”的优先级；
-3. 将解释器探测结果纳入 `jjk-verify` 报告，避免再次出现“测错环境”。
+1. 测试/验证类入口后续统一复用 `scripts/repo_python.sh`，不要各自维护一套解释器猜测逻辑；
+2. `jjk-verify` 报告继续保留“实际命中解释器”字段，避免再次出现“测错环境”；
+3. 若未来仓内统一迁移到其他 venv 目录，只需收敛修改 `scripts/repo_python.sh`，不要批量回改所有测试命令模板。
 
 ---
 
@@ -564,10 +639,16 @@
 **问题本质**
 - 当前工程流没有区分“开发期最小回归验证”和“最终收口门禁验证”两种测试语义。
 
+**本窗口收尾结果（2026-03-08）**
+1. 已新增 `scripts/pytest_targeted.sh` 作为开发期定向 pytest 单一入口：固定注入 `--no-cov`，并统一通过 `scripts/repo_python.sh` 解析解释器；
+2. `AGENTS.md` 已新增“测试语义分层（强制）”，明确 TDD/调试阶段走 targeted 入口，最终收口/门禁验证继续走常规 pytest/coverage 命令；
+3. 定向入口若收到 `--cov*` 参数会直接以 `PYTEST_TARGETED_COVERAGE_MIXED` fail-fast，禁止把 coverage 语义带回 RED 阶段；
+4. 已补最小回归 `tests/unit/test_pytest_targeted_script.py`，先红灯确认脚本缺位，再验证当前 `2 passed`。
+
 **后续修复建议**
-1. 为 TDD/调试阶段提供默认 `--no-cov` 的定向测试模板；
-2. 将 coverage 校验收敛到最终收口命令，而不是所有单测命令；
-3. 在 `jjk-test/jjk-verify` 指令中显式区分 `RED_GREEN_CHECK` 与 `FINAL_GATE_CHECK`。
+1. 开发期定向验证统一复用 `scripts/pytest_targeted.sh`，不要再手工拼接 `--no-cov`；
+2. 最终收口 coverage 门禁继续保留在正式验证命令，不要回流到 targeted 入口；
+3. 其他测试/验证文档若仍把两类命令混写，应统一收敛到“targeted vs final gate”双入口模型。
 
 ---
 
@@ -633,9 +714,9 @@
 
 | 波次 | 目标 | 建议纳入的问题 |
 |---|---|---|
-| Wave 1 | 恢复工程流稳定执行 | WF-02, WF-03, WF-04, WF-07 |
+| Wave 1 | 恢复工程流稳定执行 | WF-02, WF-07 |
 | Wave 2 | 让退役门禁与文档口径稳定收口 | WF-10 |
-| Wave 3 | 降低 worktree / merge 误操作成本 | WF-05, WF-06, WF-18 |
+| Wave 3 | 降低 worktree / merge 误操作成本 | WF-04, WF-05, WF-06, WF-18 |
 | Wave 4 | 强化契约与回归测试 | 将 WF-01、WF-08、WF-09、WF-11、WF-12、WF-13、WF-14、WF-15、WF-16、WF-17、WF-19 的现场修复固化为默认回归测试 |
 | Wave 5 | 优化指令与工具链约定 | WF-20, WF-21, WF-22 |
 
@@ -644,7 +725,6 @@
 ## 5. 推荐后续卡片
 
 1. **P0**：`cardrun_dispatch JSON 回执与超时治理`
-2. **P0**：`wt-flow dirty policy active-task 白名单内建化`
 3. **P0**：`修正 C03 契约与 legacy_wrapper_compat 验收路径`
 4. **P0**：`jjk-plan/jjk-vkplan 默认接入 temporal gate 校验`
 5. **P1**：`workflow-gate usage 日志产物策略治理`
@@ -677,4 +757,3 @@
 - 退役门禁观测证据：
   - `logs/workflow-gate-usage.jsonl`
   - `python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -`
-
