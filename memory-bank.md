@@ -30,6 +30,7 @@
 
 - 2026-03-08｜Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
+- 2026-03-08｜编排层禁止硬编码语义关键词词表（ACTIVE）→ `AGENTS.md`
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -319,3 +320,13 @@
 - 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/human.tsx`、`web/src/components/chat/messages/ai.tsx`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、会话消息渲染链路。
 - 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，或针对图表工作台引入独立内容栅格，可在保留单一 token 入口的前提下按场景拆分。
 - 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`
+### 2026-03-08 编排层禁止硬编码语义关键词词表
+- 状态：ACTIVE
+- 决策主题：把“自然语言语义识别不得下沉到编排层”冻结为仓级治理门禁
+- 背景与问题：Codex 在修复聊天/记忆等链路时，倾向于在 `chat_service`、API endpoint 等编排层直接补 `*_HINTS`、`*_KEYWORDS` 或 substring 判断，短期可跑通，长期会把语义 owner 打散到多层
+- 最终决策：在 `AGENTS.md` 与 `.cursor/rules/core.mdc` 明确禁止编排层新增业务语义关键词词表/正则词表/substring 判定；同时新增静态边界测试，发现 `*_HINTS/*_KEYWORDS/*_TRIGGERS` 直接 fail-fast
+- 取舍理由：项目未上线，优先用治理门禁阻断错误设计继续扩散，而不是接受“先补词表再慢慢收敛”的伪修复路径
+- 影响范围：`AGENTS.md`、`.cursor/rules/core.mdc`、`tests/unit/test_semantic_keyword_boundary_gate.py`
+- 回退/失效条件：若未来编排层被完全替换为统一的 schema-driven contract adapter，且语义规则可由中心化 policy 自动校验，可将静态测试迁移到新的治理入口；在此之前保持仓级 fail-fast
+- 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`tests/unit/test_semantic_keyword_boundary_gate.py`
+

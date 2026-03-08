@@ -25,6 +25,7 @@ alwaysApply: true
     - 安全漏洞、兼容性问题、已知 Bug
     - 若 MCP 工具不可用，必须明确标注”基于本地知识推断，需人工复核”并说明降级原因
 
+15. **语义判定边界**: 编排层（如 `app/services/**`、`app/api/**`、router/controller）禁止通过关键词词表、正则词表、substring 命中或 `*_HINTS/*_KEYWORDS/*_TRIGGERS` 常量执行自然语言语义识别；语义判定必须归属于 `intent/policy/resolver` 层，并以结构化 contract（如 `decision/reason_code/slot_key/needs_clarification`）对外输出；若现有判定置信度不足，应返回拒绝/澄清 contract，而不是把语义 fallback 下沉到编排层
 # 技术栈
 
 - **后端**: FastAPI + LangGraph + SQLAlchemy 2.0
