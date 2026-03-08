@@ -367,7 +367,7 @@ export function Thread() {
                 !chatStarted && "flex flex-col items-center justify-center", // Center content when chat hasn't started
               )}
               contentClassName={cn(
-                "py-8 max-w-4xl mx-auto flex flex-col gap-4 w-full transition-all duration-300",
+                "chat-stream-shell py-8 mx-auto flex flex-col gap-4 transition-all duration-300",
                 !chatStarted ? "items-center justify-center min-h-[50vh]" : ""
               )}
               content={
@@ -435,7 +435,7 @@ export function Thread() {
           </StickToBottom>
 
           <footer className="w-full bg-white/80 backdrop-blur-md sticky bottom-0 z-10 transition-all duration-300 pb-[env(safe-area-inset-bottom)]">
-            <div className="relative mx-auto max-w-4xl w-full">
+            <div className="chat-stream-shell relative mx-auto">
               <ChatInput
                 input={input}
                 setInput={setInput}

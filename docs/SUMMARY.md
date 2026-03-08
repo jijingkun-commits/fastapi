@@ -164,6 +164,10 @@
 * [意图优化实施方案](内部参考/迭代需求/意图优化_implementation_plan.md)
 * [聊天多会话并发重分析需求](内部参考/迭代需求/聊天多会话并发重分析_requirements.md)
 * [聊天多会话并发重分析实施方案](内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md)
+* [聊天多会话并发需求（2026-03-06冻结版）](内部参考/迭代需求/chat-multi-session-concurrency_requirements.md)
+* [聊天多会话并发实施方案（2026-03-06冻结版）](内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md)
+* [preference-intent-judge需求（LLM记忆判定与原子批量写入）](内部参考/迭代需求/preference-intent-judge_requirements.md)
+* [preference-intent-judge实施方案（LLM记忆判定与原子批量写入）](内部参考/迭代需求/preference-intent-judge_implementation_plan.md)
 * [cardrun内置wtimp执行器需求](内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md)
 * [cardrun内置wtimp执行器实施方案](内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md)
 

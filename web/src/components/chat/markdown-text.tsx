@@ -468,12 +468,12 @@ const defaultComponents: Partial<Components> = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+const MarkdownTextImpl: FC<{ children: string; className?: string }> = ({ children, className }) => {
   // 解析 <think></think> 标签
   const parts = parseThinkTags(children);
 
   return (
-    <div className="markdown-content">
+    <div className={cn("markdown-content", className)}>
       {parts.map((part, index) => {
         if (part.type === "thinking") {
           return <ThinkingBlock key={index} content={part.content} />;

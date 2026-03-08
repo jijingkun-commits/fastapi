@@ -1,7 +1,7 @@
 # AI 技能库
 
 > 系统集成的 AI 技能包清单与追踪。
-> **更新日期**: 2026-01-27
+> **更新日期**: 2026-03-08
 > **当前总数**: 24 个
 
 ---
@@ -70,10 +70,10 @@ Agent 会根据用户 Query 的语义相似度自动挂载相关技能。
 
 ## 5. 同步机制
 
-1. **文件即导入源**: 所有技能源文件位于 `app/ai/skills/<skill-id>/SKILL.md`
-2. **definition/version 即 runtime 真理源**: 导入流程会同步 `t_agent_skill_definitions` / `t_agent_skill_versions`；聊天运行态 catalog 与正文加载只读这两层
-3. **`t_agent_skills` 仅保留兼容用途**: 仅用于兼容、导入回写与调试检索，不再作为 progressive loader 主路径真理源
-4. **手动维护**: 更新技能请直接修改 `SKILL.md` 文件，然后重启应用或执行导入
+1. **数据库即唯一真理源**: 技能定义、版本、catalog metadata、向量与可见性统一维护在 `t_agent_skill_definitions` / `t_agent_skill_versions` / `t_user_skill_bindings`
+2. **运行时只读 versioned 模型**: 聊天运行态 catalog、正文加载、管理面列表与详情统一读取 definition/version/binding 聚合视图
+3. **`t_agent_skills` 不再参与正式主路径**: 该表仅保留历史兼容/调试遗留，不得作为导入、runtime、admin 的真理源
+4. **本地 `SKILL.md` / 导入脚本已退役**: 禁止再通过 `app/ai/skills`、`scripts/data/import_skills.py` 或重启扫描回写数据库
 
 ## 6. Progressive Loader 运行时口径
 

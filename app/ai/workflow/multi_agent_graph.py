@@ -3170,6 +3170,14 @@ def _handle_messages_mode_tool_message(
     tool_output = tool_content[:200]
     emit_tool_end(ctx.writer, tool_name, tool_output, node=ctx.node_name)
 
+    if tool_name == "load_skills":
+        load_status_message = _build_load_skills_status_message(
+            message,
+            fallback_visible_skill_count=ctx.state.get("visible_skill_count"),
+        )
+        if load_status_message:
+            emit_status(ctx.writer, message=load_status_message, node=ctx.node_name)
+
     if tool_name and "tavily" in (tool_name or "").lower():
         logger.info("联网搜索返回: tool=%s, 结果长度=%s", tool_name, len(tool_content))
 
@@ -3179,6 +3187,50 @@ def _handle_messages_mode_tool_message(
         logger.info("[%s] 从 ToolMessage 提取到 kb_images: %s 个", ctx.node_name, len(new_images))
 
     return True
+
+
+def _build_load_skills_status_message(
+    message: ToolMessage,
+    fallback_visible_skill_count: Any = 0,
+) -> Optional[str]:
+    """将 load_skills 结果压缩为单行运行态提示。"""
+
+    additional_kwargs = getattr(message, "additional_kwargs", None)
+    runtime_payload = additional_kwargs.get("skill_runtime") if isinstance(additional_kwargs, dict) else None
+    loaded_skills_payload = []
+    visible_skill_count: Optional[int] = None
+
+    if isinstance(runtime_payload, dict):
+        raw_visible_skill_count = runtime_payload.get("visible_skill_count")
+        try:
+            visible_skill_count = max(int(raw_visible_skill_count or 0), 0)
+        except (TypeError, ValueError):
+            visible_skill_count = 0
+        if isinstance(runtime_payload.get("loaded_skills"), list):
+            loaded_skills_payload = runtime_payload.get("loaded_skills") or []
+
+    if visible_skill_count is None:
+        try:
+            visible_skill_count = max(int(fallback_visible_skill_count or 0), 0)
+        except (TypeError, ValueError):
+            visible_skill_count = 0
+
+    loaded_skill_ids: List[str] = []
+    for item in loaded_skills_payload:
+        if not isinstance(item, dict):
+            continue
+        skill_id = str(item.get("skill_id") or "").strip()
+        if not skill_id or skill_id in loaded_skill_ids:
+            continue
+        loaded_skill_ids.append(skill_id)
+
+    if not loaded_skill_ids:
+        return f"已预装 {visible_skill_count} 个可见技能目录，尚未加载具体技能。"
+
+    preview = "、".join(loaded_skill_ids[:3])
+    if len(loaded_skill_ids) > 3:
+        preview = f"{preview} 等 {len(loaded_skill_ids)} 个"
+    return f"已预装 {visible_skill_count} 个可见技能目录，已加载技能：{preview}。"
 
 
 def _emit_messages_mode_token(
@@ -4529,7 +4581,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             )
             emit_status(
                 writer,
-                message=f"已预装 {visible_skill_count} 个可见技能目录，模型可按需调用 load_skills。",
+                message=f"已预装 {visible_skill_count} 个可见技能目录，尚未加载具体技能。",
                 node="preprocess",
             )
         elif content:

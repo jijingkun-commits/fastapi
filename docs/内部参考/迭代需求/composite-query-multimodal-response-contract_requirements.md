@@ -1,6 +1,6 @@
 # composite-query-multimodal-response-contract 需求文档
 
-> 更新时间：2026-03-07 00:00 +08:00  
+> 更新时间：2026-03-08 13:56 +08:00  
 > 上游设计：`docs/plans/2026-03-06-composite-query-multimodal-response-design.md`  
 > 文档目标：定义 WHAT（需求合同、验收门禁、追溯矩阵），供 `composite-query-multimodal-response-contract_implementation_plan.md` 承接
 
@@ -17,7 +17,7 @@
 - 前端解析与渲染：`web/src/lib/backend.ts`、`web/src/hooks/useSSEStream.ts`、`web/src/components/chat/messages/ai.tsx`、`web/src/types/message.ts`
 - 回放与持久化归一：`web/src/lib/message-normalizer.ts`、`app/repositories/chat_repo.py`、`app/ai/workflow/multi_agent_graph.py`
 - 契约与文档：`contracts/streaming/result-event.schema.json`、`docs/开发文档/代码解读/SSE事件协议.md`、`docs/产品文档/聊天系统需求.md`、`docs/api/streaming-events.asyncapi.yaml`、`docs/api/openapi.yaml`
-- CI 与门禁：`scripts/contract/check_result_contract.sh`、`.github/workflows/contract-gate.yml`
+- CI 与门禁（新增产物）：`scripts/contract/check_result_contract.sh`、`.github/workflows/contract-gate.yml`
 
 ### 1.3 非范围
 - 不改 `/api/v1/chat/stream` 路由路径。
@@ -41,10 +41,17 @@ requirements_contract:
     missing_blocks: []
     risk_level: medium
     risk_counterexamples_count: 5
+    handoff_contract_ready: true
     product_contract_ready: true
+    implementation_seed_count: 5
+    semantic_frozen: true
+    contract_source_decided: true
+    handoff_seed_alignment_ok: true
+    parallel_dependency_ready: true
+    replay_canonical_field_set: true
   owner: "chat-contract"
   approver: "jijingkun"
-  updated_at: "2026-03-07 00:00"
+  updated_at: "2026-03-08 13:56"
 ```
 
 ## 3. 产品契约矩阵（PRD-Lite 承接）
@@ -218,7 +225,7 @@ traceability_matrix:
     feature_id: P1-result-contract-source
     task_id: T-01
     tc_id: TC-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-02
     fr_id: FR-02
@@ -232,21 +239,21 @@ traceability_matrix:
     feature_id: P1-replay-canonical-migration
     task_id: T-03
     tc_id: TC-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_coverage_reconcile.py -q
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-04
     fr_id: FR-04
     feature_id: P1-contract-ci-gates
     task_id: T-05
     tc_id: TC-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/contract/check_result_contract.sh
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/contract/check_result_contract.sh
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-05
     fr_id: FR-05
     feature_id: P1-result-contract-source
     task_id: T-01
     tc_id: TC-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-06
     fr_id: FR-06
@@ -260,6 +267,6 @@ traceability_matrix:
     feature_id: P1-streaming-contract-docs
     task_id: T-04
     tc_id: TC-07
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
 ```

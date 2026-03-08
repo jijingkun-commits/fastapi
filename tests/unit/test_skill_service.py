@@ -513,53 +513,12 @@ def test_skill_retrieval_vector_should_raise_without_legacy_fallback(monkeypatch
 
 
 
-class _FakeSkill:
-    """测试导入流程用的假 Skill ORM 对象。"""
-
-    def __init__(self, skill_id: str, file_hash: str):
-        self.skill_id = skill_id
-        self.file_hash = file_hash
-        self.name = ""
-        self.description = ""
-        self.content = ""
-        self.embedding = None
-        self.scope = SkillService.DEFAULT_SCOPE
-        self.priority = SkillService.DEFAULT_PRIORITY
-        self.auto_enabled = True
-        self.is_enabled = True
-        self.trigger_phrases: List[str] = []
-        self.conflicts_with: List[str] = []
-
-
-class _FakeResult:
-    """模拟 SQLAlchemy execute 结果。"""
-
-    def __init__(self, item: Any):
-        self._item = item
-
-    def scalar_one_or_none(self) -> Any:
-        return self._item
-
-
 class _FakeSession:
     """模拟最小化 Session 行为。"""
 
-    def __init__(self, records: Dict[str, _FakeSkill]):
-        self.records = records
-        self.added: List[_FakeSkill] = []
+    def __init__(self):
         self.commit_count = 0
         self.rollback_count = 0
-
-    def execute(self, statement) -> _FakeResult:  # noqa: ANN001
-        params = statement.compile().params
-        skill_id = next(iter(params.values()), None)
-        if skill_id is None:
-            return _FakeResult(None)
-        return _FakeResult(self.records.get(str(skill_id)))
-
-    def add(self, skill: _FakeSkill) -> None:
-        self.records[skill.skill_id] = skill
-        self.added.append(skill)
 
     def commit(self) -> None:
         self.commit_count += 1
@@ -568,8 +527,8 @@ class _FakeSession:
         self.rollback_count += 1
 
 
-def test_skill_ingest_import_is_idempotent_for_unchanged_file(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """同文件哈希重复导入应跳过写入。"""
+def test_skill_ingest_import_should_fail_fast_when_local_file_path_used(tmp_path: Path) -> None:
+    """本地 SKILL.md 导入入口应显式退役。"""
 
     skill_file = _build_skill_file(
         tmp_path,
@@ -583,153 +542,22 @@ description: 优化文案表达
 """,
     )
 
-    parsed = SkillService._parse_skill_file(skill_file)
-    assert parsed is not None
-    file_hash = SkillService._compute_file_hash(parsed["content"])
-
-    session = _FakeSession(records={"copywriter": _FakeSkill("copywriter", file_hash)})
-    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2])
-    monkeypatch.setattr(SkillService, "_sync_versioned_records", classmethod(lambda cls, db, parsed, file_hash, embedding: None))
-
-    updated = SkillService.import_skill(skill_file, session, force=False)
-
-    assert updated is False
-    assert session.commit_count == 0
+    with pytest.raises(RuntimeError, match="本地 SKILL.md / skills 目录导入链已退役"):
+        SkillService.import_skill(skill_file, object(), force=False)
 
 
-def test_skill_ingest_import_should_backfill_versioned_records_when_legacy_unchanged(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """旧兼容层命中但版本层缺失时，仍应回填 definition/version。"""
+def test_skill_ingest_import_all_should_fail_fast_when_local_directory_used(tmp_path: Path) -> None:
+    """本地目录批量导入入口应显式退役。"""
 
-    skill_file = _build_skill_file(
-        tmp_path,
-        "copywriter",
-        """---
-name: 文案润色专家
-description: 优化文案表达
----
-
-# 文案润色专家
-""",
-    )
-
-    parsed = SkillService._parse_skill_file(skill_file)
-    assert parsed is not None
-    file_hash = SkillService._compute_file_hash(parsed["content"])
-
-    session = _FakeSession(records={"copywriter": _FakeSkill("copywriter", file_hash)})
-    sync_calls = []
-    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.1, 0.2])
-    monkeypatch.setattr(
-        SkillService,
-        "_sync_versioned_records",
-        classmethod(lambda cls, db, parsed, file_hash, embedding: sync_calls.append(parsed["skill_id"]) or True),
-    )
-
-    updated = SkillService.import_skill(skill_file, session, force=False)
-
-    assert updated is True
-    assert sync_calls == ["copywriter"]
-    assert session.commit_count == 1
+    with pytest.raises(RuntimeError, match="本地 SKILL.md / skills 目录导入链已退役"):
+        SkillService.import_all_skills(tmp_path, force=True)
 
 
-def test_skill_ingest_import_updates_existing_record(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """文件变化时应更新已存在技能。"""
+def test_skill_ingest_sync_changed_skills_should_fail_fast(tmp_path: Path) -> None:
+    """本地目录增量同步入口应显式退役。"""
 
-    skill_file = _build_skill_file(
-        tmp_path,
-        "copywriter",
-        """---
-name: 文案润色专家
-description: 新描述
-priority: 5
----
-
-# 文案润色专家
-""",
-    )
-
-    existing = _FakeSkill("copywriter", "old-hash")
-    session = _FakeSession(records={"copywriter": existing})
-    monkeypatch.setattr("app.services.skill_service.get_embedding", lambda text: [0.9])
-    monkeypatch.setattr(SkillService, "_sync_versioned_records", classmethod(lambda cls, db, parsed, file_hash, embedding: None))
-
-    updated = SkillService.import_skill(skill_file, session, force=False)
-
-    assert updated is True
-    assert session.commit_count == 1
-    assert existing.description == "新描述"
-    assert existing.priority == 5
-    assert existing.embedding == [0.9]
-
-
-def test_skill_ingest_import_all_continue_on_error(tmp_path: Path, monkeypatch, caplog) -> None:  # noqa: ANN001
-    """批量导入遇到单文件异常时应继续处理并记录错误。"""
-
-    _build_skill_file(
-        tmp_path,
-        "skill-ok-a",
-        """---
-name: Skill A
-description: A
----
-
-# Skill A
-""",
-    )
-    _build_skill_file(
-        tmp_path,
-        "skill-fail",
-        """---
-name: Skill B
-description: B
----
-
-# Skill B
-""",
-    )
-    _build_skill_file(
-        tmp_path,
-        "skill-ok-c",
-        """---
-name: Skill C
-description: C
----
-
-# Skill C
-""",
-    )
-
-    session = _FakeSession(records={})
-
-    class _ContextManager:
-        def __enter__(self) -> _FakeSession:
-            return session
-
-        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
-            return False
-
-    def _fake_import_skill(skill_path: Path, db: _FakeSession, force: bool) -> bool:  # noqa: ANN001
-        if skill_path.parent.name == "skill-fail":
-            raise RuntimeError("ingest failed")
-        db.commit()
-        return True
-
-    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: _ContextManager())
-    monkeypatch.setattr(SkillService, "import_skill", classmethod(lambda cls, p, d, f: _fake_import_skill(p, d, f)))
-
-    with caplog.at_level("ERROR"):
-        updated = SkillService.import_all_skills(tmp_path)
-
-    assert updated == 2
-    assert session.rollback_count == 1
-    assert any("导入技能失败 skill_id=skill-fail" in record.message for record in caplog.records)
-
-
-def test_skill_ingest_import_all_returns_zero_when_missing_dir(tmp_path: Path) -> None:
-    """目录不存在时返回 0。"""
-
-    missing_dir = tmp_path / "missing"
-    assert SkillService.import_all_skills(missing_dir) == 0
+    with pytest.raises(RuntimeError, match="本地 SKILL.md / skills 目录导入链已退役"):
+        SkillService.sync_changed_skills(tmp_path)
 
 
 class _SequentialResult:
@@ -803,8 +631,8 @@ def test_skill_version_publish_should_switch_active_version(monkeypatch) -> None
     assert session.commit_count == 1
 
 
-def test_skill_version_import_all_should_ensure_bootstrap_template(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
-    """版本治理开启后，批量导入应触发用户模板配置兜底。"""
+def test_skill_version_import_all_should_fail_fast_when_local_source_used(tmp_path: Path) -> None:
+    """批量导入旧入口已退役，不应再触发模板兜底流程。"""
 
     _build_skill_file(
         tmp_path,
@@ -818,29 +646,8 @@ description: SQL 检索
 """,
     )
 
-    session = _FakeSession(records={})
-    template_calls: List[Any] = []
-
-    class _ContextManager:
-        def __enter__(self):  # noqa: ANN001
-            return session
-
-        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
-            return False
-
-    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: _ContextManager())
-    monkeypatch.setattr(SkillService, "import_skill", classmethod(lambda cls, p, d, f: True))
-    monkeypatch.setattr(SkillService, "_is_skill_versioning_enabled", classmethod(lambda cls: True))
-    monkeypatch.setattr(
-        SkillService,
-        "_ensure_user_bootstrap_template_config",
-        classmethod(lambda cls, db, force=False: template_calls.append(db) or False),
-    )
-
-    updated = SkillService.import_all_skills(tmp_path, force=True)
-
-    assert updated == 1
-    assert template_calls == [session]
+    with pytest.raises(RuntimeError, match="本地 SKILL.md / skills 目录导入链已退役"):
+        SkillService.import_all_skills(tmp_path, force=True)
 
 
 def test_skill_version_template_should_not_fallback_to_legacy_records() -> None:
@@ -1121,3 +928,53 @@ def test_admin_skill_regenerate_should_update_published_version_embedding(monkey
     assert session.commit_count == 1
     assert version_v1.embedding == [0.1, 0.2, 0.3]
     assert version_v2.embedding is None
+
+
+def test_skill_get_by_id_should_read_from_versioned_truth_source(monkeypatch) -> None:  # noqa: ANN001
+    """get_by_id 应从 versioned 聚合读模型构造技能，而不是查询旧表。"""
+
+    session = object()
+
+    class _ContextManager:
+        def __enter__(self):  # noqa: ANN001
+            return session
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: _ContextManager())
+    monkeypatch.setattr(
+        SkillService,
+        "get_admin_skill",
+        classmethod(
+            lambda cls, db, skill_id: {
+                "id": 301,
+                "skill_id": skill_id,
+                "name": "Loan Advice",
+                "description": "贷款分析",
+                "content": "完整版技能",
+                "file_hash": "hash-301",
+                "has_embedding": True,
+                "embedding_dim": 3,
+                "is_enabled": True,
+                "auto_enabled": False,
+                "priority": 12,
+                "scope": "data",
+                "trigger_phrases": ["贷款余额"],
+                "conflicts_with": ["risk-check"],
+                "effective_version": "v2",
+                "binding_status": "enabled",
+            }
+        ),
+    )
+
+    payload = SkillService.get_by_id("loan-advice")
+
+    assert payload is not None
+    assert payload.skill_id == "loan-advice"
+    assert payload.content == "完整版技能"
+    assert payload.priority == 12
+    assert payload.auto_enabled is False
+    assert payload._effective_version == "v2"
+    assert payload._binding_status == "enabled"
+    assert payload.embedding == [0.0, 0.0, 0.0]

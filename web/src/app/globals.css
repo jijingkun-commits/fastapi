@@ -96,6 +96,15 @@
   --admin-content-max-width: 1360px;
   --admin-page-padding-x: clamp(14px, 1.9vw, 26px);
   --admin-page-padding-y: clamp(14px, 2vw, 26px);
+
+  --font-body: var(--font-sans-cjk);
+  --chat-stream-max-width: 72rem;
+  --chat-reading-max-width: 51rem;
+  --chat-reading-font-size: 1rem;
+  --chat-reading-line-height: 1.88;
+  --chat-reading-letter-spacing: -0.01em;
+  --chat-reading-weight: 400;
+  --chat-heading-letter-spacing: -0.024em;
 }
 
 .dark {
@@ -199,6 +208,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: var(--font-body);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -214,8 +224,19 @@
     @apply border-border outline-ring/50;
   }
 
+  html {
+    font-family: var(--font-body);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    letter-spacing: -0.008em;
   }
 
   :root {
@@ -238,6 +259,11 @@
 @layer utilities {
   .app-shell-canvas {
     background: var(--background);
+  }
+
+  .chat-stream-shell {
+    width: 100%;
+    max-width: var(--chat-stream-max-width);
   }
 
   .admin-main-scroll {

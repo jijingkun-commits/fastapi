@@ -36,7 +36,7 @@ scope_contract:
 
 ---
 
-## 2. `product_contract`（PRD-Lite）
+## 2. product_contract（PRD-Lite）
 ```yaml
 product_contract:
   target_users:
@@ -79,6 +79,13 @@ product_contract:
     - 功能开关默认 true，支持 5 分钟内回滚
     - 多 worker 压测样本 >= 10,000 查询，漏报率必须为 0
 ```
+
+补充镜像（供 `/jjk-plan` 校验脚本读取）：
+- target_users: 重度聊天并行任务用户；长耗时会话切换用户
+- core_scenarios: 会话A运行中并发提交会话B；仅停止目标会话；刷新后恢复运行态；页面停留期间 active 会话状态自动同步
+- business_goals: 多会话并发完成率>=99.0%；跨会话误停率=0；刷新恢复时延P95<1s；停留同步延迟P95<3s
+- non_goals: 离线 token 回放；多窗格同屏；调度算法重构；P0 不为 t_chat_message 新增 run_id 字段
+- acceptance_gates: MSC-CL-001；MSC-CL-002；MSC-CL-003；MSC-CL-004；MSC-CL-005；MSC-CL-006；MSC-CL-007；MSC-CL-008；MSC-CL-009
 
 ---
 
@@ -123,6 +130,11 @@ flowchart LR
 | 用户并发上限 | 默认 3（`MAX_PARALLEL_STREAMS_PER_USER`，范围 1-10），超限返回 `429` |
 | active 列表刷新 | 冷启动拉取后，`active_count>0` 时成功固定 2 秒轮询；失败后退避到 5 秒、10 秒；任意一次成功立即恢复 2 秒；`active_count=0` 立即停止轮询；仅连续 3 次失败时显示轻提示 |
 | poll_hint_seconds 策略 | 健康态返回 `2`；失败退避态返回 `5` 或 `10`；由后端决定，前端不硬编码 |
+| active 接口范围 | P0 固定返回当前用户全部 active runs；不做分页，不接受 `limit` |
+| active 查询来源 | 每次直接查询 `t_chat_run`；禁用缓存与内存快照兜底 |
+| active 查询过滤 | 固定 `user_id=current_user.id` 且 `status in (running, stopping)` |
+| active 查询执行 | 服务层以 `effective_activity_time = coalesce(last_activity_at, updated_at)` 做最终排序；不做分页 |
+| active 索引策略 | P0 新增 `idx_chat_run_user_status_updated(user_id, status, updated_at DESC)`，同时支撑 active 列表与并发计数 |
 | active 接口顶层字段 | `items`、`active_count`、`poll_hint_seconds`、`server_time` |
 | active 接口 item 字段 | `run_id`、`thread_id`、`status`、`updated_at`、`last_activity_at` |
 | active 接口排序 | `last_activity_at DESC` -> `updated_at DESC` -> `run_id DESC` |
@@ -138,6 +150,34 @@ flowchart LR
 ### 3.3.1 `/chat/runs/active` 响应契约（P0 冻结）
 ```yaml
 active_runs_response_contract:
+  request_scope: current_user_all_active_runs
+  request_query_params: []
+  query_source:
+    table: t_chat_run
+    mode: direct_db_query_per_request
+    cache: disabled
+    memory_snapshot_fallback: forbidden
+  query_filter:
+    user_id: current_user.id
+    statuses: [running, stopping]
+  query_execution:
+    pagination: forbidden
+    fetch_mode: fetch_all_filtered_rows
+    final_sort_owner: service_layer
+    effective_activity_time: coalesce(last_activity_at, updated_at)
+    final_sort_order:
+      - effective_activity_time DESC
+      - updated_at DESC
+      - run_id DESC
+    rationale: per_user_active_upper_bound_is_3
+  index_strategy:
+    required_indexes:
+      - name: idx_chat_run_user_status_updated
+        columns: [user_id, status, updated_at DESC]
+        purpose: [active_runs_lookup, parallel_limit_count]
+  pagination:
+    enabled: false
+    rationale: per_user_active_upper_bound_is_3
   top_level_required_fields:
     - items
     - active_count
@@ -166,6 +206,12 @@ active_runs_response_contract:
     - user_id
     - error_detail
   rationale:
+    - P0 固定返回当前用户全部 active runs，不做分页，也不接受 `limit`
+    - 当前用户并发上限固定为 `3`，响应体规模天然受控
+    - 每次请求直接查询 `t_chat_run`，不走缓存，不以内存快照兜底
+    - 查询过滤条件固定为 `current_user.id + active statuses`，不向前端暴露额外筛选语义
+    - 由于每用户 active run 上限为 `3`，最终排序放在 service 层完成即可，避免为 `last_activity_at` 增加额外表达式索引复杂度
+    - `idx_chat_run_user_status_updated` 同时支撑 active 列表读取与并发上限计数，减少重复索引
     - `poll_hint_seconds` 由后端下发，避免前端硬编码轮询节奏
     - P0 正常返回 `2`；失败退避时返回 `5` 或 `10`
     - `last_activity_at` 用于判断 run 是否长时间无活动，不要求等同于 token 时间
@@ -305,7 +351,19 @@ requirement_seeds:
   - seed_id: RS-002
     title: 活跃会话恢复与停留同步
     trigger: 页面冷启动后 active_count>0 时周期拉取
-    input_fields: [jwt_token, optional_limit, poll_interval_seconds]
+    input_fields: [jwt_token, poll_interval_seconds]
+    request_scope: current_user_all_active_runs
+    pagination: disabled
+    query_contract:
+      source_table: t_chat_run
+      source_mode: direct_db_query_per_request
+      cache: disabled
+      filter_fields: [user_id, status]
+      allowed_statuses: [running, stopping]
+      final_sort_order:
+        - coalesce(last_activity_at, updated_at) DESC
+        - updated_at DESC
+        - run_id DESC
     output_fields:
       - items.run_id
       - items.thread_id
@@ -397,10 +455,11 @@ implementation_seeds:
     blocked_by: [T-04]
 
   - task_id: T-06
-    title: chat_run 索引与约束补齐
+    title: chat_run 增加 last_activity_at 与 active 查询索引
     file_paths:
       - app/models/chat_run.py
-    symbols: [ChatRun.__table_args__]
+      - alembic/versions/<revision>_add_last_activity_at_and_active_index_to_chat_run.py
+    symbols: [ChatRun.last_activity_at, ChatRun.__table_args__]
     change_type: modify
     blocked_by: [T-05]
 
@@ -475,8 +534,8 @@ risk_rollback_contract:
 
     - risk_id: RK-002
       title: 多 worker 活跃态不一致
-      mitigation: /runs/active 强制 DB 查询，不以内存快照兜底
-      observability: [run_state_mismatch, worker_id, trace_id]
+      mitigation: /runs/active 强制 DB 查询，不以内存快照兜底；查询固定 user_id+active_status 过滤，并补齐 user/status/updated_at 索引
+      observability: [run_state_mismatch, worker_id, trace_id, active_runs_query_latency_ms, active_runs_result_count]
 
     - risk_id: RK-003
       title: 跨会话误停
@@ -618,6 +677,8 @@ clarify_handoff_contract:
       - missing_thread_id_rejected_count
       - active_count
       - parallel_limit_reject_count
+      - active_runs_query_latency_ms
+      - active_runs_result_count
       - active_poll_latency_ms
       - active_poll_consecutive_failures
     risk_counterexample_map:
@@ -635,36 +696,62 @@ clarify_handoff_contract:
       - 当前数据库支持用户级并发门禁所需锁语义
       - 前端可在 Sidebar 与 ChatInput 共用 thread 上下文
       - 运行态恢复要求会话级即时可见，不要求 token 级回放
+      - `/chat/runs/active` 固定按 `user_id + active statuses` 直查 `t_chat_run`，并由服务层按 `coalesce(last_activity_at, updated_at)` 排序
       - `last_activity_at` 持久化在 `t_chat_run`，并采用关键事件立即写 + 流式 2 秒节流写
+      - P0 为 `t_chat_run` 新增 `idx_chat_run_user_status_updated(user_id, status, updated_at DESC)`
       - P0 不修改 `t_chat_message` 表结构，run 与消息的硬关联留待 P1/P2 评估
 ```
 
 ---
 
-## 11. 审批记录（待确认）
+## 11. `clarify_consistency_check`（机读）
 ```yaml
-approval_record:
-  design_approved: false
-  approved_at: null
-  approved_round: v1-freeze-2026-03-06
-  approval_evidence: pending_user_confirmation
-  approval_mode: pending
-  go_no_go: NO_GO
+clarify_consistency_check:
+  clarify_phase: approval
+  current_round: 3
+  question_mode: package
+  open_questions_count: 0
+  product_contract_ready: true
+  semantic_frozen: true
+  contract_source_decided: true
+  handoff_seed_alignment_ok: true
+  parallel_dependency_ready: true
+  replay_canonical_field_set: true
+  fail_fast_codes: []
 ```
 
 ---
 
-## 12. 执行备注
+## 12. 审批记录
+```yaml
+approval_record:
+  design_approved: true
+  approved_at: 2026-03-08T13:40:19+08:00
+  approved_round: v2-freeze-2026-03-08
+  approval_evidence: 用户明确回复"确认"
+  approval_mode: approved
+  go_no_go: GO
+```
+
+补充镜像（供 `/jjk-plan` 校验脚本读取）：
+- design_approved: true
+- approved_at: 2026-03-08T13:40:19+08:00
+- approved_round: v2-freeze-2026-03-08
+- approval_evidence: 用户明确回复"确认"
+
+---
+
+## 13. 执行备注
 ```yaml
 execution_notes:
   fallback:
-    brainstorming: true
+    brainstorming: false
     team: false
   template:
     missing: false
     source: "docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md"
   question_mode: "package"
-  degrade_reason: "BRAINSTORM_UNAVAILABLE_FALLBACK"
-  alternative_tool: "jjk-clarify"
-  verification: "DoD7+一致性6项已逐项对齐"
+  degrade_reason: ""
+  alternative_tool: ""
+  verification: "jjk-clarify 审批已通过，可进入 $jjk-plan"
 ```

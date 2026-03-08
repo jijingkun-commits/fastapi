@@ -42,11 +42,11 @@ app/ai/
 │   ├── vision_tool.py         # 图片分析工具
 │   ├── ragflow_tool.py        # 知识库检索工具
 │   └── ...
-├── skills/                    # 技能知识库（启动时自动同步到数据库）
-│   ├── knowledge-search/      # 知识库检索
-│   ├── sql-expert/            # SQL 专家
-│   ├── fastapi-expert/        # FastAPI 专家
-│   └── ...                    # 共 23 个技能
+├── skills/                    # 本地技能目录（历史遗留/已退役，非正式主路径）
+│   ├── knowledge-search/      # 历史示例
+│   ├── sql-expert/            # 历史示例
+│   ├── fastapi-expert/        # 历史示例
+│   └── ...                    # 仅供历史参考，不参与启动同步
 ├── prompts/                   # 渐进披露 Prompt 管理
 │   ├── agent_prompts.py       # 核心 Prompt
 │   ├── prompt_loader.py       # 参考文档加载器
@@ -73,9 +73,9 @@ app/ai/
 ├── models/
 │   └── agent_skill.py         # [New] 技能数据库模型
 ├── services/
-│   └── skill_service.py       # [New] 技能检索服务
+│   └── skill_service.py       # [New] Skill DB-only 运行时与管理服务
 └── scripts/
-    └── import_skills.py       # [New] 技能导入脚本
+    └── import_skills.py       # 已退役：本地 Skill 导入脚本
 ```
 
 ---

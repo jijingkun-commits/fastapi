@@ -1,0 +1,358 @@
+# chat-multi-session-concurrency 实施计划
+
+> 更新时间：2026-03-08 13:40 +08:00  
+> 上游设计：`docs/plans/2026-03-06-chat-multi-session-concurrency-design.md`  
+> 对应需求：`docs/内部参考/迭代需求/chat-multi-session-concurrency_requirements.md`
+
+## 1. 实施概览
+
+- 规划模式：`parallel`
+- 交付目标：以“前端会话级运行态 + 后端 DB 真理源 + 测试闭环”三段式完成多会话并发落地，不引入缓存兜底与双真理源。
+- 架构策略：前端先消除单实例运行态，再补后端 active query / cancel / 并发门禁，最后用测试与文档索引收口。
+- 风险重点：全局流状态残留导致串会话、cancel thread 守卫缺失导致误停、`last_activity_at` 不落库导致刷新/排序失真、active query 继续走内存快照导致多 worker 不一致。
+
+## 2. implementation_tasks（机读）
+
+```yaml
+implementation_tasks:
+  - task_id: T-01
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[0]
+    feature_id: F1-front-session-runtime
+    pr_id: PR-01
+    phase: Phase-1
+    change_type: modify
+    owner: frontend-chat
+    depends_on_tasks: [ROOT]
+    risk_point: 若 StreamContext 仍保留全局单实例运行态，会继续出现跨会话 submit/stop 串扰
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+    file_paths:
+      - web/src/providers/StreamContext.tsx
+    symbols:
+      - StreamContextValue
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/providers/__tests__/StreamContext.multi-session.test.tsx
+
+  - task_id: T-02
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
+    feature_id: F1-front-session-runtime
+    pr_id: PR-01
+    phase: Phase-2
+    change_type: modify
+    owner: frontend-chat
+    depends_on_tasks: [T-01]
+    risk_point: 若 `useSSEStream` 不按 thread 分桶且不按 active_count 轮询，页面停留期间状态仍会漂移
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+    file_paths:
+      - web/src/hooks/useSSEStream.ts
+    symbols:
+      - useSSEStream
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.active-runs-polling.test.ts
+
+  - task_id: T-03
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
+    feature_id: F1-front-session-runtime
+    pr_id: PR-01
+    phase: Phase-3
+    change_type: modify
+    owner: frontend-chat
+    depends_on_tasks: [T-02]
+    risk_point: 若前端 stop 不强制携带 `thread_id`，后端无法可靠判定目标会话，误停风险无法归零
+    rollback_point: ENABLE_THREAD_ID_MATCH_CHECK=false
+    file_paths:
+      - web/src/lib/backend.ts
+      - web/src/hooks/useSSEStream.ts
+    symbols:
+      - cancelRun
+      - stop
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/lib/__tests__/backend.cancel-run.test.ts
+
+  - task_id: T-04
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[3]
+    feature_id: F2-active-runs-backend
+    pr_id: PR-02
+    phase: Phase-1
+    change_type: modify
+    owner: backend-chat
+    depends_on_tasks: [ROOT]
+    risk_point: 若 `/chat/runs/active` 返回字段、状态或排序口径不固定，前端刷新恢复会继续抖动和误判
+    rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
+    file_paths:
+      - app/api/v1/endpoints/chat_api.py
+    symbols:
+      - list_active_runs
+      - CancelRunRequest
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs_contract -q
+
+  - task_id: T-05
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
+    feature_id: F2-active-runs-backend
+    pr_id: PR-02
+    phase: Phase-2
+    change_type: modify
+    owner: backend-chat
+    depends_on_tasks: [T-04]
+    risk_point: 若 RunControlService 仍以缓存或非原子计数实现 active query / parallel gate，多 worker 与并发门禁都会失真
+    rollback_point: ENABLE_PER_USER_PARALLEL_GATE=false
+    file_paths:
+      - app/services/run_control_service.py
+    symbols:
+      - list_active_runs_by_user
+      - create_run
+      - cancel_run
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k run_control_active_query_gate -q
+
+  - task_id: T-06
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[5]
+    feature_id: F2-active-runs-backend
+    pr_id: PR-02
+    phase: Phase-3
+    change_type: modify
+    owner: backend-chat
+    depends_on_tasks: [T-05]
+    risk_point: 若 `last_activity_at` 不落库且缺少用户维度 active 索引，排序、黄灯提示与多 worker 恢复都会不稳定
+    rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
+    file_paths:
+      - app/models/chat_run.py
+      - alembic/versions/*_add_last_activity_at_and_active_index_to_chat_run.py
+    symbols:
+      - ChatRun.last_activity_at
+      - ChatRun.__table_args__
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort -q
+
+  - task_id: T-07
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[6]
+    feature_id: F3-backend-test-closure
+    pr_id: PR-03
+    phase: Phase-1
+    change_type: modify
+    owner: test-backend
+    depends_on_tasks: [T-05, T-06]
+    risk_point: 若缺少 API / service 回归矩阵，错误码、幂等语义和多 worker 一致性会在重构中回退
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+    file_paths:
+      - tests/unit/test_run_control_service.py
+      - tests/api/test_chat_api.py
+    symbols:
+      - test_active_runs
+      - test_parallel_limit
+      - test_cancel_thread_mismatch
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k multi_session_contract_matrix -q
+
+  - task_id: T-08
+    source_seed_ref: clarify_handoff_contract.required.implementation_seeds[7]
+    feature_id: F4-frontend-e2e
+    pr_id: PR-03
+    phase: Phase-2
+    change_type: add
+    owner: test-frontend
+    depends_on_tasks: [T-02, T-03, T-04, T-05]
+    risk_point: 若缺少真实浏览器并发场景验证，前端恢复/轮询/停止隔离仍可能只在单元测试层成立
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+    file_paths:
+      - web/e2e/chat-multi-session-concurrency.spec.ts
+    symbols:
+      - MSC-CL-001
+      - MSC-CL-002
+      - MSC-CL-003
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.ts
+```
+
+## 3. task_to_pr_mapping（机读）
+
+```yaml
+task_to_pr_mapping:
+  - task_id: T-01
+    pr_id: PR-01
+    pr_branch: codex/chat-multi-session-pr-01
+    pr_depends_on: []
+    pr_subject: "前端会话级 RuntimeBucket 基座"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/providers/__tests__/StreamContext.multi-session.test.tsx
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+
+  - task_id: T-02
+    pr_id: PR-01
+    pr_branch: codex/chat-multi-session-pr-01
+    pr_depends_on: []
+    pr_subject: "前端 active 条件轮询与会话级流状态"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.active-runs-polling.test.ts
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+
+  - task_id: T-03
+    pr_id: PR-01
+    pr_branch: codex/chat-multi-session-pr-01
+    pr_depends_on: []
+    pr_subject: "前端 cancel 强制 thread_id 契约"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/lib/__tests__/backend.cancel-run.test.ts
+    rollback_point: ENABLE_THREAD_ID_MATCH_CHECK=false
+
+  - task_id: T-04
+    pr_id: PR-02
+    pr_branch: codex/chat-multi-session-pr-02
+    pr_depends_on: []
+    pr_subject: "active runs API 响应契约"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs_contract -q
+    rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
+
+  - task_id: T-05
+    pr_id: PR-02
+    pr_branch: codex/chat-multi-session-pr-02
+    pr_depends_on: []
+    pr_subject: "RunControlService active 查询与并发门禁"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k run_control_active_query_gate -q
+    rollback_point: ENABLE_PER_USER_PARALLEL_GATE=false
+
+  - task_id: T-06
+    pr_id: PR-02
+    pr_branch: codex/chat-multi-session-pr-02
+    pr_depends_on: []
+    pr_subject: "chat_run last_activity_at 与 active 索引迁移"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort -q
+    rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
+
+  - task_id: T-07
+    pr_id: PR-03
+    pr_branch: codex/chat-multi-session-pr-03
+    pr_depends_on: [PR-02]
+    pr_subject: "后端契约回归矩阵补齐"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k multi_session_contract_matrix -q
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+
+  - task_id: T-08
+    pr_id: PR-03
+    pr_branch: codex/chat-multi-session-pr-03
+    pr_depends_on: [PR-01, PR-02]
+    pr_subject: "前端多会话并发 E2E"
+    acceptance_cmds:
+      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.ts
+    rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
+```
+
+## 4. planning_contract（供 `$jjk-vkplan` 直接消费）
+
+```yaml
+planning_contract:
+  topic: chat-multi-session-concurrency
+  source_seed_ref: clarify_handoff_contract.required.execution_chain_seed
+  execution_mode: parallel
+  task_key: PP-20260306-chat-multi-session-concurrency
+  card_order: [C01, C02, C03, G01]
+  strict_single_active_card: false
+  auto_done_policy:
+    implementation-card: hard_gate
+    inspection-card: policy_gate
+  gate_contract:
+    mode: as_cards
+    gate_ids: [G01]
+    depends_on:
+      G01: [C03]
+  cards:
+    - card_id: C01
+      wave: P1
+      feature_ids: [F1-front-session-runtime]
+      task_ids: [T-01, T-02, T-03]
+      depends_on: []
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - 前端运行态按 thread_id 分桶，submit/stop 均绑定会话作用域
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/providers/__tests__/StreamContext.multi-session.test.tsx
+        - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.active-runs-polling.test.ts
+        - cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/lib/__tests__/backend.cancel-run.test.ts
+      evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
+
+    - card_id: C02
+      wave: P2
+      feature_ids: [F2-active-runs-backend]
+      task_ids: [T-04, T-05, T-06]
+      depends_on: []
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - `/chat/runs/active`、并发门禁、`last_activity_at` 与 active 索引全部收口到 `t_chat_run`
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs_contract -q
+        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k run_control_active_query_gate -q
+        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort -q
+      evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
+
+    - card_id: C03
+      wave: P3
+      feature_ids: [F3-backend-test-closure, F4-frontend-e2e]
+      task_ids: [T-07, T-08]
+      depends_on: [C01, C02]
+      task_mode: implementation-card
+      merge_required: true
+      done_gate:
+        - API / service / E2E 回归矩阵覆盖设计验收门禁
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k multi_session_contract_matrix -q
+        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.ts
+      evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
+
+    - card_id: G01
+      wave: Gate
+      feature_ids: [G-01]
+      task_ids: []
+      depends_on: [C03]
+      task_mode: inspection-card
+      merge_required: false
+      done_gate:
+        - clarify->plan 对齐校验、temporal gate 校验、docs 索引校验全部通过
+      acceptance_checks:
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/chat-multi-session-concurrency_requirements.md --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_clarify_plan_alignment.json
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_planning_temporal_gate.json
+        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
+```
+
+## 5. execution_contract（机读）
+
+```yaml
+execution_contract:
+  delivery_mode: staged
+  execution_unit: per_pr
+  commit_policy: per_pr
+  stop_boundary: per_pr
+  stop_on_blocked: true
+  source_seed_ref: clarify_handoff_contract.required.execution_chain_seed.execution_contract_hint
+```
+
+## 6. implementation_readiness（机读）
+
+```yaml
+implementation_readiness:
+  implementation_ready: true
+  blocked_by: []
+  next_step: $jjk-vkplan
+  execution_contract_ready: true
+```
+
+## 7. 风险、回滚与观测
+
+1. 风险：前端仍残留全局运行态入口。  
+   缓解：`T-01~T-03` 合并到同一 PR，避免半切换。
+2. 风险：active query 语义与 DB 索引不一致。  
+   缓解：`T-04~T-06` 统一归属 `PR-02`，接口、服务、模型/迁移同批收口。
+3. 风险：只做单测不做真实浏览器验证。  
+   缓解：`T-08` 必须在 `C03` 中与后端矩阵一起完成，不允许跳过。
+
+## 8. 下游说明
+
+1. 当前规划以并行模式冻结，下一步命令固定为 `$jjk-vkplan`。
+2. 后续拆卡不得改写本文的 `task_id / feature_id / card_id / depends_on` 硬依赖。
+3. 若实现阶段发现设计缺口，应回到 `docs/plans/2026-03-06-chat-multi-session-concurrency-design.md` 先修 design，再回补本计划。

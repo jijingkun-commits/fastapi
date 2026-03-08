@@ -17,7 +17,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 │   ├── import_deposit_data.py
 │   ├── import_dim_data.py
 │   ├── import_metrics_from_didp.py
-│   ├── import_skills.py        # ★ 导入 AI 技能到向量库
+│   ├── import_skills.py        # 已退役：本地 Skill 导入链
 │   ├── init_metric_definition.py
 │   ├── setup_data.py           # 数据初始化入口
 │   ├── skill_offline_evaluation.py  # Skill 检索离线评测
@@ -39,7 +39,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 
 - 根目录 Python 入口（去重后的统一入口）：
   - `scripts/schema_sync.py@`、`scripts/sync_database.py@`、`scripts/create_dim_tables.py@` 等
-  - `scripts/import_skills.py@`、`scripts/expand_metrics.py@`、`scripts/setup_data.py@` 等
+  - `scripts/import_skills.py@`（已退役）、`scripts/expand_metrics.py@`、`scripts/setup_data.py@` 等
   - → 实体分别在 `scripts/db/` 或 `scripts/data/`（按领域归档）
 - `.cursor/scripts/` 中保留部分工作流脚本副本（兼容旧流程），但执行入口以 `scripts/` 为准。
 
@@ -60,7 +60,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 | `scripts/import_deposit_data.py` | `scripts/data/import_deposit_data.py` |
 | `scripts/import_dim_data.py` | `scripts/data/import_dim_data.py` |
 | `scripts/import_metrics_from_didp.py` | `scripts/data/import_metrics_from_didp.py` |
-| `scripts/import_skills.py` | `scripts/data/import_skills.py` |
+| `scripts/import_skills.py` | `scripts/data/import_skills.py`（已退役） |
 | `scripts/init_metric_definition.py` | `scripts/data/init_metric_definition.py` |
 | `scripts/setup_data.py` | `scripts/data/setup_data.py` |
 | `scripts/skill_offline_evaluation.py` | `scripts/data/skill_offline_evaluation.py` |
@@ -84,7 +84,7 @@ python scripts/db/sync_database.py               # 先同步数据库
 python scripts/init_llm_config.py                # LLM 模型配置
 python scripts/data/init_metric_definition.py    # 指标定义
 python scripts/data/expand_metrics.py            # 扩展指标
-python scripts/data/import_skills.py             # AI 技能
+python scripts/data/import_skills.py             # 已退役：本地 Skill 导入链
 python scripts/db/schema_sync.py                 # 元数据同步
 ```
 
@@ -92,7 +92,7 @@ python scripts/db/schema_sync.py                 # 元数据同步
 
 ```bash
 python scripts/db/schema_sync.py                 # 新增表后同步元数据
-python scripts/data/import_skills.py             # 修改 SKILL.md 后更新技能
+python scripts/data/import_skills.py             # 已退役：本地 SKILL.md 导入链不再可用
 python scripts/data/skill_offline_evaluation.py  # Skill 检索离线评测
 python scripts/config_doctor.py --strict         # 配置健康检查
 python scripts/check_special_doc_sync.py --cached --strict  # 命中特殊处理文件时强制校验手册同步

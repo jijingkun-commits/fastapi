@@ -53,34 +53,13 @@
 
 ## 2. product_contract（PRD-Lite）
 
-- target_users:
-  - 会话终端用户（关注答复正确性与稳定性）
-  - 运营/支持同学（关注误路由可解释与可观测）
-  - AI 工作流研发（关注契约一致性与回归可控）
-- core_scenarios:
-  - S1：用户询问记忆/偏好/能力信息，应优先进入 supervisor 语义处理，不误派发数据查询。
-  - S2：用户明确数据查询请求（如账单/贷款余额），可合法派发 `data_expert`。
-  - S3：复合请求（例如“先查待办再看记忆”）必须多目标覆盖，不漏答。
-  - S4：handoff 字段异常时，系统能在 1 回合内进入 supervisor 兜底并输出非空答复。
-- business_goals（含 KPI）:
-  - G1：意图误路由率（memory/meta -> data_expert）`<=0.5%`。
-  - G2：路由阻塞后恢复时长 `TTR <= 1` 回合。
-  - G3：Router Contract Guard 额外耗时 `P50 <= 30ms`、`P95 <= 150ms`。
-  - G4：planner 异常回退命中率可观测，`planner_model_failed <= 5%`。
-- non_goals:
-  - 不做 planner 全链路重写。
-  - 不做专家体系扩容或角色重命名。
-  - 不做前端协议改版。
-- acceptance_gates:
-  - A1：`_resolve_active_goals`、`_apply_router_contract_guard`、`_dispatch_values_mode_chunk` 不读取 `state.intent_plan` 作为运行态输入。
-  - A2：`invalid_target_agent`、`invalid_task_description`、`target_not_in_allowed_agents` 均可复现并稳定回流 `supervisor`。
-  - A3：复合目标覆盖率通过回归测试，不发生漏目标收口。
-  - A4：日志/指标字段完整，`event/turn_id/goal_id/target_agent/reason` 可追踪。
-  - A5：运行态仅读写 `additional_kwargs.router_result_v2`，检测到历史字段即 fail-fast 并进入 supervisor 收口。
-- release_constraints:
-  - 运行态契约为硬约束，不提供任何 feature flag 降级路径。
-  - 不兼容旧字段：检测到历史字段读写即 fail-fast 并进入 `supervisor_fallback`。
-  - 回退路径仅允许代码级回退（revert 任务变更集），不允许双轨灰度。
+- target_users: 会话终端用户（关注答复正确性与稳定性）；运营/支持同学（关注误路由可解释与可观测）；AI 工作流研发（关注契约一致性与回归可控）。
+- core_scenarios: S1 用户询问记忆/偏好/能力信息时，应优先进入 supervisor 语义处理，不误派发数据查询；S2 用户明确数据查询请求（如账单/贷款余额）时，可合法派发 `data_expert`；S3 复合请求（例如“先查待办再看记忆”）必须多目标覆盖，不漏答；S4 handoff 字段异常时，系统能在 1 回合内进入 supervisor 兜底并输出非空答复。
+- business_goals: G1 意图误路由率（memory/meta -> data_expert）`<=0.5%`；G2 路由阻塞后恢复时长 `TTR <= 1` 回合；G3 Router Contract Guard 额外耗时 `P50 <= 30ms`、`P95 <= 150ms`；G4 planner 异常回退命中率可观测，`planner_model_failed <= 5%`。
+- non_goals: 不做 planner 全链路重写；不做专家体系扩容或角色重命名；不做前端协议改版。
+- acceptance_gates: A1 `_resolve_active_goals`、`_apply_router_contract_guard`、`_dispatch_values_mode_chunk` 不读取 `state.intent_plan` 作为运行态输入；A2 `invalid_target_agent`、`invalid_task_description`、`target_not_in_allowed_agents` 均可复现并稳定回流 `supervisor`；A3 复合目标覆盖率通过回归测试，不发生漏目标收口；A4 日志/指标字段完整，`event/turn_id/goal_id/target_agent/reason` 可追踪；A5 运行态仅读写 `additional_kwargs.router_result_v2`，检测到历史字段即 fail-fast 并进入 supervisor 收口。
+- release_constraints: 运行态契约为硬约束，不提供任何 feature flag 降级路径；不兼容旧字段，检测到历史字段读写即 fail-fast 并进入 `supervisor_fallback`；回退路径仅允许代码级回退（revert 任务变更集），不允许双轨灰度。
+- 取舍说明: 根据用户“不要任何开关、不要兼容旧版本”的明确要求，本方案以代码回退锚点替代 feature flag 回退锚点。
 
 ## 3. architecture_contract
 
@@ -388,6 +367,10 @@ clarify_handoff_contract:
 
 ```yaml
 clarify_consistency_check:
+  clarify_phase: approval
+  current_round: 1
+  question_mode: single
+  open_questions_count: 0
   product_contract_ready: true
   semantic_frozen: true
   contract_source_decided: true

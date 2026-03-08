@@ -8,7 +8,7 @@
 
 > 命令触发差异：Claude Code / Cursor 可直接用 `/jjk-xxx`；Codex 需使用 `/prompts:jjk-xxx`。
 
-> 产品运行时 Skill 门禁：命中 `app/ai/skills/**`、`app/data/skills/**`、`skill_service.py`、`skill_admin_api.py`、`user_skill_api.py`、`agent_skill.py`、`import_skills.py` 等路径时，必须按 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”同步 `技能系统需求.md`、`AI技能库.md`、`接口文档.md`、相关配置/部署/测试文档。
+> 产品运行时 Skill 门禁：命中 `skill_service.py`、`skill_admin_api.py`、`user_skill_api.py`、`agent_skill.py`、Skill runtime 测试、部署/退役脚本等 DB-only 主链路径时，必须按 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”同步 `技能系统需求.md`、`AI技能库.md`、`接口文档.md`、相关配置/部署/测试文档，并保持“本地 `SKILL.md` / 导入脚本已退役”口径。
 
 ---
 

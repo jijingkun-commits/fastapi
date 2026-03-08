@@ -168,7 +168,7 @@ export function AssistantMessage({
         )}
         {/* 流式输出中也显示工具调用 */}
         {hasToolCalls && <ToolCalls toolCalls={message.tool_calls} isComplete={!isLoading} />}
-        <MarkdownText>
+        <MarkdownText className="markdown-content-readable">
           {displayContent}
         </MarkdownText>
       </div>
@@ -209,7 +209,7 @@ export function AssistantMessage({
           <>
             {displayContent.length > 0 && (
               <div className="py-1">
-                <MarkdownText>{displayContent}</MarkdownText>
+                <MarkdownText className="markdown-content-readable">{displayContent}</MarkdownText>
               </div>
             )}
 

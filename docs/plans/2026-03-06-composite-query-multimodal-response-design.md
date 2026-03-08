@@ -189,7 +189,7 @@ requirement_seeds:
     failure_semantics: 缺少必填字段时后端归一为 error 事件；不得透传空壳 result
     observability_fields: [trace_id, thread_id, run_id, data_type, reason_code]
     rollback_anchor: ENABLE_RESULT_TYPED_EVENT_V1=false
-    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
 
   - design_item: D-02
     fr_id: FR-RENDER-REGISTRY-FALLBACK-VISIBLE
@@ -219,7 +219,7 @@ requirement_seeds:
     failure_semantics: 缺 canonical 时仍回放文本，并展示结构化降级提示
     observability_fields: [message_id, thread_id, compat_source, data_type]
     rollback_anchor: ENABLE_RESULT_REPLAY_CANONICAL_V1=false
-    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_multi_intent_coverage_reconcile.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
 
   - design_item: D-05
     fr_id: FR-SSE-RELIABILITY-AND-RESUME
@@ -265,7 +265,7 @@ requirement_seeds:
     failure_semantics: 超预算 payload 必须外置为资产引用；fallback 摘要必须脱敏
     observability_fields: [thread_id, run_id, payload_bytes, externalized, redaction_applied]
     rollback_anchor: ENABLE_RESULT_PAYLOAD_BUDGET_V1=false
-    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_chat_service_done_payload.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py -q
 
   - design_item: D-04
     fr_id: FR-CONTRACT-DRIFT-CI-GATE
@@ -585,13 +585,13 @@ clarify_handoff_contract:
     risk_counterexample_map:
       - risk_id: R-01
         counterexample: 旧事件无 message 被误拒
-        verify_cmd: venv/bin/python -m pytest tests/unit/test_chat_service_done_payload.py -q
+        verify_cmd: bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py -q
       - risk_id: R-02
         counterexample: 新类型无 renderer 导致空白
         verify_cmd: pnpm --filter web test -- --runInBand
       - risk_id: R-03
         counterexample: 刷新后结构化卡片丢失
-        verify_cmd: venv/bin/python -m pytest tests/unit/test_multi_intent_coverage_reconcile.py -q
+        verify_cmd: bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
       - risk_id: R-04
         counterexample: 多个结构化结果只保留最后一个
         verify_cmd: pnpm --filter web test -- --runInBand
@@ -617,6 +617,12 @@ clarify_consistency_check:
   current_round: 2
   open_questions_count: 0
   question_mode: package
+  product_contract_ready: true
+  semantic_frozen: true
+  contract_source_decided: true
+  handoff_seed_alignment_ok: true
+  parallel_dependency_ready: true
+  replay_canonical_field_set: true
   fail_fast_codes: []
 ```
 
@@ -631,5 +637,5 @@ execution_notes:
   question_mode: "package"
   degrade_reason: ""
   alternative_tool: ""
-  verification: "已完成仓库上下文扫描 + 联网与 GitHub 证据检索；2026-03-07 用户明确确认进入 /jjk-plan"
+  verification: "已完成仓库上下文扫描 + 联网与 GitHub 证据检索；2026-03-07 用户明确确认进入 /jjk-plan；2026-03-08 二次复核补齐 clarify_consistency_check 并对齐仓内 pytest 入口"
 ```

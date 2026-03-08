@@ -93,6 +93,13 @@ class SkillService:
         "default_version": DEFAULT_VERSION,
         "skills": [],
     }
+    LOCAL_SKILL_FILE_SOURCE_RETIRED_MESSAGE = "本地 SKILL.md / skills 目录导入链已退役；技能定义与版本请直接维护数据库真理源。"
+
+    @classmethod
+    def _raise_local_skill_file_source_retired(cls) -> None:
+        """显式阻断本地文件导入链，避免重新长出第二真理源。"""
+
+        raise RuntimeError(cls.LOCAL_SKILL_FILE_SOURCE_RETIRED_MESSAGE)
 
     @staticmethod
     def _compute_file_hash(content: str) -> str:
@@ -840,81 +847,10 @@ class SkillService:
 
     @classmethod
     def import_skill(cls, skill_path: Path, db: Session, force: bool = False) -> bool:
-        """导入单个技能到数据库。"""
+        """本地文件导入链已退役，禁止再作为正式写入路径。"""
 
-        parsed = cls._parse_skill_file(skill_path)
-        if not parsed:
-            return False
-
-        skill_id = parsed["skill_id"]
-
-        for warning in parsed.get("warnings", []):
-            logger.warning("技能 %s frontmatter 字段异常: %s", skill_id, warning)
-
-        frontmatter_status = parsed.get("frontmatter_status")
-        if frontmatter_status == "missing":
-            logger.debug("技能 %s 未声明 frontmatter，使用默认元数据", skill_id)
-        elif frontmatter_status == "invalid":
-            logger.warning("技能 %s frontmatter 存在非法或降级字段，已按回退策略导入", skill_id)
-
-        content = parsed["content"]
-        file_hash = cls._compute_file_hash(content)
-        embedding = get_embedding(parsed.get("description") or parsed.get("name") or skill_id)
-
-        existing = db.execute(
-            select(AgentSkill).where(AgentSkill.skill_id == skill_id)
-        ).scalar_one_or_none()
-
-        legacy_changed = False
-        if existing:
-            if not force and existing.file_hash == file_hash:
-                logger.debug("技能 %s 兼容层未变化，继续校验版本化记录", skill_id)
-            else:
-                existing.name = parsed["name"]
-                existing.description = parsed["description"]
-                existing.content = content
-                existing.file_hash = file_hash
-                existing.embedding = embedding
-                existing.scope = parsed["scope"]
-                existing.priority = parsed["priority"]
-                existing.auto_enabled = parsed["auto_enabled"]
-                existing.is_enabled = parsed["is_enabled"]
-                existing.trigger_phrases = parsed["trigger_phrases"]
-                existing.conflicts_with = parsed["conflicts_with"]
-                legacy_changed = True
-                logger.info("更新技能: %s", skill_id)
-        else:
-            skill = AgentSkill(
-                skill_id=skill_id,
-                name=parsed["name"],
-                description=parsed["description"],
-                content=content,
-                file_hash=file_hash,
-                embedding=embedding,
-                scope=parsed["scope"],
-                priority=parsed["priority"],
-                auto_enabled=parsed["auto_enabled"],
-                is_enabled=parsed["is_enabled"],
-                trigger_phrases=parsed["trigger_phrases"],
-                conflicts_with=parsed["conflicts_with"],
-            )
-            db.add(skill)
-            legacy_changed = True
-            logger.info("导入技能: %s", skill_id)
-
-        versioned_changed = cls._sync_versioned_records(
-            db=db,
-            parsed=parsed,
-            file_hash=file_hash,
-            embedding=embedding,
-        )
-
-        if not legacy_changed and not versioned_changed:
-            logger.debug("技能 %s 兼容层与版本层均未变化，跳过提交", skill_id)
-            return False
-
-        db.commit()
-        return True
+        _ = skill_path, db, force
+        cls._raise_local_skill_file_source_retired()
 
     @classmethod
     def import_all_skills(
@@ -923,61 +859,17 @@ class SkillService:
         force: bool = False,
         whitelist: Optional[List[str]] = None,
     ) -> int:
-        """从目录导入所有技能。"""
+        """本地目录导入链已退役，禁止再作为正式写入路径。"""
 
-        if not skills_dir.exists():
-            logger.warning("技能目录不存在: %s", skills_dir)
-            return 0
-
-        updated_count = 0
-        skipped_count = 0
-        failed_count = 0
-        skill_files = sorted(skills_dir.glob("*/SKILL.md"), key=lambda path: path.parent.name)
-
-        if whitelist:
-            whitelist_set = set(whitelist)
-            skill_files = [f for f in skill_files if f.parent.name in whitelist_set]
-            logger.info("应用白名单过滤: %s", whitelist)
-
-        logger.info("发现 %d 个技能文件", len(skill_files))
-
-        with get_db_context() as db:
-            for skill_path in skill_files:
-                try:
-                    if cls.import_skill(skill_path, db, force):
-                        updated_count += 1
-                    else:
-                        skipped_count += 1
-                except Exception as exc:  # pragma: no cover - 仅记录日志
-                    failed_count += 1
-                    db.rollback()
-                    logger.exception(
-                        "导入技能失败 skill_id=%s path=%s error=%s",
-                        skill_path.parent.name,
-                        skill_path,
-                        exc,
-                    )
-
-            if cls._is_skill_versioning_enabled():
-                template_updated = cls._ensure_user_bootstrap_template_config(db, force=force)
-                if template_updated:
-                    logger.info("用户 Skill 初始化模板已同步到系统配置")
-
-        logger.info(
-            "技能导入完成: 总数=%d, 更新=%d, 跳过=%d, 失败=%d",
-            len(skill_files),
-            updated_count,
-            skipped_count,
-            failed_count,
-        )
-
-        return updated_count
+        _ = skills_dir, force, whitelist
+        cls._raise_local_skill_file_source_retired()
 
     @classmethod
     def sync_changed_skills(cls, skills_dir: Path) -> int:
-        """同步变化的技能（增量更新）。"""
+        """本地目录增量同步已退役，禁止再作为正式写入路径。"""
 
-        return cls.import_all_skills(skills_dir, force=False)
+        _ = skills_dir
+        cls._raise_local_skill_file_source_retired()
 
     @staticmethod
     def _version_sort_key(version_record: AgentSkillVersion) -> Tuple[int, float, int]:
@@ -2632,12 +2524,29 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
 
     @classmethod
     def get_by_id(cls, skill_id: str) -> Optional[AgentSkill]:
-        """根据 skill_id 获取技能。"""
+        """根据 skill_id 获取技能，来源固定为 definition/version 真理源。"""
 
         with get_db_context() as db:
-            return db.execute(
-                select(AgentSkill).where(AgentSkill.skill_id == skill_id)
-            ).scalar_one_or_none()
+            payload = cls.get_admin_skill(db, skill_id)
+
+        skill = AgentSkill(
+            id=payload["id"],
+            skill_id=payload["skill_id"],
+            name=payload["name"],
+            description=payload.get("description"),
+            content=payload.get("content") or "",
+            file_hash=payload.get("file_hash"),
+            is_enabled=payload.get("is_enabled", True),
+            auto_enabled=payload.get("auto_enabled", True),
+            priority=payload.get("priority", cls.DEFAULT_PRIORITY),
+            scope=payload.get("scope") or cls.DEFAULT_SCOPE,
+            trigger_phrases=payload.get("trigger_phrases") or [],
+            conflicts_with=payload.get("conflicts_with") or [],
+        )
+        skill.embedding = [0.0] * int(payload["embedding_dim"]) if payload.get("has_embedding") and payload.get("embedding_dim") else None
+        skill._effective_version = payload.get("effective_version")
+        skill._binding_status = payload.get("binding_status")
+        return skill
 
     @classmethod
     def format_skills_as_context_with_meta(

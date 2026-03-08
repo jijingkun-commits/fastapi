@@ -19,7 +19,12 @@ scope_contract:
     - "误记率与漏记率具备可执行测量口径与目标阈值（D2）。"
 ```
 
-## 2. `product_contract`（PRD-Lite）
+## 2. product_contract（PRD-Lite）
+- target_users: 业务管理员需要在后台核查记忆判定是否正确；对话用户希望显式偏好被稳定记住，非偏好内容不被误记。
+- core_scenarios: SC-01 显式记忆指令入库；SC-02 非记忆任务拒绝入库；SC-03 后台可解释审计；SC-04 无触发词身份偏好识别；SC-05 风格偏好结构化沉淀。
+- business_goals: memory_false_positive_rate<=0.5%；memory_false_negative_rate<=5.0%；decision_audit_coverage>=99%。
+- non_goals: 不做 UI 可视化改版；不引入多模型投票判定；不执行数据回灌迁移。
+- acceptance_gates: 误记反例集通过；显式偏好样例通过；后台查询接口返回判定审计字段且口径一致；无触发词身份样例通过；风格映射样例通过；多记忆句原子写入。
 ```yaml
 product_contract:
   target_users:
@@ -708,8 +713,8 @@ clarify_handoff_contract:
 ## 11. `clarify_consistency_check`
 ```yaml
 clarify_consistency_check:
-  clarify_phase: "freeze"
-  current_round: 8
+  clarify_phase: "approval"
+  current_round: 9
   question_mode: "single"
   open_questions_count: 0
   product_contract_ready: true
@@ -724,10 +729,17 @@ clarify_consistency_check:
 ## 12. 审批记录
 ```yaml
 design_approval:
-  design_approved: false
-  approved_at: ""
-  approved_round: ""
-  approval_evidence: ""
-  approval_mode: "pending"
-  go_no_go: "NO_GO"
+  design_approved: true
+  approved_at: "2026-03-08 14:13:32 CST"
+  approved_round: "round-9"
+  approval_evidence: "用户回复：确认"
+  approval_mode: "explicit"
+  go_no_go: "GO"
 ```
+
+- design_approved: true
+- approved_at: 2026-03-08 14:13:32 CST
+- approved_round: round-9
+- approval_evidence: 用户回复：确认
+- approval_mode: explicit
+- go_no_go: GO

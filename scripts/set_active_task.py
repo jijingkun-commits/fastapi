@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-import runpy
 
 
-def main() -> int:
-    target = (Path(__file__).resolve().parent / "coder4" / "set_active_task.py").resolve()
-    runpy.run_path(str(target), run_name="__main__")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+_TARGET = (Path(__file__).resolve().parent / "coder4" / "set_active_task.py").resolve()
+_globals = globals()
+_globals["__file__"] = str(_TARGET)
+exec(compile(_TARGET.read_text(encoding="utf-8"), str(_TARGET), "exec"), _globals, _globals)

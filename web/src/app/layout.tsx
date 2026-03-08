@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Inter } from "next/font/google";
+import { Noto_Sans_SC } from "next/font/google";
 import React from "react";
 
-const inter = Inter({
-  subsets: ["latin"],
-  preload: true,
+const notoSansSC = Noto_Sans_SC({
+  weight: ["400", "500", "600", "700"],
+  preload: false,
   display: "swap",
+  fallback: ["PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "sans-serif"],
+  variable: "--font-sans-cjk",
 });
 
 export const metadata: Metadata = {
@@ -21,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="cn" suppressHydrationWarning>
-      <body className={inter.className} suppressHydrationWarning>
+      <body className={`${notoSansSC.variable} antialiased`} suppressHydrationWarning>
         {children}
       </body>
     </html>

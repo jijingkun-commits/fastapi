@@ -4,7 +4,18 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
-- 2026-03-07｜聊天控制面恢复/终止语义冻结（ACTIVE）→ `docs/API文档/接口文档.md`
+- 2026-03-08｜数据库证据门禁左移到 plan→vkplan→cardrun→wtimp→test→verify 主链（ACTIVE）→ `docs/plans/2026-03-08-engineering-flow-db-evidence-gate-design.md`
+- 2026-03-08｜产品运行时 Skill 文档同步矩阵冻结为强制门禁（ACTIVE）→ `.cursor/rules/doc_sync.mdc`
+- 2026-03-08｜工程流 wrapper 脱仓时必须直指实体脚本真理源（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 2026-03-08｜dirty path 统一以 `git status --porcelain -z` 为真理源（ACTIVE）→ `docs/内部参考/迭代需求/debug_report_wf04_porcelain_z_dirty_parser.md`
+- 2026-03-08｜wtimp dispatch 失败路径由 bridge 负责 process-group 清理与唯一 JSON contract（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 2026-03-08｜parallel_plan 降级为 vk_cards 派生总览（ACTIVE）→ `docs/plans/2026-03-08-parallel-plan-vk-cards-unification-design.md`
+- 2026-03-08｜`wt-flow status` 必须显式输出 active/stale state context（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 2026-03-08｜文件编辑必须以实际工具面为准（ACTIVE）→ `AGENTS.md`
+- 2026-03-08｜测试解释器必须先解析仓级真理源（ACTIVE）→ `scripts/repo_python.sh`
+- 2026-03-08｜定向红绿验证与最终 coverage 门禁必须分层（ACTIVE）→ `scripts/pytest_targeted.sh`
+- 2026-03-08｜运行态日志与提交证据必须分轨（ACTIVE）→ `scripts/check_workflow_contract.py`
+- 2026-03-07｜聊天控制面恢复/终止语义冻结（ACTIVE）→ `docs/产品文档/聊天系统需求.md`
 - 2026-03-07｜DB 驱动渐进式 Skill Loader Phase A 冻结（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-05｜规则分层落地（ACTIVE）→ `AGENTS.md`
 - 2026-03-06｜MCP 权威配置收敛（ACTIVE）→ `docs/plans/2026-03-06-mcp-governance-design.md`
@@ -14,7 +25,10 @@
 - 2026-03-06｜cardrun 默认执行器切换至 wtimp（ACTIVE）→ `docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`
 - 2026-03-06｜工程减法退役流程冻结（ACTIVE）→ `docs/plans/2026-03-06-workflow-gate-retirement-design.md`
 - 2026-03-07｜wt-flow merge 统一收口到 common repo（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 2026-03-07｜active-task `.state/<task_key>/` 纳入 dirty whitelist（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
 
+- 2026-03-08｜Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
+- 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 阅读宽度分层（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -34,6 +48,66 @@
 
 ## 决策记录
 
+### 2026-03-08 数据库证据门禁左移到六段主链
+- 状态：ACTIVE
+- 决策主题：数据库风险任务的证据责任统一左移到 `plan -> vkplan -> cardrun -> wtimp -> test -> verify` 主链，不再依赖末端人工补证据
+- 背景与问题：当前工程流已把 worktree、dispatch、commit、merge 收口做得较强，但“哪些任务必须验证 `chat_db/data_db/scripted_flow/E2E`”仍未成为可机读契约，导致卡片可能局部通过、全链缺少数据库级证据
+- 最终决策：在 `implementation_plan` 引入 `risk_tags`、`mandatory_evidence`、typed `acceptance_cmds`；`vk_cards.json` 继承到卡片；`wtimp` 输出 typed `acceptance_results` 与 `evidence_satisfied`；`cardrun` done gate、`jjk-test`、`jjk-verify` 统一按必需证据集合放行
+- 取舍理由：优先修复结构性责任边界，而不是继续在 `/jjk-test` 或 `/jjk-verify` 末端堆补丁；这样更符合项目未上线阶段“设计合理性优先”的治理原则
+- 影响范围：`.cursor/commands/jjk-{plan,vkplan,cardrun,wtimp,test,verify}.md`、`scripts/check_workflow_contract.py`、`scripts/coder4/*`、`docs/开发文档/测试管理/*`、`docs/开发文档/工作流/*`
+- 回退/失效条件：若未来出现统一执行/测试编排平台，可将本决策升级为平台级证据契约；在此之前不得回退到“无 DB 证据也可 PASS”的旧语义
+- 关联文档/代码：`docs/plans/2026-03-08-engineering-flow-db-evidence-gate-design.md`、`docs/plans/2026-03-08-engineering-flow-db-evidence-gate-implementation.md`、`.cursor/commands/jjk-cardrun.md`、`.cursor/commands/jjk-wtimp.md`
+
+### 2026-03-08 产品运行时 Skill 文档同步矩阵冻结
+- 状态：ACTIVE
+- 决策主题：产品运行时 Skill 的文档同步不再依赖执行者自行猜测，统一冻结为显式强制矩阵
+- 背景与问题：`技能系统需求.md`、`AI技能库.md`、`接口文档.md`、配置/部署/测试文档虽已存在，但 `doc_sync` 未对 `app/ai/skills`、`skill_service`、`skill_admin`、`import_skills` 等路径给出单一门禁，导致 AI 容易只更新部分文档
+- 最终决策：在 `.cursor/rules/doc_sync.mdc` 新增“产品运行时 Skill 专项映射（强制）”，并将 `jjk-imp`、`jjk-debug`、`jjk-review`、`jjk-verify` 与工作流/速查文档统一引用该矩阵
+- 取舍理由：把责任收敛到规则层而不是继续堆“经验提醒”，避免产品文档、内部机制文档、接口文档、部署文档长期漂移
+- 影响范围：`.cursor/rules/doc_sync.mdc`、`.cursor/commands/jjk-{imp,debug,review,verify}.md`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
+- 回退/失效条件：若未来运行时 Skill 文档进一步收敛为单一主文档，可由新的单源矩阵替代；在此之前不得回退到泛化门禁
+- 关联文档/代码：`.cursor/rules/doc_sync.mdc`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
+
+### 2026-03-08 wtimp dispatch 失败路径收口
+- 状态：ACTIVE
+- 决策主题：`wtimp_dispatch_bridge` 必须独占 dispatch 子执行器生命周期治理，失败路径统一负责 process-group 清理与唯一 JSON contract 校验
+- 背景与问题：此前虽已补 `dispatch_timeout_seconds` 契约，但 bridge 仍使用 `subprocess.run(...)` + 宽松 JSON 提取；timeout 后只能杀最外层进程，stdout 中任意 dict 也可能被误判为成功回执
+- 最终决策：bridge 改为 `Popen(..., start_new_session=True)`；timeout / 非零退出 / 非法回执统一附带 `session_cleanup` 证据并尝试回收当前 process-group；结果提取只接受唯一 contract payload，禁止 fallback 到任意 dict
+- 取舍理由：把失败治理收敛在 bridge 边界内，避免 kernel 感知子进程细节，也避免通过宽松 coercion 或人工清理掩盖结构性问题
+- 影响范围：`scripts/coder4/wtimp_dispatch_bridge.py`、`tests/unit/test_coder4_wtimp_dispatch_bridge.py`、`tests/unit/test_coder4_dispatch_executor.py`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+- 回退/失效条件：若后续 `wtimp` 引入主动脱离当前 session 的后台任务，需要升级为跨 session 清理机制；否则本决策持续有效
+- 关联文档/代码：`docs/内部参考/迭代需求/debug_report_wf02_dispatch_timeout.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wtimp_dispatch_bridge.py`
+
+### 2026-03-08 dirty path 解析协议收口
+- 状态：ACTIVE
+- 决策主题：`wt-flow` 与 `coder4_bootstrap_kernel` 的 dirty path 统一以 `git status --porcelain -z --untracked-files=no` 为真理源
+- 背景与问题：此前虽已补 quoted-path decode，但 rename/copy 仍依赖文本箭头切割；当文件名自身包含 ` -> ` 时，whitelist 命中会被误伤
+- 最终决策：shell/python 两侧都改为解析 NUL 分隔记录；rename/copy 一律消费目标路径；删除 `core.quotePath=false` / 文本补码作为主路径依赖
+- 取舍理由：把路径解析提升到 Git 原生记录协议层，消除“引号/箭头/空格/中文”交织时的字符串歧义
+- 影响范围：`scripts/coder4/wt-flow.sh`、`scripts/coder4/coder4_bootstrap_kernel.py`、相关 dirty policy / merge / local-mode 回归测试
+- 回退/失效条件：若未来改用更高层 Git 库统一封装，可由新封装替代；否则不应回退到文本行解析
+- 关联文档/代码：`docs/内部参考/迭代需求/debug_report_wf04_porcelain_z_dirty_parser.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
+
+### 2026-03-08 工程流 wrapper 真理源提示收口
+- 状态：ACTIVE
+- 决策主题：工程流 wrapper 在脱离仓库布局时必须 fail-fast，并直接提示实体脚本路径作为单一真理源
+- 背景与问题：`scripts/wt-flow.sh` 被复制到仓库外时，旧行为只会抛出 `coder4/wt-flow.sh: No such file or directory`，用户难以判断自己拿错了 wrapper 还是实体脚本
+- 最终决策：wrapper 缺失实体脚本时统一输出“当前只是 wrapper / 单一真理源是实体脚本 / 若需脱仓调试请复制实体脚本”的明确报错；仓库内正常布局继续透明转发
+- 取舍理由：把错误提示提升到职责层，避免工程流使用者继续把 wrapper 当可独立运行的实体脚本，也避免为了迁就误用去复制实体实现
+- 影响范围：`scripts/wt-flow.sh`、工程流手册中的脚本角色说明、后续同类 wrapper 入口
+- 回退/失效条件：若未来彻底移除 wrapper 或统一由单一 Python/Bash 入口生成兼容壳，可由新入口策略替代；否则该提示规则持续有效
+- 关联文档/代码：`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_wt_flow_wrapper_entrypoint.py`
+
+### 2026-03-08 Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链
+- 状态：ACTIVE
+- 决策主题：Skill 的正式维护、管理面与运行时统一只认数据库 versioned 真理源，本地 `SKILL.md` 与目录导入脚本退出主路径
+- 背景与问题：即使 runtime/admin 已切到 `definition/version`，只要仍保留本地目录导入链，就会继续诱发第二真理源与“重启/导入即可修复”的错误操作心智
+- 最终决策：`t_agent_skill_definitions / t_agent_skill_versions / t_user_skill_bindings` 为唯一正式来源；`import_skill/import_all_skills/sync_changed_skills` 显式 fail-fast；`scripts/data/import_skills.py` 与 `tests/update_skills_db.py` 标记退役
+- 取舍理由：项目未上线，优先彻底消灭双源结构，而不是保留历史脚本做软兼容；显式阻断比静默继续可维护性更高
+- 影响范围：`app/services/skill_service.py`、`scripts/data/import_skills.py`、`tests/update_skills_db.py`、`docs/内部参考/AI技能库.md`、后续所有 Skill 运维/测试手册
+- 回退/失效条件：若未来引入“DB 审核后再导出文件”的离线发布链，可新增只读导出工具；在此之前不得恢复本地文件导入为正式路径
+- 关联文档/代码：`docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`、`docs/内部参考/AI技能库.md`、`app/services/skill_service.py`
+
 ### 2026-03-07 DB 驱动渐进式 Skill Loader Phase A 冻结
 - 状态：ACTIVE
 - 决策主题：Skill 运行时收敛到 progressive loader，Phase A 的 schema 真理源、会话态与 canonical replay 一次冻结
@@ -52,7 +126,7 @@
 - 取舍理由：优先保持控制面与意图层职责单一，避免通过自然语言兼容层掩盖状态机问题，也避免把半成品 AI 回复当最终历史展示
 - 影响范围：聊天前端状态机、`app/services/chat_service.py`、`app/services/run_control_service.py`、`app/ai/workflow/multi_agent_graph.py`、`app/repositories/chat_repo.py`、聊天 API/架构文档
 - 回退/失效条件：若后续引入显式 reconnect/reset-checkpoint 能力，并把瞬态状态改为真正非持久化字段，可重新评估“断流后直接续跑/重发”的交互口径
-- 关联文档/代码：`docs/API文档/接口文档.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/services/chat_service.py`、`app/ai/workflow/multi_agent_graph.py`
+- 关联文档/代码：`docs/产品文档/聊天系统需求.md`、`docs/API文档/接口文档.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/services/chat_service.py`、`app/ai/workflow/multi_agent_graph.py`
 
 ### 2026-03-06 MCP 权威配置收敛
 - 状态：ACTIVE
@@ -135,6 +209,16 @@
 - 关联文档/代码：`docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md`
 
 
+### 2026-03-07 active-task `.state/<task_key>/` 纳入 dirty whitelist
+- 状态：ACTIVE
+- 决策主题：active task 运行态真理源 `.state/<task_key>/` 默认视为工程流运行产物，`wt-flow` 与 `bootstrap kernel` 的 dirty policy 必须自动放行该目录
+- 背景与问题：此前 dirty whitelist 仅覆盖文档目录，导致 `task-runner-state.json`、`task-ledger.jsonl`、`coder4-idempotency.json` 等运行态文件一旦变脏，就会误阻断 `bootstrap/merge`；同时中文路径在 git quoted path 下又会进一步放大误判
+- 最终决策：基于 `active_task.task_split_dir + task_key` 自动推导 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/` 并追加到 dirty whitelist；显式用户白名单不被覆盖，只做合并；quoted path 必须先解码后再参与匹配
+- 取舍理由：运行态真理源不应再被当作“用户未提交脏改动”处理；优先恢复工程流稳定执行，再逐步细化 lock/session 等更小粒度分类
+- 影响范围：`scripts/coder4/wt-flow.sh`、`scripts/coder4/coder4_bootstrap_kernel.py`、dirty policy 相关测试与工程流文档
+- 回退/失效条件：若后续把运行态真理源整体迁出 Git 工作区，或引入独立运行态存储层，本决策可失效并转由新存储边界承担 dirty 隔离
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`docs/内部参考/迭代需求/debug_report_wf03_state_dirty_whitelist.md`
+
 ### 2026-03-07 wt-flow merge 统一收口到 common repo
 - 状态：ACTIVE
 - 决策主题：`wt-flow merge` 的基线分支合并上下文固定归属 `common repo root`，不再依赖当前 card worktree checkout
@@ -154,3 +238,73 @@
 - 影响范围：`scripts/check_*` L1 门禁脚本、`.cursor/commands/*`、`.agents/skills/*`、工作流与治理文档
 - 回退/失效条件：若统一入口兼容性或验收矩阵失败，回退为“旧脚本主入口 + wrapper 反向代理”，并暂停删除阶段
 - 关联文档/代码：`docs/plans/2026-03-06-workflow-gate-retirement-design.md`、`docs/内部参考/工程减法体检报告_2026-03-06_v3.md`
+
+### 2026-03-08 parallel_plan 降级为 vk_cards 派生总览
+- 状态：ACTIVE
+- 决策主题：`parallel_plan.md` 从拆卡阶段并列真理源降级为 `vk_cards.json` 自动生成的人类可读总览
+- 背景与问题：当前 `parallel_plan.md` 与 `vk_cards.json` 同时承载执行策略、Gate 契约与总览信息，而实际执行链主要消费 `vk_cards.json`，双写带来漂移与心智负担
+- 最终决策：`vk_cards.json` 作为拆卡后唯一机器真理源；新增/统一 `gate_results` 等运行态字段写回 `vk_cards.json`；`parallel_plan.md` 仅作为由 `vk_cards.json` 渲染生成的展示视图保留
+- 取舍理由：在不污染上游 `implementation_plan.md` 的前提下收敛运行态真理源，减少并行文档双写，同时保留人工阅读与历史目录兼容性
+- 影响范围：`scripts/backfill_gate_status.py`、`scripts/workflow_contract_gate_contract_impl.py`、任务拆解模板、`jjk-vkplan/jjk-cardrun/jjk-imp-ws/jjk-test/jjk-vktodo` 文档口径
+- 回退/失效条件：若后续平台引入独立 Gate 状态存储或统一视图服务，可继续下沉 `parallel_plan.md`；若必须恢复人工可编辑并行总览，应新建独立文档而不是恢复其真理源职责
+- 关联文档/代码：`docs/plans/2026-03-08-parallel-plan-vk-cards-unification-design.md`、`docs/内部参考/任务拆解/_templates/parallel_plan_template.md`
+
+### 2026-03-08 wt-flow status 状态发现契约显式化
+- 状态：ACTIVE
+- 决策主题：`wt-flow status` 必须显式输出 active task 与 stale state 候选的映射，不允许再让人工靠目录名猜真理源
+- 背景与问题：历史 `.state/<task_key>/` 与当前 active task 的 `.state/<task_key>/` 可同时存在；此前 `status` 只给 session/worktree 信息，无法直接看出当前命中的 active task file、task_key 与 state root
+- 最终决策：`status` 统一输出 `ACTIVE_TASK_FILE`、`ACTIVE_TASK_SPLIT_DIR`、`ACTIVE_TASK_KEY`、`TASK_STATE_ROOT`、`STALE_STATE_CANDIDATES`；仅做只读发现，不在该命令内自动清理历史状态目录
+- 取舍理由：先把“状态发现”与“状态治理”边界切清，降低误判真理源的概率，同时避免把自动清理做成新的隐式 fallback 或误删风险
+- 影响范围：`scripts/coder4/wt-flow.sh`、`tests/unit/test_coder4_wt_flow_verified_state.py`、工程流状态诊断与人工排障路径
+- 回退/失效条件：若后续引入独立状态浏览器或编排服务，并以更强契约提供同等 active/stale 映射，可把 CLI `status` 简化为该服务代理；否则本决策持续有效
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wt-flow.sh`
+
+### 2026-03-08 文件编辑工具面契约冻结
+- 状态：ACTIVE
+- 决策主题：文件编辑必须以当前会话**实际暴露**的工具面为准；若无独立 `apply_patch` 入口，禁止通过 `exec_command` 包装 `apply_patch`
+- 背景与问题：本轮执行中外层提示持续要求“使用 apply_patch tool”，但真实工具清单并未暴露该入口，导致代理在遵从提示与遵从工具事实之间反复空转
+- 最终决策：在 `AGENTS.md` 与工程流手册中冻结同一条契约；命中该场景时统一记录 `APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK`，并改用当前可用的直接写回方式，不再尝试伪造不存在的编辑工具
+- 取舍理由：优先尊重真实工具边界，先修“指令链冲突”而不是继续制造 wrapper/兼容壳，避免把工具提示漂移演化成执行链稳定性问题
+- 影响范围：`AGENTS.md`、`CLAUDE.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`、相关文档一致性回归测试
+- 回退/失效条件：若后续运行环境正式暴露独立 `apply_patch` 工具并同步修正文案，本决策可退化为“优先真实 apply_patch，删除 fallback 标记”
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_workflow_tooling_contract_docs.py`
+
+### 2026-03-08 仓级测试解释器真理源冻结
+- 状态：ACTIVE
+- 决策主题：测试/验证命令必须先解析仓级 Python 解释器真理源，不再默认裸用 `python3 -m pytest`
+- 背景与问题：本轮定向回归首次失败并非业务断言失败，而是系统 `python3` 缺少 pytest；而仓内 `venv` 已具备完整依赖，说明问题出在解释器入口漂移
+- 最终决策：新增 `scripts/repo_python.sh` 作为单一解析入口；优先级固定为 `VK_RUNTIME_VENV -> venv -> .venv -> .vibe/venv -> python3 -> python`；`AGENTS.md` 与测试指南统一引用该入口
+- 取舍理由：把解释器选择从分散命令模板中抽离出来，避免每个测试命令各自猜环境，也避免“环境失败掩盖真实回归”再次发生
+- 影响范围：`scripts/repo_python.sh`、`AGENTS.md`、`docs/开发文档/测试管理/测试指南与环境配置.md`、测试/验证执行链与相关回归测试
+- 回退/失效条件：若未来平台提供更上层的仓级解释器发现机制并稳定覆盖 worktree 场景，可由新机制替代；否则应继续维持脚本为单一入口
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_repo_python_script.py`、`scripts/repo_python.sh`
+
+### 2026-03-08 定向 pytest 与最终 gate 语义分层
+- 状态：ACTIVE
+- 决策主题：开发期定向红绿验证与最终 coverage 门禁必须使用不同入口，禁止再混成同一条 pytest 命令
+- 背景与问题：本轮新回归测试 RED 时，真实失败之外又叠加了全局 coverage 阈值失败，说明开发期最小验证被最终门禁语义污染
+- 最终决策：新增 `scripts/pytest_targeted.sh` 作为开发期定向入口，固定注入 `--no-cov` 并拒绝 `--cov*` 混用；最终收口继续使用常规 pytest/coverage 命令
+- 取舍理由：先让 TDD/调试阶段只对“是否命中当前根因”负责，避免 coverage 噪音掩盖红灯；同时不削弱最终收口门禁
+- 影响范围：`scripts/pytest_targeted.sh`、`AGENTS.md`、`docs/开发文档/测试管理/测试指南与环境配置.md`、开发期回归与最终验收的测试命令模板
+- 回退/失效条件：若未来测试平台原生支持“targeted-no-cov / final-gate-cov”双模式，并能稳定覆盖本仓工作流，可由平台模式替代脚本；否则应继续维持双入口
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_pytest_targeted_script.py`、`scripts/pytest_targeted.sh`
+
+### 2026-03-08 usage 运行日志与提交证据分轨
+- 状态：ACTIVE
+- 决策主题：`logs/workflow-gate-usage.jsonl` 只承担运行态观测；提交证据必须由 `usage-report` 显式导出到 tracked report 文件
+- 背景与问题：此前 `C05` 把 ignored `logs/` 文件同时当作运行态台账和验收证据，导致默认提交链路需要 `git add -f` 才能携带关键证据
+- 最终决策：保留运行态日志在 `logs/`；`check_workflow_contract.py --mode usage-report` 新增 `--log-path` / `--report-output`，统一导出 `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json` 作为提交证据
+- 取舍理由：先切清“滚动日志”和“可提交证据”边界，既保留运行时观测体验，又避免 ignored 目录与提交流程天然冲突
+- 影响范围：`scripts/check_workflow_contract.py`、`docs/plans/2026-03-06-workflow-gate-retirement-design.md`、workflow-gate retirement 需求/实现计划、`WS-C05` / `vk_cards.json` 契约与相关回归测试
+- 回退/失效条件：若后续平台为观测证据提供独立存储/导出服务，可由平台服务替代 report 导出；否则应继续维持 runtime log 与 tracked report 双轨
+- 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_workflow_gate_usage_report_contract.py`、`scripts/check_workflow_contract.py`
+
+### 2026-03-08 聊天前端字体系统切换为 CJK WebFont + 阅读宽度分层
+- 状态：ACTIVE
+- 决策主题：聊天前端统一采用 CJK 主字体与阅读型 typography 契约
+- 背景与问题：原方案以 `Inter` 作为全局主字体，中文主要依赖系统 fallback，导致英文与中文气质割裂，Markdown 长文也缺少阅读型层次与合适宽度。
+- 最终决策：根布局统一注入 `Noto Sans SC`，全局样式收口字体与排版 token，AI Markdown 正文单独限制阅读宽度，图表/SQL/工具结果保留较宽展示宽度。
+- 取舍理由：未上线阶段优先消除字体入口分散与正文样式失控的结构性问题，用一次重构换取后续内容产品一致性。
+- 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、AI 消息正文渲染链路。
+- 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，可在根布局保留单一入口的前提下替换字体源与 token。
+- 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`

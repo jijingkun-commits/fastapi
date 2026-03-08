@@ -12,6 +12,7 @@ from typing import Any
 
 TASK_ACTIVE_FILENAME = "_active_task.json"
 TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
+DEFAULT_ACTIVE_TASK_INDEX_PATH = str(TASK_SPLIT_BASE / TASK_ACTIVE_FILENAME)
 
 
 def detect_repo_root(start: Path) -> Path:
@@ -81,6 +82,11 @@ def parse_args() -> argparse.Namespace:
         "--repo-root",
         default="",
         help="Repository root path (optional, defaults to script parent repo root)",
+    )
+    parser.add_argument(
+        "--active-task-path",
+        default=DEFAULT_ACTIVE_TASK_INDEX_PATH,
+        help="Index active task file path to update alongside task-scoped _active_task.json",
     )
     parser.add_argument(
         "--scope-request",
@@ -212,6 +218,26 @@ def write_active_payload(
     return task_scoped_active_task_path
 
 
+def resolve_active_task_index_path(repo_root: Path, raw_active_task_path: str | None) -> Path:
+    raw = str(raw_active_task_path or "").strip() or DEFAULT_ACTIVE_TASK_INDEX_PATH
+    target = Path(raw).expanduser()
+    if target.is_absolute():
+        return target.resolve()
+    return (repo_root / target).resolve()
+
+
+def write_active_index_payload(
+    *,
+    index_path: Path,
+    task_scoped_active_task_path: Path,
+    active_payload: dict[str, Any],
+) -> Path:
+    index_payload = dict(active_payload)
+    index_payload["active_task_path"] = str(task_scoped_active_task_path.resolve())
+    write_json(index_path, index_payload)
+    return index_path
+
+
 def mark_scope_request_applied(
     request_path: Path,
     request_payload: dict[str, Any],
@@ -295,12 +321,19 @@ def apply_scope_request(args: argparse.Namespace, repo_root: Path) -> int:
     )
 
     action = "already_active"
+    task_scoped_active_task_path = scoped_active_path
     if not already_active:
-        write_active_payload(
+        task_scoped_active_task_path = write_active_payload(
             task_split_dir=task_split_dir,
             active_payload=active_payload,
         )
         action = "scope_switched"
+
+    write_active_index_payload(
+        index_path=resolve_active_task_index_path(repo_root, getattr(args, "active_task_path", DEFAULT_ACTIVE_TASK_INDEX_PATH)),
+        task_scoped_active_task_path=task_scoped_active_task_path,
+        active_payload=active_payload,
+    )
 
     mark_scope_request_applied(
         request_path,
@@ -346,8 +379,14 @@ def set_task_active(args: argparse.Namespace, repo_root: Path) -> int:
         task_split_dir=task_split_dir,
         active_payload=active_payload,
     )
+    active_index_path = write_active_index_payload(
+        index_path=resolve_active_task_index_path(repo_root, getattr(args, "active_task_path", DEFAULT_ACTIVE_TASK_INDEX_PATH)),
+        task_scoped_active_task_path=task_scoped_active_task_path,
+        active_payload=active_payload,
+    )
 
     print(f"updated task-scoped: {task_scoped_active_task_path}")
+    print(f"updated active index: {active_index_path}")
     print(
         "scope:",
         f"project_id={active_payload['project_id']}",
@@ -362,9 +401,9 @@ def set_task_active(args: argparse.Namespace, repo_root: Path) -> int:
 
 def main() -> int:
     args = parse_args()
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_repo_root(getattr(args, "repo_root", ""))
     try:
-        if str(args.scope_request or "").strip():
+        if str(getattr(args, "scope_request", "") or "").strip():
             return apply_scope_request(args, repo_root)
         return set_task_active(args, repo_root)
     except ValueError as exc:

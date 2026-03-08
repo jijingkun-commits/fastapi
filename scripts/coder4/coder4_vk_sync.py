@@ -202,10 +202,13 @@ def resolve_task_scoped_active_task_path(active_task_path: Path, active_payload:
         raise ValueError(f"active task missing task_split_dir: {active_task_path}")
     if active_task_path.name != "_active_task.json":
         raise ValueError(f"active task file name invalid: {active_task_path}")
-    if active_task_path.parent.name != task_split_dir:
-        raise ValueError(
-            f"active task must be task-scoped: file_dir={active_task_path.parent.name} task_split_dir={task_split_dir}"
-        )
+    if active_task_path.parent.name == task_split_dir:
+        return active_task_path.resolve()
+
+    candidate = (active_task_path.parent / task_split_dir / "_active_task.json").resolve()
+    if candidate.exists():
+        return candidate
+
     return active_task_path.resolve()
 
 
@@ -250,9 +253,21 @@ def build_vktodo_card_title(*, raw_title: str, card_id: str, task_key: str, main
 
 def resolve_vk_cards_path(active_task_path: Path) -> Path:
     vk_cards_path = (active_task_path.parent / "vk_cards.json").resolve()
-    if not vk_cards_path.exists():
-        raise FileNotFoundError(f"vk_cards.json not found: {vk_cards_path}")
-    return vk_cards_path
+    if vk_cards_path.exists():
+        return vk_cards_path
+
+    try:
+        active_payload = load_json(active_task_path)
+    except Exception:  # noqa: BLE001
+        active_payload = {}
+
+    task_split_dir = str(active_payload.get("task_split_dir") or "").strip()
+    if task_split_dir:
+        candidate = (active_task_path.parent / task_split_dir / "vk_cards.json").resolve()
+        if candidate.exists():
+            return candidate
+
+    raise FileNotFoundError(f"vk_cards.json not found: {vk_cards_path}")
 
 
 def load_state_status_map(state_path: Path) -> dict[str, str]:

@@ -1,45 +1,180 @@
 /* Base markdown styles */
-.markdown-content code:not(pre code) {
-  background-color: rgba(0, 0, 0, 0.05);
-  padding: 0.2em 0.4em;
-  border-radius: 3px;
-  font-size: 0.9em;
+.markdown-content {
+  color: var(--foreground);
+  font-size: var(--chat-reading-font-size);
+}
+
+.markdown-content-readable {
+  width: 100%;
+  max-width: var(--chat-reading-max-width);
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content :where(p, li, blockquote) {
+  font-size: var(--chat-reading-font-size);
+  line-height: var(--chat-reading-line-height);
+  font-weight: var(--chat-reading-weight);
+  letter-spacing: var(--chat-reading-letter-spacing);
+}
+
+.markdown-content p {
+  margin: 0;
+}
+
+.markdown-content p + p {
+  margin-top: 1rem;
+}
+
+.markdown-content :where(ul, ol) {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown-content li + li {
+  margin-top: 0.55rem;
+}
+
+.markdown-content li > :where(ul, ol) {
+  margin-top: 0.6rem;
+}
+
+.markdown-content :where(h1, h2, h3) {
+  color: color-mix(in srgb, var(--foreground) 96%, black 4%);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: var(--chat-heading-letter-spacing);
+  margin: 0;
+}
+
+.markdown-content h1 {
+  font-size: clamp(2.1rem, 1.9rem + 0.9vw, 2.9rem);
+  margin-top: 2.4rem;
+  margin-bottom: 1.15rem;
+}
+
+.markdown-content h2 {
+  font-size: clamp(1.55rem, 1.42rem + 0.45vw, 2rem);
+  margin-top: 2rem;
+  margin-bottom: 0.95rem;
+}
+
+.markdown-content h3 {
+  font-size: clamp(1.2rem, 1.12rem + 0.28vw, 1.45rem);
+  margin-top: 1.6rem;
+  margin-bottom: 0.8rem;
+  font-weight: 650;
+}
+
+.markdown-content :where(strong, b) {
+  font-weight: 650;
+  color: color-mix(in srgb, var(--foreground) 94%, black 6%);
+}
+
+.markdown-content :where(em, i) {
+  font-style: italic;
 }
 
 .markdown-content a {
-  color: #0070f3;
+  color: var(--color-brand-700);
   text-decoration: none;
+  text-decoration-color: color-mix(in srgb, var(--color-brand-700) 32%, transparent);
 }
 
 .markdown-content a:hover {
   text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 
 .markdown-content blockquote {
-  border-left: 4px solid #ddd;
-  padding-left: 1rem;
-  color: #666;
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1rem;
+  border-left: 3px solid color-mix(in srgb, var(--color-brand-600) 42%, white 58%);
+  color: var(--muted-foreground);
+}
+
+.markdown-content hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 82%, white 18%);
+}
+
+.markdown-content code:not(pre code) {
+  background-color: color-mix(in srgb, var(--muted) 72%, white 28%);
+  color: color-mix(in srgb, var(--foreground) 95%, var(--color-brand-700) 5%);
+  padding: 0.18em 0.42em;
+  border-radius: 0.45rem;
+  font-size: 0.92em;
 }
 
 .markdown-content pre {
   overflow-x: auto;
+  margin: 1.3rem 0;
+  border-radius: 1rem;
 }
 
 .markdown-content table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
+  margin: 1.25rem 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, white 12%);
+  border-radius: 0.9rem;
 }
 
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid #ddd;
-  padding: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 88%, white 12%);
+  padding: 0.8rem 0.95rem;
+  text-align: left;
+}
+
+.markdown-content tr:last-child td {
+  border-bottom: 0;
 }
 
 .markdown-content th {
-  background-color: #f2f2f2;
+  background-color: color-mix(in srgb, var(--muted) 70%, white 30%);
+  font-weight: 600;
 }
 
 .markdown-content tr:nth-child(even) {
-  background-color: #f9f9f9;
+  background-color: color-mix(in srgb, var(--muted) 38%, white 62%);
+}
+
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2rem 0;
+}
+
+@media (max-width: 768px) {
+  .markdown-content-readable {
+    max-width: 100%;
+  }
+
+  .markdown-content h1 {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  .markdown-content h2 {
+    margin-top: 1.6rem;
+  }
+
+  .markdown-content :where(ul, ol) {
+    padding-left: 1.25rem;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    padding: 0.72rem 0.78rem;
+  }
 }
