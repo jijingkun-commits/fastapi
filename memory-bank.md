@@ -4,6 +4,7 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-08｜治理前置命令显式化：`/jjk-arch-gate` 与 `/jjk-api-doc-sync`（ACTIVE）→ `docs/plans/2026-03-08-jjk-governance-skills-design.md`
 - 2026-03-08｜数据库证据门禁左移到 plan→vkplan→cardrun→wtimp→test→verify 主链（ACTIVE）→ `docs/plans/2026-03-08-engineering-flow-db-evidence-gate-design.md`
 - 2026-03-08｜产品运行时 Skill 文档同步矩阵冻结为强制门禁（ACTIVE）→ `.cursor/rules/doc_sync.mdc`
 - 2026-03-08｜工程流 wrapper 脱仓时必须直指实体脚本真理源（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
@@ -47,6 +48,16 @@
 - 历史记录按月归档至 `docs/内部参考/决策归档/`，本文件保留近期生效与关键里程碑。
 
 ## 决策记录
+
+### 2026-03-08 治理前置命令显式化
+- 状态：ACTIVE
+- 决策主题：把架构门禁与 API 文档同步从散落规则显式收敛为 `jjk-*` 前置命令
+- 背景与问题：Layer1 已要求任何改动前先给四段式架构结论，且 API / 契约变更必须先同步文档，但当前只有规则没有显式命令入口，执行者容易直接跳去 `/jjk-plan`、`/jjk-imp`、`/jjk-refactor`，遗漏治理动作
+- 最终决策：新增 `.cursor/commands/jjk-arch-gate.md` 与 `.cursor/commands/jjk-api-doc-sync.md` 作为真理源，并同步镜像到 `.agents/skills/`；工作流手册与速查表统一把二者标注为治理前置门禁
+- 取舍理由：用显式入口降低执行歧义，比继续依赖口头提醒或散落规则更稳；项目未上线，优先把结构性治理前置而不是事后补救
+- 影响范围：`.cursor/commands/jjk-{arch-gate,api-doc-sync}.md`、`.agents/skills/jjk-{arch-gate,api-doc-sync}/SKILL.md`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
+- 回退/失效条件：若未来把架构门禁与文档同步门禁下沉为可执行脚本或 CI 自动判定，可让命令退化为可视化入口；在此之前保持显式命令形态
+- 关联文档/代码：`docs/plans/2026-03-08-jjk-governance-skills-design.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-api-doc-sync.md`
 
 ### 2026-03-08 数据库证据门禁左移到六段主链
 - 状态：ACTIVE

@@ -445,6 +445,7 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
+| `/jjk-arch-gate` | 动手前先做四段式架构结论，防止结构性误改 | `/jjk-arch-gate @app/services/chat_service.py` |
 | `/jjk-review` | 结构化代码审查，定位高风险点 | `/jjk-review` |
 | `/jjk-test` | 执行测试矩阵并输出测试报告 | `/jjk-test` |
 | `/jjk-verify` | 审查 + 测试 + UAT 一体化验收 | `/jjk-verify` |
@@ -457,10 +458,11 @@ description: 命令的简短描述
 
 ### 7.6 文档同步
 
-文档同步已并入标准研发链路，不再维护独立文档命令。
+文档同步主责任仍在标准研发链路，但新增 `/jjk-api-doc-sync` 作为 API / Schema / Route 变更的显式前置门禁。
 
 | 入口/命令 | 说明 | 使用示例 |
 |------|------|----------|
+| `/jjk-api-doc-sync` | 命中接口/契约变更时，先列文档同步清单 | `/jjk-api-doc-sync @app/api/v1/endpoints/chat_api.py` |
 | `/jjk-imp` | 实现阶段同步必要文档变更 | `/jjk-imp` |
 | `/jjk-review` | 审查阶段检查文档-代码一致性 | `/jjk-review` |
 | `/jjk-verify` | 验收阶段做最终文档收口确认 | `/jjk-verify` |
@@ -502,7 +504,9 @@ npx ai-agent-skills update --all    # 更新全部
 # 发散与冻结
 /ask               # 兼容别名（已降级），会立即转入 /jjk-clarify
 /jjk-clarify       # 设计冻结 + handoff 契约（含 PRD-Lite）
+/jjk-arch-gate     # 改动前四段式架构门禁
 /jjk-plan          # 生成 requirements + implementation_plan（core/parallel）
+/jjk-api-doc-sync  # API / Schema / Route 文档同步门禁
 
 # 并行与看板 - 多 worktree 协作
 /jjk-vkplan        # 在 /jjk-plan 后执行并行拆解并产出 vk_cards.json
@@ -551,12 +555,14 @@ npx ai-agent-skills update --all    # 更新全部
 └── webapp-testing/        # Playwright 测试
 ```
 
-### 9.2 Commands（17 个）
+### 9.2 Commands（19 个）
 
 ```
 .cursor/commands/
 ├── ask.md                 # 兼容入口（已降级，立即并入 jjk-clarify）
 ├── do.md                  # 通用执行实施
+├── jjk-api-doc-sync.md    # API / Schema / Route 文档同步门禁
+├── jjk-arch-gate.md       # 四段式架构门禁
 ├── jjk-cardrun.md         # 串行卡片执行调度
 ├── jjk-clarify.md         # 设计冻结 + handoff 契约
 ├── jjk-create-pr.md       # PR 交付入口

@@ -85,7 +85,9 @@ python3 scripts/check_workflow_contract.py --mode clarify_plan \
 | 场景 | 推荐命令 | 说明 |
 |---|---|---|
 | 快速澄清需求 | `/jjk-clarify` | 设计冻结入口（默认收敛），产出 `design_freeze_summary + clarify_handoff_contract` |
+| 改动前先过架构门禁 | `/jjk-arch-gate` | 先输出四段式架构结论，确认该走 `plan / imp / refactor` 哪条线 |
 | 规划（不拆卡） | `/jjk-plan` 或 `/jjk-plan core` | 只产出需求与技术方案 |
+| API / Schema 文档同步 | `/jjk-api-doc-sync` | 命中路由 / schema / DTO / 接口语义变更时，先列必须同步的文档清单 |
 | 规划 + 并行拆解（推荐） | `/jjk-plan parallel -> /jjk-vkplan`（或 `/jjk-plan core -> /jjk-vkplan`） | 含 G0 冻结与落卡前产物 |
 | 看板落卡（推荐） | `/jjk-vktodo <任务拆解目录> create` | create-only 幂等建卡（不负责状态推进） |
 | 串行卡片执行（推荐） | `/jjk-cardrun <任务拆解目录> loop` | 主控按 `card_order` 串行执行并执行每卡 merge 收口 |
