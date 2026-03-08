@@ -93,7 +93,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 3. 运行态最小校验：  
    - `lsof -nP -iTCP:${VK_BACKEND_PORT} -sTCP:LISTEN`  
    - `lsof -nP -iTCP:${VK_FRONTEND_PORT} -sTCP:LISTEN`  
-   - `curl -sf "${VK_BACKEND_BASE_URL}/health"`（若项目健康路由存在）  
+   - `curl -sf "${VK_BACKEND_BASE_URL}/api/v1/health"`  
 4. 若浏览器访问目标与 `VK_FRONTEND_BASE_URL` 不一致，`FAIL_FAST` 输出 `VERIFY_PORT_CONTEXT_MISMATCH`。
 
 ### 1) 变更分析与验证策略
