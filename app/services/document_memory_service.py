@@ -514,27 +514,46 @@ def _build_preference_context(
     if not documents:
         return ""
 
-    header = "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）："
-    lines = [header]
-    budget = max(120, int(max_chars))
-    current_len = len(header)
-    has_assistant_persona = False
-
+    parsed_documents: list[tuple[str, str, str]] = []
     for item in documents:
         summary = str(item.get("summary_md") or "").strip()
         doc_key = str(item.get("doc_key") or "").strip()
         if not summary or not doc_key:
             continue
-
         display_key = doc_key.split(":", 1)[-1] if ":" in doc_key else doc_key
-        if display_key == "assistant.persona":
+        parsed_documents.append((summary, doc_key, display_key))
+
+    if not parsed_documents:
+        return ""
+
+    has_structured_assistant_persona = any(
+        display_key.startswith("assistant.persona.")
+        for _, _, display_key in parsed_documents
+    )
+
+    header = "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）："
+    lines = [header]
+    budget = max(120, int(max_chars))
+    current_len = len(header)
+    has_assistant_persona = False
+    rendered_keys: set[str] = set()
+
+    for summary, doc_key, display_key in parsed_documents:
+        if has_structured_assistant_persona and display_key == "assistant.persona":
+            continue
+        if display_key in rendered_keys:
+            continue
+
+        if display_key == "assistant.persona" or display_key.startswith("assistant.persona."):
             has_assistant_persona = True
+
         citation = f"memory://user/{user_id}/{_DEFAULT_PREFERENCE_DOC_KIND}/{doc_key}#L1-L5"
         line = f"- {display_key}: {summary}\n  引用: {citation}"
         next_len = current_len + len(line) + 1
         if next_len > budget:
             break
         lines.append(line)
+        rendered_keys.add(display_key)
         current_len = next_len
 
     if has_assistant_persona:
@@ -856,18 +875,23 @@ def _build_atomic_reject_contract(
     confidence: float,
     detector: str,
     item_errors: list[dict[str, Any]] | None = None,
+    decision_id: str | None = None,
 ) -> dict[str, Any]:
     errors = list(item_errors or [])
+    audit_payload: dict[str, Any] = {
+        "detector": detector,
+        "rejected_items_count": len(errors),
+        "item_errors": errors,
+    }
+    normalized_decision_id = str(decision_id or "").strip()
+    if normalized_decision_id:
+        audit_payload["decision_id"] = normalized_decision_id
     return {
         "decision": _DECISION_REJECT,
         "reason_code": str(reason_code),
         "confidence": max(0.0, min(float(confidence), 1.0)),
         "memories": [],
-        "audit": {
-            "detector": detector,
-            "rejected_items_count": len(errors),
-            "item_errors": errors,
-        },
+        "audit": audit_payload,
     }
 
 
@@ -1151,6 +1175,14 @@ def flush_canonical_memory(
             decision_contract.update(normalized_contract)
             return 0
 
+        audit_payload = normalized_contract.get("audit") or {}
+        decision_id = str(audit_payload.get("decision_id") or "").strip()
+        if not decision_id:
+            if source_message_id is not None:
+                decision_id = f"decision-{int(source_message_id)}"
+            else:
+                decision_id = f"decision-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+
         slot_governance = MemorySlotGovernanceService(repo=document_memory_repo)
         normalized_memories, item_errors = _validate_atomic_batch_memories(
             normalized_contract["memories"],
@@ -1162,18 +1194,11 @@ def flush_canonical_memory(
                 confidence=normalized_contract["confidence"],
                 detector=detector,
                 item_errors=item_errors,
+                decision_id=decision_id,
             )
             decision_contract.clear()
             decision_contract.update(rejected_contract)
             return 0
-
-        audit_payload = normalized_contract.get("audit") or {}
-        decision_id = str(audit_payload.get("decision_id") or "").strip()
-        if not decision_id:
-            if source_message_id is not None:
-                decision_id = f"decision-{int(source_message_id)}"
-            else:
-                decision_id = f"decision-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
         persisted_count = 0
         resolved_event_time = event_time or datetime.now()
@@ -1232,6 +1257,7 @@ def flush_canonical_memory(
                         reason_code="batch_write_failed",
                     )
                 ],
+                decision_id=decision_id,
             )
             decision_contract.clear()
             decision_contract.update(rejected_contract)

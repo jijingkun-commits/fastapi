@@ -25,6 +25,11 @@ _SLOT_KEY_ALIASES: dict[str, str] = {
     "response.detail": "user.preference.response_detail_level",
     "response.length": "user.preference.response_length",
     "response.structure": "user.preference.response_structure",
+    "response.format.structure": "user.preference.response_structure",
+    "domain.fact.jiaxing_bank.founded_year": "knowledge.important.jiaxing_bank_founded_year",
+    "domain.fact.wealth_management.product_categories": "knowledge.important.wealth_management_product_categories",
+    "domain.fact.jiaxing.bank.founded.year": "knowledge.important.jiaxing_bank_founded_year",
+    "domain.fact.wealth.management.product.categories": "knowledge.important.wealth_management_product_categories",
     "user.identity": "user.identity.display_name",
     "user.profile": "user.profile.general",
     "interaction.policy": "interaction.policy.general",
@@ -70,6 +75,12 @@ class MemorySlotGovernanceService:
         normalized = normalized.replace("_", ".")
         normalized = re.sub(r"[^a-z0-9.\-]", "", normalized)
         normalized = re.sub(r"\.{2,}", ".", normalized).strip(".")
+        if normalized.startswith("domain.fact."):
+            normalized = f"knowledge.important.{normalized[len('domain.fact.') :]}"
+        elif normalized.startswith("domain.facts."):
+            normalized = f"knowledge.important.{normalized[len('domain.facts.') :]}"
+        elif normalized.startswith("user.claims."):
+            normalized = f"knowledge.important.{normalized[len('user.claims.') :]}"
         normalized = _SLOT_KEY_ALIASES.get(normalized, normalized)
         if not normalized:
             return ""

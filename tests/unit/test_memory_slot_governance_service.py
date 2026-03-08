@@ -56,6 +56,11 @@ def test_normalize_slot_key_should_map_alias_and_enforce_prefix() -> None:
     assert service.normalize_slot_key(" AI.Personality ") == "assistant.persona.style"
     assert service.normalize_slot_key("User/Preference/Coffee") == "user.preference.coffee"
     assert service.normalize_slot_key("response.verbosity") == "user.preference.response_detail_level"
+    assert service.normalize_slot_key("response.format.structure") == "user.preference.response_structure"
+    assert service.normalize_slot_key("domain.fact.jiaxing_bank.founded_year") == "knowledge.important.jiaxing.bank.founded.year"
+    assert service.normalize_slot_key("domain.fact.wealth_management.product_categories") == "knowledge.important.wealth.management.product.categories"
+    assert service.normalize_slot_key("user.claims.wealth_management.categories") == "knowledge.important.wealth.management.categories"
+    assert service.normalize_slot_key("domain.facts.wealth_management.product_categories") == "knowledge.important.wealth.management.product.categories"
     assert service.normalize_slot_key("user.identity.display-name") == "user.identity.display-name"
     assert service.normalize_slot_key("custom.free.text") == ""
 

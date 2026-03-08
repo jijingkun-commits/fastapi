@@ -181,6 +181,43 @@ def test_recall_should_include_preference_even_without_query_hit(monkeypatch):
     assert "不要回答“无法跨会话记住该称呼”" in context
 
 
+def test_recall_should_prefer_structured_persona_over_legacy(monkeypatch):
+    """结构化 assistant.persona.* 存在时，应抑制 legacy assistant.persona。"""
+
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "list_documents",
+        lambda *args, **kwargs: (
+            [
+                {
+                    "doc_key": "assistant.persona.name",
+                    "summary_md": "AAA",
+                },
+                {
+                    "doc_key": "global:assistant.persona",
+                    "summary_md": "hh",
+                },
+            ],
+            2,
+        ),
+    )
+    monkeypatch.setattr(memory_service, "_build_retrieval_context", lambda *args, **kwargs: "")
+
+    context = memory_service.recall(
+        _DummySession(),
+        user_id=2,
+        query_text="你叫什么",
+        max_results=3,
+        max_injected_chars=1200,
+    )
+
+    assert "assistant.persona.name: AAA" in context
+    assert "memory://user/2/preference/assistant.persona.name#L1-L5" in context
+    assert "assistant.persona: hh" not in context
+    assert "global:assistant.persona" not in context
+    assert "按 AI 人设进行自称" in context
+
+
 def test_upsert_preference_documents_from_input_should_persist_candidates(monkeypatch):
     """从输入提取到显式偏好时应写入 preference 文档。"""
 
@@ -432,8 +469,67 @@ def test_flush_canonical_memory_atomic_batch_should_reject_partial_invalid_memor
     assert captured["replace"] == 0
     assert decision_contract["decision"] == "reject"
     assert decision_contract["reason_code"] == "memory_batch_atomic_reject"
+    assert decision_contract["audit"]["decision_id"] == "decision-1001"
     assert decision_contract["audit"]["rejected_items_count"] == 1
     assert decision_contract["audit"]["item_errors"][0]["reason_code"] == "slot_taxonomy_invalid"
+
+
+def test_flush_canonical_memory_atomic_batch_should_normalize_response_and_domain_aliases(monkeypatch):
+    """slot alias 映射后的记忆项应通过 atomic_batch 并落库。"""
+
+    captured = {"upserts": []}
+
+    def _fake_upsert(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=300 + len(captured["upserts"]), content_md=kwargs["content_md"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "replace_document_chunks",
+        lambda *args, **kwargs: len(kwargs["chunks"]),
+    )
+
+    decision_contract = {
+        "decision": "accept",
+        "reason_code": "accepted",
+        "confidence": 0.86,
+        "memories": [
+            {
+                "memory_kind": "response_preference",
+                "operation": "upsert",
+                "slot_key": "response.format.structure",
+                "normalized_value": "detailed_zong_fen_zong_paragraphs",
+                "canonical_text": "用户偏好以详细的总分总结构回答",
+                "evidence_span": "永远用详细的总分总段落方式回答",
+            },
+            {
+                "memory_kind": "profile_fact",
+                "operation": "upsert",
+                "slot_key": "domain.fact.jiaxing_bank.founded_year",
+                "normalized_value": "2000",
+                "canonical_text": "嘉兴银行成立于2000年",
+                "evidence_span": "嘉兴银行成立于2000年",
+            },
+        ],
+        "audit": {"detector": "llm_primary", "decision_id": "decision-5226"},
+    }
+
+    session = _DummySession()
+    count = memory_service.flush_canonical_memory(
+        session,
+        user_id=8,
+        source_thread_id="thread-atomic",
+        source_message_id=5226,
+        decision_contract=decision_contract,
+    )
+
+    assert count == 2
+    assert session.commit_called is True
+    assert decision_contract["decision"] == "accept"
+    assert decision_contract["audit"]["decision_id"] == "decision-5226"
+    assert captured["upserts"][0]["doc_key"] == "user.preference.response_structure"
+    assert captured["upserts"][1]["doc_key"] == "knowledge.important.jiaxing.bank.founded.year"
 
 
 def test_flush_canonical_memory_atomic_batch_should_persist_all_memories(monkeypatch):

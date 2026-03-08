@@ -198,6 +198,54 @@ def test_delete_memory_should_record_completed_audit(monkeypatch) -> None:  # no
     assert audit_calls[0]["result_status"] == memory_admin_service.AUDIT_RESULT_COMPLETED
 
 
+def test_list_memories_should_suppress_legacy_assistant_persona_when_structured_exists(monkeypatch) -> None:  # noqa: ANN001
+    """同一用户存在结构化人设时，列表应隐藏 legacy assistant.persona。"""
+
+    monkeypatch.setattr(
+        memory_admin_service.document_memory_repo,
+        "list_documents",
+        lambda *args, **kwargs: (
+            [
+                {
+                    "memory_id": 8,
+                    "doc_id": 8,
+                    "user_id": 2,
+                    "doc_kind": "preference",
+                    "doc_key": "assistant.persona.name",
+                    "slot_key": "assistant.persona.name",
+                    "summary_md": "AAA",
+                    "content_md": "",
+                    "status": "active",
+                },
+                {
+                    "memory_id": 5,
+                    "doc_id": 5,
+                    "user_id": 2,
+                    "doc_kind": "preference",
+                    "doc_key": "global:assistant.persona",
+                    "slot_key": None,
+                    "summary_md": "hh",
+                    "content_md": "",
+                    "status": "active",
+                },
+            ],
+            2,
+        ),
+    )
+
+    payload = memory_admin_service.list_memories(
+        _DummySession(),
+        user_id=2,
+        status="active",
+        page=1,
+        page_size=20,
+    )
+
+    assert payload["total"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["doc_key"] == "assistant.persona.name"
+
+
 def test_memory_admin_feature_flags_should_be_registered_in_config_contract() -> None:
     """记忆能力应通过单开关纳入配置契约。"""
 

@@ -274,6 +274,43 @@ def _extract_decision_audit_fields(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _suppress_legacy_assistant_persona_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    structured_users: set[int] = set()
+    for item in items:
+        try:
+            resolved_user_id = int(item.get("user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if resolved_user_id <= 0:
+            continue
+
+        resolved_slot_key = _resolve_slot_key(
+            slot_key=item.get("slot_key"),
+            doc_key=item.get("doc_key"),
+        )
+        if resolved_slot_key.startswith("assistant.persona."):
+            structured_users.add(resolved_user_id)
+
+    if not structured_users:
+        return items
+
+    output: list[dict[str, Any]] = []
+    for item in items:
+        try:
+            resolved_user_id = int(item.get("user_id") or 0)
+        except (TypeError, ValueError):
+            resolved_user_id = 0
+
+        normalized_doc_key = str(item.get("doc_key") or "").strip().lower()
+        if (
+            resolved_user_id in structured_users
+            and normalized_doc_key == "global:assistant.persona"
+        ):
+            continue
+        output.append(item)
+    return output
+
+
 def record_admin_audit(
     db: Session,
     *,
@@ -409,11 +446,17 @@ def list_memories(
                 level=normalized_level,
             )
         ]
+        filtered_items = _suppress_legacy_assistant_persona_items(filtered_items)
         total = len(filtered_items)
         offset = (safe_page - 1) * safe_page_size
         items = filtered_items[offset : offset + safe_page_size]
     else:
-        items = [_enrich_memory_semantics(item) for item in raw_items]
+        enriched_items = [_enrich_memory_semantics(item) for item in raw_items]
+        deduped_items = _suppress_legacy_assistant_persona_items(enriched_items)
+        removed_count = len(enriched_items) - len(deduped_items)
+        if removed_count > 0:
+            total = max(0, int(total) - removed_count)
+        items = deduped_items
 
     logger.info(
         "memory-admin query list: user_id=%s status=%s slot_key=%s category=%s level=%s page=%s page_size=%s total=%s",
