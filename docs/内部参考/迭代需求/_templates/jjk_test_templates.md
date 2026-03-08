@@ -3,12 +3,10 @@
 > 仅用于覆盖全局模板差异：
 > `/Users/jijingkun/.codex/engineering/templates/jjk_test_templates.md`
 
-## 项目覆盖段（按需填写）
+## 当前状态
 
 ```markdown
-### 覆盖: test-quality-gate
-- 覆盖原因: 本项目要求把测试质量从“执行留痕”升级到“风险驱动 + 坏测试阻断”。
-- 输出模板差异:
-  - 报告必须新增 `Risk Model`、`Test Quality Review` 两节。
-  - `Test Quality Review` 至少包含：风险模型、失败模式覆盖、断言质量、实现耦合风险、低价值测试识别。
+### 覆盖: none
+- 说明: 当前项目关于测试质量的通用要求已上收至全局模板，本地不再重复覆盖。
+- 使用原则: 仅当本仓库出现特有字段、特有门禁或特有证据格式时，才在此文件补充差异。
 ```
