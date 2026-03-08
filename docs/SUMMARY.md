@@ -10,6 +10,7 @@
 ## 工程规范
 
 * [Bugfix 最小变更规范](工程规范/bugfix-minimal-change.md)
+* [Lean Guard 规范](工程规范/lean-guard.md)
 
 ---
 

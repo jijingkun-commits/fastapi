@@ -1,7 +1,7 @@
 # 文档单一真相源与动态融合治理需求文档
 
-> 更新时间：2026-03-08 14:35 +08:00  
-> 上游设计：`docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`  
+> 更新时间：2026-03-08 14:35 +08:00
+> 上游设计：`docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`
 > 文档目标：定义 WHAT（需求合同、验收门禁、追溯矩阵），供 `文档单一真相源与动态融合治理_implementation_plan.md` 承接
 
 ## 1. 需求范围与目标
