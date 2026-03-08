@@ -15,6 +15,13 @@
 3. 统计口径：按 `.cursor/commands/*.md` 文件计数（不含 `.bak`），统计时间 `2026-03-06`，当前共 `17` 个命令文件。
 4. 冲突裁决：若本文与 `AI协作速查表.md`、`VibeKanban多Worktree本机开发测试.md`、或其他消费文档冲突，一律以对应 `.cursor/commands/*.md` 为准。
 
+### 0.1 产品运行时 Skill 文档门禁（2026-03-08 校准）
+
+1. 运行时 Skill 文档同步统一以 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”为准。
+2. 命中 `app/ai/skills/**` 或 `app/data/skills/**` 时，不得只改内部参考；至少同步 `docs/产品文档/技能系统需求.md` 与 `docs/内部参考/AI技能库.md`。
+3. 命中 `skill_service.py`、`skill_bootstrap_service.py`、`app/main.py`、Skill runtime 测试时，需同步配置与测试文档。
+4. 命中 `skill_admin_api.py`、`user_skill_api.py`、`agent_skill.py`、`import_skills.py`、部署脚本时，需同步 API/数据库/安装部署文档，禁止只更一半口径。
+
 ## 1. Cursor Skills 使用指南
 
 ### 1.1 已安装的 Skills

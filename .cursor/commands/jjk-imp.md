@@ -68,6 +68,8 @@ description: 代码实现入口：按 implementation_plan 执行、验证与回�
 2. 表结构 -> `docs/开发文档/架构设计/数据库设计.md`
 3. 配置 -> `docs/开发文档/快速入门/配置说明.md` + `.env.example`
 4. 测试行为 -> `docs/开发文档/测试管理/测试用例库.md`
+5. 产品运行时 Skill 变更（如 `app/ai/skills/**`、`app/data/skills/**`、`app/services/skill_service.py`、`app/services/skill_bootstrap_service.py`、`app/main.py`、`app/api/v1/endpoints/skill_admin_api.py`、`app/api/v1/endpoints/user_skill_api.py`、`app/models/agent_skill.py`、`app/schemas/user_skill.py`、`scripts/data/import_skills.py`）-> 必须按 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”同步 `技能系统需求.md`、`AI技能库.md`、`接口文档.md`、相关配置/部署/测试文档
+6. 禁止只更新 Skill 测试报告、只更新接口文档，或只更新内部参考而遗漏产品需求文档
 
 最终必须输出：
 

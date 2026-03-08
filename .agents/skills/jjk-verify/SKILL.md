@@ -132,7 +132,7 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 3. 测试统计
 4. UAT 结论
 5. 自动证据与降级记录
-6. 文档同步状态
+6. 文档同步状态（命中产品运行时 Skill 变更时，需逐项核对专项映射是否齐套）
 7. 下一步建议命令（`合并/发布`、`$jjk-debug`、`$jjk-imp(-ws)`）
 
 ---

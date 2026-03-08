@@ -90,6 +90,8 @@ description: 问题修复入口（结合 systematic-debugging）：根因定位 
 2. 数据库变更 -> `docs/开发文档/架构设计/数据库设计.md`
 3. 配置变更 -> `docs/开发文档/快速入门/配置说明.md` + `.env.example`
 4. 测试行为变更 -> `docs/开发文档/测试管理/测试用例库.md`
+5. 产品运行时 Skill 变更（如 `app/ai/skills/**`、`app/data/skills/**`、`app/services/skill_service.py`、`app/services/skill_bootstrap_service.py`、`app/main.py`、`app/api/v1/endpoints/skill_admin_api.py`、`app/api/v1/endpoints/user_skill_api.py`、`app/models/agent_skill.py`、`app/schemas/user_skill.py`、`scripts/data/import_skills.py`）-> 必须按 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”同步 `技能系统需求.md`、`AI技能库.md`、`接口文档.md`、相关配置/部署/测试文档
+6. 禁止只修 Skill 运行时问题而不回填 `技能系统需求.md` / `AI技能库.md` / 部署文档口径
 
 ### 6) 交付产物（强制）
 
