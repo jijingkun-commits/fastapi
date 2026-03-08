@@ -218,6 +218,37 @@ def test_recall_should_prefer_structured_persona_over_legacy(monkeypatch):
     assert "按 AI 人设进行自称" in context
 
 
+def test_recall_should_emit_response_structure_guidance(monkeypatch):
+    """命中 response.structure 偏好时应注入明确总分总模板约束。"""
+
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "list_documents",
+        lambda *args, **kwargs: (
+            [
+                {
+                    "doc_key": "user.preference.response.structure",
+                    "summary_md": "用户偏好用详细的总分总段落结构回答",
+                }
+            ],
+            1,
+        ),
+    )
+    monkeypatch.setattr(memory_service, "_build_retrieval_context", lambda *args, **kwargs: "")
+
+    context = memory_service.recall(
+        _DummySession(),
+        user_id=2,
+        query_text="你对vibe coding怎么看",
+        max_results=3,
+        max_injected_chars=1200,
+    )
+
+    assert "user.preference.response.structure: 用户偏好用详细的总分总段落结构回答" in context
+    assert "格式要求：若本轮无冲突指令，回答应遵循 user.preference.response.structure 偏好。" in context
+    assert "输出模板：先“总”（先给结论），再“分”（分点展开依据/细节），最后“总”（总结与下一步）。" in context
+
+
 def test_upsert_preference_documents_from_input_should_persist_candidates(monkeypatch):
     """从输入提取到显式偏好时应写入 preference 文档。"""
 

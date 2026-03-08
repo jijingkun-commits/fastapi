@@ -536,6 +536,8 @@ def _build_preference_context(
     budget = max(120, int(max_chars))
     current_len = len(header)
     has_assistant_persona = False
+    has_response_structure_preference = False
+    response_structure_summary = ""
     rendered_keys: set[str] = set()
 
     for summary, doc_key, display_key in parsed_documents:
@@ -546,6 +548,9 @@ def _build_preference_context(
 
         if display_key == "assistant.persona" or display_key.startswith("assistant.persona."):
             has_assistant_persona = True
+        if display_key in {"user.preference.response.structure", "user.preference.response_structure"}:
+            has_response_structure_preference = True
+            response_structure_summary = summary
 
         citation = f"memory://user/{user_id}/{_DEFAULT_PREFERENCE_DOC_KIND}/{doc_key}#L1-L5"
         line = f"- {display_key}: {summary}\n  引用: {citation}"
@@ -556,17 +561,30 @@ def _build_preference_context(
         rendered_keys.add(display_key)
         current_len = next_len
 
-    if has_assistant_persona:
-        guidance_lines = (
-            "执行要求：当用户未另行指定时，按 AI 人设进行自称。",
-            "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
+    guidance_lines: list[str] = []
+    if has_response_structure_preference:
+        guidance_lines.extend(
+            [
+                "格式要求：若本轮无冲突指令，回答应遵循 user.preference.response.structure 偏好。",
+                f"当前结构偏好：{response_structure_summary or '总-分-总'}。",
+                "输出模板：先“总”（先给结论），再“分”（分点展开依据/细节），最后“总”（总结与下一步）。",
+            ]
         )
-        for guidance in guidance_lines:
-            next_len = current_len + len(guidance) + 1
-            if next_len > budget:
-                break
-            lines.append(guidance)
-            current_len = next_len
+
+    if has_assistant_persona:
+        guidance_lines.extend(
+            [
+                "执行要求：当用户未另行指定时，按 AI 人设进行自称。",
+                "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
+            ]
+        )
+
+    for guidance in guidance_lines:
+        next_len = current_len + len(guidance) + 1
+        if next_len > budget:
+            break
+        lines.append(guidance)
+        current_len = next_len
 
     return "\n".join(lines) if len(lines) > 1 else ""
 
