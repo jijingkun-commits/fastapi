@@ -62,6 +62,8 @@ WT_FLOW_ACTIVE_SESSION_FILE_PREFIX="active-session-"
 WT_FLOW_ACTIVE_SESSION_FILE_SUFFIX=".json"
 WT_FLOW_SESSION_LOCK_DIRNAME=".session-state.lock"
 WT_FLOW_SESSION_STATE_FILE_RESULT=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+GIT_DELIVERY_ENGINE_SCRIPT="${SCRIPT_DIR}/git-delivery-engine.sh"
 
 # --- 工具函数 ---
 
@@ -1104,27 +1106,12 @@ cmd_merge() {
 
   _log "合并 ${branch} -> ${base_branch} (${ahead} 个提交) ..."
 
-  # 检查 master 是否前进了（worktree 创建后有新提交）
-  local base_ahead
-  base_ahead="$(git rev-list --count "${branch}..${base_branch}" 2>/dev/null || echo 0)"
-  if [[ "$base_ahead" -gt 0 ]]; then
-    _log "${base_branch} 有 ${base_ahead} 个新提交，先 rebase ..."
-    if ! git -C "$wt_path" rebase "${base_branch}" 2>/dev/null; then
-      _err "rebase 冲突，自动中止 rebase，保留 worktree 供手动解决"
-      git -C "$wt_path" rebase --abort 2>/dev/null || true
-      _err "请手动进入 ${wt_path} 解决冲突后重新执行 merge"
-      exit 1
-    fi
-    _log "rebase 成功"
-  fi
-
-  # 切到 common repo root 执行基线分支 merge，避免在 card worktree 内强切基线分支。
-  local merge_root
-  merge_root="$(_git_driver_root)"
-  cd "$merge_root"
+  [[ -x "$GIT_DELIVERY_ENGINE_SCRIPT" ]] || _die "缺少 shared delivery engine: ${GIT_DELIVERY_ENGINE_SCRIPT}"
 
   # 基线仓不干净时 fail-fast（白名单内变更放行）。
-  local whitelist_csv disallowed preview
+  local merge_root whitelist_csv disallowed preview
+  merge_root="$(_git_driver_root)"
+  cd "$merge_root"
   whitelist_csv="$(_dirty_whitelist_csv)"
   disallowed="$(_collect_disallowed_dirty_lines "$whitelist_csv")"
   if [[ -n "$disallowed" ]]; then
@@ -1132,17 +1119,15 @@ cmd_merge() {
     _die "基线仓存在非白名单变更，policy=${DIRTY_POLICY_VERSION} whitelist=${whitelist_csv} preview=${preview}。请先提交或清理后再执行 merge"
   fi
 
-  git checkout "${base_branch}"
-  if ! git merge --no-ff "${branch}" -m "merge: ${branch} into ${base_branch}"; then
-    _err "merge 冲突，自动中止"
-    git merge --abort 2>/dev/null || true
-    _err "请手动解决冲突后重新执行 merge"
+  local engine_output merge_commit
+  if ! engine_output="$(bash "$GIT_DELIVERY_ENGINE_SCRIPT" merge --source-branch "$branch" --source-worktree "$wt_path" --base-branch "$base_branch")"; then
+    [[ -n "$engine_output" ]] && printf '%s
+' "$engine_output"
     exit 1
   fi
 
+  merge_commit="$(printf '%s' "$engine_output" | jq -r '.merge_commit // ""')"
   _log "合并完成"
-  local merge_commit
-  merge_commit="$(git rev-parse HEAD 2>/dev/null || true)"
   _mark_card_done_after_merge "$branch" "$base_branch" "$state_dir" "$merge_commit"
 
   if [[ "$no_cleanup" == false ]]; then

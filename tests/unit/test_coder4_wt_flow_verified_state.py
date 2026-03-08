@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 SOURCE_SCRIPT = Path("scripts/coder4/wt-flow.sh")
+DELIVERY_ENGINE_SCRIPT = Path("scripts/coder4/git-delivery-engine.sh")
 TASK_SPLIT_DIR = "2026-03-07_verified_state_machine"
 TASK_KEY = "PP-20260307-VERIFIED-STATE"
 
@@ -37,6 +38,10 @@ def _copy_script(tmp_path: Path) -> Path:
     script_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE_SCRIPT, script_path)
     script_path.chmod(0o755)
+
+    delivery_engine_path = tmp_path / "scripts" / "coder4" / "git-delivery-engine.sh"
+    shutil.copy2(DELIVERY_ENGINE_SCRIPT, delivery_engine_path)
+    delivery_engine_path.chmod(0o755)
     return script_path
 
 

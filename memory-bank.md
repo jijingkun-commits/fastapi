@@ -35,6 +35,8 @@
 - 2026-03-08｜编排层禁止硬编码语义关键词词表（ACTIVE）→ `AGENTS.md`
 - 2026-03-08｜主文档只表达当前态，过程文档只承载历史与证据（ACTIVE）→ `docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`
 
+- 2026-03-09｜Git 交付收口分层为命令编排层 + 共享 delivery engine（ACTIVE）→ `docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`
+
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -53,6 +55,17 @@
 - 历史记录按月归档至 `docs/内部参考/决策归档/`，本文件保留近期生效与关键里程碑。
 
 ## 决策记录
+
+
+### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
+- 状态：ACTIVE
+- 决策主题：把 `jjk-commit` 从“交付门禁 + 半套 merge 口径”收敛为交付编排层，并将真实 Git 生命周期统一下沉到共享 delivery engine
+- 背景与问题：当前 `jjk-commit` 文案仍以 `--ff-only` + 人工冲突处理为主，而 `wt-flow.sh` 已实现 `rebase + --no-ff merge + abort`；命令层和脚本层形成两套 merge 真理源，用户无法稳定判断应该信哪一套
+- 最终决策：新增共享 `Git Delivery Engine` 作为 `rebase / merge / continue / abort / status / prepare-base` 的唯一执行层；`jjk-commit` 仅保留交付门禁、验证证据、提交摘要与错误码翻译；`wt-flow.sh` 复用 engine，只保留 card/worktree 状态语义
+- 取舍理由：项目未上线，优先彻底收敛结构性分裂，而不是继续靠文案提醒或兼容补丁维持两套行为；这样既能提升可恢复性，也能让测试和文档只围绕一份真理源展开
+- 影响范围：`docs/plans/2026-03-09-jjk-commit-delivery-engine-{design,implementation}.md`、`.cursor/commands/jjk-commit.md`、`.agents/skills/jjk-commit/SKILL.md`、`scripts/coder4/wt-flow.sh`、`scripts/coder4/git-delivery-engine.sh`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
+- 回退/失效条件：若未来由统一工程流编排器完全接管本地 Git 生命周期，可将共享 engine 再次内聚进新的单一入口；在此之前，不得回退到 `jjk-commit` 与 `wt-flow` 各写一套 merge 逻辑
+- 关联文档/代码：`docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`、`docs/plans/2026-03-09-jjk-commit-delivery-engine-implementation.md`、`.cursor/commands/jjk-commit.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-08 治理前置命令显式化
 - 状态：ACTIVE
