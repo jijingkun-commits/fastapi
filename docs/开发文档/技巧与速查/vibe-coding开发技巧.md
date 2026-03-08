@@ -528,7 +528,7 @@ npx ai-agent-skills update --all    # 更新全部
 
 # 交付与通用补充
 /jjk-create-pr     # 创建/更新 PR，校验交付证据
-/jjk-commit        # 提交当前分支并合并到 master
+/jjk-commit        # 提交当前分支并通过 shared delivery engine 收口到 master
 /jjk-deleteworktree # 删除当前分支与当前 worktree
 /plan              # 通用规划命令（非 JJK 主链）
 /do                # 通用执行命令（非 JJK 主链）
@@ -568,7 +568,7 @@ npx ai-agent-skills update --all    # 更新全部
 ├── jjk-arch-gate.md       # 四段式架构门禁
 ├── jjk-cardrun.md         # 串行卡片执行调度
 ├── jjk-clarify.md         # 设计冻结 + handoff 契约
-├── jjk-commit.md          # 提交当前分支并合并到 master
+├── jjk-commit.md          # 提交当前分支并通过 shared delivery engine 收口到 master
 ├── jjk-create-pr.md       # PR 交付入口
 ├── jjk-debug.md           # 调试问题
 ├── jjk-deleteworktree.md  # 删除当前分支与当前 worktree
