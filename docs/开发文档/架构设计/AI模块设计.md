@@ -2008,11 +2008,13 @@ Data Agent 采用两层漏斗模型处理用户查询：
 6. **默认口径**：机构分布图表场景未指定层级时，默认按 `分行` 执行，并在 `query_context.used_default_org_level=true` 留痕。  
 7. **策略可配置 + 缓存**：意图归一化/图表别名/指标同义词可通过 `t_system_config` 的 `data_graph.intent_policy`（JSON）配置；运行时带 60 秒本地缓存，降低重复读取开销。  
 8. **日志增强**：新增 `continuation_reason/context_reset_for_new_query/intent_policy_source/intent_policy_cache_hit` 等排障字段。  
-9. **Data Handoff 规范化（2026-02-16）**：Supervisor 在委派 `data_expert` 前会对 payload 做轻量归一化：`task_description` 优先保留“用户原始问题”，并补齐 `turn_act_hint`（默认 `NEW_QUERY`）；不在 Supervisor 侧推断问数槽位，避免规则膨胀与误判。  
+9. **Data Handoff 规范化（2026-02-16，2026-03-09 更新）**：Supervisor 在委派 `data_expert` 前会对 payload 做轻量归一化：默认补齐 `turn_act_hint`（`NEW_QUERY`），并仅在上游 `task_description` 明确属于 generic/空描述时回退到“用户原始问题”；若上游已生成精确 data task，则必须保留该 task 描述，避免 mixed query 场景被整句原问题覆盖。  
 10. **Handoff frame 强优先（2026-02-16）**：`data_graph._extract_handoff_context` 在 `frame` 存在时仅消费结构化字段，`task_description` 仅作为无 frame 时兜底，减少“文本噪声误提取机构层级”的风险。  
 11. **NEW_QUERY 提示优先（2026-02-16）**：当 `turn_act_hint=NEW_QUERY` 且无历史 state 上下文时，禁止将当前轮误判为补充轮（`SUPPLEMENT`）。  
 12. **结构化澄清级别（2026-02-16）**：意图分析输出新增 `clarify_level`（`required|optional`）。当关键槽位已齐备且 `clarify_level=optional` 时，Data Agent 跳过该澄清并继续执行；`required` 仍按澄清流程处理，避免依赖口径关键词硬编码。  
 13. **session_frame 回收兜底（2026-02-18）**：在 MultiAgent 父图状态裁剪导致 `matched_metric/time_range/dimensions/viz_type/query_context` 丢失时，`analyze_data_intent` 会优先从 `session_frame` 回收同义槽位，保障“生成图表/分行”等补充轮延续上一轮已确认上下文。  
+14. **Tool Observation 归一（2026-03-09）**：Supervisor / summarize 消费第三方搜索工具输出时，必须先经过 observation normalizer，将 HTML 属性、站点导航、标题锚点等网页噪声剔除后再写入 `handoff_execution_trace` 或最终答复；Tavily 无结果/错误文本不得直接透传给用户。  
+15. **Coverage Pending 收口（2026-03-09）**：`data.query` 交付物只有在存在结构化 `data` 或结构化 message 时才视为 `success`；若 `data_expert` 仅返回澄清文本，coverage 需保持 `pending` 并由统一汇总阶段继续补齐。  
 
 #### 相关状态字段（DataAgentState）
 

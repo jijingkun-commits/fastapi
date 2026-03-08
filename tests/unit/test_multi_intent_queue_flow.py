@@ -354,6 +354,42 @@ def test_compute_coverage_report_should_fill_goal_id_for_direct_deliverable() ->
     assert normalized["goal_results"]["GOAL-02"]["goal_id"] == "GOAL-02"
 
 
+
+
+def test_build_delivery_artifacts_marks_data_query_pending_without_structured_result() -> None:
+    """data_expert 仅返回澄清文本、未产出结构化 data 时，不应算作已覆盖。"""
+    state = {
+        "messages": [
+            HumanMessage(content="查询2025年6月30日贷款余额前10名的客户"),
+            AIMessage(content="请确认是否只执行贷款余额查询？"),
+        ],
+        "handoff_execution_trace": [
+            {
+                "goal_id": "GOAL-01",
+                "target_agent": AgentType.DATA,
+                "task_description": "查看2025-06-30贷款余额前10名客户",
+                "result_excerpt": "请确认是否只执行贷款余额查询？",
+            }
+        ],
+    }
+    active_goals = [
+        {
+            "goal_id": "GOAL-01",
+            "order": 1,
+            "kind": "data.query",
+            "title": "数据查询",
+            "must_answer": True,
+        }
+    ]
+
+    deliverables = _build_delivery_artifacts(state)
+    data_deliverable = next(item for item in deliverables if item.get("kind") == "data.query")
+    report = _compute_coverage_report(active_goals, deliverables)
+
+    assert data_deliverable["status"] == "pending"
+    assert report["pass"] is False
+    assert report["missing_goals"][0]["goal_id"] == "GOAL-01"
+
 def test_render_coverage_blocked_message_should_use_single_question_style() -> None:
     """coverage 门禁阻断文案应输出明确补齐目标与确认提问。"""
     active_goals = [

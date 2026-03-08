@@ -69,11 +69,15 @@
 - `agent_prompts`：仅负责判定语义提示，不承担运行态门禁逻辑。
 - `delivery_contract_validators`：仅负责合同字段校验，不做重路由决策。
 - `experts`：只执行合法委派任务，禁止 fallback。
+- `session_intent_kernel` / `intent-policy`：负责判定 handoff 描述是否具备可直传的结构化特异性，编排层禁止新增关键词词表、正则词表或 substring 语义判定。
+- `tool observation normalizer`：负责第三方工具原始输出（如 Tavily 原始网页文本）的清洗与摘要归一；编排层只消费 clean summary，不感知供应商脏数据细节。
 
 ### 3.2 依赖方向（冻结）
 
 - `input -> decompose_goals -> goal_normalization -> router_guard -> dispatch -> fallback/coverage -> final`。
+- `tool_raw_output -> observation_normalizer -> supervisor/todo aggregation -> final`。
 - 依赖单向，不允许从执行层反向修改规划层中间状态。
+- 编排层禁止直接依赖第三方搜索工具的原始 HTML/站点噪声格式。
 
 ### 3.3 状态归属（冻结）
 
@@ -86,6 +90,7 @@
 - 窗口不足规则：若历史不足 5 轮，允许使用短列表或空列表进入 `decompose_goals`；不得因“未凑满 5 轮”单独触发澄清。
 - 运行态唯一目标源：`decomposed_goals`（`S2+` 全阶段）。
 - 运行态唯一委派字段：`handoff.target_agent`。
+- `data.query` 的完成态 owner 为结构化 data contract；澄清文案或自然语言摘要不得单独把数据目标判定为 `success`。
 - 重放幂等键：`turn_id + goal_id`。
 
 ### 3.4 错误处理责任（冻结）
@@ -94,6 +99,7 @@
 - 单策略：`target_not_in_allowed_agents` 一律进入 `supervisor` 重新组织答复，不采用“专家侧自行修复”。
 - 单策略：planner 失败仅触发 `heuristic_fallback`，不终止主链路。
 - 单策略：若仅靠 `user_query + messages` 仍无法消解指代，则产出 `clarify_needed` 并回流 `supervisor`，禁止猜测用户意图。
+- 单策略：第三方工具返回的原始错误文本、HTML 标记、站点导航噪声必须在 normalizer 层被截断或清洗；编排层不直接回显原始内容。
 
 ### 3.5 端到端数据流
 
@@ -127,6 +133,9 @@ C --> O[Final Answer]
 | fallback 主体唯一化 | FR-03 | block/coverage 缺口/运行异常 | `blocked_handoffs` | `supervisor_fallback_activated` | 不允许专家兜底 | `revert:T03~T04` |
 | planner 规划能力保留 | FR-04 | 调用 `decompose_goals` | `user_query + messages(last_5_persisted_user_visible_chat_turns)` | `goals(source=...)` | `planner_model_failed -> heuristic_fallback`；指代无法消解时 `clarify_needed -> supervisor` | `revert:planner-preservation-delta` |
 | 回放字段归一 | FR-05 | 记录结构化路由结果 | `additional_kwargs.router_result_v2` | `additional_kwargs.router_result_v2(version=v2)` | 检测到 `legacy_field_detected` 或 `canonical_missing` 时 fail-fast 并记观测事件 | `revert:canonical-router-result-v2` |
+| data.query 完成态收紧 | FR-06 | 计算 deliverables / coverage | `data structured result + result_excerpt` | `deliverables(kind=data.query,status=success/pending)` | 仅澄清文案时必须保持 `pending`，避免 coverage 误报通过 | `revert:data-query-coverage-tightening` |
+| Tavily observation 归一 | FR-07 | Supervisor/Todo 消费 web_search 输出 | `tool raw output` | `clean observation summary` | 原始 HTML/站点噪声不得进入 handoff frame 或最终答复 | `revert:tavily-observation-normalizer` |
+| handoff 描述特异性归一 | FR-08 | 规范化 data handoff | `task_description + user_query + policy contract` | `normalized task_description` | 仅当上游 contract 明确 generic 时才回退到用户原问题 | `revert:data-handoff-specificity-contract` |
 
 ## 5. implementation_seeds（任务原子）
 
@@ -139,6 +148,9 @@ C --> O[Final Answer]
 | T05 | [T03] | `tests/unit/test_intent_plan_model_primary.py`,`tests/integration/test_intent_shadow_metrics.py` | `planner_regression_tests` | modify | `PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q && PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q` |
 | T06 | [T03] | `tests/unit/test_router_ignores_intent_plan_runtime.py` | `runtime_contract_regression` | add | `PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q` |
 | T07 | [T01,T02,T03,T04,T05,T06] | `docs/开发文档/架构设计/AI模块设计.md` | `intent_routing_sections` | modify | `rg -n "intent_plan|decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md` |
+| T08 | [T03] | `app/ai/workflow/multi_agent_graph.py`,`tests/unit/test_multi_intent_queue_flow.py` | `_build_delivery_artifacts`,`data_query_coverage_pending` | refactor | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py -k data_query_pending` |
+| T09 | [T03] | `app/ai/workflow/session_intent_kernel.py`,`app/ai/workflow/multi_agent_graph.py`,`app/tests/test_handoff_detection.py` | `preserve_handoff_specificity_contract` | refactor | `bash scripts/pytest_targeted.sh app/tests/test_handoff_detection.py -k preserve_specific_task` |
+| T10 | [T03] | `app/ai/workflow/multi_agent_graph.py`,`tests/unit/test_multi_agent_streaming_helpers.py` | `tavily_observation_normalizer` | refactor | `bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_streaming_helpers.py -k tavily_raw_markup_noise` |
 
 ## 6. execution_chain_seed
 

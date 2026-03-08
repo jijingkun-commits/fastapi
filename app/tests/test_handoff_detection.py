@@ -94,6 +94,31 @@ def test_augment_data_handoff_payload_should_use_user_raw_question():
     assert normalized.get("frame") is None
 
 
+
+
+def test_augment_data_handoff_payload_should_preserve_specific_task_for_mixed_query():
+    """当 Supervisor 已生成精确 data 任务时，不应被复合原问题覆盖掉。"""
+    from app.ai.state import AgentType
+    from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
+    from langchain_core.messages import HumanMessage
+
+    handoff = {
+        "action": "handoff",
+        "target_agent": AgentType.DATA,
+        "task_description": "查看2025-06-30时点贷款余额前10名的客户，按贷款余额降序返回Top10。",
+        "frame": None,
+        "turn_act_hint": "",
+    }
+    state = {
+        "messages": [HumanMessage(content="查询嘉兴近一周的天气，再看看2025年6月30日贷款余额前10名的客户")],
+    }
+
+    normalized = _augment_data_handoff_payload(handoff, state)
+
+    assert "嘉兴" not in normalized["task_description"]
+    assert "贷款余额前10名" in normalized["task_description"]
+    assert normalized["turn_act_hint"] == "NEW_QUERY"
+
 def test_augment_data_handoff_payload_should_keep_existing_frame():
     """已有结构化 frame 时应保持透传，仅补齐描述与 turn_act。"""
     from app.ai.state import AgentType

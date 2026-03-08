@@ -18,6 +18,14 @@ TURN_ACT_CONFIRM = "CONFIRM"
 TURN_ACT_UNKNOWN = "UNKNOWN"
 
 
+DATA_HANDOFF_GENERIC_DESC_PREFIXES = (
+    "请按模型建议处理",
+    "请执行复杂口径确认后再输出",
+    "请继续处理",
+    "请处理",
+)
+
+
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -209,6 +217,28 @@ def classify_turn_act(
         return TURN_ACT_SUPPLEMENT, "short_reply_with_context"
 
     return TURN_ACT_NEW_QUERY, "insufficient_signal"
+
+
+def classify_data_handoff_task_description(raw_desc: str, user_desc: str) -> str:
+    """判定 data handoff 描述是 specific/generic/empty。"""
+    normalized_raw = re.sub(r"\s+", " ", _normalize_text(raw_desc)).strip()[:240]
+    normalized_user = re.sub(r"\s+", " ", _normalize_text(user_desc)).strip()[:240]
+    compact_raw = re.sub(r"\s+", "", normalized_raw)
+
+    if not compact_raw:
+        return "empty"
+
+    if normalized_user and normalized_raw in {normalized_user, f"用户原始问题：{normalized_user}"}:
+        return "generic"
+
+    compact_prefixes = tuple(re.sub(r"\s+", "", item) for item in DATA_HANDOFF_GENERIC_DESC_PREFIXES)
+    if any(compact_raw.startswith(prefix) for prefix in compact_prefixes):
+        return "generic"
+
+    if normalized_user and len(compact_raw) < 16 and not re.search(r"\d", compact_raw):
+        return "generic"
+
+    return "specific"
 
 
 def advance_clarify_fsm_state(prev_state: str, missing_slots: list[str]) -> str:

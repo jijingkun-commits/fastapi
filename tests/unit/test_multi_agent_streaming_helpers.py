@@ -816,6 +816,28 @@ def test_build_direct_lookup_findings_ignores_tavily_error_output() -> None:
     assert findings == []
 
 
+
+
+def test_build_direct_lookup_findings_sanitizes_tavily_raw_markup_noise() -> None:
+    """Tavily 原始搜索文本含 HTML/站点噪声时，不应直接透传到最终答复。"""
+    messages = [
+        ToolMessage(
+            content='嘉兴天气: " alt="" style="height:0.4rem;line-height:0.4rem;"> # 嘉兴天气 精细化预报 7天天气预报 2.3mm 3.3m/s 17:00 10.1℃；【嘉兴天气预报】 嘉兴天气预报7天_全国天气网: # 全国天气网 首页 国内天气 空气质量',
+            tool_call_id="tc-raw",
+            name="tavily_search",
+        )
+    ]
+
+    findings = _build_direct_lookup_findings(messages)
+
+    assert findings
+    summary = findings[0]["summary"]
+    assert "alt=" not in summary
+    assert "style=" not in summary
+    assert "#" not in summary
+    assert "首页" not in summary
+    assert "嘉兴天气" in summary
+
 def test_extract_supervisor_tool_observations_ignores_tavily_error_output() -> None:
     """handoff frame 不应携带 Tavily 错误文本。"""
     messages = [

@@ -78,6 +78,8 @@ from app.ai.contracts.delivery_contract_validators import (
     validate_active_goals_contract,
     validate_coverage_report_contract,
 )
+from app.ai.workflow.session_intent_kernel import classify_data_handoff_task_description
+from app.ai.workflow.tool_observation_normalizer import summarize_tavily_tool_output
 
 # Schema 路由增强（借鉴 TypeAgent Dispatcher）
 from app.ai.schema.agent_schema import route_by_schema
@@ -1907,10 +1909,12 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
         if target_agent == AgentType.DATA:
             payload = dict((data_structured or {}).get("data") or {})
-            summary = result_excerpt or (data_structured or {}).get("message") or ""
+            structured_message = str((data_structured or {}).get("message") or "").strip()
+            summary = structured_message or result_excerpt or ""
+            has_structured_result = data_structured is not None and bool(payload or structured_message)
             if _is_coverage_reconcile_enabled():
-                status = "success" if (summary or payload) else "pending"
-                if not summary:
+                status = "success" if has_structured_result else "pending"
+                if status != "success" and not structured_message:
                     summary = "数据结果待补齐"
             else:
                 status = "success"
@@ -2219,11 +2223,15 @@ def _augment_data_handoff_payload(
     enriched["turn_act_hint"] = turn_act_hint
 
     raw_desc = str(enriched.get("task_description") or "").strip()
+    normalized_raw_desc = _normalize_tool_summary_text(raw_desc, limit=240)
     user_desc = str(latest_user_text or "").strip()
-    if user_desc:
-        enriched["task_description"] = f"用户原始问题：{user_desc}"
+    task_desc_kind = classify_data_handoff_task_description(raw_desc, user_desc)
+    if task_desc_kind == "specific":
+        enriched["task_description"] = normalized_raw_desc
+    elif user_desc:
+        enriched["task_description"] = f"用户原始问题：{_normalize_tool_summary_text(user_desc, limit=240)}"
     else:
-        enriched["task_description"] = _normalize_tool_summary_text(raw_desc, limit=240)
+        enriched["task_description"] = normalized_raw_desc
 
     logger.info(
         "data_handoff_normalized: turn_act_hint=%s, has_frame=%s, desc_len=%s",
@@ -2483,85 +2491,10 @@ def _prepare_messages_for_supervisor_inference(
     return prepared
 
 
-TAVILY_ERROR_HINTS = (
-    "no search results found for",
-    "suggestions: remove time_range argument",
-    "try a more detailed search using 'advanced' search_depth",
-)
-
-
 def _is_tool_message_error(message: ToolMessage) -> bool:
     """判定 ToolMessage 是否为错误状态。"""
     status = str(getattr(message, "status", "") or "").strip().lower()
     return status in {"error", "failed", "failure"}
-
-
-def _is_tavily_tool_error_output(tool_content: str, payload: Any = None) -> bool:
-    """识别 Tavily 的无结果/报错输出，避免直接回显给用户。"""
-    normalized = str(tool_content or "").strip().lower()
-    if any(hint in normalized for hint in TAVILY_ERROR_HINTS):
-        return True
-
-    if isinstance(payload, dict):
-        status = str(payload.get("status") or "").strip().lower()
-        if status in {"error", "failed", "failure"}:
-            return True
-        if payload.get("error"):
-            return True
-        answer = str(payload.get("answer") or "").strip().lower()
-        if answer.startswith("no search results found for"):
-            return True
-
-    return False
-
-
-def _summarize_tavily_tool_output(tool_content: str) -> str:
-    """从 Tavily 工具输出中提取可用于待办补充的摘要。"""
-    stripped = str(tool_content or "").strip()
-    if not stripped:
-        return ""
-
-    payload: Any = None
-    if (stripped.startswith("{") and stripped.endswith("}")) or (
-        stripped.startswith("[") and stripped.endswith("]")
-    ):
-        try:
-            payload = json.loads(stripped)
-        except json.JSONDecodeError:
-            payload = None
-
-    if _is_tavily_tool_error_output(stripped, payload=payload):
-        return ""
-
-    if isinstance(payload, dict):
-        answer = _normalize_tool_summary_text(payload.get("answer"), limit=220)
-        if answer:
-            return answer
-        results = payload.get("results")
-    elif isinstance(payload, list):
-        results = payload
-    else:
-        return _normalize_tool_summary_text(stripped, limit=220)
-
-    if not isinstance(results, list):
-        return ""
-
-    lines = []
-    for item in results[:2]:
-        if not isinstance(item, dict):
-            continue
-        title = _normalize_tool_summary_text(item.get("title"), limit=36)
-        snippet = _normalize_tool_summary_text(
-            item.get("content") or item.get("snippet"),
-            limit=140,
-        )
-        if title and snippet:
-            lines.append(f"{title}: {snippet}")
-        elif snippet:
-            lines.append(snippet)
-
-    merged = "；".join(lines)
-    return _normalize_tool_summary_text(merged, limit=240)
 
 
 def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
@@ -2584,7 +2517,7 @@ def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> li
         if "tavily" not in lowered_name:
             continue
 
-        summary = _summarize_tavily_tool_output(tool_content)
+        summary = summarize_tavily_tool_output(tool_content)
         if not summary:
             continue
 
@@ -2940,7 +2873,7 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
             continue
 
         if "tavily" in lowered_name:
-            summary = _summarize_tavily_tool_output(content)
+            summary = summarize_tavily_tool_output(content)
             label = "天气/实时信息"
         elif "knowledge_search" in lowered_name:
             summary = _normalize_tool_summary_text(content, limit=220)
