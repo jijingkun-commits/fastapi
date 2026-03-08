@@ -157,6 +157,7 @@ def test_persist_memory_should_flush_when_async_disabled(monkeypatch) -> None:  
         raise AssertionError("sync 模式不应调用 enqueue_memory_intent_job")
 
     def _fake_flush(*args, **kwargs):  # noqa: ANN001
+        assert kwargs["decision_contract"]["decision"] == "accept"
         called["flush"] += 1
         return 1
 
@@ -165,6 +166,26 @@ def test_persist_memory_should_flush_when_async_disabled(monkeypatch) -> None:  
         return "最新记忆上下文"
 
     monkeypatch.setattr(chat_service, "enqueue_memory_intent_job", _unexpected_enqueue)
+    monkeypatch.setattr(
+        chat_service,
+        "_decide_memory_intent_contract",
+        lambda **kwargs: {
+            "decision": "accept",
+            "reason_code": "accepted",
+            "confidence": 0.93,
+            "memories": [
+                {
+                    "memory_kind": "response_preference",
+                    "operation": "upsert",
+                    "slot_key": "user.preference.response_structure",
+                    "normalized_value": "conclusion_first",
+                    "canonical_text": "用户偏好先结论后分析",
+                    "evidence_span": "先给结论",
+                }
+            ],
+            "audit": {"detector": "llm_primary", "decision_id": "decision-1002"},
+        },
+    )
     monkeypatch.setattr(chat_service, "flush_document_memory", _fake_flush)
     monkeypatch.setattr(chat_service, "recall_document_memory", _fake_recall)
 
@@ -189,34 +210,36 @@ def test_persist_memory_should_flush_when_async_disabled(monkeypatch) -> None:  
     assert called == {"flush": 1, "recall": 1}
 
 
-def test_persist_memory_should_upsert_preference_and_recall_when_sync(monkeypatch) -> None:  # noqa: ANN001
-    """同步模式下命中偏好时应写入 preference 并触发 recall。"""
+def test_persist_memory_should_skip_recall_when_decision_rejected(monkeypatch) -> None:  # noqa: ANN001
+    """同步模式下判定 reject 时不应触发 recall。"""
 
-    called = {"flush": 0, "preference": 0, "recall": 0}
+    called = {"flush": 0, "recall": 0}
 
     def _unexpected_enqueue(*args, **kwargs):  # noqa: ANN001
         raise AssertionError("sync 模式不应调用 enqueue_memory_intent_job")
 
     def _fake_flush(*args, **kwargs):  # noqa: ANN001
+        assert kwargs["decision_contract"]["decision"] == "reject"
         called["flush"] += 1
         return 0
-
-    def _fake_upsert_preference(*args, **kwargs):  # noqa: ANN001
-        called["preference"] += 1
-        return 1
 
     def _fake_recall(*args, **kwargs):  # noqa: ANN001
         called["recall"] += 1
         return "偏好已更新后的上下文"
 
     monkeypatch.setattr(chat_service, "enqueue_memory_intent_job", _unexpected_enqueue)
-    monkeypatch.setattr(chat_service, "flush_document_memory", _fake_flush)
     monkeypatch.setattr(
         chat_service,
-        "upsert_preference_document_memory",
-        _fake_upsert_preference,
-        raising=False,
+        "_decide_memory_intent_contract",
+        lambda **kwargs: {
+            "decision": "reject",
+            "reason_code": "task_intent_translation_or_quote",
+            "confidence": 0.97,
+            "memories": [],
+            "audit": {"detector": "llm_primary", "decision_id": "decision-1003"},
+        },
     )
+    monkeypatch.setattr(chat_service, "flush_document_memory", _fake_flush)
     monkeypatch.setattr(chat_service, "recall_document_memory", _fake_recall)
 
     context = chat_service._persist_document_memory_context(
@@ -236,8 +259,8 @@ def test_persist_memory_should_upsert_preference_and_recall_when_sync(monkeypatc
         document_text_weight=0.3,
     )
 
-    assert context == "偏好已更新后的上下文"
-    assert called == {"flush": 1, "preference": 1, "recall": 1}
+    assert context == ""
+    assert called == {"flush": 1, "recall": 0}
 
 
 def test_stream_should_pass_memory_context_without_system_message_persistence(monkeypatch) -> None:  # noqa: ANN001

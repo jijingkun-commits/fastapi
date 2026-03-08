@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from datetime import datetime
 from typing import Any
 
@@ -45,6 +46,7 @@ _LEVEL_DOC_KIND_MAPPING: dict[str, str] = {
 }
 
 _SLOT_PREFIX_CATEGORY_MAPPING: tuple[tuple[str, str], ...] = (
+    ("user.identity.", "user_identity"),
     ("assistant.persona.", "ai_persona"),
     ("user.preference.", "user_preference"),
     ("knowledge.important.", "important_knowledge"),
@@ -199,6 +201,16 @@ def _enrich_memory_semantics(item: dict[str, Any]) -> dict[str, Any]:
     memory_id = enriched.get("memory_id")
     if memory_id in (None, 0, "") and enriched.get("doc_id") not in (None, 0, ""):
         enriched["memory_id"] = int(enriched.get("doc_id"))
+
+    decision_audit = _extract_decision_audit_fields(enriched)
+    enriched["decision_id"] = str(decision_audit.get("decision_id") or "").strip() or None
+    enriched["reason_code"] = str(decision_audit.get("reason_code") or "").strip() or None
+    confidence = decision_audit.get("confidence")
+    enriched["confidence"] = float(confidence) if isinstance(confidence, (int, float)) else None
+    enriched["memories_count"] = int(decision_audit.get("memories_count") or 0)
+    enriched["rejected_items_count"] = int(decision_audit.get("rejected_items_count") or 0)
+    raw_item_errors = decision_audit.get("item_errors")
+    enriched["item_errors"] = raw_item_errors if isinstance(raw_item_errors, list) else []
     return enriched
 
 
@@ -206,6 +218,60 @@ def _build_source_span(start_line: int, end_line: int) -> str:
     safe_start = max(1, int(start_line or 1))
     safe_end = max(safe_start, int(end_line or safe_start))
     return f"L{safe_start}-L{safe_end}"
+
+
+def _parse_line_key_values(content_md: str | None) -> dict[str, str]:
+    pairs: dict[str, str] = {}
+    for raw_line in str(content_md or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- ") or ":" not in line:
+            continue
+        key, value = line[2:].split(":", 1)
+        normalized_key = str(key or "").strip().lower()
+        normalized_value = str(value or "").strip()
+        if normalized_key:
+            pairs[normalized_key] = normalized_value
+    return pairs
+
+
+def _parse_json_array(value: str | None) -> list[dict[str, Any]]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _extract_decision_audit_fields(item: dict[str, Any]) -> dict[str, Any]:
+    line_values = _parse_line_key_values(item.get("content_md"))
+    confidence_value = line_values.get("confidence")
+    try:
+        confidence = float(confidence_value) if confidence_value is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    try:
+        memories_count = int(line_values.get("memories_count") or 0)
+    except (TypeError, ValueError):
+        memories_count = 0
+    try:
+        rejected_items_count = int(line_values.get("rejected_items_count") or 0)
+    except (TypeError, ValueError):
+        rejected_items_count = 0
+
+    return {
+        "decision_id": line_values.get("decision_id"),
+        "reason_code": line_values.get("reason_code"),
+        "confidence": confidence,
+        "memories_count": memories_count,
+        "rejected_items_count": rejected_items_count,
+        "item_errors": _parse_json_array(line_values.get("item_errors_json")),
+    }
 
 
 def record_admin_audit(

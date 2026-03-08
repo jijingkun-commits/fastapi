@@ -16,6 +16,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_human_message
 
 from app.ai.events import stopped_event
+from app.ai.llm_util import get_scene_llm
+from app.ai.scene_registry import SCENE_KEY_INTENT_CLASSIFIER
 from app.ai.runtime.recovery_policy import (
     is_feature_flag_enabled,
     should_degrade_on_plugin_failure,
@@ -36,10 +38,10 @@ from app.core.utils import content_hash as _content_hash
 from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
 from app.db.session import get_db_context
 from app.repositories import chat_repo
+from app.services import memory_intent_llm_service
 from app.services.document_memory_service import (
-    flush as flush_document_memory,
+    flush_canonical_memory as flush_document_memory,
     recall as recall_document_memory,
-    upsert_preference_documents_from_input as upsert_preference_document_memory,
 )
 from app.services.user_memory_intent_job_service import (
     enqueue_from_chat_message as enqueue_memory_intent_job,
@@ -161,6 +163,37 @@ def _get_document_memory_hybrid_min_score(fallback: float) -> float:
         return max(0.0, float(fallback))
 
 
+def _decide_memory_intent_contract(
+    *,
+    user_text: str,
+    context: dict[str, Any] | None,
+    source_message_id: int | None,
+) -> dict[str, Any]:
+    llm = get_scene_llm(scene_key=SCENE_KEY_INTENT_CLASSIFIER, internal=True)
+    decision = memory_intent_llm_service.decide(
+        llm=llm,
+        user_text=user_text,
+        context=context,
+    )
+
+    audit_payload = decision.get("audit")
+    if isinstance(audit_payload, dict):
+        audit = dict(audit_payload)
+    else:
+        audit = {}
+
+    if not str(audit.get("decision_id") or "").strip():
+        if source_message_id is not None:
+            decision_id = f"decision-{int(source_message_id)}"
+        else:
+            decision_id = f"decision-{uuid4().hex}"
+        audit["decision_id"] = decision_id
+
+    audit.setdefault("detector", "llm_primary")
+    decision["audit"] = audit
+    return decision
+
+
 def _persist_document_memory_context(
     db: Any,
     *,
@@ -210,33 +243,38 @@ def _persist_document_memory_context(
         return document_memory_context
 
     try:
+        decision_contract = _decide_memory_intent_contract(
+            user_text=prompt,
+            context={
+                "source_thread_id": thread_id,
+                "source_message_id": source_message_id,
+            },
+            source_message_id=source_message_id,
+        )
         persisted_doc_count = flush_document_memory(
             db,
             user_id=user_id,
-            user_text=prompt,
             source_thread_id=thread_id,
             source_message_id=source_message_id,
-        )
-        persisted_preference_count = upsert_preference_document_memory(
-            db,
-            user_id=user_id,
-            user_text=prompt,
-            source_thread_id=thread_id,
-            source_message_id=source_message_id,
+            source="memory",
+            decision_contract=decision_contract,
         )
         if persisted_doc_count:
             logger.info(
-                "压缩前文档记忆 flush 成功: user_id=%s, count=%d",
+                "memory_intent 判定并写入成功: user_id=%s, count=%d, decision_id=%s, reason_code=%s",
                 user_id,
                 persisted_doc_count,
+                ((decision_contract.get("audit") or {}).get("decision_id") if isinstance(decision_contract, dict) else None),
+                decision_contract.get("reason_code") if isinstance(decision_contract, dict) else None,
             )
-        if persisted_preference_count:
+        elif isinstance(decision_contract, dict):
             logger.info(
-                "偏好文档记忆 upsert 成功: user_id=%s, count=%d",
+                "memory_intent 判定拒绝: user_id=%s, decision_id=%s, reason_code=%s",
                 user_id,
-                persisted_preference_count,
+                ((decision_contract.get("audit") or {}).get("decision_id") if isinstance(decision_contract, dict) else None),
+                decision_contract.get("reason_code"),
             )
-        if document_memory_recall_enabled and (persisted_doc_count or persisted_preference_count):
+        if document_memory_recall_enabled and persisted_doc_count:
             latest_document_context = recall_document_memory(
                 db,
                 user_id=user_id,

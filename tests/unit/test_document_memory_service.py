@@ -374,3 +374,121 @@ def test_migrate_legacy_preference_kv_should_skip_when_any_status_preference_exi
     assert session.commit_called is False
     assert captured["list_called"] is False
     assert captured["count_kwargs"]["status"] is None
+
+
+def test_flush_canonical_memory_atomic_batch_should_reject_partial_invalid_memories(monkeypatch):
+    """atomic_batch 任一 item 非法时应整批拒绝且不落库。"""
+
+    captured = {"upserts": 0, "replace": 0}
+
+    def _fake_upsert(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["upserts"] += 1
+        return _DummyDocument(id=101, content_md=kwargs["content_md"])
+
+    def _fake_replace(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["replace"] += 1
+        return 1
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(memory_service.document_memory_repo, "replace_document_chunks", _fake_replace)
+
+    decision_contract = {
+        "decision": "accept",
+        "reason_code": "accepted",
+        "confidence": 0.93,
+        "memories": [
+            {
+                "memory_kind": "response_preference",
+                "operation": "upsert",
+                "slot_key": "user.preference.response_structure",
+                "normalized_value": "conclusion_first",
+                "canonical_text": "用户偏好先结论后分析",
+                "evidence_span": "先给结论",
+            },
+            {
+                "memory_kind": "response_preference",
+                "operation": "upsert",
+                "slot_key": "custom.invalid.slot",
+                "normalized_value": "short",
+                "canonical_text": "用户偏好回答简短",
+                "evidence_span": "回答简短",
+            },
+        ],
+        "audit": {"detector": "llm_primary", "decision_id": "decision-1001"},
+    }
+
+    session = _DummySession()
+    count = memory_service.flush_canonical_memory(
+        session,
+        user_id=7,
+        source_thread_id="thread-atomic",
+        source_message_id=1001,
+        decision_contract=decision_contract,
+    )
+
+    assert count == 0
+    assert session.commit_called is False
+    assert captured["upserts"] == 0
+    assert captured["replace"] == 0
+    assert decision_contract["decision"] == "reject"
+    assert decision_contract["reason_code"] == "memory_batch_atomic_reject"
+    assert decision_contract["audit"]["rejected_items_count"] == 1
+    assert decision_contract["audit"]["item_errors"][0]["reason_code"] == "slot_taxonomy_invalid"
+
+
+def test_flush_canonical_memory_atomic_batch_should_persist_all_memories(monkeypatch):
+    """atomic_batch 全部合法时应一次提交并写入所有 item。"""
+
+    captured = {"upserts": [], "replace": []}
+
+    def _fake_upsert(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["upserts"].append(kwargs)
+        return _DummyDocument(id=200 + len(captured["upserts"]), content_md=kwargs["content_md"])
+
+    def _fake_replace(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["replace"].append(kwargs)
+        return len(kwargs["chunks"])
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _fake_upsert)
+    monkeypatch.setattr(memory_service.document_memory_repo, "replace_document_chunks", _fake_replace)
+
+    decision_contract = {
+        "decision": "accept",
+        "reason_code": "accepted",
+        "confidence": 0.95,
+        "memories": [
+            {
+                "memory_kind": "response_preference",
+                "operation": "upsert",
+                "slot_key": "user.preference.response_structure",
+                "normalized_value": "conclusion_first",
+                "canonical_text": "用户偏好先给结论",
+                "evidence_span": "先给结论",
+            },
+            {
+                "memory_kind": "response_preference",
+                "operation": "upsert",
+                "slot_key": "user.preference.response_length",
+                "normalized_value": "short",
+                "canonical_text": "用户偏好回答简短",
+                "evidence_span": "简短一点",
+            },
+        ],
+        "audit": {"detector": "llm_primary", "decision_id": "decision-1002"},
+    }
+
+    session = _DummySession()
+    count = memory_service.flush_canonical_memory(
+        session,
+        user_id=8,
+        source_thread_id="thread-atomic",
+        source_message_id=1002,
+        decision_contract=decision_contract,
+    )
+
+    assert count == 2
+    assert session.commit_called is True
+    assert len(captured["upserts"]) == 2
+    assert len(captured["replace"]) == 2
+    assert decision_contract["audit"]["memories_count"] == 2
+    assert decision_contract["audit"]["rejected_items_count"] == 0
