@@ -1,0 +1,296 @@
+openapi: 3.1.0
+info:
+  title: Chat Streaming API (Contract Freeze)
+  version: 1.0.0
+  description: |
+    OpenAPI 3.1 过渡定义。SSE 事件帧契约与 AsyncAPI 保持一致，
+    并预留 text_event_stream_itemSchema 作为 OAS3.2 itemSchema 迁移位。
+servers:
+  - url: http://localhost:8000
+paths:
+  /api/v1/chat/stream:
+    post:
+      summary: Start chat streaming response
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: last_event_id_resume 续传游标（客户端保存的最近事件 ID）
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                thread_id:
+                  type: string
+      responses:
+        '200':
+          description: text/event-stream response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              x-itemSchema:
+                $ref: '#/components/schemas/text_event_stream_itemSchema'
+  /api/v1/chat/resume:
+    post:
+      summary: Resume interrupted run
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: last_event_id_resume 续传游标
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [thread_id, decision]
+              properties:
+                thread_id:
+                  type: string
+                decision:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: text/event-stream response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              x-itemSchema:
+                $ref: '#/components/schemas/text_event_stream_itemSchema'
+components:
+  schemas:
+    result_event_union:
+      oneOf:
+        - $ref: '#/components/schemas/TodoListResultEvent'
+        - $ref: '#/components/schemas/SqlResultEvent'
+        - $ref: '#/components/schemas/ImageResultEvent'
+        - $ref: '#/components/schemas/TableResultEvent'
+        - $ref: '#/components/schemas/ChartResultEvent'
+        - $ref: '#/components/schemas/TextResultEvent'
+        - $ref: '#/components/schemas/GenericResultEvent'
+    text_event_stream_itemSchema:
+      description: OAS3.2 迁移占位（text/event-stream itemSchema oneOf）
+      oneOf:
+        - $ref: '#/components/schemas/TokenEvent'
+        - $ref: '#/components/schemas/StatusEvent'
+        - $ref: '#/components/schemas/ResultFrameEvent'
+        - $ref: '#/components/schemas/FinalAnswerEvent'
+        - $ref: '#/components/schemas/InterruptEvent'
+        - $ref: '#/components/schemas/DoneEvent'
+        - $ref: '#/components/schemas/ErrorEvent'
+
+    ResultEnvelope:
+      type: object
+      required: [id, source, sequence_number, timestamp, thread_id, run_id]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        specversion:
+          type: string
+          default: '1.0'
+        type:
+          type: string
+          default: result
+        sequence_number:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+        thread_id:
+          type: string
+        run_id:
+          type: string
+
+    ResultEventBase:
+      type: object
+      required: [event, data_type, data]
+      properties:
+        event:
+          type: string
+          const: result
+        data_type:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        message:
+          type: string
+        envelope:
+          $ref: '#/components/schemas/ResultEnvelope'
+        result_contract_version:
+          type: string
+          default: 1.0.0
+
+    TodoListResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: todo_list
+    SqlResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: sql_result
+    ImageResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: image
+    TableResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: table
+    ChartResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: chart
+    TextResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+        - type: object
+          properties:
+            data_type:
+              const: text
+    GenericResultEvent:
+      allOf:
+        - $ref: '#/components/schemas/ResultEventBase'
+
+    TokenEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: token
+        data:
+          type: object
+          properties:
+            content:
+              type: string
+    StatusEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: status
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+            phase:
+              type: string
+    ResultFrameEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: result
+        data:
+          $ref: '#/components/schemas/result_event_union'
+    FinalAnswerEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: final_answer
+        data:
+          type: object
+          required: [content]
+          properties:
+            content:
+              type: string
+            meta:
+              type: object
+              additionalProperties: true
+    InterruptEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: interrupt
+        data:
+          type: object
+          required: [thread_id, interrupt_id, value]
+          properties:
+            thread_id:
+              type: string
+            interrupt_id:
+              type: string
+            value:
+              type: object
+              additionalProperties: true
+    DoneEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: done
+        data:
+          type: object
+          required: [thread_id]
+          properties:
+            thread_id:
+              type: string
+            message_id:
+              type: integer
+            final_content:
+              type: string
+    ErrorEvent:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          const: error
+        data:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+
+    payload_budget_rules:
+      type: object
+      properties:
+        image_chart_policy:
+          type: string
+          enum: [url_only]
+        table_policy:
+          type: string
+          enum: [preview_plus_export_ref]
+        fallback_policy:
+          type: string
+          enum: [redaction_whitelist_only]
+x-contract-symbols:
+  asyncapi_transitional_contract: true
+  last_event_id_resume:
+    header: Last-Event-ID
+  payload_budget_rules_ref: '#/components/schemas/payload_budget_rules'

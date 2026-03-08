@@ -8,11 +8,12 @@
 import re
 import json
 import logging
-from typing import Optional, Dict, Any, Tuple, List, Set, TypedDict
+from typing import Optional, Dict, Any, Tuple, List, Set, TypedDict, NotRequired, cast
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage
 
 from app.ai.utils.message_factory import create_ai_message
+from app.contracts.result_event_contract import build_result_event_payload
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,27 @@ class StreamingToolStartPayload(TypedDict):
     input: Dict[str, Any]
 
 
+class StreamingResultEnvelope(TypedDict):
+    """result 事件 envelope。"""
+
+    id: str
+    source: str
+    specversion: str
+    type: str
+    sequence_number: int
+    timestamp: str
+    thread_id: str
+    run_id: str
+
+
 class StreamingResultPayload(TypedDict):
     """result 事件统一载荷。"""
 
     data_type: str
     data: Dict[str, Any]
     message: str
+    envelope: NotRequired[StreamingResultEnvelope]
+    result_contract_version: NotRequired[str]
 
 
 class StreamingKbImagesPayload(TypedDict):
@@ -209,16 +225,17 @@ def build_streaming_result_payload_from_fields(
     message: Any,
 ) -> Optional[StreamingResultPayload]:
     """从字段值构建 result 事件统一载荷。"""
-    normalized_data_type = str(data_type or "").strip()
-    if not normalized_data_type:
+    payload = build_result_event_payload(
+        data_type=data_type,
+        data=data,
+        message=message,
+        include_envelope=False,
+        strict_required=False,
+    )
+    if not payload:
         return None
 
-    normalized_data = data if isinstance(data, dict) else {}
-    return {
-        "data_type": normalized_data_type,
-        "data": normalized_data,
-        "message": str(message or ""),
-    }
+    return cast(StreamingResultPayload, payload)
 
 
 def build_streaming_kb_images_payload(

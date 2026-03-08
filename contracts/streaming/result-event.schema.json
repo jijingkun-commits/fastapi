@@ -1,0 +1,390 @@
+{
+  "$defs": {
+    "ChartResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "chart",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "ChartResultEvent",
+      "type": "object"
+    },
+    "GenericResultEvent": {
+      "additionalProperties": true,
+      "description": "兜底结果类型（兼容未来 data_type）。",
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "minLength": 1,
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "GenericResultEvent",
+      "type": "object"
+    },
+    "ImageResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "image",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "ImageResultEvent",
+      "type": "object"
+    },
+    "ResultEventEnvelope": {
+      "description": "SSE result 事件统一 envelope。",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "specversion": {
+          "default": "1.0",
+          "minLength": 1,
+          "title": "Specversion",
+          "type": "string"
+        },
+        "type": {
+          "default": "result",
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "sequence_number": {
+          "minimum": 0,
+          "title": "Sequence Number",
+          "type": "integer"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "thread_id": {
+          "minLength": 1,
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "sequence_number",
+        "timestamp",
+        "thread_id",
+        "run_id"
+      ],
+      "title": "ResultEventEnvelope",
+      "type": "object"
+    },
+    "SqlResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "sql_result",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "SqlResultEvent",
+      "type": "object"
+    },
+    "TableResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "table",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "TableResultEvent",
+      "type": "object"
+    },
+    "TextResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "text",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "TextResultEvent",
+      "type": "object"
+    },
+    "TodoListResultEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "event": {
+          "const": "result",
+          "default": "result",
+          "title": "Event",
+          "type": "string"
+        },
+        "data_type": {
+          "const": "todo_list",
+          "title": "Data Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "envelope": {
+          "$ref": "#/$defs/ResultEventEnvelope"
+        },
+        "result_contract_version": {
+          "default": "1.0.0",
+          "minLength": 1,
+          "title": "Result Contract Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_type",
+        "envelope"
+      ],
+      "title": "TodoListResultEvent",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "discriminator": {
+        "mapping": {
+          "chart": "#/$defs/ChartResultEvent",
+          "image": "#/$defs/ImageResultEvent",
+          "sql_result": "#/$defs/SqlResultEvent",
+          "table": "#/$defs/TableResultEvent",
+          "text": "#/$defs/TextResultEvent",
+          "todo_list": "#/$defs/TodoListResultEvent"
+        },
+        "propertyName": "data_type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TodoListResultEvent"
+        },
+        {
+          "$ref": "#/$defs/SqlResultEvent"
+        },
+        {
+          "$ref": "#/$defs/ImageResultEvent"
+        },
+        {
+          "$ref": "#/$defs/TableResultEvent"
+        },
+        {
+          "$ref": "#/$defs/ChartResultEvent"
+        },
+        {
+          "$ref": "#/$defs/TextResultEvent"
+        }
+      ]
+    },
+    {
+      "$ref": "#/$defs/GenericResultEvent"
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibe-kanban/contracts/streaming/result-event.schema.json",
+  "title": "ResultEventUnion"
+}

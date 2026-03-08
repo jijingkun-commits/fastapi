@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 from sqlalchemy import func
 from fastapi.encoders import jsonable_encoder
@@ -19,6 +19,155 @@ from app.core.utils import content_hash as _content_hash
 
 
 logger = logging.getLogger(__name__)
+
+
+def _to_non_negative_int(value: Any) -> Optional[int]:
+    """将值安全转换为非负整数。"""
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _coerce_result_event_item(raw_event: Any) -> Optional[Dict[str, Any]]:
+    """规范化单条 result_event。"""
+
+    if not isinstance(raw_event, dict):
+        return None
+
+    data_type = str(raw_event.get("data_type") or "").strip()
+    if not data_type:
+        return None
+
+    normalized: Dict[str, Any] = dict(raw_event)
+    normalized["data_type"] = data_type
+    normalized["data"] = raw_event.get("data") if isinstance(raw_event.get("data"), dict) else {}
+
+    message = raw_event.get("message")
+    if isinstance(message, str):
+        message = message.strip()
+        if message:
+            normalized["message"] = message
+        else:
+            normalized.pop("message", None)
+    else:
+        normalized.pop("message", None)
+
+    sequence_number = _to_non_negative_int(raw_event.get("sequence_number"))
+    if sequence_number is not None:
+        normalized["sequence_number"] = sequence_number
+    else:
+        normalized.pop("sequence_number", None)
+
+    envelope = raw_event.get("envelope")
+    if isinstance(envelope, dict):
+        normalized["envelope"] = dict(envelope)
+    else:
+        normalized.pop("envelope", None)
+
+    return normalized
+
+
+def _build_legacy_result_event_from_pair(additional_kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """从 legacy data_type + data 字段构建单条 result_event。"""
+
+    data_type = str(additional_kwargs.get("data_type") or "").strip()
+    if not data_type:
+        return None
+
+    legacy_event: Dict[str, Any] = {
+        "data_type": data_type,
+        "data": additional_kwargs.get("data") if isinstance(additional_kwargs.get("data"), dict) else {},
+    }
+
+    message = additional_kwargs.get("message")
+    if isinstance(message, str) and message.strip():
+        legacy_event["message"] = message.strip()
+
+    sequence_number = _to_non_negative_int(additional_kwargs.get("sequence_number"))
+    if sequence_number is not None:
+        legacy_event["sequence_number"] = sequence_number
+
+    envelope = additional_kwargs.get("envelope")
+    if isinstance(envelope, dict):
+        legacy_event["envelope"] = dict(envelope)
+
+    return _coerce_result_event_item(legacy_event)
+
+
+def _resolve_result_events_for_replay(additional_kwargs: Dict[str, Any]) -> tuple[list[Dict[str, Any]], str]:
+    """按 read-old-write-new 语义解析 result_events。"""
+
+    raw_events = additional_kwargs.get("result_events")
+    if isinstance(raw_events, list):
+        normalized_events = [
+            item
+            for item in (_coerce_result_event_item(raw) for raw in raw_events)
+            if item is not None
+        ]
+        if normalized_events:
+            return normalized_events, "result_events"
+
+    legacy_single = _coerce_result_event_item(additional_kwargs.get("result_event"))
+    if legacy_single is not None:
+        return [legacy_single], "result_event"
+
+    legacy_pair = _build_legacy_result_event_from_pair(additional_kwargs)
+    if legacy_pair is not None:
+        return [legacy_pair], "data_type_data"
+
+    return [], "none"
+
+
+def _result_event_sort_key(event: Dict[str, Any], index: int) -> tuple[int, int, int]:
+    """生成 result_event 的稳定排序键（sequence_number 优先）。"""
+
+    sequence_number = _to_non_negative_int(event.get("sequence_number"))
+    if sequence_number is not None:
+        return (0, sequence_number, index)
+
+    envelope = event.get("envelope")
+    if isinstance(envelope, dict):
+        envelope_sequence = _to_non_negative_int(envelope.get("sequence_number"))
+        if envelope_sequence is not None:
+            return (0, envelope_sequence, index)
+
+    return (1, index, index)
+
+
+def _sort_result_events_by_sequence(events: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """按 sequence_number 对 result_events 保序排序。"""
+
+    enumerated = [(idx, event) for idx, event in enumerate(events)]
+    enumerated.sort(key=lambda pair: _result_event_sort_key(pair[1], pair[0]))
+    return [event for _, event in enumerated]
+
+
+def _normalize_result_additional_kwargs_for_replay(additional_kwargs: Any) -> Dict[str, Any]:
+    """规范化 result replay 载荷：读旧写新到 result_events[]。"""
+
+    normalized = dict(additional_kwargs) if isinstance(additional_kwargs, dict) else {}
+    result_events, compat_source = _resolve_result_events_for_replay(normalized)
+    if not result_events:
+        return normalized
+
+    ordered_events = _sort_result_events_by_sequence(result_events)
+    latest_event = ordered_events[-1]
+
+    normalized["result_events"] = ordered_events
+    normalized["result_event"] = latest_event
+    normalized["result_count"] = len(ordered_events)
+    normalized["compat_source"] = compat_source
+    normalized["data_type"] = latest_event.get("data_type")
+    normalized["data"] = latest_event.get("data", {})
+
+    latest_message = latest_event.get("message")
+    if isinstance(latest_message, str) and latest_message.strip():
+        normalized["message"] = latest_message
+
+    return normalized
 
 
 def _extract_tool_image_urls(content: str) -> list[str]:
@@ -96,6 +245,7 @@ def save_message(
         from app.ai.protocol import normalize_skill_runtime_additional_kwargs
 
         extra_data = normalize_skill_runtime_additional_kwargs(extra_data)
+        extra_data = _normalize_result_additional_kwargs_for_replay(extra_data)
         extra_data = jsonable_encoder(extra_data)
     
     # AI 消息去除首尾换行（LLM 输出常带有多余换行）

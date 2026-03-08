@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_human_message
 
 from app.ai.events import stopped_event
+from app.contracts.result_event_contract import build_result_event_payload
 from app.ai.runtime.recovery_policy import (
     is_feature_flag_enabled,
     should_degrade_on_plugin_failure,
@@ -330,9 +331,38 @@ def _infer_result_content(event_data: dict[str, Any]) -> Any:
     return ""
 
 
-def _normalize_result_event_payload(event_data: dict[str, Any], *, node: str = "") -> dict[str, Any]:
+def _normalize_result_event_payload(
+    event_data: dict[str, Any],
+    *,
+    node: str = "",
+    thread_id: str = "",
+    run_id: Optional[str] = None,
+    sequence_number: int = 0,
+) -> dict[str, Any]:
     """标准化 result 事件，补齐冻结契约必填字段。"""
-    payload = dict(event_data or {})
+
+    raw_payload = dict(event_data or {})
+    extra_fields = {
+        key: value
+        for key, value in raw_payload.items()
+        if key not in {"event", "data_type", "data", "message", "envelope", "result_contract_version"}
+    }
+
+    payload = build_result_event_payload(
+        data_type=raw_payload.get("data_type"),
+        data=raw_payload.get("data"),
+        message=raw_payload.get("message"),
+        envelope=raw_payload.get("envelope"),
+        source=node or "chat_service",
+        sequence_number=sequence_number,
+        thread_id=thread_id or "-",
+        run_id=run_id or "-",
+        include_envelope=True,
+        strict_required=True,
+        extra_fields=extra_fields,
+    )
+    if not payload:
+        raise ValueError("invalid result payload")
 
     if not isinstance(payload.get("type"), str) or not str(payload.get("type")).strip():
         payload["type"] = _infer_result_type(payload)
@@ -598,6 +628,52 @@ def _build_stopped_payload(*, thread_id: str, run_id: str, reason: str) -> dict[
     return stopped_event(thread_id=thread_id, run_id=run_id, reason=reason)
 
 
+def _get_sse_retry_ms(fallback: int = 1500) -> int:
+    """读取 SSE retry 配置（毫秒）。"""
+
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_int("streaming.sse.retry_ms", fallback)
+        return max(0, int(resolved))
+    except Exception:
+        return max(0, int(fallback))
+
+
+def sse_retry_and_heartbeat(retry_ms: Any, heartbeat_comment: str = "ping") -> tuple[int, bytes]:
+    """规范化 SSE retry 与 heartbeat 注释帧。"""
+
+    normalized_retry = _parse_non_negative_int(retry_ms, default=_get_sse_retry_ms())
+    comment = str(heartbeat_comment or "ping").strip() or "ping"
+    heartbeat_chunk = f": {comment}\n\n".encode("utf-8")
+    return normalized_retry, heartbeat_chunk
+
+
+def _build_invalid_result_payload_error(
+    *,
+    message: str,
+    thread_id: str,
+    run_id: Optional[str],
+) -> dict[str, Any]:
+    """构造 result 载荷非法时的统一错误输出。"""
+
+    return {
+        "message": message,
+        "reason_code": "invalid_result_payload",
+        "thread_id": thread_id,
+        "run_id": run_id,
+    }
+
+
+def _advance_result_sequence(current: int, envelope: Any) -> int:
+    """根据 envelope.sequence_number 推进序号。"""
+
+    if isinstance(envelope, dict):
+        sequence = envelope.get("sequence_number")
+        if isinstance(sequence, int) and sequence >= current:
+            return sequence + 1
+    return current + 1
+
 
 class ChatService:
     """Chat 服务类，封装与 LangGraph 的交互。"""
@@ -816,6 +892,7 @@ class ChatService:
         cancel_reason = "user_cancelled"
         cancel_after_token_count = 0
         client_disconnected = False
+        result_sequence_number = 0
 
         def _clear_cancelled_task_state() -> None:
             task = asyncio.current_task()
@@ -986,9 +1063,37 @@ class ChatService:
                         # 如果有 message 字段，也收集到 full_answer
                         if event_data.get("message"):
                             full_answer.append(event_data["message"])
-                        result_payload = _normalize_result_event_payload(
-                            event_data,
-                            node=chunk.get("node", ""),
+
+                        try:
+                            result_payload = _normalize_result_event_payload(
+                                event_data,
+                                node=chunk.get("node", ""),
+                                thread_id=thread_id,
+                                run_id=resolved_run_id,
+                                sequence_number=result_sequence_number,
+                            )
+                        except ValueError as result_error:
+                            logger.warning(
+                                "result 事件不符合契约，已转 error: thread_id=%s, run_id=%s, error=%s",
+                                thread_id,
+                                resolved_run_id,
+                                result_error,
+                            )
+                            error_payload = _build_invalid_result_payload_error(
+                                message="结构化结果格式无效，已降级为错误事件。",
+                                thread_id=thread_id,
+                                run_id=resolved_run_id,
+                            )
+                            if not client_disconnected:
+                                try:
+                                    yield self._format_sse("error", error_payload)
+                                except asyncio.CancelledError:
+                                    _mark_client_disconnected("result_invalid")
+                            continue
+
+                        result_sequence_number = _advance_result_sequence(
+                            result_sequence_number,
+                            result_payload.get("envelope"),
                         )
                         if not client_disconnected:
                             try:
@@ -1314,10 +1419,46 @@ class ChatService:
                     except asyncio.CancelledError:
                         _mark_client_disconnected("error")
     
-    def _format_sse(self, event_type: str, data: dict) -> bytes:
-        """格式化 SSE 事件。"""
+    def _format_sse(
+        self,
+        event_type: str,
+        data: dict,
+        *,
+        event_id: Optional[str] = None,
+        retry: Optional[int] = None,
+    ) -> bytes:
+        """格式化 SSE 事件，并补齐 id/retry 可靠性字段。"""
+
         payload = json.dumps(jsonable_encoder(data), ensure_ascii=False)
-        return f"event: {event_type}\ndata: {payload}\n\n".encode()
+
+        resolved_event_id = str(event_id or "").strip()
+        if not resolved_event_id and isinstance(data, dict):
+            envelope = data.get("envelope")
+            if isinstance(envelope, dict):
+                envelope_id = str(envelope.get("id") or "").strip()
+                if envelope_id:
+                    resolved_event_id = envelope_id
+            if not resolved_event_id:
+                payload_event_id = str(data.get("event_id") or "").strip()
+                if payload_event_id:
+                    resolved_event_id = payload_event_id
+
+        if not resolved_event_id:
+            resolved_event_id = f"{event_type}-{uuid4().hex}"
+
+        retry_ms, _ = sse_retry_and_heartbeat(
+            retry if retry is not None else _get_sse_retry_ms(),
+        )
+
+        lines = [
+            f"event: {event_type}",
+            f"data: {payload}",
+            f"id: {resolved_event_id}",
+        ]
+        if retry_ms > 0:
+            lines.append(f"retry: {retry_ms}")
+
+        return ("\n".join(lines) + "\n\n").encode()
 
     def _save_conversation_fallback(
         self,
@@ -1478,6 +1619,7 @@ async def sse_resume_stream(
     cancelled_stream = False
     cancel_after_token_count = 0
     cancel_reason = "user_cancelled"
+    result_sequence_number = 0
 
     svc = ChatService()
     format_sse = svc._format_sse
@@ -1604,9 +1746,35 @@ async def sse_resume_stream(
                 elif event_type == "result":
                     if event_data.get("message"):
                         full_answer.append(event_data["message"])
-                    result_payload = _normalize_result_event_payload(
-                        event_data,
-                        node=chunk.get("node", ""),
+
+                    try:
+                        result_payload = _normalize_result_event_payload(
+                            event_data,
+                            node=chunk.get("node", ""),
+                            thread_id=thread_id,
+                            run_id=resolved_run_id,
+                            sequence_number=result_sequence_number,
+                        )
+                    except ValueError as result_error:
+                        logger.warning(
+                            "resume result 事件不符合契约，已转 error: thread_id=%s, run_id=%s, error=%s",
+                            thread_id,
+                            resolved_run_id,
+                            result_error,
+                        )
+                        yield format_sse(
+                            "error",
+                            _build_invalid_result_payload_error(
+                                message="结构化结果格式无效，已降级为错误事件。",
+                                thread_id=thread_id,
+                                run_id=resolved_run_id,
+                            ),
+                        )
+                        continue
+
+                    result_sequence_number = _advance_result_sequence(
+                        result_sequence_number,
+                        result_payload.get("envelope"),
                     )
                     yield format_sse("result", result_payload)
 

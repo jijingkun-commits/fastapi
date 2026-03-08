@@ -35,3 +35,43 @@ def test_slice_current_turn_messages_fallback_when_id_not_found():
 
     assert sliced == messages
 
+
+def test_replay_consistency_test_slice_keeps_current_turn_structured_result_only() -> None:
+    """replay_consistency_test：切片后只保留当前轮结构化结果，避免跨轮污染。"""
+    old_human = HumanMessage(content="上一轮问题", id="human-old")
+    old_ai = create_ai_message(
+        "上一轮结构化结果",
+        additional_kwargs={
+            "result_events": [
+                {
+                    "data_type": "todo_list",
+                    "data": {"todos": [{"title": "legacy-task"}]},
+                    "sequence_number": 1,
+                }
+            ]
+        },
+    )
+
+    current_human = HumanMessage(content="当前轮问题", id="human-current")
+    current_ai = create_ai_message(
+        "当前轮结构化结果",
+        additional_kwargs={
+            "result_events": [
+                {
+                    "data_type": "todo_list",
+                    "data": {"todos": [{"title": "current-task"}]},
+                    "sequence_number": 2,
+                }
+            ]
+        },
+    )
+
+    sliced = _slice_current_turn_messages(
+        [old_human, old_ai, current_human, current_ai],
+        "human-current",
+    )
+
+    assert len(sliced) == 2
+    assert sliced[0] is current_human
+    assert sliced[1] is current_ai
+    assert sliced[1].additional_kwargs["result_events"][0]["data"]["todos"][0]["title"] == "current-task"

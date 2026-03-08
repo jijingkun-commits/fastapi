@@ -1567,12 +1567,93 @@ def _build_multi_intent_recovery_system_context(
     return recovery_hint
 
 
+def _coerce_replay_result_event(raw_event: Any) -> Optional[Dict[str, Any]]:
+    """规范化回放 result_event 结构。"""
+
+    if not isinstance(raw_event, dict):
+        return None
+
+    data_type = str(raw_event.get("data_type") or "").strip()
+    if not data_type:
+        return None
+
+    normalized: Dict[str, Any] = dict(raw_event)
+    normalized["data_type"] = data_type
+    normalized["data"] = raw_event.get("data") if isinstance(raw_event.get("data"), dict) else {}
+
+    message = _normalize_text_content(raw_event.get("message"))
+    if message:
+        normalized["message"] = message
+    else:
+        normalized.pop("message", None)
+
+    return normalized
+
+
+def _resolve_replay_result_events(additional_kwargs: Dict[str, Any]) -> tuple[list[Dict[str, Any]], str]:
+    """按 read-old-write-new 语义解析 result_events。"""
+
+    raw_events = additional_kwargs.get("result_events")
+    if isinstance(raw_events, list):
+        normalized_events = [
+            item
+            for item in (_coerce_replay_result_event(raw) for raw in raw_events)
+            if item is not None
+        ]
+        if normalized_events:
+            return normalized_events, "result_events"
+
+    legacy_single = _coerce_replay_result_event(additional_kwargs.get("result_event"))
+    if legacy_single is not None:
+        return [legacy_single], "result_event"
+
+    legacy_data_type = str(additional_kwargs.get("data_type") or "").strip()
+    if legacy_data_type:
+        legacy_pair_event = _coerce_replay_result_event(
+            {
+                "data_type": legacy_data_type,
+                "data": additional_kwargs.get("data"),
+                "message": additional_kwargs.get("message"),
+                "sequence_number": additional_kwargs.get("sequence_number"),
+                "envelope": additional_kwargs.get("envelope"),
+            }
+        )
+        if legacy_pair_event is not None:
+            return [legacy_pair_event], "data_type_data"
+
+    return [], "none"
+
+
+def _result_event_sort_key(event: Dict[str, Any], index: int) -> tuple[int, int, int]:
+    """生成回放 result_event 稳定排序键。"""
+
+    sequence_number = _parse_non_negative_int(event.get("sequence_number"), default=-1)
+    if sequence_number >= 0:
+        return (0, sequence_number, index)
+
+    envelope = event.get("envelope")
+    if isinstance(envelope, dict):
+        envelope_sequence = _parse_non_negative_int(envelope.get("sequence_number"), default=-1)
+        if envelope_sequence >= 0:
+            return (0, envelope_sequence, index)
+
+    return (1, index, index)
+
+
+def _sort_result_events_by_sequence(events: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """按 sequence_number 对 result_events 保序。"""
+
+    enumerated = [(idx, event) for idx, event in enumerate(events)]
+    enumerated.sort(key=lambda pair: _result_event_sort_key(pair[1], pair[0]))
+    return [event for _, event in enumerated]
+
+
 def _extract_latest_structured_result(
     messages: Sequence[BaseMessage],
     *,
     data_type: str,
 ) -> Optional[Dict[str, Any]]:
-    """提取当前轮最近的结构化结果。"""
+    """提取当前轮最近的结构化结果（优先 canonical result_events[]）。"""
     target_data_type = str(data_type or "").strip()
     if not target_data_type:
         return None
@@ -1580,20 +1661,36 @@ def _extract_latest_structured_result(
     for message in reversed(messages or []):
         if str(getattr(message, "type", "")).lower().strip() != "ai":
             continue
+
         additional = getattr(message, "additional_kwargs", {}) or {}
         if not isinstance(additional, dict):
             continue
-        if str(additional.get("data_type") or "").strip() != target_data_type:
+
+        replay_events, compat_source = _resolve_replay_result_events(additional)
+        if not replay_events:
             continue
-        payload = additional.get("data")
-        if not isinstance(payload, dict):
-            payload = {}
-        return {
-            "data_type": target_data_type,
-            "data": payload,
-            "message": _normalize_text_content(getattr(message, "content", "")),
-        }
+
+        ordered_events = _sort_result_events_by_sequence(replay_events)
+        for event in reversed(ordered_events):
+            if str(event.get("data_type") or "").strip() != target_data_type:
+                continue
+
+            payload = event.get("data")
+            if not isinstance(payload, dict):
+                payload = {}
+
+            message_text = _normalize_text_content(event.get("message")) or _normalize_text_content(
+                getattr(message, "content", "")
+            )
+            return {
+                "data_type": target_data_type,
+                "data": payload,
+                "message": message_text,
+                "compat_source": compat_source,
+            }
+
     return None
+
 
 
 def _ensure_active_goals_covers_runtime(

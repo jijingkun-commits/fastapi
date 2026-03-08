@@ -17,6 +17,7 @@
 from typing import TypedDict, Literal, Optional, Any, Callable
 
 from app.ai.runtime.recovery_policy import is_feature_flag_enabled
+from app.ai.protocol import build_streaming_result_payload_from_fields
 
 
 # ==================== 事件类型定义 ====================
@@ -352,14 +353,22 @@ def emit_result(
         emit_result(writer, "todo_list", {"todos": todos_data}, "找到 3 条待办")
         emit_result(writer, "image", {"url": minio_url})
     """
+    if not callable(writer):
+        return
+
+    result_payload = build_streaming_result_payload_from_fields(
+        data_type=data_type,
+        data=data,
+        message=message,
+    )
+    if result_payload is None:
+        emit_error(writer, "结构化结果缺少必填字段，已降级为 error 事件", node=node)
+        return
+
     writer({
         "type": "result",
-        "data": {
-            "data_type": data_type,
-            "data": data,
-            "message": message
-        },
-        "node": node
+        "data": result_payload,
+        "node": node,
     })
 
 

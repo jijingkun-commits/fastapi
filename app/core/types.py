@@ -5,6 +5,29 @@
 from typing import TypedDict, Optional
 
 
+class ResultEventEnvelope(TypedDict):
+    """SSE result 事件 envelope 类型。"""
+
+    id: str
+    source: str
+    specversion: str
+    type: str
+    sequence_number: int
+    timestamp: str
+    thread_id: str
+    run_id: str
+
+
+class StructuredResultPayload(TypedDict, total=False):
+    """统一结构化结果载荷类型。"""
+
+    data_type: str
+    data: Optional[dict]
+    message: str
+    envelope: ResultEventEnvelope
+    result_contract_version: str
+
+
 class ToolResult(TypedDict):
     """工具调用统一返回类型。
     

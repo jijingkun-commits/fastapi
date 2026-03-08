@@ -5,6 +5,8 @@
  * 这是前端消息处理的单一数据源。
  */
 
+import type { ResultEventEnvelope } from "@/types/generated/result-event";
+
 /**
  * 内容块类型
  * 支持多种内容格式：文本、Markdown、图片、图表、自定义 UI
@@ -149,9 +151,19 @@ export interface TokenEventData {
  * 结构化结果事件数据
  */
 export interface ResultEventData {
+    event?: "result";
     data_type: string;  // "todo_list" | "image" | "chart" | "sql_result" 等
     data: unknown;
     message?: string;
+    event_id?: string;
+    retry?: number;
+    sequence_number?: number;
+    envelope?: ResultEventEnvelope;
+    result_contract_version?: string;
+    renderer_key?: string;
+    fallback_used?: boolean;
+    warning_code?: string;
+    fallback_payload_preview?: string;
 }
 
 /**

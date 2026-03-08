@@ -385,3 +385,93 @@ def test_stream_exception_fallback_does_not_duplicate_human_message():
     assert [event for event, _ in events] == ["init", "error"]
     assert saved_roles.count("human") == 1
     assert saved_roles.count("ai") == 1
+
+
+def test_unknown_data_type_fallback_test_payload_is_forwarded_without_drop() -> None:
+    """unknown_data_type_fallback_test：未知 data_type 不应在后端流中被静默丢弃。"""
+
+    fake_snapshot = SimpleNamespace(tasks=[], values={"messages": []})
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "result",
+                "data": {
+                    "data_type": "custom_widget_v2",
+                    "data": {"raw": "opaque-payload"},
+                    "message": "未知类型结果",
+                },
+                "node": "custom_expert",
+            }
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="返回未知类型结果", thread_id="thread-unknown", user_id=1)
+        )
+
+    result_events = [payload for event, payload in events if event == "result"]
+    assert len(result_events) == 1
+    payload = result_events[0]
+
+    assert payload["data_type"] == "custom_widget_v2"
+    assert payload["type"] == "custom_widget_v2"
+    assert payload["content"] == "未知类型结果"
+    assert payload["meta"]["node"] == "custom_expert"
+
+
+def test_sse_resume_dedup_test_result_payload_exposes_event_id_and_sequence() -> None:
+    """sse_resume_dedup_test：result 事件应透出 event_id/sequence_number 供前端去重排序。"""
+
+    fake_snapshot = SimpleNamespace(tasks=[], values={"messages": []})
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "result",
+                "data": {
+                    "data_type": "todo_list",
+                    "data": {"todos": [{"id": 1001, "title": "补齐门禁测试"}]},
+                    "message": "找到 1 条待办",
+                    "envelope": {
+                        "id": "evt-resume-0007",
+                        "source": "todo_expert",
+                        "specversion": "1.0",
+                        "type": "result",
+                        "sequence_number": 7,
+                        "timestamp": "2026-03-08T08:00:00+00:00",
+                        "thread_id": "thread-resume-dedup",
+                        "run_id": "run-resume-dedup",
+                    },
+                },
+                "node": "todo_expert",
+            }
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="测试去重字段", thread_id="thread-resume-dedup", user_id=1)
+        )
+
+    result_events = [payload for event, payload in events if event == "result"]
+    assert len(result_events) == 1
+    payload = result_events[0]
+
+    assert "event_id" not in payload
+    assert "sequence_number" not in payload
+    assert payload["envelope"]["id"] == "evt-resume-0007"
+    assert payload["envelope"]["sequence_number"] == 7

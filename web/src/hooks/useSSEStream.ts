@@ -27,7 +27,9 @@ import {
     DecisionType,
     Attachment,
 } from "@/lib/backend";
+import type { StreamResultMeta } from "@/lib/backend";
 import { fromBackendMessages } from "@/lib/message-normalizer";
+import { coerceResultEventData } from "@/lib/validators/result-event";
 import { useThreads } from "@/providers/Thread";
 import { StateType, StreamContextValue, MessageMetadata, StreamStatus } from "@/providers/StreamContext";
 import { useMessageUpdater } from "@/hooks/use-message-updater";
@@ -122,6 +124,101 @@ function buildClarificationDisplayText(data: ClarificationEventData): string {
     return message;
 }
 
+function resolveResultEventId(resultEvent: ResultEventData): string | undefined {
+    if (typeof resultEvent.event_id === "string" && resultEvent.event_id.trim().length > 0) {
+        return resultEvent.event_id;
+    }
+
+    const envelopeId = resultEvent.envelope?.id;
+    if (typeof envelopeId === "string" && envelopeId.trim().length > 0) {
+        return envelopeId;
+    }
+
+    return undefined;
+}
+
+function resolveResultSequence(resultEvent: ResultEventData): number | undefined {
+    if (typeof resultEvent.sequence_number === "number" && Number.isFinite(resultEvent.sequence_number)) {
+        return Math.trunc(resultEvent.sequence_number);
+    }
+
+    const envelopeSequence = resultEvent.envelope?.sequence_number;
+    if (typeof envelopeSequence === "number" && Number.isFinite(envelopeSequence)) {
+        return Math.trunc(envelopeSequence);
+    }
+
+    return undefined;
+}
+
+function coerceResultEventArray(value: unknown): ResultEventData[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const normalized: ResultEventData[] = [];
+    for (const item of value) {
+        const resultEvent = coerceResultEventData(item);
+        if (resultEvent) {
+            normalized.push(resultEvent);
+        }
+    }
+    return normalized;
+}
+
+function dedupByEventId(
+    existingEvents: ResultEventData[],
+    incomingEvent: ResultEventData,
+): { events: ResultEventData[]; dedupDropped: boolean } {
+    const incomingEventId = resolveResultEventId(incomingEvent);
+    if (!incomingEventId) {
+        return {
+            events: [...existingEvents, incomingEvent],
+            dedupDropped: false,
+        };
+    }
+
+    const duplicated = existingEvents.some((eventItem) => resolveResultEventId(eventItem) === incomingEventId);
+    if (duplicated) {
+        return {
+            events: existingEvents,
+            dedupDropped: true,
+        };
+    }
+
+    return {
+        events: [...existingEvents, incomingEvent],
+        dedupDropped: false,
+    };
+}
+
+function resultEventsAccumulator(
+    existingEvents: ResultEventData[],
+    incomingEvent: ResultEventData,
+): { events: ResultEventData[]; dedupDropped: boolean } {
+    const deduped = dedupByEventId(existingEvents, incomingEvent);
+    if (deduped.dedupDropped) {
+        return deduped;
+    }
+
+    const sortedEvents = [...deduped.events].sort((left, right) => {
+        const leftSequence = resolveResultSequence(left);
+        const rightSequence = resolveResultSequence(right);
+
+        if (leftSequence === undefined || rightSequence === undefined) {
+            return 0;
+        }
+        if (leftSequence === rightSequence) {
+            return 0;
+        }
+        return leftSequence - rightSequence;
+    });
+
+    return {
+        events: sortedEvents,
+        dedupDropped: false,
+    };
+}
+
 /**
  * SSE 流消息处理 Hook
  */
@@ -211,6 +308,8 @@ export function useSSEStream(): StreamContextValue {
             return;
         }
 
+        let dedupDropped = false;
+
         setMessages((prev) => {
             const updated = [...prev];
             const idx = updated.findIndex((m) => m.id === aiId);
@@ -220,16 +319,48 @@ export function useSSEStream(): StreamContextValue {
 
             const message = updated[idx] as MessageWithAdditionalKwargs;
             const existingKwargs = message.additional_kwargs ?? {};
+            const existingResultEvents = coerceResultEventArray(existingKwargs.result_events);
+            const accumulated = resultEventsAccumulator(existingResultEvents, data);
+            dedupDropped = accumulated.dedupDropped;
+            if (dedupDropped) {
+                return updated;
+            }
+
+            const latestResultEvent = accumulated.events[accumulated.events.length - 1] ?? data;
             updated[idx] = {
                 ...updated[idx],
                 additional_kwargs: {
                     ...existingKwargs,
-                    data_type: data.data_type,
-                    data: data.data,
+                    data_type: latestResultEvent.data_type,
+                    data: latestResultEvent.data,
+                    ...(latestResultEvent.message ? { message: latestResultEvent.message } : {}),
+                    result_event: latestResultEvent,
+                    result_events: accumulated.events,
+                    result_count: accumulated.events.length,
+                    fallback_used: accumulated.events.some((eventItem) => Boolean(eventItem.fallback_used)),
                 },
             } as Message;
             return updated;
         });
+
+        if (dedupDropped) {
+            console.warn("[result-dedup] 丢弃重复 event_id", {
+                thread_id: data.envelope?.thread_id,
+                run_id: data.envelope?.run_id,
+                event_id: resolveResultEventId(data),
+                data_type: data.data_type,
+            });
+            return;
+        }
+
+        if (data.fallback_used || data.warning_code) {
+            console.warn("[result-fallback] 使用降级渲染", {
+                thread_id: data.envelope?.thread_id,
+                run_id: data.envelope?.run_id,
+                data_type: data.data_type,
+                warning_code: data.warning_code,
+            });
+        }
 
         if (data.message) {
             appendToAiMessage(aiId, data.message);
@@ -346,18 +477,29 @@ export function useSSEStream(): StreamContextValue {
         }
     }, [setThreadId]);
 
-    const handleStructuredResultEvent = useCallback((aiId: string, data: ResultEventData, isResume: boolean) => {
-        const imageUrl = getImageUrlFromResult(data);
+    const handleStructuredResultEvent = useCallback((
+        aiId: string,
+        data: ResultEventData,
+        isResume: boolean,
+        meta?: StreamResultMeta,
+    ) => {
+        const normalizedResultData: ResultEventData = {
+            ...data,
+            event_id: data.event_id ?? meta?.eventId,
+            retry: data.retry ?? meta?.retryMs,
+        };
+
+        const imageUrl = getImageUrlFromResult(normalizedResultData);
         if (imageUrl) {
             appendImageToAiMessage(aiId, imageUrl);
         }
 
-        storeStructuredResultToMessage(aiId, data);
+        storeStructuredResultToMessage(aiId, normalizedResultData);
         if (isResume) {
-            console.log(`恢复流收到结构化结果: ${data.data_type}`);
+            console.log(`恢复流收到结构化结果: ${normalizedResultData.data_type}`);
             return;
         }
-        console.log(`收到结构化结果: ${data.data_type}`);
+        console.log(`收到结构化结果: ${normalizedResultData.data_type}`);
     }, [appendImageToAiMessage, storeStructuredResultToMessage]);
 
     /**
@@ -599,8 +741,8 @@ export function useSSEStream(): StreamContextValue {
                     },
                     // 处理结构化结果事件（待办列表等）
                     // 图片完全依赖 LLM 在回复中保留 Markdown 语法
-                    onResult: (data: ResultEventData) => {
-                        handleStructuredResultEvent(aiId, data, false);
+                    onResult: (data: ResultEventData, meta?: StreamResultMeta) => {
+                        handleStructuredResultEvent(aiId, data, false, meta);
                     },
                     onFinalAnswer: (data) => {
                         applyFinalAnswerToMessage(aiId, data.content, data.meta);
@@ -711,8 +853,8 @@ export function useSSEStream(): StreamContextValue {
                 onToolEnd: (name: string, output: unknown) => {
                     console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                 },
-                onResult: (data: ResultEventData) => {
-                    handleStructuredResultEvent(aiId, data, true);
+                onResult: (data: ResultEventData, meta?: StreamResultMeta) => {
+                    handleStructuredResultEvent(aiId, data, true, meta);
                 },
                 onFinalAnswer: (data) => {
                     applyFinalAnswerToMessage(aiId, data.content, data.meta);

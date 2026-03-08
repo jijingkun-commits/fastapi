@@ -1,3 +1,4 @@
+import { validateResultEventPayload } from "@/lib/validators/result-event";
 import { STREAM_EVENT_TYPES } from "@/types/message";
 import type {
   ClarificationEventData,
@@ -6,7 +7,6 @@ import type {
   InitEventData,
   KbImagesEventData,
   ResultEventData,
-  SqlResultData,
   StatusEventData,
   StatusPhase,
   StreamEventType,
@@ -190,7 +190,7 @@ export interface StreamCallbacks {
   /** 需要人工审核（interrupt） */
   onInterrupt?: (data: InterruptData) => void;
   /** 结构化结果（待办列表、图片等） */
-  onResult?: (data: ResultEventData) => void;
+  onResult?: (data: ResultEventData, meta?: StreamResultMeta) => void;
   /** 问题合同准备完成（兼容期开关） */
   onPlanReady?: (data: unknown) => void;
   /** 覆盖率检查 */
@@ -213,6 +213,11 @@ export interface StreamCallbacks {
   onKbImages?: (images: Record<string, string>) => void;
   /** 最终答复（唯一对外正文） */
   onFinalAnswer?: (data: FinalAnswerEventData) => void;
+}
+
+export interface StreamResultMeta {
+  eventId?: string;
+  retryMs?: number;
 }
 
 /**
@@ -246,6 +251,8 @@ export type DecisionType =
 interface SSEEvent {
   type: StreamEventType;
   data: unknown;
+  eventId?: string;
+  retryMs?: number;
 }
 
 const STREAM_EVENT_TYPE_SET: ReadonlySet<string> = new Set(STREAM_EVENT_TYPES);
@@ -279,16 +286,14 @@ function toOptionalMessageId(value: unknown): number | undefined {
   return undefined;
 }
 
-function normalizeResultEventData(data: unknown): ResultEventData | null {
-  if (!isObjectRecord(data)) return null;
-  const dataType = toOptionalString(data.data_type);
-  if (!dataType) return null;
-  return {
-    data_type: dataType,
-    // 约定：`data_type=sql_result` 时，data 可选携带 `chart` 字段
-    data: data.data as SqlResultData,
-    message: toOptionalString(data.message),
-  };
+function normalizeResultEventData(
+  data: unknown,
+  meta?: StreamResultMeta,
+): ResultEventData | null {
+  return validateResultEventPayload(data, {
+    sseEventId: meta?.eventId,
+    sseRetryMs: meta?.retryMs,
+  });
 }
 
 function normalizeFinalAnswerEventData(data: unknown): FinalAnswerEventData | null {
@@ -359,11 +364,20 @@ function parseSSEEventsFromBuffer(buffer: string): {
   for (const chunk of chunks) {
     const lines = chunk.split("\n");
     let eventType: string | null = null;
+    let eventId: string | undefined;
+    let retryMs: number | undefined;
     const dataLines: string[] = [];
 
     for (const line of lines) {
       if (line.startsWith("event:")) {
         eventType = line.slice(6).trim();
+      } else if (line.startsWith("id:")) {
+        eventId = toOptionalString(line.slice(3));
+      } else if (line.startsWith("retry:")) {
+        const parsedRetry = Number.parseInt(line.slice(6).trim(), 10);
+        if (!Number.isNaN(parsedRetry) && parsedRetry >= 0) {
+          retryMs = parsedRetry;
+        }
       } else if (line.startsWith("data:")) {
         dataLines.push(line.slice(5).trimStart());
       }
@@ -382,6 +396,8 @@ function parseSSEEventsFromBuffer(buffer: string): {
       events.push({
         type: eventType,
         data: JSON.parse(dataLines.join("\n")),
+        eventId,
+        retryMs,
       });
     } catch (error) {
       console.error("SSE JSON parse error", error);
@@ -472,9 +488,16 @@ function dispatchSSEEvent(
       return;
     }
     case "result": {
-      const resultData = normalizeResultEventData(event.data);
+      const resultMeta: StreamResultMeta = {
+        eventId: event.eventId,
+        retryMs: event.retryMs,
+      };
+      const resultData = normalizeResultEventData(event.data, resultMeta);
       if (resultData) {
-        onResult?.(resultData);
+        onResult?.(resultData, {
+          eventId: resultData.event_id ?? resultMeta.eventId,
+          retryMs: resultData.retry ?? resultMeta.retryMs,
+        });
       }
       return;
     }

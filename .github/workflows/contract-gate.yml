@@ -1,0 +1,58 @@
+name: Contract Gate
+
+on:
+  pull_request:
+    paths:
+      - 'app/contracts/**'
+      - 'app/services/chat_service.py'
+      - 'app/repositories/chat_repo.py'
+      - 'app/ai/workflow/multi_agent_graph.py'
+      - 'contracts/streaming/result-event.schema.json'
+      - 'web/src/**'
+      - 'docs/**'
+      - 'scripts/contract/check_result_contract.sh'
+      - '.github/workflows/contract-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  contract-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run contract drift and targeted gates
+        env:
+          PYTHONPATH: .
+        run: |
+          python3 scripts/contract/check_result_contract.sh
+
+      - name: Upload contract gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-gate-reports
+          if-no-files-found: warn
+          path: |
+            docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json
+            docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Contract Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Gate script: \`scripts/contract/check_result_contract.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Workflow contract check: \`scripts/check_workflow_contract.py\`" >> "$GITHUB_STEP_SUMMARY"

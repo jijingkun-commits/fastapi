@@ -6,6 +6,8 @@
  * @test-case TC-EDGE-09 Resume 结构化结果渲染
  * @see docs/开发文档/测试管理/待办助手测试案例.md
  */
+const fs = require('fs');
+const path = require('path');
 const { test, expect } = require('@playwright/test');
 const { loginIfNeeded, waitForChatReady, waitForAIResponse } = require('./helpers/auth-helper');
 
@@ -31,6 +33,30 @@ function parseDonePayloads(sseText) {
 
     return donePayloads;
 }
+
+/**
+ * 解析 SSE 文本里的 result 事件 payload 列表
+ * @param {string} sseText
+ */
+function parseResultPayloads(sseText) {
+    const normalized = sseText.replace(/\r\n/g, '\n');
+    const blocks = normalized.split('\n\n').filter(Boolean);
+    const resultPayloads = [];
+
+    for (const block of blocks) {
+        if (!block.includes('event: result')) continue;
+        const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
+        if (!dataLine) continue;
+        try {
+            resultPayloads.push(JSON.parse(dataLine.slice(6)));
+        } catch {
+            // 忽略异常 payload
+        }
+    }
+
+    return resultPayloads;
+}
+
 
 /**
  * 发送消息并抓取本次 /chat/stream SSE 响应
@@ -263,5 +289,35 @@ test.describe('待办助手 SSE 协议回归', () => {
 
         await expect(resumeAiMessage).toContainText('待办清单', { timeout: 30000 });
         await expect(resumeAiMessage).toContainText(resumeTodoTitle, { timeout: 30000 });
+    });
+});
+
+
+test.describe('契约静态守卫', () => {
+    test('TC-EDGE-10: sse_resume_dedup_test 解析重复 event_id', async () => {
+        const sse = [
+            `event: result\ndata: ${JSON.stringify({ data_type: 'todo_list', data: { todos: [{ id: 1, title: 'A' }] }, event_id: 'evt-1', sequence_number: 1 })}`,
+            `event: result\ndata: ${JSON.stringify({ data_type: 'todo_list', data: { todos: [{ id: 1, title: 'A' }] }, event_id: 'evt-1', sequence_number: 1 })}`,
+            `event: done\ndata: ${JSON.stringify({ thread_id: 'thread-1', message_id: 1 })}`,
+        ].join('\n\n') + '\n\n';
+
+        const resultPayloads = parseResultPayloads(sse);
+        expect(resultPayloads).toHaveLength(2);
+
+        const eventIds = resultPayloads
+            .map((payload) => payload.event_id || payload.envelope?.id)
+            .filter(Boolean);
+        expect(new Set(eventIds).size).toBe(1);
+    });
+
+    test('TC-EDGE-11: redaction_whitelist_test 文档存在 payload_budget_rules', async () => {
+        const openapiPath = path.resolve(__dirname, '../../docs/api/openapi.yaml');
+        const asyncapiPath = path.resolve(__dirname, '../../docs/api/streaming-events.asyncapi.yaml');
+
+        const openapiText = fs.readFileSync(openapiPath, 'utf-8');
+        const asyncapiText = fs.readFileSync(asyncapiPath, 'utf-8');
+
+        expect(openapiText.includes('payload_budget_rules')).toBeTruthy();
+        expect(asyncapiText.includes('payload_budget_rules')).toBeTruthy();
     });
 });

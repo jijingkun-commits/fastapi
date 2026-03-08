@@ -1,6 +1,6 @@
 /**
  * 消息标准化服务（中文注释）
- * 
+ *
  * 将不同来源的消息格式统一转换为 UnifiedMessage 格式。
  * 支持的来源：
  * - 后端 API 返回的历史消息 (ConversationMessage)
@@ -9,13 +9,20 @@
  */
 
 import { Message } from "@langchain/langgraph-sdk";
+import { coerceResultEventData } from "@/lib/validators/result-event";
 import { ConversationMessage, ContentBlock as BackendContentBlock } from "./backend";
 import {
     UnifiedMessage,
     ContentBlock,
     ToolCall,
-    isContentBlockArray
+    ResultEventData,
+    isContentBlockArray,
 } from "@/types/message";
+
+interface ReplayResultEventsResolution {
+    events: ResultEventData[];
+    compatSource: "result_events" | "result_event" | "data_type_data" | "none";
+}
 
 /**
  * 将后端历史消息转换为统一格式
@@ -39,9 +46,12 @@ export function fromBackendMessage(msg: ConversationMessage): UnifiedMessage {
         }
     }
 
-    // 从 metadata 恢复 additionalKwargs (用于 TodoList/SqlResult 等卡片渲染)
+    // 从 metadata 恢复 additionalKwargs（读旧写新：统一写回 result_events[]）
     if (msg.metadata && Object.keys(msg.metadata).length > 0) {
-        normalized.additionalKwargs = msg.metadata;
+        const replayKwargs = normalizeReplayAdditionalKwargs(msg.metadata);
+        if (Object.keys(replayKwargs).length > 0) {
+            normalized.additionalKwargs = replayKwargs;
+        }
     }
 
     // 恢复用户反馈状态
@@ -50,6 +60,168 @@ export function fromBackendMessage(msg: ConversationMessage): UnifiedMessage {
     }
 
     return normalized;
+}
+
+function normalizeReplayAdditionalKwargs(
+    metadata: Record<string, unknown>,
+): Record<string, unknown> {
+    const normalized = { ...metadata };
+    const resolution = resolveReplayResultEvents(metadata);
+    if (resolution.events.length === 0) {
+        return normalized;
+    }
+
+    const sortedEvents = sequenceNumberSort(resolution.events);
+    const latestEvent = sortedEvents[sortedEvents.length - 1];
+    if (!latestEvent) {
+        return normalized;
+    }
+
+    normalized.result_events = sortedEvents;
+    normalized.result_event = latestEvent;
+    normalized.result_count = sortedEvents.length;
+    normalized.compat_source = resolution.compatSource;
+    normalized.data_type = latestEvent.data_type;
+    normalized.data = latestEvent.data;
+    if (typeof latestEvent.message === "string" && latestEvent.message.trim().length > 0) {
+        normalized.message = latestEvent.message;
+    }
+
+    return normalized;
+}
+
+function resolveReplayResultEvents(metadata: Record<string, unknown>): ReplayResultEventsResolution {
+    const canonicalEvents = coerceResultEventArray(metadata.result_events);
+    if (canonicalEvents.length > 0) {
+        return {
+            events: canonicalEvents,
+            compatSource: "result_events",
+        };
+    }
+
+    const legacySingle = coerceResultEventData(metadata.result_event);
+    if (legacySingle) {
+        return {
+            events: [legacySingle],
+            compatSource: "result_event",
+        };
+    }
+
+    const legacyPairEvent = buildLegacyPairEvent(metadata);
+    if (legacyPairEvent) {
+        return {
+            events: [legacyPairEvent],
+            compatSource: "data_type_data",
+        };
+    }
+
+    return {
+        events: [],
+        compatSource: "none",
+    };
+}
+
+function coerceResultEventArray(value: unknown): ResultEventData[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const events: ResultEventData[] = [];
+    for (const item of value) {
+        const normalized = coerceResultEventData(item);
+        if (normalized) {
+            events.push(normalized);
+        }
+    }
+    return events;
+}
+
+function buildLegacyPairEvent(metadata: Record<string, unknown>): ResultEventData | null {
+    const dataType = toNonEmptyString(metadata.data_type);
+    if (!dataType) {
+        return null;
+    }
+
+    const legacyPayload: Record<string, unknown> = {
+        event: "result",
+        data_type: dataType,
+        data: isRecord(metadata.data) ? metadata.data : {},
+    };
+
+    const message = toNonEmptyString(metadata.message);
+    if (message) {
+        legacyPayload.message = message;
+    }
+
+    const sequenceNumber = toNonNegativeInt(metadata.sequence_number);
+    if (sequenceNumber !== undefined) {
+        legacyPayload.sequence_number = sequenceNumber;
+    }
+
+    if (isRecord(metadata.envelope)) {
+        legacyPayload.envelope = metadata.envelope;
+    }
+
+    const contractVersion = toNonEmptyString(metadata.result_contract_version);
+    if (contractVersion) {
+        legacyPayload.result_contract_version = contractVersion;
+    }
+
+    return coerceResultEventData(legacyPayload);
+}
+
+function sequenceNumberSort(events: ResultEventData[]): ResultEventData[] {
+    return events
+        .map((event, index) => ({
+            event,
+            index,
+            sequenceNumber: resolveResultSequence(event),
+        }))
+        .sort((left, right) => {
+            if (left.sequenceNumber === undefined && right.sequenceNumber === undefined) {
+                return left.index - right.index;
+            }
+            if (left.sequenceNumber === undefined) {
+                return 1;
+            }
+            if (right.sequenceNumber === undefined) {
+                return -1;
+            }
+            if (left.sequenceNumber === right.sequenceNumber) {
+                return left.index - right.index;
+            }
+            return left.sequenceNumber - right.sequenceNumber;
+        })
+        .map((item) => item.event);
+}
+
+function resolveResultSequence(event: ResultEventData): number | undefined {
+    const sequenceFromEvent = toNonNegativeInt(event.sequence_number);
+    if (sequenceFromEvent !== undefined) {
+        return sequenceFromEvent;
+    }
+    return toNonNegativeInt(event.envelope?.sequence_number);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function toNonEmptyString(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function toNonNegativeInt(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string") {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isNaN(parsed) && parsed >= 0) {
+            return parsed;
+        }
+    }
+    return undefined;
 }
 
 /**
