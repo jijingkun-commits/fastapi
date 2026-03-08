@@ -334,7 +334,7 @@ export function MemoryAdminPanel() {
                 <TableHead className="w-[90px]">revision</TableHead>
                 <TableHead className="w-[120px]">chunks</TableHead>
                 <TableHead className="w-[180px]">更新时间</TableHead>
-                <TableHead className="w-[220px]">操作</TableHead>
+                <TableHead className="w-[260px] min-w-[260px]">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -366,8 +366,8 @@ export function MemoryAdminPanel() {
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDateTime(item.update_time)}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
+                  <TableCell className="min-w-[260px]">
+                    <div className="flex min-w-max flex-nowrap items-center gap-2 whitespace-nowrap">
                       <Button
                         size="sm"
                         variant="outline"
