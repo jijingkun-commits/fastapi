@@ -3,13 +3,7 @@ import { File, X as XIcon } from "lucide-react";
 import { ContentBlock } from "@langchain/core/messages";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ImageViewer } from "@/components/ui/image-viewer";
-import { CloseButton } from "@/components/ui/close-button";
+import { ImageLightbox } from "@/components/ui/image-viewer";
 
 export interface MultimodalPreviewProps {
   block: ContentBlock.Multimodal.Data;
@@ -27,7 +21,9 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   size = "md",
 }) => {
   // 扩展 block 类型以支持 previewUrl
-  const extBlock = block as ContentBlock.Multimodal.Data & { previewUrl?: string };
+  const extBlock = block as ContentBlock.Multimodal.Data & {
+    previewUrl?: string;
+  };
 
   // 图片放大弹窗状态
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -42,10 +38,17 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
     // 获取 MIME 类型，默认为 image/png
     const mimeType = block.mimeType || "image/png";
     // 优先使用 previewUrl (ObjectURL)，否则回退到 base64
-    const url = extBlock.previewUrl || (block.data ? `data:${mimeType};base64,${block.data}` : "");
-    let imgClass: string = "rounded-md object-cover h-16 w-16 text-lg cursor-pointer hover:opacity-80 transition-opacity";
-    if (size === "sm") imgClass = "rounded-md object-cover h-10 w-10 text-base cursor-pointer hover:opacity-80 transition-opacity";
-    if (size === "lg") imgClass = "rounded-md object-cover h-24 w-24 text-xl cursor-pointer hover:opacity-80 transition-opacity";
+    const url =
+      extBlock.previewUrl ||
+      (block.data ? `data:${mimeType};base64,${block.data}` : "");
+    let imgClass: string =
+      "rounded-md object-cover h-16 w-16 text-lg cursor-pointer hover:opacity-80 transition-opacity";
+    if (size === "sm")
+      imgClass =
+        "rounded-md object-cover h-10 w-10 text-base cursor-pointer hover:opacity-80 transition-opacity";
+    if (size === "lg")
+      imgClass =
+        "rounded-md object-cover h-24 w-24 text-xl cursor-pointer hover:opacity-80 transition-opacity";
 
     const imageName = String(block.metadata?.name || "uploaded image");
 
@@ -76,23 +79,12 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
           )}
         </div>
 
-        {/* 图片放大弹窗 - 使用新的 ImageViewer 组件 */}
-        <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-          <DialogContent
-            className="max-w-[95vw] max-h-[95vh] p-0 bg-transparent border-none"
-            showClose={false}
-          >
-            <DialogTitle className="sr-only">{imageName}</DialogTitle>
-            <div className="relative w-full h-[95vh]">
-              <ImageViewer src={url} alt={imageName} />
-              <CloseButton
-                onClick={() => setLightboxOpen(false)}
-                className="absolute top-4 right-4 z-50"
-                size="lg"
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ImageLightbox
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          src={url}
+          alt={imageName}
+        />
       </>
     );
   }
@@ -137,11 +129,13 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   }
 
   // Excel / CSV / 其他表格文件
-  const isSpreadsheet = block.mimeType?.includes("spreadsheet") ||
+  const isSpreadsheet =
+    block.mimeType?.includes("spreadsheet") ||
     block.mimeType?.includes("excel") ||
     block.mimeType === "text/csv";
   if (block.type === "file" && isSpreadsheet) {
-    const filename = block.metadata?.filename || block.metadata?.name || "Spreadsheet";
+    const filename =
+      block.metadata?.filename || block.metadata?.name || "Spreadsheet";
     return (
       <div
         className={cn(

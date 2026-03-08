@@ -1,143 +1,424 @@
 "use client";
 
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { CloseButton } from "@/components/ui/close-button";
 
 interface ImageViewerProps {
-    src: string;
-    alt?: string;
-    className?: string;
+  src: string;
+  alt?: string;
+  className?: string;
+  onRequestClose?: () => void;
 }
 
-/**
- * 独立的图片查看器组件
- * 支持缩放、拖拽、重置等功能
- */
-export const ImageViewer: React.FC<ImageViewerProps> = ({ src, alt, className }) => {
-    const [scale, setScale] = useState(1);
-    const [position, setPosition] = useState({ x: 0, y: 0 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-    const containerRef = useRef<HTMLDivElement>(null);
+interface ImageLightboxProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  src: string;
+  alt?: string;
+  className?: string;
+}
 
-    const handleWheel = useCallback((e: WheelEvent) => {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        setScale((prev) => Math.max(0.5, Math.min(5, prev + delta)));
-    }, []);
+interface PointerPosition {
+  x: number;
+  y: number;
+}
 
-    const handleZoomIn = () => {
-        setScale((prev) => Math.min(5, prev + 0.2));
-    };
+const MIN_SCALE = 1;
+const MAX_SCALE = 5;
+const SCALE_STEP = 0.2;
+const WHEEL_SCALE_STEP = 0.1;
+const DOUBLE_TAP_SCALE = 2;
+const DRAG_THRESHOLD = 3;
 
-    const handleZoomOut = () => {
-        setScale((prev) => Math.max(0.5, prev - 0.2));
-    };
+function getPointerDistance(points: PointerPosition[]) {
+  if (points.length < 2) {
+    return 0;
+  }
 
-    const handleReset = () => {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
-    };
+  const [firstPoint, secondPoint] = points;
+  return Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y);
+}
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if (scale > 1) {
-            setIsDragging(true);
-            setDragStart({
-                x: e.clientX - position.x,
-                y: e.clientY - position.y,
-            });
-        }
-    };
+export const ImageViewer: React.FC<ImageViewerProps> = ({
+  src,
+  alt,
+  className,
+  onRequestClose,
+}) => {
+  const [scale, setScale] = useState(MIN_SCALE);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const pointerPositionsRef = useRef<Map<number, PointerPosition>>(new Map());
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef(MIN_SCALE);
+  const dragMovedRef = useRef(false);
 
-    const handleMouseMove = useCallback(
-        (e: MouseEvent) => {
-            if (isDragging) {
-                setPosition({
-                    x: e.clientX - dragStart.x,
-                    y: e.clientY - dragStart.y,
-                });
-            }
-        },
-        [isDragging, dragStart]
-    );
+  const clampScale = useCallback((nextScale: number) => {
+    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
+  }, []);
 
-    const handleMouseUp = useCallback(() => {
+  const setAbsoluteScale = useCallback(
+    (nextScale: number) => {
+      setScale(clampScale(nextScale));
+    },
+    [clampScale],
+  );
+
+  const updateScale = useCallback(
+    (delta: number) => {
+      setScale((prev) => clampScale(prev + delta));
+    },
+    [clampScale],
+  );
+
+  const handleReset = useCallback(() => {
+    setScale(MIN_SCALE);
+    setPosition({ x: 0, y: 0 });
+    setIsDragging(false);
+    activePointerIdRef.current = null;
+    pointerPositionsRef.current.clear();
+    pinchStartDistanceRef.current = null;
+    pinchStartScaleRef.current = MIN_SCALE;
+    dragMovedRef.current = false;
+  }, []);
+
+  const handleWheel = useCallback(
+    (e: WheelEvent) => {
+      e.preventDefault();
+      updateScale(e.deltaY > 0 ? -WHEEL_SCALE_STEP : WHEEL_SCALE_STEP);
+    },
+    [updateScale],
+  );
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pointerPositionsRef.current.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
+      e.currentTarget.setPointerCapture(e.pointerId);
+
+      const pointerCount = pointerPositionsRef.current.size;
+      if (pointerCount === 2) {
+        pinchStartDistanceRef.current = getPointerDistance(
+          Array.from(pointerPositionsRef.current.values()),
+        );
+        pinchStartScaleRef.current = scale;
         setIsDragging(false);
-    }, []);
+        activePointerIdRef.current = null;
+        dragMovedRef.current = false;
+        return;
+      }
 
-    useEffect(() => {
-        const container = containerRef.current;
-        if (container) {
-            container.addEventListener("wheel", handleWheel, { passive: false });
-            return () => {
-                container.removeEventListener("wheel", handleWheel);
-            };
+      if (pointerCount !== 1 || scale <= MIN_SCALE) {
+        return;
+      }
+
+      activePointerIdRef.current = e.pointerId;
+      dragMovedRef.current = false;
+      setIsDragging(true);
+      setDragStart({
+        x: e.clientX - position.x,
+        y: e.clientY - position.y,
+      });
+    },
+    [position.x, position.y, scale],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!pointerPositionsRef.current.has(e.pointerId)) {
+        return;
+      }
+
+      pointerPositionsRef.current.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
+
+      if (pointerPositionsRef.current.size === 2) {
+        const pinchDistance = getPointerDistance(
+          Array.from(pointerPositionsRef.current.values()),
+        );
+        const pinchStartDistance = pinchStartDistanceRef.current;
+
+        if (pinchStartDistance && pinchDistance > 0) {
+          setAbsoluteScale(
+            pinchStartScaleRef.current * (pinchDistance / pinchStartDistance),
+          );
         }
-    }, [handleWheel]);
+        return;
+      }
 
-    useEffect(() => {
-        if (isDragging) {
-            document.addEventListener("mousemove", handleMouseMove);
-            document.addEventListener("mouseup", handleMouseUp);
-            return () => {
-                document.removeEventListener("mousemove", handleMouseMove);
-                document.removeEventListener("mouseup", handleMouseUp);
-            };
+      if (!isDragging || activePointerIdRef.current !== e.pointerId) {
+        return;
+      }
+
+      const nextPosition = {
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      };
+
+      if (
+        Math.abs(nextPosition.x - position.x) > DRAG_THRESHOLD ||
+        Math.abs(nextPosition.y - position.y) > DRAG_THRESHOLD
+      ) {
+        dragMovedRef.current = true;
+      }
+
+      setPosition(nextPosition);
+    },
+    [
+      dragStart.x,
+      dragStart.y,
+      isDragging,
+      position.x,
+      position.y,
+      setAbsoluteScale,
+    ],
+  );
+
+  const stopDragging = useCallback(
+    (e?: React.PointerEvent<HTMLDivElement>) => {
+      if (e) {
+        pointerPositionsRef.current.delete(e.pointerId);
+
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          // ignore release errors from already released pointers
         }
-    }, [isDragging, handleMouseMove, handleMouseUp]);
+      }
 
-    return (
-        <div className={cn("relative w-full h-full flex flex-col", className)}>
-            <div
-                ref={containerRef}
-                className="flex-1 flex items-center justify-center overflow-hidden bg-black/90 rounded-lg"
-                onMouseDown={handleMouseDown}
-                style={{ cursor: scale > 1 ? (isDragging ? "grabbing" : "grab") : "default" }}
-            >
-                <img
-                    src={src}
-                    alt={alt || "图片"}
-                    className="max-w-full max-h-full object-contain transition-transform duration-200"
-                    style={{
-                        transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
-                        userSelect: "none",
-                    }}
-                    draggable={false}
-                />
-            </div>
+      if (pointerPositionsRef.current.size >= 2) {
+        pinchStartDistanceRef.current = getPointerDistance(
+          Array.from(pointerPositionsRef.current.values()),
+        );
+        pinchStartScaleRef.current = scale;
+        setIsDragging(false);
+        activePointerIdRef.current = null;
+        return;
+      }
 
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-black/70 rounded-full px-4 py-2">
-                <button
-                    onClick={handleZoomOut}
-                    className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
-                    aria-label="缩小"
-                >
-                    <ZoomOut className="w-5 h-5" />
-                </button>
+      pinchStartDistanceRef.current = null;
 
-                <span className="text-white text-sm min-w-16 text-center">
-                    {Math.round(scale * 100)}%
-                </span>
+      if (pointerPositionsRef.current.size === 1 && scale > MIN_SCALE) {
+        const [remainingPointerId, remainingPointer] = Array.from(
+          pointerPositionsRef.current.entries(),
+        )[0];
 
-                <button
-                    onClick={handleZoomIn}
-                    className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
-                    aria-label="放大"
-                >
-                    <ZoomIn className="w-5 h-5" />
-                </button>
+        activePointerIdRef.current = remainingPointerId;
+        setIsDragging(true);
+        setDragStart({
+          x: remainingPointer.x - position.x,
+          y: remainingPointer.y - position.y,
+        });
+        return;
+      }
 
-                <div className="w-px h-6 bg-white/30 mx-1" />
+      activePointerIdRef.current = null;
+      setIsDragging(false);
+    },
+    [position.x, position.y, scale],
+  );
 
-                <button
-                    onClick={handleReset}
-                    className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
-                    aria-label="重置"
-                >
-                    <RotateCcw className="w-5 h-5" />
-                </button>
-            </div>
+  const handleStageClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget) {
+        return;
+      }
+
+      if (dragMovedRef.current) {
+        dragMovedRef.current = false;
+        return;
+      }
+
+      onRequestClose?.();
+    },
+    [onRequestClose],
+  );
+
+  const handleStageDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      if (scale > MIN_SCALE) {
+        handleReset();
+        return;
+      }
+
+      setAbsoluteScale(DOUBLE_TAP_SCALE);
+    },
+    [handleReset, scale, setAbsoluteScale],
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+    };
+  }, [handleWheel]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key;
+
+      if (key === "Escape") {
+        onRequestClose?.();
+        return;
+      }
+
+      if (key === "+" || key === "=" || key === "NumpadAdd") {
+        e.preventDefault();
+        updateScale(SCALE_STEP);
+        return;
+      }
+
+      if (key === "-" || key === "_" || key === "NumpadSubtract") {
+        e.preventDefault();
+        updateScale(-SCALE_STEP);
+        return;
+      }
+
+      if (key === "0" || key === "Numpad0") {
+        e.preventDefault();
+        handleReset();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleReset, onRequestClose, updateScale]);
+
+  useEffect(() => {
+    if (scale <= MIN_SCALE) {
+      setPosition({ x: 0, y: 0 });
+      setIsDragging(false);
+      activePointerIdRef.current = null;
+      dragMovedRef.current = false;
+    }
+  }, [scale]);
+
+  useEffect(() => {
+    handleReset();
+  }, [handleReset, src]);
+
+  return (
+    <div
+      className={cn(
+        "relative flex size-full min-h-0 flex-col bg-black",
+        className,
+      )}
+    >
+      <div
+        ref={containerRef}
+        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden"
+        onClick={handleStageClick}
+        onDoubleClick={handleStageDoubleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopDragging}
+        onPointerCancel={stopDragging}
+        style={{
+          cursor:
+            scale > MIN_SCALE ? (isDragging ? "grabbing" : "grab") : "default",
+          touchAction: "none",
+        }}
+      >
+        <img
+          src={src}
+          alt={alt || "图片"}
+          className="max-h-full max-w-full object-contain transition-transform duration-200 will-change-transform"
+          style={{
+            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            userSelect: "none",
+          }}
+          draggable={false}
+        />
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-full bg-black/70 px-3 py-2 text-white backdrop-blur-md sm:gap-2 sm:px-4">
+          <button
+            onClick={() => updateScale(-SCALE_STEP)}
+            className="rounded-full p-2 transition-colors hover:bg-white/20"
+            aria-label="缩小"
+          >
+            <ZoomOut className="h-5 w-5" />
+          </button>
+
+          <span className="min-w-14 text-center text-sm tabular-nums">
+            {Math.round(scale * 100)}%
+          </span>
+
+          <button
+            onClick={() => updateScale(SCALE_STEP)}
+            className="rounded-full p-2 transition-colors hover:bg-white/20"
+            aria-label="放大"
+          >
+            <ZoomIn className="h-5 w-5" />
+          </button>
+
+          <div className="mx-1 h-6 w-px bg-white/30" />
+
+          <button
+            onClick={handleReset}
+            className="rounded-full p-2 transition-colors hover:bg-white/20"
+            aria-label="重置"
+          >
+            <RotateCcw className="h-5 w-5" />
+          </button>
         </div>
-    );
+      </div>
+    </div>
+  );
+};
+
+export const ImageLightbox: React.FC<ImageLightboxProps> = ({
+  open,
+  onOpenChange,
+  src,
+  alt,
+  className,
+}) => {
+  const imageName = alt || "图片";
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      <DialogContent
+        fullscreen
+        className={cn("bg-black", className)}
+        showClose={false}
+      >
+        <DialogTitle className="sr-only">{imageName}</DialogTitle>
+        <div className="relative h-full w-full overflow-hidden pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+          <ImageViewer
+            src={src}
+            alt={imageName}
+            onRequestClose={() => onOpenChange(false)}
+          />
+          <CloseButton
+            onClick={() => onOpenChange(false)}
+            className="absolute top-4 right-4 z-20 bg-black/60 backdrop-blur-md md:top-6 md:right-6"
+            size="lg"
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 };

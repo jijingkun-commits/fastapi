@@ -18,9 +18,7 @@ import { SyntaxHighlighter } from "@/components/chat/syntax-highlighter";
 
 import { TooltipIconButton } from "@/components/chat/tooltip-icon-button";
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { ImageViewer } from "@/components/ui/image-viewer";
-import { CloseButton } from "@/components/ui/close-button";
+import { ImageLightbox } from "@/components/ui/image-viewer";
 
 import "katex/dist/katex.min.css";
 
@@ -245,29 +243,12 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({
         <span className="text-xs text-gray-400">[图片加载失败]</span>
       )}
 
-      {/* 点击放大弹窗 - 使用新的 ImageViewer 组件 */}
-      <Dialog
+      <ImageLightbox
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
-      >
-        <DialogContent
-          className="max-h-[95vh] max-w-[95vw] border-none bg-transparent p-0"
-          showClose={false}
-        >
-          <DialogTitle className="sr-only">{imageName}</DialogTitle>
-          <div className="relative h-[95vh] w-full">
-            <ImageViewer
-              src={src}
-              alt={imageName}
-            />
-            <CloseButton
-              onClick={() => setLightboxOpen(false)}
-              className="absolute top-4 right-4 z-50"
-              size="lg"
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+        src={src}
+        alt={imageName}
+      />
     </>
   );
 };
