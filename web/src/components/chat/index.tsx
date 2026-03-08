@@ -385,10 +385,10 @@ export function Thread() {
                           }}
                         />
                       </div>
-                      <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-br from-gray-900 to-gray-600 bg-clip-text text-transparent">
+                      <h1 className="app-page-title">
                         嘉银助手
                       </h1>
-                      <p className="text-muted-foreground max-w-md">
+                      <p className="app-page-subtitle max-w-xl">
                         已有：知识库、联网搜索、数据查询、简单的图形（图表）生成
                         能上传文件、展示图片。
                       </p>

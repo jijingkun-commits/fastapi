@@ -78,14 +78,14 @@
 
   --app-sidebar-bg: oklch(1 0 0);
   --app-sidebar-border: oklch(0.91 0 0);
-  --app-sidebar-title: oklch(0.325 0.022 223);
-  --app-sidebar-item-fg: oklch(0.47 0.016 223);
-  --app-sidebar-item-hover-fg: oklch(0.3 0.02 220);
-  --app-sidebar-item-hover-bg: oklch(0.985 0 0);
-  --app-sidebar-item-active-bg: oklch(1 0 0);
-  --app-sidebar-item-active-fg: oklch(0.255 0.02 220);
-  --app-sidebar-item-active-ring: oklch(0.85 0.02 192 / 0.6);
-  --app-sidebar-icon: oklch(0.56 0.018 220);
+  --app-sidebar-title: oklch(0.26 0.02 223);
+  --app-sidebar-item-fg: oklch(0.31 0.018 223);
+  --app-sidebar-item-hover-fg: oklch(0.24 0.02 220);
+  --app-sidebar-item-hover-bg: oklch(0.975 0.004 205);
+  --app-sidebar-item-active-bg: oklch(0.985 0.006 192);
+  --app-sidebar-item-active-fg: oklch(0.235 0.02 220);
+  --app-sidebar-item-active-ring: oklch(0.82 0.024 192 / 0.72);
+  --app-sidebar-icon: oklch(0.36 0.018 220);
   --app-sidebar-icon-active: oklch(0.45 0.08 192);
   --app-sidebar-icon-active-bg: oklch(0.968 0.01 192);
 
@@ -99,12 +99,27 @@
 
   --font-body: var(--font-sans-cjk);
   --chat-stream-max-width: 72rem;
-  --chat-reading-max-width: 51rem;
+  --chat-content-max-width: 56rem;
+  --chat-reading-max-width: var(--chat-content-max-width);
   --chat-reading-font-size: 1rem;
   --chat-reading-line-height: 1.88;
   --chat-reading-letter-spacing: -0.01em;
   --chat-reading-weight: 400;
-  --chat-heading-letter-spacing: -0.024em;
+  --chat-heading-letter-spacing: -0.02em;
+  --chat-heading-1-size: clamp(1.56rem, 1.48rem + 0.24vw, 1.8rem);
+  --chat-heading-2-size: clamp(1.32rem, 1.26rem + 0.18vw, 1.48rem);
+  --chat-heading-3-size: clamp(1.1rem, 1.06rem + 0.1vw, 1.2rem);
+  --chat-code-inline-surface: oklch(0.972 0.003 220);
+  --chat-code-inline-color: oklch(0.29 0.018 223);
+  --chat-code-block-surface: oklch(0.992 0.002 220);
+  --chat-code-block-header-surface: oklch(0.968 0.004 220);
+  --chat-code-block-border: oklch(0.9 0.004 220 / 0.9);
+  --chat-code-block-header-foreground: oklch(0.4 0.014 223);
+  --app-page-title-size: clamp(1.56rem, 1.45rem + 0.3vw, 1.82rem);
+  --app-page-title-weight: 650;
+  --app-page-title-letter-spacing: -0.022em;
+  --app-page-subtitle-size: 0.95rem;
+  --app-page-subtitle-line-height: 1.65;
 }
 
 .dark {
@@ -162,9 +177,9 @@
 
   --app-sidebar-bg: oklch(0.23 0.014 220);
   --app-sidebar-border: oklch(0.36 0.022 220);
-  --app-sidebar-title: oklch(0.89 0.016 205);
-  --app-sidebar-item-fg: oklch(0.79 0.013 218);
-  --app-sidebar-item-hover-fg: oklch(0.96 0.01 205);
+  --app-sidebar-title: oklch(0.93 0.012 205);
+  --app-sidebar-item-fg: oklch(0.86 0.012 218);
+  --app-sidebar-item-hover-fg: oklch(0.98 0.008 205);
   --app-sidebar-item-hover-bg: oklch(0.33 0.024 210);
   --app-sidebar-item-active-bg: oklch(0.36 0.036 194);
   --app-sidebar-item-active-fg: oklch(0.97 0.011 200);
@@ -177,6 +192,12 @@
   --admin-canvas-bottom: oklch(0.17 0.012 232);
   --admin-content-surface: oklch(0.22 0.012 224 / 0.92);
   --admin-content-border: oklch(0.36 0.022 220 / 0.8);
+  --chat-code-inline-surface: oklch(0.325 0.014 222);
+  --chat-code-inline-color: oklch(0.92 0.01 215);
+  --chat-code-block-surface: oklch(0.245 0.012 223);
+  --chat-code-block-header-surface: oklch(0.285 0.014 223);
+  --chat-code-block-border: oklch(0.38 0.02 220 / 0.92);
+  --chat-code-block-header-foreground: oklch(0.82 0.012 214);
 }
 
 @theme inline {
@@ -264,6 +285,33 @@
   .chat-stream-shell {
     width: 100%;
     max-width: var(--chat-stream-max-width);
+  }
+
+  .chat-content-shell {
+    width: 100%;
+    max-width: var(--chat-content-max-width);
+  }
+
+  .app-page-title {
+    color: var(--foreground);
+    font-size: var(--app-page-title-size);
+    font-weight: var(--app-page-title-weight);
+    line-height: 1.2;
+    letter-spacing: var(--app-page-title-letter-spacing);
+  }
+
+  .app-page-subtitle {
+    color: var(--muted-foreground);
+    font-size: var(--app-page-subtitle-size);
+    line-height: var(--app-page-subtitle-line-height);
+  }
+
+  .app-sidebar-secondary {
+    color: color-mix(
+      in srgb,
+      var(--app-sidebar-item-fg) 88%,
+      var(--app-sidebar-bg)
+    );
   }
 
   .admin-main-scroll {

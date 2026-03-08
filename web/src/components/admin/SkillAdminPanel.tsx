@@ -446,8 +446,8 @@ export function SkillAdminPanel() {
     <div className="admin-page-content space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">技能管理</h1>
-          <p className="text-sm text-muted-foreground">管理 Agent 技能向量和配置</p>
+          <h1 className="app-page-title">技能管理</h1>
+          <p className="app-page-subtitle">管理 Agent 技能向量和配置</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={listLoading}>
           {listLoading ? "刷新中..." : "刷新"}

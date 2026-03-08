@@ -676,8 +676,8 @@ export function AdminOverviewCockpit() {
     return (
       <div className="admin-page-content space-y-4">
         <header>
-          <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
-          <p className="mt-1 text-sm text-muted-foreground">正在准备实时运行态数据...</p>
+          <h1 className="app-page-title">总览驾驶舱</h1>
+          <p className="app-page-subtitle mt-1">正在准备实时运行态数据...</p>
         </header>
         <CockpitSkeleton />
       </div>
@@ -688,8 +688,8 @@ export function AdminOverviewCockpit() {
     return (
       <div className="admin-page-content space-y-4">
         <header>
-          <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
-          <p className="mt-1 text-sm text-muted-foreground">实时总览暂不可用，可稍后重试</p>
+          <h1 className="app-page-title">总览驾驶舱</h1>
+          <p className="app-page-subtitle mt-1">实时总览暂不可用，可稍后重试</p>
         </header>
         <ViewState
           type="error"
@@ -709,8 +709,8 @@ export function AdminOverviewCockpit() {
       <header className="space-y-2">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">总览驾驶舱</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h1 className="app-page-title">总览驾驶舱</h1>
+            <p className="app-page-subtitle mt-1">
               聚焦系统健康、请求质量与合规风险，支持实时流 + 轮询降级。
             </p>
           </div>

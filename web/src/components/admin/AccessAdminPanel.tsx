@@ -251,8 +251,8 @@ export function AccessAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">数据访问控制</h1>
-          <p className="text-sm text-muted-foreground mt-1">管理 AI 问数功能的数据库访问权限</p>
+          <h1 className="app-page-title">数据访问控制</h1>
+          <p className="app-page-subtitle mt-1">管理 AI 问数功能的数据库访问权限</p>
         </div>
         <Button variant="outline" size="sm" onClick={loadConfig} className="gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" />

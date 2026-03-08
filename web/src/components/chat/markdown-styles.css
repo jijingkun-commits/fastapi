@@ -2,11 +2,20 @@
 .markdown-content {
   color: var(--foreground);
   font-size: var(--chat-reading-font-size);
+  --markdown-code-inline-surface: var(--chat-code-inline-surface);
+  --markdown-code-inline-color: var(--chat-code-inline-color);
+  --markdown-code-block-surface: var(--chat-code-block-surface);
+  --markdown-code-block-header-surface: var(--chat-code-block-header-surface);
+  --markdown-code-block-border: var(--chat-code-block-border);
+  --markdown-code-block-header-foreground: var(
+    --chat-code-block-header-foreground
+  );
 }
 
 .markdown-content-readable {
   width: 100%;
   max-width: var(--chat-reading-max-width);
+  margin-inline: auto;
 }
 
 .markdown-content > :first-child {
@@ -54,21 +63,21 @@
 }
 
 .markdown-content h1 {
-  font-size: clamp(2.1rem, 1.9rem + 0.9vw, 2.9rem);
-  margin-top: 2.4rem;
-  margin-bottom: 1.15rem;
-}
-
-.markdown-content h2 {
-  font-size: clamp(1.55rem, 1.42rem + 0.45vw, 2rem);
+  font-size: var(--chat-heading-1-size);
   margin-top: 2rem;
   margin-bottom: 0.95rem;
 }
 
-.markdown-content h3 {
-  font-size: clamp(1.2rem, 1.12rem + 0.28vw, 1.45rem);
+.markdown-content h2 {
+  font-size: var(--chat-heading-2-size);
   margin-top: 1.6rem;
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.78rem;
+}
+
+.markdown-content h3 {
+  font-size: var(--chat-heading-3-size);
+  margin-top: 1.25rem;
+  margin-bottom: 0.6rem;
   font-weight: 650;
 }
 
@@ -84,7 +93,11 @@
 .markdown-content a {
   color: var(--color-brand-700);
   text-decoration: none;
-  text-decoration-color: color-mix(in srgb, var(--color-brand-700) 32%, transparent);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-brand-700) 32%,
+    transparent
+  );
 }
 
 .markdown-content a:hover {
@@ -95,7 +108,8 @@
 .markdown-content blockquote {
   margin: 1.25rem 0;
   padding: 0.25rem 0 0.25rem 1rem;
-  border-left: 3px solid color-mix(in srgb, var(--color-brand-600) 42%, white 58%);
+  border-left: 3px solid
+    color-mix(in srgb, var(--color-brand-600) 42%, white 58%);
   color: var(--muted-foreground);
 }
 
@@ -106,17 +120,70 @@
 }
 
 .markdown-content code:not(pre code) {
-  background-color: color-mix(in srgb, var(--muted) 72%, white 28%);
-  color: color-mix(in srgb, var(--foreground) 95%, var(--color-brand-700) 5%);
+  background-color: var(--markdown-code-inline-surface);
+  color: var(--markdown-code-inline-color);
   padding: 0.18em 0.42em;
   border-radius: 0.45rem;
   font-size: 0.92em;
 }
 
-.markdown-content pre {
-  overflow-x: auto;
+.markdown-content .markdown-code-block {
+  overflow: hidden;
   margin: 1.3rem 0;
+  border: 1px solid var(--markdown-code-block-border);
   border-radius: 1rem;
+  background: var(--markdown-code-block-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.markdown-content .markdown-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.72rem 1rem;
+  border-bottom: 1px solid var(--markdown-code-block-border);
+  background: var(--markdown-code-block-header-surface);
+  color: var(--markdown-code-block-header-foreground);
+}
+
+.markdown-content .markdown-code-block__language {
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.markdown-content .markdown-code-block__copy {
+  color: var(--markdown-code-block-header-foreground);
+}
+
+.markdown-content .markdown-code-block__copy:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--markdown-code-block-header-surface) 82%,
+    var(--foreground) 18%
+  );
+  color: var(--foreground);
+}
+
+.markdown-content .markdown-code-block__body {
+  margin: 0;
+  width: 100%;
+  background: transparent !important;
+  font-size: 0.92rem;
+  line-height: 1.72;
+}
+
+.markdown-content .markdown-code-block__body > code,
+.markdown-content
+  .markdown-code-block__body
+  :where(code[class*="language-"], pre[class*="language-"]) {
+  background: transparent !important;
+}
+
+.markdown-content .markdown-code-block__body code {
+  padding: 0 !important;
+  color: inherit;
 }
 
 .markdown-content table {

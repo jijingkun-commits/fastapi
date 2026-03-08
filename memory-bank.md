@@ -28,7 +28,7 @@
 - 2026-03-07｜active-task `.state/<task_key>/` 纳入 dirty whitelist（ACTIVE）→ `docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
 
 - 2026-03-08｜Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
-- 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 阅读宽度分层（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
+- 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -299,12 +299,12 @@
 - 回退/失效条件：若后续平台为观测证据提供独立存储/导出服务，可由平台服务替代 report 导出；否则应继续维持 runtime log 与 tracked report 双轨
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_workflow_gate_usage_report_contract.py`、`scripts/check_workflow_contract.py`
 
-### 2026-03-08 聊天前端字体系统切换为 CJK WebFont + 阅读宽度分层
+### 2026-03-08 聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token
 - 状态：ACTIVE
-- 决策主题：聊天前端统一采用 CJK 主字体与阅读型 typography 契约
-- 背景与问题：原方案以 `Inter` 作为全局主字体，中文主要依赖系统 fallback，导致英文与中文气质割裂，Markdown 长文也缺少阅读型层次与合适宽度。
-- 最终决策：根布局统一注入 `Noto Sans SC`，全局样式收口字体与排版 token，AI Markdown 正文单独限制阅读宽度，图表/SQL/工具结果保留较宽展示宽度。
-- 取舍理由：未上线阶段优先消除字体入口分散与正文样式失控的结构性问题，用一次重构换取后续内容产品一致性。
-- 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、AI 消息正文渲染链路。
-- 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，可在根布局保留单一入口的前提下替换字体源与 token。
+- 决策主题：聊天前端统一采用 CJK 主字体、阅读型 typography 与共享会话内容列宽契约
+- 背景与问题：原方案以 `Inter` 作为全局主字体，中文主要依赖系统 fallback，导致英文与中文气质割裂；同时 AI 正文、用户气泡、状态行与底部输入框分别挂在不同宽度层，出现“会话元素脱离统一内容列”的布局割裂。
+- 最终决策：根布局统一注入 `Noto Sans SC`，全局样式收口字体与排版 token，并让 AI 正文、用户气泡、状态行、加载占位、操作栏与 `ChatInput` 共同消费同一内容列宽 token；图表/SQL/工具结果继续保留较宽展示宽度。
+- 取舍理由：未上线阶段优先消除字体入口分散与内容列宽双源配置的结构性问题，用一次收敛换取后续内容产品一致性。
+- 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/human.tsx`、`web/src/components/chat/messages/ai.tsx`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、会话消息渲染链路。
+- 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，或针对图表工作台引入独立内容栅格，可在保留单一 token 入口的前提下按场景拆分。
 - 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`

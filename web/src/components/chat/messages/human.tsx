@@ -75,14 +75,8 @@ export function HumanMessage({
   };
 
   return (
-    <div
-      className={cn(
-        "group ml-auto flex items-center gap-2",
-        isEditing && "w-full max-w-xl",
-      )}
-      data-testid="human-message"
-    >
-      <div className={cn("flex flex-col gap-2", isEditing && "w-full")}>
+    <div className="group w-full" data-testid="human-message">
+      <div className={cn("chat-content-shell mx-auto flex flex-col gap-2", isEditing && "w-full")}>
         {isEditing ? (
           <EditableContent
             value={value}
@@ -121,7 +115,7 @@ export function HumanMessage({
               // 移除工具调用提示行 "(请使用 analyze_image...)"
               const displayText = contentString.replace(/\(请使用 analyze_image 工具分析此图片:.*?\)\n*/g, '');
               return displayText.trim() ? (
-                <div className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 text-left">
+                <div className="bg-muted ml-auto w-fit max-w-full rounded-3xl px-4 py-2 text-left">
                   <MarkdownText>{displayText}</MarkdownText>
                 </div>
               ) : null;

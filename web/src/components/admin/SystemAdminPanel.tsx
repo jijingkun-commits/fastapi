@@ -156,8 +156,8 @@ export function SystemAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">系统配置</h1>
-          <p className="text-muted-foreground">管理系统运行参数和配置项</p>
+          <h1 className="app-page-title">系统配置</h1>
+          <p className="app-page-subtitle">管理系统运行参数和配置项</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleRefreshCache}>

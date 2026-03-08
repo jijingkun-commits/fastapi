@@ -196,8 +196,8 @@ export function LLMAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">LLM 模型配置</h1>
-          <p className="text-muted-foreground">管理 AI 模型提供商和模型配置</p>
+          <h1 className="app-page-title">LLM 模型配置</h1>
+          <p className="app-page-subtitle">管理 AI 模型提供商和模型配置</p>
         </div>
         <Button variant="outline" onClick={loadData}>
           刷新

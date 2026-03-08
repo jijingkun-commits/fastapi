@@ -161,7 +161,7 @@ export function ChatInput({
     }, [threadId]);
 
     return (
-        <div ref={dropRef} className="relative z-10 w-full max-w-4xl mx-auto">
+        <div ref={dropRef} className="chat-content-shell relative z-10 mx-auto">
             {/* 选中待办提示 - 仅在非审核状态下显示 */}
             {!hasInterrupt && selectedTodo && (
                 <div className="mb-2" data-selected-todo={selectedTodo.id}>

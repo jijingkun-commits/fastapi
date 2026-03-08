@@ -7,16 +7,18 @@ import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { FC, memo, useState } from "react";
-import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, BrainIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  BrainIcon,
+} from "lucide-react";
 import { SyntaxHighlighter } from "@/components/chat/syntax-highlighter";
 
 import { TooltipIconButton } from "@/components/chat/tooltip-icon-button";
 import { cn } from "@/lib/utils";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { CloseButton } from "@/components/ui/close-button";
 
@@ -31,14 +33,17 @@ interface ThinkingBlockProps {
   defaultExpanded?: boolean;
 }
 
-const ThinkingBlock: FC<ThinkingBlockProps> = ({ content, defaultExpanded = false }) => {
+const ThinkingBlock: FC<ThinkingBlockProps> = ({
+  content,
+  defaultExpanded = false,
+}) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   return (
     <div className="my-3 rounded-lg border border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/30">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30 rounded-t-lg transition-colors"
+        className="flex w-full items-center gap-2 rounded-t-lg px-3 py-2 text-left text-sm font-medium text-purple-700 transition-colors hover:bg-purple-100 dark:text-purple-300 dark:hover:bg-purple-900/30"
       >
         {isExpanded ? (
           <ChevronDownIcon className="h-4 w-4" />
@@ -48,14 +53,14 @@ const ThinkingBlock: FC<ThinkingBlockProps> = ({ content, defaultExpanded = fals
         <BrainIcon className="h-4 w-4" />
         <span>思考过程</span>
         {!isExpanded && (
-          <span className="text-xs text-purple-500 dark:text-purple-400 ml-2">
+          <span className="ml-2 text-xs text-purple-500 dark:text-purple-400">
             (点击展开)
           </span>
         )}
       </button>
       {isExpanded && (
-        <div className="px-4 pb-3 text-sm text-purple-800 dark:text-purple-200 border-t border-purple-200 dark:border-purple-800">
-          <div className="pt-3 whitespace-pre-wrap leading-relaxed">
+        <div className="border-t border-purple-200 px-4 pb-3 text-sm text-purple-800 dark:border-purple-800 dark:text-purple-200">
+          <div className="pt-3 leading-relaxed whitespace-pre-wrap">
             {content}
           </div>
         </div>
@@ -96,7 +101,10 @@ function parseThinkTags(text: string): ParsedPart[] {
 
     // 添加开始标签前的文本
     if (startIndex > currentIndex) {
-      parts.push({ type: "text", content: text.slice(currentIndex, startIndex) });
+      parts.push({
+        type: "text",
+        content: text.slice(currentIndex, startIndex),
+      });
     }
 
     // 查找对应的结束标签（从开始标签之后找）
@@ -126,7 +134,7 @@ function parseThinkTags(text: string): ParsedPart[] {
 /**
  * 修复 Markdown 表格格式
  * 当 AI 返回的表格缺少必要的换行符时，自动修复
- * 
+ *
  * 问题示例：
  * "| 日期 | 星期 ||------|------|| 数据 | 数据 |"
  * 应该变成：
@@ -138,13 +146,13 @@ function fixMarkdownTable(text: string): string {
   // 匹配：结尾的 | 后面紧跟（可能有空格）另一个 | 开头的新行
 
   // 步骤 1: 修复 "||" -> "|\n|" 的情况（两个管道符号直接相连）
-  let fixed = text.replace(/\|\|/g, '|\n|');
+  let fixed = text.replace(/\|\|/g, "|\n|");
 
   // 步骤 2: 修复 "| |" -> "|\n|" 的情况（两个管道符号之间有空格但应该是换行）
   // 但要小心不要误伤正常的空单元格，所以只在特定情况下处理
   // 例如 "级 | | 日期" 这种情况（行尾 | 后面有空格再 | 再有实际内容）
   // 使用回溯检测：如果 | 后面紧跟另一个完整的表格行模式
-  fixed = fixed.replace(/\| \|(?=\s*[^\n|]+\s*\|)/g, '|\n|');
+  fixed = fixed.replace(/\| \|(?=\s*[^\n|]+\s*\|)/g, "|\n|");
 
   return fixed;
 }
@@ -181,11 +189,14 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-t-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">
-      <span className="lowercase [&>span]:text-xs">{language}</span>
+    <div className="markdown-code-block__header">
+      <span className="markdown-code-block__language lowercase [&>span]:text-xs">
+        {language}
+      </span>
       <TooltipIconButton
         tooltip="Copy"
         onClick={onCopy}
+        className="markdown-code-block__copy"
       >
         {!isCopied && <CopyIcon />}
         {isCopied && <CheckIcon />}
@@ -204,7 +215,11 @@ interface ImageWithLightboxProps {
   className?: string;
 }
 
-const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) => {
+const ImageWithLightbox: FC<ImageWithLightboxProps> = ({
+  src,
+  alt,
+  className,
+}) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const imageName = alt || "图片";
@@ -218,9 +233,9 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) 
         src={src}
         alt={imageName}
         className={cn(
-          "max-w-xs max-h-48 rounded-lg my-2 cursor-pointer hover:opacity-90 transition-opacity shadow-sm border",
+          "my-2 max-h-48 max-w-xs cursor-pointer rounded-lg border shadow-sm transition-opacity hover:opacity-90",
           loadError && "hidden",
-          className
+          className,
         )}
         loading="lazy"
         onClick={() => setLightboxOpen(true)}
@@ -231,14 +246,20 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({ src, alt, className }) 
       )}
 
       {/* 点击放大弹窗 - 使用新的 ImageViewer 组件 */}
-      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+      <Dialog
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+      >
         <DialogContent
-          className="max-w-[95vw] max-h-[95vh] p-0 bg-transparent border-none"
+          className="max-h-[95vh] max-w-[95vw] border-none bg-transparent p-0"
           showClose={false}
         >
           <DialogTitle className="sr-only">{imageName}</DialogTitle>
-          <div className="relative w-full h-[95vh]">
-            <ImageViewer src={src} alt={imageName} />
+          <div className="relative h-[95vh] w-full">
+            <ImageViewer
+              src={src}
+              alt={imageName}
+            />
             <CloseButton
               onClick={() => setLightboxOpen(false)}
               className="absolute top-4 right-4 z-50"
@@ -378,21 +399,30 @@ const defaultComponents: Partial<Components> = {
       {...props}
     />
   ),
-  img: ({ src, alt, className, ...props }: { src?: string | Blob; alt?: string; className?: string }) => {
+  img: ({
+    src,
+    alt,
+    className,
+    ...props
+  }: {
+    src?: string | Blob;
+    alt?: string;
+    className?: string;
+  }) => {
     // 修复 MinIO 预签名 URL 被重复编码的问题
     const fixMinioUrl = (url: string | undefined | Blob) => {
-      if (typeof url !== 'string') return url;
+      if (typeof url !== "string") return url;
       if (!url) return undefined;
 
       // 检查是否是被重复编码的 MinIO URL
-      if (url.includes('%3F') && url.includes('X-Amz-Algorithm')) {
+      if (url.includes("%3F") && url.includes("X-Amz-Algorithm")) {
         try {
-          let fixed = url.replace('%3F', '?');
-          fixed = fixed.replace(/%26/g, '&');
-          fixed = fixed.replace(/%3D/g, '=');
+          let fixed = url.replace("%3F", "?");
+          fixed = fixed.replace(/%26/g, "&");
+          fixed = fixed.replace(/%3D/g, "=");
           return fixed;
         } catch (e) {
-          console.error('Error fixing MinIO URL:', e);
+          console.error("Error fixing MinIO URL:", e);
           return url;
         }
       }
@@ -400,7 +430,7 @@ const defaultComponents: Partial<Components> = {
     };
 
     const finalSrc = fixMinioUrl(src);
-    const imageSrc = typeof finalSrc === 'string' ? finalSrc : undefined;
+    const imageSrc = typeof finalSrc === "string" ? finalSrc : undefined;
 
     // 使用内联的图片组件，支持点击放大
     return (
@@ -419,11 +449,8 @@ const defaultComponents: Partial<Components> = {
     />
   ),
   pre: ({ className, ...props }: { className?: string }) => (
-    <pre
-      className={cn(
-        "max-w-4xl overflow-x-auto rounded-lg bg-black text-white",
-        className,
-      )}
+    <div
+      className={cn("markdown-code-block max-w-4xl", className)}
       {...props}
     />
   ),
@@ -449,7 +476,7 @@ const defaultComponents: Partial<Components> = {
           />
           <SyntaxHighlighter
             language={language}
-            className={className}
+            className={cn("markdown-code-block__body", className)}
           >
             {code}
           </SyntaxHighlighter>
@@ -468,7 +495,10 @@ const defaultComponents: Partial<Components> = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string; className?: string }> = ({ children, className }) => {
+const MarkdownTextImpl: FC<{ children: string; className?: string }> = ({
+  children,
+  className,
+}) => {
   // 解析 <think></think> 标签
   const parts = parseThinkTags(children);
 
@@ -476,7 +506,12 @@ const MarkdownTextImpl: FC<{ children: string; className?: string }> = ({ childr
     <div className={cn("markdown-content", className)}>
       {parts.map((part, index) => {
         if (part.type === "thinking") {
-          return <ThinkingBlock key={index} content={part.content} />;
+          return (
+            <ThinkingBlock
+              key={index}
+              content={part.content}
+            />
+          );
         }
         // 修复 Markdown 表格格式（AI 可能返回缺少换行的表格）
         // 同时移除开头的空白换行（防止后端消息格式问题导致显示异常）

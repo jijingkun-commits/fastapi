@@ -440,8 +440,8 @@ export function MemoryAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">用户个性化永久记忆</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="app-page-title">用户个性化永久记忆</h1>
+          <p className="app-page-subtitle mt-1">
             统一通过 `memory-admin-api` 完成列表筛选、详情抽屉与治理动作。
           </p>
         </div>

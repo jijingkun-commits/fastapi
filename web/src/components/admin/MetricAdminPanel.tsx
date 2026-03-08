@@ -519,8 +519,8 @@ export function MetricAdminPanel() {
             {/* 页头 */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-foreground">指标管理</h1>
-                    <p className="text-muted-foreground text-sm mt-1">
+                    <h1 className="app-page-title">指标管理</h1>
+                    <p className="app-page-subtitle mt-1">
                         管理问数助手的指标定义，支持 AI 从 ETL 脚本提取 SELECT 模板
                     </p>
                 </div>

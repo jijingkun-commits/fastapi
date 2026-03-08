@@ -465,8 +465,8 @@ export function DataAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">问数管理台</h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <h1 className="app-page-title">问数管理台</h1>
+          <p className="app-page-subtitle mt-1">
             SQL 修正台与结果增强规则管理一体化运维
           </p>
         </div>
