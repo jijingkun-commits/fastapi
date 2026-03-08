@@ -362,7 +362,7 @@ export function AssistantMessage({
     }
     return (
       <div className="group mr-auto flex w-full items-start gap-2" data-testid="tool-result">
-        <div className="flex w-full flex-col gap-2">
+        <div className="chat-content-shell mx-auto flex w-full flex-col gap-2">
           <ToolResult message={message as ToolMessage} />
         </div>
       </div>
@@ -403,7 +403,7 @@ export function AssistantMessage({
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2" data-testid="ai-message">
-      <div className="flex w-full flex-col gap-2">
+      <div className="chat-content-shell mx-auto flex w-full flex-col gap-2">
         {displayContent.length > 0 && (
           <div className="py-1">
             <MarkdownText className="markdown-content-readable">{displayContent}</MarkdownText>
@@ -436,7 +436,7 @@ export function AssistantMessage({
         {contentString.trim().length > 0 && (
           <div
             className={cn(
-              "chat-content-shell mx-auto flex items-center gap-2 transition-opacity",
+              "flex items-center gap-2 transition-opacity",
               "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
             )}
           >

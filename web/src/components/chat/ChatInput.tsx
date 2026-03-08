@@ -206,7 +206,7 @@ export function ChatInput({
                         <div className="relative bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow transition-shadow">
                             {/* 文件预览 - 在输入框内部顶部 */}
                             {contentBlocks.length > 0 && (
-                                <div className="px-4 pt-3 pb-2">
+                                <div className="px-[var(--chat-content-inline-padding)] pt-3 pb-2">
                                     <ContentBlocksPreview blocks={contentBlocks} onRemove={onRemoveBlock} />
                                 </div>
                             )}
@@ -231,7 +231,7 @@ export function ChatInput({
                                     }
                                 }}
                                 placeholder={selectedTodo ? `对「${selectedTodo.title}」说点什么...（补充、修改、完成、删除）` : "Type your message..."}
-                                className="field-sizing-content resize-none border-none bg-transparent w-full px-4 py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
+                                className="field-sizing-content resize-none border-none bg-transparent w-full px-[var(--chat-content-inline-padding)] py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
                                 style={{ fieldSizing: 'content' } as any}
                                 data-testid="chat-input"
                                 data-streaming={isLoading ? "true" : "false"}

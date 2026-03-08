@@ -7,8 +7,8 @@
  * - 大数字格式化（亿/万单位）
  * - 空结果提示
  */
-import { useState } from "react";
 import { ChevronDown, ChevronUp, Database } from "lucide-react";
+import { useState } from "react";
 
 interface SqlResultTableProps {
   columns: string[];
@@ -57,7 +57,7 @@ export function SqlResultTable({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 overflow-hidden">
+    <div className="mx-auto w-fit max-w-full rounded-lg border border-gray-200 overflow-hidden bg-white">
       {permissionScopeApplied && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
           注：{resolvedScopeHint}。
@@ -65,8 +65,8 @@ export function SqlResultTable({
       )}
 
       {/* 表格 */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto">
+        <table className="w-max text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {columns.map((col, idx) => (

@@ -100,7 +100,8 @@
   --font-body: var(--font-sans-cjk);
   --chat-stream-max-width: 72rem;
   --chat-content-max-width: 56rem;
-  --chat-reading-max-width: var(--chat-content-max-width);
+  --chat-content-inline-padding: 1rem;
+  --chat-reading-max-width: calc(var(--chat-content-max-width) - (var(--chat-content-inline-padding) * 2));
   --chat-reading-font-size: 1rem;
   --chat-reading-line-height: 1.88;
   --chat-reading-letter-spacing: -0.01em;
