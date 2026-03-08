@@ -19,6 +19,7 @@
 5. **文档变更门禁**：涉及架构/API/表结构/配置变更/功能变动时，先更新文档再改代码；同步细则统一引用 `.cursor/rules/doc_sync.mdc` 与 `.cursor/rules/core.mdc` 第 8 条。
 6. **证据化交付**：未给出瘦身证据（删除清单、重复收敛、复杂度变化、验证结果）不得宣称 `lean/refactor` 完成。
 7. **去重约束**：Layer1 只保留治理口径与交付门禁，不复述 Layer2 技术细则；同主题仅保留“门禁 + 引用”。
+8. **语义判定边界门禁**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract，技术细则统一引用 `.cursor/rules/core.mdc` 第 15 条。
 
 ## `patch` 模式附加门槛（强制）
 - 必须包含：影响范围、临时性说明、回退路径、后续治理任务。
