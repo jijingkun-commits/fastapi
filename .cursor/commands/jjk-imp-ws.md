@@ -28,8 +28,8 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 必须输入并可解析：
 
 1. 单个 `WS-*.md` 文档。
-2. 同目录 `parallel_plan.md`。
-3. 同目录 `vk_cards.json`。
+2. 同目录 `parallel_plan.md`（可选；自动生成总览）。
+3. 同目录 `vk_cards.json`（唯一机器真理源）。
 4. 同主题：`docs/内部参考/迭代需求/<topic>_requirements.md`。
 5. 同主题：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`。
 6. 若 WS 引用专项附录：`docs/内部参考/迭代需求/<topic>_<appendix>_implementation_plan.md`。
@@ -144,12 +144,12 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 执行 Gate WS 时，完成门禁命令后必须执行自动回填脚本，禁止手工改数字：
 
 ```bash
-venv/bin/python scripts/backfill_gate_status.py --plan docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md
+venv/bin/python scripts/backfill_gate_status.py --cards docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json
 ```
 
 规则：
 
-1. 脚本自动执行 `pytest/tsc/lint/docs_guard` 并回写 `parallel_plan.md` Gate 区块。
+1. 脚本自动执行 `pytest/tsc/lint/docs_guard` 并先回写 `vk_cards.json.gate_results`，再自动生成 `parallel_plan.md` 总览。
 2. 默认执行基线硬拦截；未通过直接失败。
 3. 任一命令失败返回非零退出码，Gate 判定失败。
 4. 仅应急场景可用 `--skip-baseline-check`，并在 WS 文档记录批准人与原因。

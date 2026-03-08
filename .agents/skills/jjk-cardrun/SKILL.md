@@ -29,7 +29,7 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 必备文件：
 
 1. `docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json`
-2. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`
+2. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览，仅供人工阅读）
 3. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
 4. `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
 5. `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`（首次执行可由调度器自动创建）

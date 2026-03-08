@@ -10,7 +10,7 @@
 
 - 对应 `task_key`:
 - 来源主计划：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`
-- 来源并行计划：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
+- 来源并行计划总览（可选，自动生成）：`docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 
 ## 1. 目标
 

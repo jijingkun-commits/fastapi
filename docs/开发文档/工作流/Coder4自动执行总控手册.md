@@ -1,7 +1,7 @@
 # Coder4自动执行总控手册
 
 > 适用对象：需要让 `jjk_coder4_bot` 自动推进 VK 卡片的人  
-> 更新日期：2026-03-01
+> 更新日期：2026-03-08
 
 ## 1. 这份手册解决什么问题
 
@@ -31,6 +31,66 @@ coder4 每轮执行前会读取并校验以下链路（缺一会阻断）：
 3. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`
 4. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
 5. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+
+### 2.3 `bootstrap_kernel` 是什么
+
+这里的 `bootstrap_kernel` 指的是：
+
+- 主实现：`scripts/coder4/coder4_bootstrap_kernel.py`
+- 兼容入口：`scripts/coder4_bootstrap_kernel.py`（仅做薄转发）
+
+它不是“真正写业务代码的执行器”，而是 **coder4 / cardrun 每轮推进时的核心调度内核**：
+
+1. 读取当前任务作用域与卡片契约；
+2. 判断本轮下一步应该做什么；
+3. 在允许时执行 `seed / activate / dispatch`；
+4. 把本轮证据写回状态文件与任务台账。
+
+### 2.4 `bootstrap_kernel` 的职责边界
+
+| 维度 | 结论 | 说明 |
+|---|---|---|
+| 模块边界 | 它是“轮次级调度内核”，不是业务实现器 | 负责判定与编排，不直接完成业务功能开发 |
+| 依赖方向 | 依赖 `_active_task.json`、`vk_cards.json`、运行态 state / VK 任务，再向下分派给 `wtimp` | 上游给它任务上下文，下游由它发起单卡执行 |
+| 状态归属 | 任务真理源在 `_active_task.json`；卡片契约在 `vk_cards.json`；运行态在 `.state/<task_key>/task-runner-state.json`；长期证据在 `task-ledger.jsonl` | 避免把“任务定义”“运行状态”“执行证据”混在一起 |
+| 错误处理责任 | 它负责 fail-fast | 主仓 dirty、作用域冲突、依赖未满足、缺少 commit 证据、重复触发等都在这里阻断 |
+
+### 2.5 `bootstrap_kernel` 的每轮决策图
+
+```mermaid
+flowchart TD
+    A["_active_task.json / vk_cards.json / 运行态 state"] --> B["build_kernel_context\n构建当前任务上下文"]
+    B --> C{"decide_action\n决定本轮动作"}
+    C -->|仓库脏 / scope冲突 / preflight未过| D["preflight_blocked"]
+    C -->|卡缺失且依赖满足| E["seed"]
+    C -->|卡为todo且依赖满足| F["activate"]
+    C -->|卡为inprogress/inreview| G["dispatch -> wtimp"]
+    C -->|卡为verified| H["awaiting_merge"]
+    C -->|全部done| I["all_done"]
+    E --> J["apply_action"]
+    F --> J
+    G --> J
+    J --> K["记录 attempt / task-ledger / 输出结果"]
+    J --> L["可选：异步 sync VK / auto wake 下一轮"]
+```
+
+### 2.6 动作语义速查
+
+| 动作 | 触发条件 | 实际含义 | 是否会真正落状态 |
+|---|---|---|---|
+| `preflight_blocked` | 主仓 dirty / scope 冲突 / preflight 未通过 | 本轮不允许推进 | 否 |
+| `seed` | 卡还不存在，且依赖满足 | 创建卡并进入 `todo` | `--apply-bootstrap` 时会 |
+| `activate` | 卡是 `todo`，且依赖满足 | 推进到 `inprogress` | `--apply-bootstrap` 时会 |
+| `dispatch` | 卡是 `inprogress` / `inreview` | 分派给 `wtimp` 在隔离 worktree 中执行 | `--apply-bootstrap` 时会 |
+| `blocked_depends` | 上游依赖未完成 | 记录阻断并等待 | 否 |
+| `awaiting_merge` | 卡已 `verified` | 等待 `verify -> merge -> done` 主路径收口 | 否 |
+| `all_done` | 当前卡链全部完成 | 当前任务无下一步 | 否 |
+
+补充约束：
+
+- `dispatch` 只负责把实现工作派给 `wtimp`，**不会**直接把卡标记为 `done`。
+- `verify -> merge -> done` 仍由 `cardrun / wt-flow` 主路径收口，避免出现双重 merge 主路径。
+- `dispatch` 阶段必须回填结构化证据（如 `subagent_id / ws_file / commit_sha / merge_sha`）；缺少 `commit_sha` 必须阻断。
 
 ---
 
@@ -80,18 +140,18 @@ coder4 每一轮按固定顺序执行：
 
 1. 直接读取任务级 `_active_task.json`；缺失或字段不全 -> `BLOCKED_DOC_CONTEXT`。
 2. 读取 `vk_cards.json`，校验 `task_key` 一致性，失败 -> `BLOCKED_DOC_CONTEXT`。
-3. 读取 project 看板任务并分组：
-   - `scoped_tasks`：标题含 `[task_key]`，或 labels 含 `task_key`，或 ID 前缀匹配 `task_key::`
-   - `unscoped_tasks`：其他卡片
-4. 执行作用域门禁：
+3. 构建当前轮的运行态上下文：
+   - `--local-mode`：读取 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`
+   - 非 `--local-mode`：读取 project 看板任务，并按当前 `task_key` 拆分 `scoped_tasks / unscoped_tasks`
+4. 执行作用域门禁与前置门禁：
    - 主仓 clean-main gate：主仓 `git status --porcelain` 非空时直接阻断（`BLOCKED_MAIN_REPO_DIRTY`）。
    - `unscoped` 有活动卡 -> `RECONCILE_ONLY(scope_conflict)`
    - `single_active_card=true` 且 scoped 活动卡 > 1 -> `RECONCILE_ONLY(multi_active_scoped)`
-   - scoped 活动卡 = 0 且 todo > 0 -> `NO_INCREMENT(scope_no_active)`
-   - scoped 活动卡 = 0 且 todo = 0 -> `ALL_DONE`
-5. 仅当 clean-main + 作用域门禁都通过，才允许派单；且每轮只派 1 个最小步骤。
-6. 回读 main 会话最新有效回报，做证据绑定检查。
-7. 写回状态文件与汇报。
+   - preflight 卡未完成 -> `preflight_blocked`
+5. 调度内核按 `card_order` 找到第一张未完成卡，并决定单步动作：`seed / activate / dispatch / blocked_depends / awaiting_merge / all_done`。
+6. 仅当带 `--apply-bootstrap` 且动作为 `seed / activate / dispatch` 时，才会真正落状态或分派执行。
+7. `dispatch` 时会把当前卡映射到对应 `WS-*.md` 和当前会话 worktree，并调用 `wtimp` 执行；若缺少 `commit_sha` 证据，必须阻断。
+8. 本轮结束后写回 `task-runner-state.json`、`task-ledger.jsonl` 与结构化结果；`local-mode` 下可按需异步 `sync_vk` 或 `auto wake` 下一轮。
 
 ---
 

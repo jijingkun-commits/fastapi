@@ -16,7 +16,7 @@ source: local
 2. 单轮只推进一个最小步骤，杜绝伪进度。
 3. DONE 门禁按卡片模式分流：实现卡走 git+测试+门禁，检查/问答卡走评估证据门禁。
 4. 会话过载时先压缩/重置，再继续执行。
-5. 必须按新文档链（requirements -> implementation_plan -> parallel_plan -> WS -> vk_cards）执行，防止信息丢失。
+5. 必须按新文档链（requirements -> implementation_plan -> vk_cards -> WS），`parallel_plan.md` 仅作为由 `vk_cards.json` 自动生成的总览视图，防止信息丢失与双写漂移。
 6. `evidence_entry` 不能只做索引，优先回查到 `output/openclaw源码解析/**` 的原始证据（作为质量增强，不作为硬阻断）。
 
 ## 执行前读取（先读再发指令）

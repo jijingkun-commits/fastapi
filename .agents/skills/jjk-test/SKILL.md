@@ -99,10 +99,10 @@ description: "Use when you need `jjk-test` in this repository. Source intent: �
 
 ### 4) Gate 回填（并行拆解场景）
 
-若存在 `parallel_plan.md` 且本轮属于 Gate 校验，必须执行：
+若存在 `vk_cards.json` 且本轮属于 Gate 校验，必须执行：
 
 ```bash
-venv/bin/python scripts/backfill_gate_status.py --plan "$PARALLEL_PLAN_PATH"
+venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 ```
 
 1. 禁止手工改 Gate 数字。

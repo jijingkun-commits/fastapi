@@ -19,7 +19,7 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 
 1. `task_split_dir` 必须可解析且目录存在：
    - `docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json`
-   - `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`
+   - `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览）
 2. `vk_cards.json` 必须可解析且包含：
    - `task_key`
    - `cards[]`

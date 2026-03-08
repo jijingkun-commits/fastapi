@@ -408,8 +408,6 @@ def run_check(task_split_dir: Path, repo_root: Path) -> dict[str, Any]:
     parallel_plan_path = task_split_dir / "parallel_plan.md"
     if not vk_cards_path.exists():
         raise ContractParseError(f"缺少文件: {vk_cards_path}")
-    if not parallel_plan_path.exists():
-        raise ContractParseError(f"缺少文件: {parallel_plan_path}")
 
     vk_cards = load_json(vk_cards_path)
     source_files = vk_cards.get("source_files") or {}
@@ -422,11 +420,21 @@ def run_check(task_split_dir: Path, repo_root: Path) -> dict[str, Any]:
         raise ContractParseError(f"implementation_plan 不存在: {implementation_path}")
 
     vk_contract = _canonical_contract(_extract_vk_contract(vk_cards, vk_cards_path))
-    parallel_contract = _canonical_contract(_extract_parallel_contract(parallel_plan_path))
+    parallel_contract = None
+    if parallel_plan_path.exists():
+        parallel_contract = _canonical_contract(_extract_parallel_contract(parallel_plan_path))
     impl_contract = _canonical_contract(_extract_impl_contract(implementation_path))
 
     errors: list[str] = []
-    errors.extend(_compare_contracts(expected_name="vk_cards", expected=vk_contract, actual_name="parallel_plan", actual=parallel_contract))
+    if parallel_contract is not None:
+        errors.extend(
+            _compare_contracts(
+                expected_name="vk_cards",
+                expected=vk_contract,
+                actual_name="parallel_plan",
+                actual=parallel_contract,
+            )
+        )
     errors.extend(
         _compare_contracts(
             expected_name="vk_cards",
@@ -436,7 +444,8 @@ def run_check(task_split_dir: Path, repo_root: Path) -> dict[str, Any]:
         )
     )
     errors.extend(_validate_gate_membership(vk_contract, "vk_cards"))
-    errors.extend(_validate_gate_membership(parallel_contract, "parallel_plan"))
+    if parallel_contract is not None:
+        errors.extend(_validate_gate_membership(parallel_contract, "parallel_plan"))
     errors.extend(_validate_gate_membership(impl_contract, "implementation_plan"))
 
     return {
@@ -445,7 +454,7 @@ def run_check(task_split_dir: Path, repo_root: Path) -> dict[str, Any]:
         "task_key": str(vk_cards.get("task_key") or ""),
         "files": {
             "vk_cards": str(vk_cards_path),
-            "parallel_plan": str(parallel_plan_path),
+            "parallel_plan": str(parallel_plan_path) if parallel_plan_path.exists() else None,
             "implementation_plan": str(implementation_path),
         },
         "contracts": {
@@ -471,7 +480,7 @@ def _write_output(path: str, payload: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查 Gate 契约在三份文档中的一致性")
+    parser = argparse.ArgumentParser(description="检查 Gate 契约在 vk_cards / implementation_plan（以及可选 parallel_plan 总览）之间的一致性")
     parser.add_argument("--task-split-dir", required=True, help="任务拆解目录名或绝对路径")
     parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
     parser.add_argument("--output", default="", help="可选输出 JSON 文件路径，'-' 表示打印 JSON")

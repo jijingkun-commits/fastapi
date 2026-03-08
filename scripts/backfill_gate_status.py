@@ -4,7 +4,8 @@
 用途：
 1. 执行 Gate 统一命令（pytest/tsc/lint/docs_guard）；
 2. 解析关键结果；
-3. 自动回填到 parallel_plan.md 的 Gate 状态章节。
+3. 优先回写到 `vk_cards.json.gate_results`；
+4. 同步自动生成 `parallel_plan.md` 人类可读总览。
 """
 
 from __future__ import annotations
@@ -13,10 +14,26 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from render_parallel_plan import (  # noqa: E402
+    dump_json,
+    ensure_parallel_plan_source,
+    load_json,
+    render_parallel_plan,
+    resolve_parallel_plan_path,
+)
 
 
 @dataclass
@@ -164,86 +181,215 @@ def format_docs_guard_status(stats: dict[str, int]) -> str:
     return f"失败（{errors} error, {warnings} warning）"
 
 
-def replace_with_fallback_patterns(
-    text: str,
-    patterns: list[str],
-    replacement: str,
-    append_hint: str,
-) -> str:
-    for pattern in patterns:
-        compiled = re.compile(pattern, re.DOTALL)
-        if compiled.search(text):
-            return compiled.sub(replacement, text, count=1)
-    return text + f"\n\n{append_hint}\n\n{replacement}\n"
+def _resolve_repo_path(raw: str | None, *, project_root: Path) -> Path | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = (project_root / path).resolve()
+    return path.resolve()
 
 
-def update_parallel_plan(
-    plan_path: Path,
-    pytest_status: str,
-    tsc_status: str,
-    lint_status: str,
-    docs_status: str,
-    docs_errors: int,
-    now_label: str,
-) -> None:
-    content = plan_path.read_text(encoding="utf-8")
+def resolve_vk_cards_path(*, project_root: Path, cards_path: str | None = None, plan_path: str | None = None) -> Path:
+    candidate = _resolve_repo_path(cards_path, project_root=project_root)
+    if candidate is not None:
+        return candidate
 
-    section_101 = (
-        f"### 10.1 WS-G1 结果（自动回填：{now_label}）\n\n"
-        f"- `pytest`：{pytest_status}\n"
-        f"- `tsc`：{tsc_status}\n"
-        f"- `lint`：{lint_status}\n"
-        f"- `docs_guard`：{docs_status}\n"
+    plan_candidate = _resolve_repo_path(plan_path, project_root=project_root)
+    if plan_candidate is not None:
+        return (plan_candidate.parent / "vk_cards.json").resolve()
+
+    raise FileNotFoundError("缺少 --cards 或 --plan，无法定位 vk_cards.json")
+
+
+def _command_payload(
+    result: CommandResult,
+    *,
+    status: str,
+    summary: str,
+    warnings: int | None = None,
+    errors: int | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "command": result.command,
+        "exit_code": result.return_code,
+        "passed": result.return_code == 0,
+        "status": status,
+        "summary": summary,
+    }
+    if warnings is not None:
+        payload["warnings"] = warnings
+    if errors is not None:
+        payload["errors"] = errors
+    return payload
+
+
+def build_gate_results_payload(
+    *,
+    vk_cards_payload: dict[str, Any],
+    pytest_result: CommandResult,
+    tsc_result: CommandResult,
+    lint_result: CommandResult,
+    docs_result: CommandResult,
+    docs_report: dict[str, Any],
+    generated_at: str,
+    baseline_branch: str | None,
+    baseline_checked: bool,
+) -> dict[str, Any]:
+    stats = docs_report.get("stats", {}) if isinstance(docs_report, dict) else {}
+    docs_errors = int(stats.get("errors", 0))
+    docs_warnings = int(stats.get("warnings", 0))
+    lint_warnings = parse_lint_warning_count(lint_result.output)
+
+    pytest_status = format_pytest_status(pytest_result)
+    pytest_summary, _ = parse_pytest_summary(pytest_result.output)
+    tsc_status = format_simple_status(tsc_result)
+    lint_status = format_simple_status(lint_result, warning_count=lint_warnings)
+    docs_status = format_docs_guard_status({"errors": docs_errors, "warnings": docs_warnings})
+
+    overall_passed = all(
+        result.return_code == 0 for result in (pytest_result, tsc_result, lint_result, docs_result)
     )
+    conclusion = "Gate 通过，可进入后续收口。" if overall_passed else "Gate 未通过，请修复失败项后重试。"
 
-    content = replace_with_fallback_patterns(
-        content,
-        [
-            r"### 10\.1 WS-G1 结果(?:（[^）]*）)?\n[\s\S]*?(?=\n### 10\.2 WS-G2 预期动作)",
-            r"### 9\.1 WS-G1 结果(?:（[^）]*）)?\n[\s\S]*?(?=\n### 9\.2 WS-G2 预期动作)",
-        ],
-        section_101,
-        "### 10.1 WS-G1 结果",
+    return {
+        "updated_at": generated_at,
+        "generator": "scripts/backfill_gate_status.py",
+        "overall_passed": overall_passed,
+        "gate_ids": list((vk_cards_payload.get("gate_contract") or {}).get("gate_ids") or []),
+        "baseline": {
+            "checked": baseline_checked,
+            "branch": baseline_branch or "",
+            "status": "passed" if baseline_checked else "skipped",
+        },
+        "checks": {
+            "pytest": _command_payload(
+                pytest_result,
+                status=pytest_status,
+                summary=pytest_summary or pytest_status,
+            ),
+            "tsc": _command_payload(
+                tsc_result,
+                status=tsc_status,
+                summary=tsc_status,
+            ),
+            "lint": _command_payload(
+                lint_result,
+                status=lint_status,
+                summary=lint_status,
+                warnings=lint_warnings,
+            ),
+            "docs_guard": _command_payload(
+                docs_result,
+                status=docs_status,
+                summary=docs_status,
+                warnings=docs_warnings,
+                errors=docs_errors,
+            ),
+        },
+        "conclusion": conclusion,
+    }
+
+
+def run_gate_backfill(
+    *,
+    project_root: Path,
+    vk_cards_path: Path,
+    parallel_plan_path: Path | None = None,
+    pytest_cmd: str = "venv/bin/python -m pytest -q --override-ini addopts='' --maxfail=20",
+    tsc_cmd: str = "npx tsc --noEmit",
+    lint_cmd: str = "npm run -s lint",
+    docs_cmd: str = "venv/bin/python scripts/docs_guard.py --strict",
+    baseline_branch: str = "",
+    skip_baseline_check: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    vk_cards_path = vk_cards_path.resolve()
+    if not vk_cards_path.exists():
+        raise FileNotFoundError(f"vk_cards.json 不存在: {vk_cards_path}")
+
+    vk_cards_payload = load_json(vk_cards_path)
+    resolved_parallel_plan_path = parallel_plan_path or resolve_parallel_plan_path(
+        vk_cards_payload,
+        vk_cards_path=vk_cards_path,
+        repo_root=project_root,
     )
+    baseline_used = ""
+    baseline_checked = False
 
-    if docs_errors == 0:
-        gate_conclusion = "业务与文档门禁通过，可关闭本轮 Gate。"
+    if not skip_baseline_check:
+        baseline_used = resolve_baseline_branch(
+            project_root=project_root,
+            preferred_branch=baseline_branch.strip() or None,
+        )
+        ensure_head_contains_baseline(project_root=project_root, baseline_branch=baseline_used)
+        baseline_checked = True
     else:
-        gate_conclusion = "业务门禁可通过但文档门禁未通过，请先修复文档后重跑 Gate。"
+        print("警告：已跳过 Gate 基线硬拦截（--skip-baseline-check）")
 
-    section_11 = (
-        f"## 11. Gate 收口结果（自动回填：{now_label}）\n\n"
-        "1. `WS-G1` 已执行：\n"
-        f"   - `pytest` {pytest_status}\n"
-        f"   - `tsc` {tsc_status}\n"
-        f"   - `lint` {lint_status}\n"
-        f"   - `docs_guard` {docs_status}\n"
-        "2. `WS-G2` 已执行：\n"
-        f"   - `docs_guard --strict` {docs_status}\n"
-        "3. Gate 结论：\n"
-        f"   - {gate_conclusion}\n"
+    pytest_result = run_command(pytest_cmd, cwd=project_root)
+    tsc_result = run_command(tsc_cmd, cwd=project_root / "web")
+    lint_result = run_command(lint_cmd, cwd=project_root / "web")
+
+    with tempfile.NamedTemporaryFile(prefix="docs_guard_", suffix=".json", delete=False) as temp_file:
+        docs_json_path = Path(temp_file.name)
+
+    docs_command = f"{docs_cmd} --json-out {docs_json_path}"
+    docs_result = run_command(docs_command, cwd=project_root)
+
+    docs_report: dict[str, Any] = {}
+    if docs_json_path.exists():
+        docs_report = json.loads(docs_json_path.read_text(encoding="utf-8"))
+        docs_json_path.unlink(missing_ok=True)
+
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    gate_results = build_gate_results_payload(
+        vk_cards_payload=vk_cards_payload,
+        pytest_result=pytest_result,
+        tsc_result=tsc_result,
+        lint_result=lint_result,
+        docs_result=docs_result,
+        docs_report=docs_report,
+        generated_at=generated_at,
+        baseline_branch=baseline_used,
+        baseline_checked=baseline_checked,
     )
 
-    content = replace_with_fallback_patterns(
-        content,
-        [
-            r"## 11\. Gate 收口结果(?:（[^）]*）)?\n[\s\S]*$",
-            r"## 10\. Gate 收口结果(?:（[^）]*）)?\n[\s\S]*$",
-        ],
-        section_11,
-        "## 11. Gate 收口结果",
-    )
+    print("Gate 结果摘要:")
+    for check_name in ("pytest", "tsc", "lint", "docs_guard"):
+        print(f"- {check_name}: {gate_results['checks'][check_name]['status']}")
 
-    plan_path.write_text(content, encoding="utf-8")
+    if dry_run:
+        return {
+            "overall_passed": gate_results["overall_passed"],
+            "gate_results": gate_results,
+            "parallel_plan_path": str(resolved_parallel_plan_path),
+        }
+
+    vk_cards_payload["gate_results"] = gate_results
+    ensure_parallel_plan_source(
+        vk_cards_payload,
+        parallel_plan_path=resolved_parallel_plan_path,
+        repo_root=project_root,
+    )
+    dump_json(vk_cards_path, vk_cards_payload)
+
+    rendered_content = render_parallel_plan(vk_cards_payload, generated_at=generated_at)
+    resolved_parallel_plan_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_parallel_plan_path.write_text(rendered_content, encoding="utf-8")
+
+    return {
+        "overall_passed": gate_results["overall_passed"],
+        "gate_results": gate_results,
+        "parallel_plan_path": str(resolved_parallel_plan_path),
+    }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="执行 Gate 命令并自动回填 parallel_plan.md")
-    parser.add_argument(
-        "--plan",
-        required=True,
-        help="parallel_plan.md 路径",
-    )
+    parser = argparse.ArgumentParser(description="执行 Gate 命令并回写 vk_cards.json，同时自动生成 parallel_plan.md")
+    parser.add_argument("--cards", default="", help="vk_cards.json 路径（推荐）")
+    parser.add_argument("--plan", default="", help="parallel_plan.md 路径（兼容旧参数，可推导 vk_cards.json）")
     parser.add_argument(
         "--pytest-cmd",
         default="venv/bin/python -m pytest -q --override-ini addopts='' --maxfail=20",
@@ -277,80 +423,31 @@ def main() -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="仅打印结果，不回写文件",
+        help="仅打印结果，不回写 vk_cards.json / parallel_plan.md",
     )
 
     args = parser.parse_args()
+    project_root = Path.cwd().resolve()
+    vk_cards_path = resolve_vk_cards_path(project_root=project_root, cards_path=args.cards, plan_path=args.plan)
+    plan_override = _resolve_repo_path(args.plan, project_root=project_root) if args.plan else None
 
-    plan_path = Path(args.plan)
-    if not plan_path.exists():
-        raise FileNotFoundError(f"parallel_plan.md 不存在: {plan_path}")
-
-    project_root = Path.cwd()
-
-    if not args.skip_baseline_check:
-        baseline_branch = resolve_baseline_branch(
-            project_root=project_root,
-            preferred_branch=args.baseline_branch.strip() or None,
-        )
-        ensure_head_contains_baseline(project_root=project_root, baseline_branch=baseline_branch)
-    else:
-        print("警告：已跳过 Gate 基线硬拦截（--skip-baseline-check）")
-
-    pytest_result = run_command(args.pytest_cmd, cwd=project_root)
-    tsc_result = run_command(args.tsc_cmd, cwd=project_root / "web")
-    lint_result = run_command(args.lint_cmd, cwd=project_root / "web")
-
-    with tempfile.NamedTemporaryFile(prefix="docs_guard_", suffix=".json", delete=False) as temp_file:
-        docs_json_path = Path(temp_file.name)
-
-    docs_command = f"{args.docs_cmd} --json-out {docs_json_path}"
-    docs_result = run_command(docs_command, cwd=project_root)
-
-    docs_report = {}
-    if docs_json_path.exists():
-        docs_report = json.loads(docs_json_path.read_text(encoding="utf-8"))
-        docs_json_path.unlink(missing_ok=True)
-
-    stats = docs_report.get("stats", {})
-    docs_errors = int(stats.get("errors", 0))
-
-    pytest_status = format_pytest_status(pytest_result)
-    tsc_status = format_simple_status(tsc_result)
-    lint_status = format_simple_status(
-        lint_result,
-        warning_count=parse_lint_warning_count(lint_result.output),
+    payload = run_gate_backfill(
+        project_root=project_root,
+        vk_cards_path=vk_cards_path,
+        parallel_plan_path=plan_override,
+        pytest_cmd=args.pytest_cmd,
+        tsc_cmd=args.tsc_cmd,
+        lint_cmd=args.lint_cmd,
+        docs_cmd=args.docs_cmd,
+        baseline_branch=args.baseline_branch,
+        skip_baseline_check=args.skip_baseline_check,
+        dry_run=args.dry_run,
     )
-    docs_status = format_docs_guard_status(
-        {
-            "errors": docs_errors,
-            "warnings": int(stats.get("warnings", 0)),
-        }
-    )
-
-    now_label = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    print("Gate 结果摘要:")
-    print(f"- pytest: {pytest_status}")
-    print(f"- tsc: {tsc_status}")
-    print(f"- lint: {lint_status}")
-    print(f"- docs_guard: {docs_status}")
 
     if args.dry_run:
-        print("dry-run 模式：未回写 parallel_plan.md")
-        return
+        print("dry-run 模式：未回写 vk_cards.json / parallel_plan.md")
 
-    update_parallel_plan(
-        plan_path=plan_path,
-        pytest_status=pytest_status,
-        tsc_status=tsc_status,
-        lint_status=lint_status,
-        docs_status=docs_status,
-        docs_errors=docs_errors,
-        now_label=now_label,
-    )
-
-    if any(result.return_code != 0 for result in [pytest_result, tsc_result, lint_result, docs_result]):
+    if not payload["overall_passed"]:
         raise SystemExit(1)
 
 

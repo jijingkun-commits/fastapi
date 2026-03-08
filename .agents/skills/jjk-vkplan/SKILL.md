@@ -74,14 +74,14 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 
 必须生成：
 
-1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
+1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`（自动生成的人类可读总览，非机器真理源）
 2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
 3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
 
 最小字段要求：
 
 1. 卡片必须含 `card_id/feature_ids/task_ids/acceptance_checks/pr_id/pr_branch`；
-2. `parallel_plan.md` 与 `vk_cards.json` 必须显式写入 `execution_contract`；
+2. `vk_cards.json` 必须显式写入 `execution_contract`；`parallel_plan.md` 若生成，内容必须由 `vk_cards.json` 派生；
 3. 若存在 `gate_contract.mode=as_cards`，Gate 必须实体化为卡片。
 
 ### 3) 全量消费覆盖校验（必做）
@@ -121,6 +121,8 @@ python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
 7. `VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN`
 
 ### 4) 真理源写入与回读（必做）
+
+拆卡后的唯一机器真理源为 `vk_cards.json`；`parallel_plan.md` 仅用于展示与兼容引用，不得再作为独立状态来源。
 
 ```bash
 python3 scripts/set_active_task.py \
