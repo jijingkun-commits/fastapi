@@ -86,7 +86,8 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
             commit_sha="abc123",
             merge_sha=None,
             changed_files=[],
-            acceptance_results=[],
+            acceptance_results=[{"kind": "unit", "cmd": "pytest -q", "exit_code": 0, "summary": "1 passed"}],
+            evidence_satisfied=True,
             worktree_path=str((tmp_path / "wt-C01").resolve()),
         ),
     )
@@ -105,4 +106,6 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
     assert payload["merge_owner"] == "wt_flow"
     assert payload["executor_dispatch_mode"] == "cardrun_dispatch"
     assert payload["merge_sha"] is None
+    assert payload["acceptance_results"][0]["kind"] == "unit"
+    assert payload["evidence_satisfied"] is True
     assert "vk_sync" not in payload

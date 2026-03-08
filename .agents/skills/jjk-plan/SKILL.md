@@ -125,11 +125,32 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 11. `depends_on_tasks`
 12. `owner`
 13. `risk_point`
+14. `risk_tags`
+15. `mandatory_evidence`
+
+`acceptance_cmds[*]` 必填子字段（证据门禁）：
+
+1. `kind`
+2. `cmd`
 
 补齐规则（v3 适配）：
 
 1. 若上游是轻量 `implementation_seeds`，本步骤必须补齐 `feature_id/acceptance_cmds/rollback_point/pr_id/phase/depends_on_tasks`。
 2. 补齐前禁止标记 `implementation_ready=true`。
+
+数据库证据契约（强制左移）：
+
+1. 命中数据库风险任务时，必须声明 `risk_tags`（至少覆盖 `chat_db` 或 `data_db`）。
+2. 命中数据库风险任务时，必须声明 `mandatory_evidence`，且包含对应 DB 类证据（示例：`chat_db_write_read`、`data_db_route_sql_result`）。
+3. `acceptance_cmds` 不得只写裸字符串；必须使用对象结构并带 `kind/cmd`。
+4. `acceptance_cmds[*].kind` 必须可被下游消费（示例：`unit/api/chat_db/data_db/scripted_flow/e2e`）。
+5. `risk_tags` 命中 `scripted_flow` 时，`mandatory_evidence` 必须包含 `scripted_flow`。
+
+失败码（新增）：
+
+1. `PLAN_RISK_TAGS_MISSING`
+2. `PLAN_DB_EVIDENCE_MISSING`
+3. `PLAN_EVIDENCE_KIND_INVALID`
 
 时间窗门禁约束：
 

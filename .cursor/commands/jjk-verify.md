@@ -37,6 +37,7 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 2. 若映射与计划不一致（`task_to_pr_mapping`），`FAIL_FAST` 输出 `VERIFY_MAPPING_MISMATCH`。
 3. 若无可复核的测试/命令证据，`FAIL_FAST` 输出 `VERIFY_EVIDENCE_MISSING`。
 4. 若审查结论已 `BLOCKED` 且未修复，`FAIL_FAST` 输出 `VERIFY_BLOCKER_UNRESOLVED`。
+5. DB 风险任务若无法对齐 `mandatory_evidence`，必须 `FAIL_FAST`。
 
 ## 执行硬约束（强制）
 
@@ -45,6 +46,8 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 3. 仅在自动证据不足时进入交互 UAT，问题数限制 1~3 条。
 4. 任一关键命令失败，必须在报告记录：`命令原文 + 退出码 + 错误摘要 + 处理建议`。
 5. 必须区分“本轮问题”与“历史问题”。
+6. `PASS` 必须满足 `mandatory_evidence` 全量命中。
+7. DB 风险任务缺少 DB 类证据不得降级为 `WARN`。
 
 ---
 
@@ -95,6 +98,7 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 1. 解析变更范围（优先 `main/master...HEAD`，失败时降级为工作区 + 最近提交）。
 2. 按变更类型选择最小必要验证集（后端/API/前端/AI/数据库）。
 3. 生成验证计划（命令清单 + 断言点）。
+4. 读取 `mandatory_evidence` 并构建“必需证据对账表”。
 
 ### 2) 快速审查复核
 
@@ -118,9 +122,9 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 
 结论规则：
 
-1. `PASS`：审查无阻断 + 关键测试通过 + UAT 通过。
-2. `WARN`：存在非阻断问题，但核心链路通过。
-3. `FAIL`：阻断问题未解或关键测试/UAT 失败。
+1. `PASS`：审查无阻断 + 关键测试通过 + `mandatory_evidence` 全量满足。
+2. `WARN`：仅允许出现在非 mandatory 证据缺口，且核心链路通过。
+3. `FAIL`：阻断问题未解、关键测试/UAT 失败或 mandatory 证据缺失。
 
 必须输出：
 
@@ -133,6 +137,13 @@ description: 验收入口（消费 review/pr/manifest 证据）：审查+测试+
 7. 下一步建议命令（`合并/发布`、`/jjk-debug`、`/jjk-imp(-ws)`）
 
 ---
+
+
+## 失败码补充（mandatory evidence）
+
+1. `VERIFY_MANDATORY_EVIDENCE_MISSING`
+2. `VERIFY_CHAT_DB_UNPROVEN`
+3. `VERIFY_DATA_DB_UNPROVEN`
 
 ## 输出模板（推荐）
 

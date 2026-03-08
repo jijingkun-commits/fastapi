@@ -45,6 +45,11 @@ def test_record_attempt_evidence_writes_canonical_execution_evidence(tmp_path):
             "ws_file": "workstreams/WS-01.md",
             "commit_sha": "abc123",
             "merge_sha": "def456",
+            "changed_files": ["scripts/coder4/wt-flow.sh"],
+            "acceptance_results": [
+                {"kind": "chat_db", "cmd": "pytest -q", "exit_code": 0, "summary": "1 passed"}
+            ],
+            "evidence_satisfied": True,
         },
     )
 
@@ -61,12 +66,17 @@ def test_record_attempt_evidence_writes_canonical_execution_evidence(tmp_path):
     assert canonical["merge_sha"] == "def456"
     assert canonical["subagent_id"] == "agent-1"
     assert canonical["ws_file"] == "workstreams/WS-01.md"
+    assert canonical["changed_files"] == ["scripts/coder4/wt-flow.sh"]
+    assert canonical["acceptance_results"][0]["kind"] == "chat_db"
+    assert canonical["evidence_satisfied"] is True
 
     ledger_entry = json.loads(ledger_file.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert ledger_entry["commit_sha"] == "abc123"
     assert ledger_entry["merge_sha"] == "def456"
     assert ledger_entry["execution_evidence"]["executor_mode"] == "wtimp"
     assert ledger_entry["execution_evidence"]["commit_sha"] == "abc123"
+    assert ledger_entry["acceptance_results"][0]["kind"] == "chat_db"
+    assert ledger_entry["evidence_satisfied"] is True
 
 
 def test_record_attempt_evidence_explicit_args_override_legacy_applied_fields(tmp_path):
@@ -89,6 +99,9 @@ def test_record_attempt_evidence_explicit_args_override_legacy_applied_fields(tm
         subagent_id="agent-new",
         ws_file="workstreams/WS-02.md",
         executor_mode="wtimp",
+        changed_files=["scripts/coder4/coder4_bootstrap_kernel.py"],
+        acceptance_results=[{"kind": "data_db", "cmd": "pytest -q", "exit_code": 0, "summary": "2 passed"}],
+        evidence_satisfied=True,
         applied={
             "performed": True,
             "commit_sha": "old-commit",
@@ -96,6 +109,9 @@ def test_record_attempt_evidence_explicit_args_override_legacy_applied_fields(tm
             "subagent_id": "agent-old",
             "ws_file": "workstreams/WS-old.md",
             "executor_mode": "legacy",
+            "changed_files": ["legacy.txt"],
+            "acceptance_results": [{"kind": "unit", "cmd": "old", "exit_code": 1, "summary": "old"}],
+            "evidence_satisfied": False,
         },
     )
 
@@ -106,3 +122,6 @@ def test_record_attempt_evidence_explicit_args_override_legacy_applied_fields(tm
     assert attempt["ws_file"] == "workstreams/WS-02.md"
     assert attempt["execution_evidence"]["executor_mode"] == "wtimp"
     assert attempt["execution_evidence"]["commit_sha"] == "new-commit"
+    assert attempt["execution_evidence"]["changed_files"] == ["scripts/coder4/coder4_bootstrap_kernel.py"]
+    assert attempt["execution_evidence"]["acceptance_results"][0]["kind"] == "data_db"
+    assert attempt["execution_evidence"]["evidence_satisfied"] is True

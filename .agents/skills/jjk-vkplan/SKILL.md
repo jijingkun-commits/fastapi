@@ -24,7 +24,7 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 3. `implementation_plan.planning_contract`
 4. `implementation_plan.execution_contract`
 5. `implementation_plan.task_to_pr_mapping`
-6. `implementation_plan.implementation_tasks`（含 `task_id/feature_id/pr_id/acceptance_cmds`）
+6. `implementation_plan.implementation_tasks`（含 `task_id/feature_id/pr_id/risk_tags/mandatory_evidence/acceptance_cmds[*].kind`）
 
 自动执行场景还必须具备 `project_id`（显式参数优先；仅可从同任务目录 `_active_task.json` 推断，不再依赖根索引）。
 
@@ -69,6 +69,8 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 3. `execution_mode=serial` 必须保持单活卡推进语义；
 4. 每张实现卡必须可映射唯一 `pr_id`。
 5. 禁止把依赖自然时间流逝、观察窗口成熟、TTL 到期的条件生成到 `cards[].done_gate` 或 `cards[].acceptance_checks`。
+6. `risk_tags/mandatory_evidence` 只允许继承或细化，禁止删除或弱化。
+7. DB 链路拆成多卡时，必须声明 `cross_card_closure.required=true` 与 `closure_owner`。
 
 ### 2) 生成拆解产物
 
@@ -80,9 +82,10 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 
 最小字段要求：
 
-1. 卡片必须含 `card_id/feature_ids/task_ids/acceptance_checks/pr_id/pr_branch`；
+1. 卡片必须含 `card_id/feature_ids/task_ids/acceptance_checks/pr_id/pr_branch/risk_tags/mandatory_evidence`；
 2. `vk_cards.json` 必须显式写入 `execution_contract`；`parallel_plan.md` 若生成，内容必须由 `vk_cards.json` 派生；
 3. 若存在 `gate_contract.mode=as_cards`，Gate 必须实体化为卡片。
+4. DB 风险链路卡必须补充 `cross_card_closure`（未拆链时可 `required=false`）。
 
 ### 3) 全量消费覆盖校验（必做）
 
@@ -109,6 +112,8 @@ python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
 7. `empty_task_ids=[]`
 8. `clarify_plan_alignment.ok=true`
 9. 无 `VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN`
+10. `evidence_mapping_missing=[]`
+11. DB 拆链卡片满足 `cross_card_closure`
 
 失败码：
 
@@ -119,6 +124,16 @@ python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
 5. `CLARIFY_PLAN_ALIGNMENT_FAILED`
 6. `PLAN_IMPLEMENTATION_DETAIL_INSUFFICIENT`
 7. `VKPLAN_TEMPORAL_BLOCKER_FORBIDDEN`
+8. `VKPLAN_EVIDENCE_MAPPING_BROKEN`
+9. `VKPLAN_DB_CHAIN_SPLIT_UNCLOSED`
+
+
+### 3.5) 数据库证据继承门禁（强制）
+
+1. `vk_cards.json.cards[*]` 必须继承任务级 `risk_tags` 与 `mandatory_evidence`，不得仅保留 `acceptance_checks`。
+2. 卡片的 `mandatory_evidence` 必须与 `task_ids` 对应任务并集一致；不一致时输出 `VKPLAN_EVIDENCE_MAPPING_BROKEN`。
+3. 若 `risk_tags` 命中 `chat_db` 或 `data_db` 且链路拆分到多卡，必须显式声明 `cross_card_closure` 并指定闭环卡。
+4. 未声明闭环卡时必须 `FAIL_FAST`：`VKPLAN_DB_CHAIN_SPLIT_UNCLOSED`。
 
 ### 4) 真理源写入与回读（必做）
 

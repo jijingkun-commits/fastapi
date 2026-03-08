@@ -93,3 +93,128 @@ def test_temporal_gate_contract_detects_window_blockers(tmp_path):
 
     assert payload["ok"] is False
     assert any(item["code"] == "TEMPORAL_GATE_BLOCKER_DETECTED" for item in payload["errors"])
+
+
+def test_plan_db_evidence_contract_detects_missing_db_evidence(tmp_path):
+    module = _load_module()
+    implementation_path = tmp_path / "demo_implementation_plan.md"
+    implementation_path.write_text(
+        """
+```yaml
+implementation_tasks:
+  - task_id: T-01
+    risk_tags:
+      - chat_db
+    mandatory_evidence:
+      - unit
+    acceptance_cmds:
+      - kind: unit
+        cmd: bash scripts/pytest_targeted.sh tests/unit/test_dummy.py -q
+implementation_readiness:
+  implementation_ready: true
+```
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = module._validate_plan_db_evidence_contract(implementation_path)
+
+    assert payload["ok"] is False
+    assert any(item["code"] == "PLAN_DB_EVIDENCE_MISSING" for item in payload["errors"])
+
+
+def test_plan_db_evidence_contract_detects_invalid_acceptance_kind(tmp_path):
+    module = _load_module()
+    implementation_path = tmp_path / "demo_kind_implementation_plan.md"
+    implementation_path.write_text(
+        """
+```yaml
+implementation_tasks:
+  - task_id: T-02
+    risk_tags:
+      - data_db
+    mandatory_evidence:
+      - data_db_route_sql_result
+    acceptance_cmds:
+      - cmd: bash scripts/pytest_targeted.sh tests/unit/test_dummy.py -q
+implementation_readiness:
+  implementation_ready: true
+```
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = module._validate_plan_db_evidence_contract(implementation_path)
+
+    assert payload["ok"] is False
+    assert any(item["code"] == "PLAN_EVIDENCE_KIND_INVALID" for item in payload["errors"])
+
+
+def test_vkplan_db_evidence_contract_detects_mapping_gap_and_split_unclosed(tmp_path):
+    module = _load_module()
+    repo_root = tmp_path / "repo"
+    implementation_path = repo_root / "docs" / "内部参考" / "迭代需求" / "demo_implementation_plan.md"
+    task_split_dir = repo_root / "docs" / "内部参考" / "任务拆解" / "2026-03-08_demo"
+    implementation_path.parent.mkdir(parents=True, exist_ok=True)
+    task_split_dir.mkdir(parents=True, exist_ok=True)
+
+    implementation_path.write_text(
+        """
+```yaml
+implementation_tasks:
+  - task_id: T-03
+    risk_tags:
+      - chat_db
+    mandatory_evidence:
+      - chat_db_write_read
+    acceptance_cmds:
+      - kind: chat_db
+        cmd: bash scripts/pytest_targeted.sh tests/unit/test_dummy.py -q
+implementation_readiness:
+  implementation_ready: true
+```
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    (task_split_dir / "vk_cards.json").write_text(
+        json.dumps(
+            {
+                "execution_mode": "serial",
+                "card_order": ["C01", "C02"],
+                "cards": [
+                    {
+                        "card_id": "C01",
+                        "task_ids": ["T-03"],
+                        "risk_tags": [],
+                        "mandatory_evidence": [],
+                        "cross_card_closure": {"required": False, "closure_owner": None},
+                    },
+                    {
+                        "card_id": "C02",
+                        "task_ids": ["T-03"],
+                        "risk_tags": [],
+                        "mandatory_evidence": [],
+                        "cross_card_closure": {"required": False, "closure_owner": None},
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = module._validate_vkplan_db_evidence_contract(
+        repo_root=repo_root,
+        task_split_dir=task_split_dir,
+        implementation_path=implementation_path,
+    )
+
+    assert payload["ok"] is False
+    assert any(item["code"] == "VKPLAN_EVIDENCE_MAPPING_BROKEN" for item in payload["errors"])
+    assert any(item["code"] == "VKPLAN_DB_CHAIN_SPLIT_UNCLOSED" for item in payload["errors"])

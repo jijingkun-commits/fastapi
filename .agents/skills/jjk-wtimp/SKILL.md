@@ -88,8 +88,9 @@ git worktree list
 1. 默认模式：`executor_mode=standalone`，执行完整闭环（`create -> implement -> verify -> merge`）。
 2. 被 `$jjk-cardrun` 调用时必须使用：`executor_mode=cardrun_dispatch`。
 3. `cardrun_dispatch` 下仅执行“实现 + 提交 + 证据回传”，不得重复执行 `create` 与 `merge`。
-4. `cardrun_dispatch` 必须最终只输出一段结构化 JSON，至少包含 `executor/executor_mode/card_id/ws_file/subagent_id/commit_sha/merge_sha/changed_files/acceptance_results`。
-5. `cardrun_dispatch` 缺少 `commit_sha` 时必须输出 `WTIMP_EVIDENCE_MISSING`。
+4. `cardrun_dispatch` 必须最终只输出一段结构化 JSON，至少包含 `executor/executor_mode/card_id/ws_file/subagent_id/commit_sha/merge_sha/changed_files/acceptance_results/evidence_satisfied`。
+5. `acceptance_results[*]` 必须是 typed 结果对象，至少包含 `kind/cmd/exit_code/summary`。
+6. `cardrun_dispatch` 缺少 `commit_sha` 时必须输出 `WTIMP_EVIDENCE_MISSING`。
 
 ### 1) 创建隔离 worktree
 
@@ -113,8 +114,9 @@ git worktree list
 ### 4) 文档同步与验证
 
 1. 命中 API/数据库/配置/架构变更时，先完成文档同步再进入合并阶段。
-2. 执行 `acceptance_cmds` 与最小必要回归测试。
-3. 任一关键验证失败，`FAIL_FAST` 输出 `WTIMP_VERIFY_FAILED`。
+2. 执行 `acceptance_cmds` 与最小必要回归测试，并将结果按 `kind` 回填到 `acceptance_results`。
+3. DB 风险最低证据标准：`chat_db` 至少写读断言；`data_db` 至少路由/SQL/结果断言。
+4. 任一关键验证失败，`FAIL_FAST` 输出 `WTIMP_VERIFY_FAILED`。
 
 ### 5) 提交、合并与清理
 
@@ -138,6 +140,13 @@ git worktree list
 5. 下一步命令建议（`$jjk-review`、`$jjk-verify`）
 
 ---
+
+
+## 失败码补充（DB 证据门禁）
+
+1. `WTIMP_DB_ASSERTION_MISSING`
+2. `WTIMP_ANALYTICS_ROUTE_UNVERIFIED`
+3. `WTIMP_ACCEPTANCE_KIND_MISMATCH`
 
 ## 输出模板（推荐）
 

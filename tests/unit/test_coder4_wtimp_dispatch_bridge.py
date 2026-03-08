@@ -103,7 +103,7 @@ def test_run_dispatch_parses_json_result_and_requires_commit_sha(monkeypatch):
         executor_mode="cardrun_dispatch",
     )
 
-    stdout = """some log\n{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "abc123def456", "merge_sha": null, "changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [{"cmd": "pytest -q tests/unit/test_dummy.py", "exit_code": 0, "summary": "1 passed"}]}\n"""
+    stdout = """some log\n{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "abc123def456", "merge_sha": null, "changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [{"kind": "chat_db", "cmd": "pytest -q tests/unit/test_dummy.py", "exit_code": 0, "summary": "1 passed"}], "evidence_satisfied": true}\n"""
 
     process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
     _patch_popen(monkeypatch, module, process)
@@ -119,7 +119,9 @@ def test_run_dispatch_parses_json_result_and_requires_commit_sha(monkeypatch):
     assert result.commit_sha == "abc123def456"
     assert result.merge_sha is None
     assert result.changed_files == ["scripts/coder4/coder4_bootstrap_kernel.py"]
+    assert result.acceptance_results[0]["kind"] == "chat_db"
     assert result.acceptance_results[0]["exit_code"] == 0
+    assert result.evidence_satisfied is True
 
 
 def test_run_dispatch_fails_when_commit_sha_missing(monkeypatch):
@@ -132,7 +134,7 @@ def test_run_dispatch_fails_when_commit_sha_missing(monkeypatch):
         executor_mode="cardrun_dispatch",
     )
 
-    stdout = '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "", "merge_sha": null, "changed_files": [], "acceptance_results": []}'
+    stdout = '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "", "merge_sha": null, "changed_files": [], "acceptance_results": [], "evidence_satisfied": true}'
 
     process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
     _patch_popen(monkeypatch, module, process)
@@ -269,13 +271,67 @@ def test_run_dispatch_rejects_multiple_contract_payloads(monkeypatch):
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
         '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
-        '"changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": []}'
+        '"changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [], "evidence_satisfied": true}'
         '\nnoise\n'
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
         '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-2", "commit_sha": "def456", "merge_sha": null, '
-        '"changed_files": ["scripts/coder4/wtimp_dispatch_bridge.py"], "acceptance_results": []}'
+        '"changed_files": ["scripts/coder4/wtimp_dispatch_bridge.py"], "acceptance_results": [], "evidence_satisfied": true}'
     )
+    process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
+    _patch_popen(monkeypatch, module, process)
+
+    with pytest.raises(module.WtimpDispatchError) as exc_info:
+        module.run_dispatch(request)
+
+    assert exc_info.value.code == "CARDRUN_EXECUTION_RESULT_INVALID"
+
+
+
+def test_run_dispatch_rejects_missing_evidence_satisfied(monkeypatch):
+    module = _load_module()
+    request = module.WtimpDispatchRequest(
+        task_key="PP-20260306-CARDRUN-WTIMP",
+        card_id="C02",
+        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        worktree_path="/tmp/worktree-c02",
+        executor_mode="cardrun_dispatch",
+    )
+
+    stdout = (
+        '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
+        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
+        '"changed_files": [], "acceptance_results": []}'
+    )
+
+    process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
+    _patch_popen(monkeypatch, module, process)
+
+    with pytest.raises(module.WtimpDispatchError) as exc_info:
+        module.run_dispatch(request)
+
+    assert exc_info.value.code == "CARDRUN_EXECUTION_RESULT_INVALID"
+
+
+def test_run_dispatch_rejects_untyped_acceptance_results(monkeypatch):
+    module = _load_module()
+    request = module.WtimpDispatchRequest(
+        task_key="PP-20260306-CARDRUN-WTIMP",
+        card_id="C02",
+        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        worktree_path="/tmp/worktree-c02",
+        executor_mode="cardrun_dispatch",
+    )
+
+    stdout = (
+        '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
+        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
+        '"changed_files": [], "acceptance_results": [{"cmd": "pytest -q", "exit_code": 0, "summary": "ok"}], '
+        '"evidence_satisfied": true}'
+    )
+
     process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
     _patch_popen(monkeypatch, module, process)
 

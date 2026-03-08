@@ -40,6 +40,7 @@ description: "Use when you need `jjk-test` in this repository. Source intent: �
 2. 若测试范围无法映射到本次变更，`FAIL_FAST` 输出 `TEST_SCOPE_UNCLEAR`。
 3. 若在线测试前置门禁失败（端口/健康检查），`FAIL_FAST` 输出 `TEST_ONLINE_GATE_FAILED`。
 4. 若执行结束仍未产出报告，`FAIL_FAST` 输出 `TEST_REPORT_MISSING`。
+5. DB 风险任务缺少 DB 证据闭环时，`FAIL_FAST` 输出 `TEST_DB_CHAIN_INCOMPLETE`。
 
 ## 执行流程（强制顺序）
 
@@ -84,6 +85,7 @@ description: "Use when you need `jjk-test` in this repository. Source intent: �
 1. 按 `feature_id` 生成最小可追溯测试矩阵。
 2. 必测覆盖：Happy Path / Edge Cases / Error Handling。
 3. 高风险链路补充稳定性/超时/重试场景。
+4. 矩阵必须显式列出：`Required Evidence`、`Actual Evidence`、`Scripted Flow Status`、`Historical Gap vs Current Gap`。
 
 ### 3) 执行三层验证
 
@@ -96,6 +98,7 @@ description: "Use when you need `jjk-test` in this repository. Source intent: �
 1. 只跑与本次变更相关的必要测试，不默认全量。
 2. 失败项必须记录命令、退出码、摘要与责任归属。
 3. Playwright 不可用时输出 `PLAYWRIGHT_UNAVAILABLE_FALLBACK`，并给替代验证路径。
+4. `scripted_flow` 证据必须纳入主矩阵，不得作为口头补充。
 
 ### 4) Gate 回填（并行拆解场景）
 
@@ -122,6 +125,10 @@ venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 2. `Defect List`（含证据）
 3. `Trace Matrix`（用例ID/结果/状态）
 4. 本轮问题与历史问题区分
+5. `Required Evidence`（必需证据集合）
+6. `Actual Evidence`（本轮实际执行证据）
+7. `Scripted Flow Status`（脚本链路执行/缺失状态）
+8. `Historical Gap vs Current Gap`（历史缺口与本轮新增缺口）
 
 并同步：
 
@@ -130,6 +137,13 @@ venv/bin/python scripts/backfill_gate_status.py --cards "$VK_CARDS_PATH"
 3. 相关索引（`docs/SUMMARY.md`、测试报告 README）
 
 ---
+
+
+## 失败码补充（证据矩阵）
+
+1. `TEST_EVIDENCE_COVERAGE_GAP`
+2. `TEST_SCRIPTED_FLOW_UNTRACKED`
+3. `TEST_DB_CHAIN_INCOMPLETE`
 
 ## 输出模板（推荐）
 

@@ -121,7 +121,8 @@ def test_apply_dispatch_action_returns_executor_evidence_and_executed_result(mon
             commit_sha="abc123",
             merge_sha=None,
             changed_files=["scripts/coder4/coder4_bootstrap_kernel.py"],
-            acceptance_results=[{"cmd": "pytest -q", "exit_code": 0, "summary": "1 passed"}],
+            acceptance_results=[{"kind": "chat_db", "cmd": "pytest -q", "exit_code": 0, "summary": "1 passed"}],
+            evidence_satisfied=True,
             worktree_path=expected_request.worktree_path,
         )
 
@@ -149,6 +150,9 @@ def test_apply_dispatch_action_returns_executor_evidence_and_executed_result(mon
     assert payload["commit_sha"] == "abc123"
     assert payload["merge_sha"] is None
     assert payload["worktree_path"] == expected_request.worktree_path
+    assert payload["changed_files"] == ["scripts/coder4/coder4_bootstrap_kernel.py"]
+    assert payload["acceptance_results"][0]["kind"] == "chat_db"
+    assert payload["evidence_satisfied"] is True
 
     assert module._derive_attempt_result("dispatch", applied_performed=True) == "dispatch_executed"
     assert module._derive_attempt_result("dispatch", applied_performed=False) == "dispatch_pending"

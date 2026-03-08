@@ -29,6 +29,7 @@ DISPATCH_RESULT_REQUIRED_KEYS = frozenset(
         "merge_sha",
         "changed_files",
         "acceptance_results",
+        "evidence_satisfied",
     }
 )
 
@@ -63,6 +64,7 @@ class WtimpDispatchResult:
     merge_sha: str | None
     changed_files: list[str]
     acceptance_results: list[dict[str, Any]]
+    evidence_satisfied: bool
     worktree_path: str
     error_code: str | None = None
     error_message: str | None = None
@@ -74,8 +76,9 @@ def build_wtimp_prompt(request: WtimpDispatchRequest) -> str:
         f"任务 task_key={request.task_key}，当前卡 card_id={request.card_id}。\n"
         f"必须在当前工作目录内执行 `$jjk-wtimp @{request.ws_file}`，并使用 `executor_mode=cardrun_dispatch`。\n"
         "禁止 create worktree，禁止 merge，禁止输出解释文本。\n"
+        "acceptance_results[*] 必须包含 kind/cmd/exit_code/summary。\n"
         "完成后只输出一段 JSON，对象字段至少包含："
-        "ok, executor, executor_mode, card_id, ws_file, subagent_id, commit_sha, merge_sha, changed_files, acceptance_results, error_code, error_message。\n"
+        "ok, executor, executor_mode, card_id, ws_file, subagent_id, commit_sha, merge_sha, changed_files, acceptance_results, evidence_satisfied, error_code, error_message。\n"
         f"其中 executor 必须是 `wtimp`，executor_mode 必须是 `{request.executor_mode}`，"
         f"card_id 必须是 `{request.card_id}`，ws_file 必须是 `{request.ws_file}`。"
     )
@@ -154,7 +157,7 @@ def _normalize_string_list(values: Any) -> list[str]:
     return result
 
 
-def _normalize_dict_list(values: Any) -> list[dict[str, Any]]:
+def _normalize_acceptance_results(values: Any) -> list[dict[str, Any]]:
     if not isinstance(values, list):
         raise WtimpDispatchError(
             "CARDRUN_EXECUTION_RESULT_INVALID",
@@ -169,7 +172,34 @@ def _normalize_dict_list(values: Any) -> list[dict[str, Any]]:
                 "wtimp dispatch acceptance_results 元素类型非法",
                 {"field": "acceptance_results", "actual_type": type(item).__name__},
             )
-        result.append(item)
+        kind = str(item.get("kind") or "").strip().lower()
+        cmd = str(item.get("cmd") or "").strip()
+        exit_code = item.get("exit_code")
+        summary = str(item.get("summary") or "").strip()
+        if not kind or not cmd or summary == "":
+            raise WtimpDispatchError(
+                "CARDRUN_EXECUTION_RESULT_INVALID",
+                "wtimp dispatch acceptance_results 缺少必填字段",
+                {
+                    "field": "acceptance_results",
+                    "item": item,
+                    "required": ["kind", "cmd", "exit_code", "summary"],
+                },
+            )
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise WtimpDispatchError(
+                "CARDRUN_EXECUTION_RESULT_INVALID",
+                "wtimp dispatch acceptance_results.exit_code 类型非法",
+                {"field": "acceptance_results.exit_code", "actual_type": type(exit_code).__name__},
+            )
+        result.append(
+            {
+                "kind": kind,
+                "cmd": cmd,
+                "exit_code": int(exit_code),
+                "summary": summary,
+            }
+        )
     return result
 
 
@@ -271,7 +301,8 @@ def _validate_payload(request: WtimpDispatchRequest, payload: dict[str, Any]) ->
     merge_sha = _require_string_or_none(payload, "merge_sha")
     subagent_id = _require_string_or_none(payload, "subagent_id")
     changed_files = _normalize_string_list(payload.get("changed_files"))
-    acceptance_results = _normalize_dict_list(payload.get("acceptance_results"))
+    acceptance_results = _normalize_acceptance_results(payload.get("acceptance_results"))
+    evidence_satisfied = _require_bool(payload, "evidence_satisfied")
     error_code = _require_string_or_none(payload, "error_code")
     error_message = _require_string_or_none(payload, "error_message")
 
@@ -329,6 +360,7 @@ def _validate_payload(request: WtimpDispatchRequest, payload: dict[str, Any]) ->
         merge_sha=merge_sha,
         changed_files=changed_files,
         acceptance_results=acceptance_results,
+        evidence_satisfied=evidence_satisfied,
         worktree_path=request.worktree_path,
         error_code=error_code,
         error_message=error_message,

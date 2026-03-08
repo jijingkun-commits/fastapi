@@ -41,6 +41,8 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 3. `task_to_pr_mapping` 必须完整，否则 `CARDRUN_PR_MAPPING_MISSING`
 4. `card_id -> WS -> pr_id` 必须唯一可解析，否则 `CARDRUN_CARD_MAPPING_BROKEN`
 5. 运行态根目录必须位于 `<task_split_dir>/.state`，否则 `CARDRUN_STATE_DIR_INVALID`
+6. 卡片必须声明 `risk_tags/mandatory_evidence`，缺失即 `CARDRUN_EVIDENCE_CONTRACT_MISSING`
+7. DB 风险卡片必须可解析到 DB 类 `mandatory_evidence`，否则阻断派发
 
 ---
 
@@ -95,10 +97,12 @@ python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-
 
 1. 必须把当前卡对应 `WS-*.md` 全量上下文交给子代理。
 2. 子代理入口固定：`$jjk-wtimp @<ws_file>`（`executor_mode=cardrun_dispatch`），并由 cardrun 在 `dispatch` 阶段真实调用。
-3. `wtimp` 必须以结构化 JSON 回执 `executor/subagent_id/ws_file/commit_sha/merge_sha`，禁止只靠人工口头回填。
+3. `wtimp` 必须以结构化 JSON 回执 `executor/subagent_id/ws_file/commit_sha/merge_sha/acceptance_results/evidence_satisfied`，禁止只靠人工口头回填。
 4. 仅允许“卡内并行”，禁止“跨卡并行”。
 5. 子代理失败立即阻断：`CARDRUN_SUBAGENT_FAILED`。
 6. 子代理回执必须包含当前卡片对应的 `commit_sha` 证据；缺失时阻断：`CARDRUN_NO_COMMIT_EVIDENCE`。
+7. 子代理回执中 `acceptance_results` 必须可追溯到命令级结果对象（至少 `kind/cmd/exit_code/summary`）。
+8. 若 `evidence_satisfied=false` 或 DB/scripted_flow 必需证据缺口存在，直接阻断：`CARDRUN_DB_EVIDENCE_UNSATISFIED` / `CARDRUN_SCRIPTED_FLOW_MISSING`。
 
 ### 4) done_gate + merge 收口（强制）
 
@@ -110,6 +114,7 @@ bash scripts/wt-flow.sh merge
 规则：
 
 1. `verify` 通过后先到 `verified`，不得直接 `done`。
+1.1 `verify` 必须消费最近一次 dispatch 的 `acceptance_results/evidence_satisfied`，禁止只看 `commit_sha`。
 2. 只有 `merge` 成功后才写 `done` 并推进下一卡。
 3. `verify` 失败：`CARDRUN_DONE_GATE_FAILED`
 4. `merge` 失败：`CARDRUN_MERGE_FAILED`
@@ -117,6 +122,7 @@ bash scripts/wt-flow.sh merge
 6. `merge` 时若目标分支相对基线 `ahead=0`，必须阻断：`MERGE_NO_COMMITS`（禁止“无提交也标记完成”）。
 7. 门禁/编排类卡片若无文件改动，允许空提交进入 `merge`，但必须有 `commit_sha` 与原因证据。
 8. `cardrun` 是唯一 merge 主路径；`wtimp` 在 `executor_mode=cardrun_dispatch` 下不得重复执行 merge。
+9. DB 风险卡片在 `evidence_satisfied=true` 前禁止进入 merge。
 
 ### 5) 循环推进（仅 loop）
 
@@ -125,6 +131,13 @@ bash scripts/wt-flow.sh merge
 3. 任一轮失败立刻停止，不允许跳卡继续。
 
 ---
+
+
+## 失败码补充（DB 证据门禁）
+
+1. `CARDRUN_EVIDENCE_CONTRACT_MISSING`
+2. `CARDRUN_DB_EVIDENCE_UNSATISFIED`
+3. `CARDRUN_SCRIPTED_FLOW_MISSING`
 
 ## 输出模板（强制）
 

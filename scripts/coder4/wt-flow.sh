@@ -1295,8 +1295,122 @@ cmd_verify() {
   local checks_count=0
   local evidence_json=""
   local check normalized_check run_check prefix output rc item
+  local mandatory_evidence_json risk_tags_json requires_evidence_gate
+
+  mandatory_evidence_json="$(jq -c --arg card "$card_id" '
+      (.cards // [])
+      | map(select(((.card_id // "") | ascii_upcase) == ($card | ascii_upcase)))
+      | .[0]
+      | (.mandatory_evidence // [])
+    ' "$cards_file")"
+  risk_tags_json="$(jq -c --arg card "$card_id" '
+      (.cards // [])
+      | map(select(((.card_id // "") | ascii_upcase) == ($card | ascii_upcase)))
+      | .[0]
+      | (.risk_tags // [])
+    ' "$cards_file")"
+  requires_evidence_gate="$(jq -n --argjson mandatory "$mandatory_evidence_json" --argjson risk "$risk_tags_json" '
+      (($mandatory | length) > 0) or (($risk | length) > 0)
+    ')"
+
+  if [[ "$requires_evidence_gate" == "true" ]]; then
+    local task_state_root ledger_file dispatch_contract gate_eval
+    task_state_root="$(dirname "$state_file")"
+    ledger_file="${task_state_root}/task-ledger.jsonl"
+
+    if [[ ! -f "$ledger_file" ]]; then
+      _err "CARDRUN_DB_EVIDENCE_UNSATISFIED: ${card_id} 缺少 dispatch 台账 ${ledger_file}"
+      item="$(jq -n --arg card "$card_id" --arg ledger_file "$ledger_file"         '{check: "dispatch_evidence_gate", result: "fail", error_code: "CARDRUN_DB_EVIDENCE_UNSATISFIED", reason: "missing_dispatch_ledger", ledger_file: $ledger_file, card_id: $card}')"
+      evidence_json="$item"
+      all_passed=false
+      checks_count=$((checks_count + 1))
+    else
+      dispatch_contract="$(jq -s --arg card "$card_id" '
+          map(select((.event // "") == "kernel_round" and (.action // "") == "dispatch" and ((.card_id // "" | ascii_upcase) == ($card | ascii_upcase))))
+          | last
+        ' "$ledger_file" 2>/dev/null || true)"
+      if [[ -z "$dispatch_contract" || "$dispatch_contract" == "null" ]]; then
+        _err "CARDRUN_DB_EVIDENCE_UNSATISFIED: ${card_id} 未找到 dispatch 证据记录"
+        item="$(jq -n --arg card "$card_id" --arg ledger_file "$ledger_file"           '{check: "dispatch_evidence_gate", result: "fail", error_code: "CARDRUN_DB_EVIDENCE_UNSATISFIED", reason: "dispatch_record_missing", ledger_file: $ledger_file, card_id: $card}')"
+        evidence_json="$item"
+        all_passed=false
+        checks_count=$((checks_count + 1))
+      else
+        gate_eval="$(jq -n --argjson dispatch "$dispatch_contract" --argjson mandatory "$mandatory_evidence_json" --argjson risk "$risk_tags_json" '
+            def norm($arr): [$arr[]? | tostring | ascii_downcase];
+            def has_kind($pattern): [
+              $dispatch.acceptance_results[]?
+              | select((((.kind // "") | tostring | ascii_downcase) | test($pattern)) and ((.exit_code // 1) == 0))
+            ] | length > 0;
+            {
+              evidence_satisfied: ($dispatch.evidence_satisfied == true),
+              require_chat: ((norm($mandatory) + norm($risk) | map(select(test("chat_db"))) | length) > 0),
+              require_data: ((norm($mandatory) + norm($risk) | map(select(test("data_db"))) | length) > 0),
+              require_scripted: ((norm($mandatory) | map(select(test("scripted_flow"))) | length) > 0),
+              has_chat: has_kind("chat_db"),
+              has_data: has_kind("data_db"),
+              has_scripted: has_kind("scripted_flow")
+            }
+          ')"
+
+        local evidence_satisfied_ok require_chat require_data require_scripted has_chat has_data has_scripted
+        evidence_satisfied_ok="$(printf '%s' "$gate_eval" | jq -r '.evidence_satisfied')"
+        require_chat="$(printf '%s' "$gate_eval" | jq -r '.require_chat')"
+        require_data="$(printf '%s' "$gate_eval" | jq -r '.require_data')"
+        require_scripted="$(printf '%s' "$gate_eval" | jq -r '.require_scripted')"
+        has_chat="$(printf '%s' "$gate_eval" | jq -r '.has_chat')"
+        has_data="$(printf '%s' "$gate_eval" | jq -r '.has_data')"
+        has_scripted="$(printf '%s' "$gate_eval" | jq -r '.has_scripted')"
+
+        local gate_failed=false
+        local gate_error_code=""
+        local gate_reason=""
+
+        if [[ "$evidence_satisfied_ok" != "true" ]]; then
+          gate_failed=true
+          gate_error_code="CARDRUN_DB_EVIDENCE_UNSATISFIED"
+          gate_reason="evidence_satisfied_false"
+        elif [[ "$require_chat" == "true" && "$has_chat" != "true" ]]; then
+          gate_failed=true
+          gate_error_code="CARDRUN_DB_EVIDENCE_UNSATISFIED"
+          gate_reason="chat_db_evidence_missing"
+        elif [[ "$require_data" == "true" && "$has_data" != "true" ]]; then
+          gate_failed=true
+          gate_error_code="CARDRUN_DB_EVIDENCE_UNSATISFIED"
+          gate_reason="data_db_evidence_missing"
+        elif [[ "$require_scripted" == "true" && "$has_scripted" != "true" ]]; then
+          gate_failed=true
+          gate_error_code="CARDRUN_SCRIPTED_FLOW_MISSING"
+          gate_reason="scripted_flow_evidence_missing"
+        fi
+
+        if [[ "$gate_failed" == "true" ]]; then
+          _err "${gate_error_code}: ${card_id} ${gate_reason}"
+          item="$(jq -n --arg card "$card_id" --arg error_code "$gate_error_code" --arg reason "$gate_reason" --argjson gate_eval "$gate_eval"             '{check: "dispatch_evidence_gate", result: "fail", error_code: $error_code, reason: $reason, card_id: $card, gate_eval: $gate_eval}')"
+          if [[ -n "$evidence_json" ]]; then
+            evidence_json="${evidence_json},${item}"
+          else
+            evidence_json="$item"
+          fi
+          all_passed=false
+          checks_count=$((checks_count + 1))
+        else
+          item="$(jq -n --arg card "$card_id" --argjson gate_eval "$gate_eval"             '{check: "dispatch_evidence_gate", result: "pass", card_id: $card, gate_eval: $gate_eval}')"
+          if [[ -n "$evidence_json" ]]; then
+            evidence_json="${evidence_json},${item}"
+          else
+            evidence_json="$item"
+          fi
+          checks_count=$((checks_count + 1))
+        fi
+      fi
+    fi
+  fi
 
   while IFS= read -r check; do
+    if [[ "$requires_evidence_gate" == "true" && "$all_passed" != true ]]; then
+      break
+    fi
     [[ -z "$check" ]] && continue
     checks_count=$((checks_count + 1))
 

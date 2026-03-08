@@ -30,6 +30,413 @@ TEMPORAL_GATE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("temporal_window_field", re.compile(r"ZERO_CALL_WINDOW_NOT_MATURE|eligible_after|window_days")),
 )
 
+YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
+DB_RISK_TAGS = {"chat_db", "data_db"}
+DB_EVIDENCE_HINTS = {
+    "chat_db": ("chat_db", "write_read", "write-read"),
+    "data_db": ("data_db", "route_sql", "analytics_route", "sql_result"),
+}
+ALLOWED_ACCEPTANCE_KINDS = {"unit", "api", "chat_db", "data_db", "scripted_flow", "integration", "e2e"}
+
+
+def _normalize_contract_token(raw: Any) -> str:
+    return str(raw or "").strip().strip("`'\"").lower()
+
+
+def _split_key_value(text: str) -> tuple[str, str]:
+    key, sep, value = str(text or "").partition(":")
+    if not sep:
+        return key.strip(), ""
+    return key.strip(), value.strip()
+
+
+def _parse_inline_list(raw: str) -> list[str]:
+    value = str(raw or "").strip()
+    if not value:
+        return []
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    items = []
+    for segment in value.split(","):
+        token = _normalize_contract_token(segment)
+        if token:
+            items.append(token)
+    return items
+
+
+def _extract_yaml_blocks_from_markdown(path: Path) -> list[str]:
+    content = path.read_text(encoding="utf-8")
+    return YAML_BLOCK_PATTERN.findall(content)
+
+
+def _find_yaml_block(blocks: list[str], marker: str) -> str:
+    for block in blocks:
+        if marker in block:
+            return block
+    raise ValueError(f"缺少 yaml block: {marker}")
+
+
+def _parse_implementation_tasks_contract(implementation_path: Path) -> list[dict[str, Any]]:
+    blocks = _extract_yaml_blocks_from_markdown(implementation_path)
+    block = _find_yaml_block(blocks, "implementation_tasks:")
+    lines = block.splitlines()
+
+    start_idx = -1
+    for idx, line in enumerate(lines):
+        if line.strip().startswith("implementation_tasks:"):
+            start_idx = idx
+            break
+    if start_idx < 0:
+        return []
+
+    tasks: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    list_mode = ""
+    acceptance_mode = False
+    current_acceptance: dict[str, str] | None = None
+
+    idx = start_idx + 1
+    while idx < len(lines):
+        raw_line = lines[idx]
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+
+        if acceptance_mode and current_acceptance is not None and indent <= 4:
+            current["acceptance_cmds"].append(current_acceptance)
+            current_acceptance = None
+
+        if not stripped:
+            idx += 1
+            continue
+        if indent < 2:
+            break
+
+        if indent == 2 and stripped.startswith("- "):
+            if current is not None:
+                if current_acceptance is not None:
+                    current["acceptance_cmds"].append(current_acceptance)
+                    current_acceptance = None
+                tasks.append(current)
+            current = {
+                "task_id": "",
+                "risk_tags": [],
+                "mandatory_evidence": [],
+                "acceptance_cmds": [],
+            }
+            list_mode = ""
+            acceptance_mode = False
+
+            key, value = _split_key_value(stripped[2:])
+            if key == "task_id":
+                current["task_id"] = _normalize_contract_token(value).upper()
+            idx += 1
+            continue
+
+        if current is None:
+            idx += 1
+            continue
+
+        if indent == 4:
+            key, value = _split_key_value(stripped)
+            list_mode = ""
+            if key == "task_id":
+                current["task_id"] = _normalize_contract_token(value).upper()
+                acceptance_mode = False
+            elif key == "risk_tags":
+                current["risk_tags"].extend(_parse_inline_list(value))
+                list_mode = "risk_tags" if not value else ""
+                acceptance_mode = False
+            elif key == "mandatory_evidence":
+                current["mandatory_evidence"].extend(_parse_inline_list(value))
+                list_mode = "mandatory_evidence" if not value else ""
+                acceptance_mode = False
+            elif key == "acceptance_cmds":
+                acceptance_mode = True
+                if value and value not in {"[]", ""}:
+                    for cmd in _parse_inline_list(value):
+                        current["acceptance_cmds"].append({"kind": "", "cmd": cmd})
+            else:
+                acceptance_mode = False
+            idx += 1
+            continue
+
+        if list_mode in {"risk_tags", "mandatory_evidence"} and indent >= 6 and stripped.startswith("- "):
+            token = _normalize_contract_token(stripped[2:])
+            if token:
+                current[list_mode].append(token)
+            idx += 1
+            continue
+
+        if acceptance_mode and indent >= 6:
+            if stripped.startswith("- "):
+                if current_acceptance is not None:
+                    current["acceptance_cmds"].append(current_acceptance)
+                entry = stripped[2:].strip()
+                cmd_item = {"kind": "", "cmd": ""}
+                key, value = _split_key_value(entry)
+                if key in {"kind", "cmd"}:
+                    cmd_item[key] = _normalize_contract_token(value)
+                else:
+                    cmd_item["cmd"] = _normalize_contract_token(entry)
+                current_acceptance = cmd_item
+            elif current_acceptance is not None and indent >= 8:
+                key, value = _split_key_value(stripped)
+                if key in {"kind", "cmd"}:
+                    current_acceptance[key] = _normalize_contract_token(value)
+            idx += 1
+            continue
+
+        idx += 1
+
+    if current is not None:
+        if current_acceptance is not None:
+            current["acceptance_cmds"].append(current_acceptance)
+        tasks.append(current)
+
+    normalized_tasks: list[dict[str, Any]] = []
+    for task in tasks:
+        normalized_tasks.append(
+            {
+                "task_id": str(task.get("task_id") or "").strip().upper(),
+                "risk_tags": sorted({item for item in task.get("risk_tags", []) if item}),
+                "mandatory_evidence": sorted({item for item in task.get("mandatory_evidence", []) if item}),
+                "acceptance_cmds": [
+                    {
+                        "kind": _normalize_contract_token(item.get("kind")),
+                        "cmd": str(item.get("cmd") or "").strip(),
+                    }
+                    for item in task.get("acceptance_cmds", [])
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+    return normalized_tasks
+
+
+def _db_hint_from_acceptance(task: dict[str, Any]) -> bool:
+    for item in task.get("acceptance_cmds", []):
+        kind = _normalize_contract_token(item.get("kind"))
+        if "chat_db" in kind or "data_db" in kind:
+            return True
+    return False
+
+
+def _validate_plan_db_evidence_contract(implementation_path: Path) -> dict[str, Any]:
+    tasks = _parse_implementation_tasks_contract(implementation_path)
+    errors: list[dict[str, Any]] = []
+
+    for task in tasks:
+        task_id = task.get("task_id") or "UNKNOWN"
+        risk_tags = set(task.get("risk_tags") or [])
+        mandatory = set(task.get("mandatory_evidence") or [])
+        acceptance_cmds = task.get("acceptance_cmds") or []
+
+        inferred_db_hint = bool({tag for tag in mandatory if "chat_db" in tag or "data_db" in tag}) or _db_hint_from_acceptance(task)
+        has_chat_risk = "chat_db" in risk_tags
+        has_data_risk = "data_db" in risk_tags
+        db_risk = has_chat_risk or has_data_risk or inferred_db_hint
+
+        if db_risk and not risk_tags:
+            errors.append(
+                {
+                    "code": "PLAN_RISK_TAGS_MISSING",
+                    "message": "DB 风险任务缺少 risk_tags",
+                    "details": {"task_id": task_id},
+                }
+            )
+
+        if db_risk:
+            if not mandatory:
+                errors.append(
+                    {
+                        "code": "PLAN_DB_EVIDENCE_MISSING",
+                        "message": "DB 风险任务缺少 mandatory_evidence",
+                        "details": {"task_id": task_id, "risk_tags": sorted(risk_tags)},
+                    }
+                )
+            if has_chat_risk and not any(any(hint in item for hint in DB_EVIDENCE_HINTS["chat_db"]) for item in mandatory):
+                errors.append(
+                    {
+                        "code": "PLAN_DB_EVIDENCE_MISSING",
+                        "message": "chat_db 风险任务缺少 chat_db 类 mandatory_evidence",
+                        "details": {"task_id": task_id, "mandatory_evidence": sorted(mandatory)},
+                    }
+                )
+            if has_data_risk and not any(any(hint in item for hint in DB_EVIDENCE_HINTS["data_db"]) for item in mandatory):
+                errors.append(
+                    {
+                        "code": "PLAN_DB_EVIDENCE_MISSING",
+                        "message": "data_db 风险任务缺少 data_db 类 mandatory_evidence",
+                        "details": {"task_id": task_id, "mandatory_evidence": sorted(mandatory)},
+                    }
+                )
+
+        if db_risk:
+            invalid_cmds = []
+            for item in acceptance_cmds:
+                kind = _normalize_contract_token(item.get("kind"))
+                cmd = str(item.get("cmd") or "").strip()
+                if not kind or not cmd or kind not in ALLOWED_ACCEPTANCE_KINDS:
+                    invalid_cmds.append({"kind": kind, "cmd": cmd})
+            if invalid_cmds:
+                errors.append(
+                    {
+                        "code": "PLAN_EVIDENCE_KIND_INVALID",
+                        "message": "DB 风险任务 acceptance_cmds[*].kind/cmd 不合法",
+                        "details": {"task_id": task_id, "invalid_acceptance_cmds": invalid_cmds},
+                    }
+                )
+
+    return {
+        "ok": not errors,
+        "implementation_plan": str(implementation_path),
+        "tasks_checked": len(tasks),
+        "errors": errors,
+    }
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON root must be object: {path}")
+    return payload
+
+
+def _validate_vkplan_db_evidence_contract(*, repo_root: Path, task_split_dir: Path, implementation_path: Path) -> dict[str, Any]:
+    tasks = _parse_implementation_tasks_contract(implementation_path)
+    tasks_by_id = {str(task.get("task_id") or "").upper(): task for task in tasks if task.get("task_id")}
+
+    vk_cards_path = task_split_dir / "vk_cards.json"
+    vk_cards_payload = _load_json_object(vk_cards_path)
+    cards = vk_cards_payload.get("cards") or []
+
+    cards_by_task: dict[str, list[dict[str, Any]]] = {}
+    evidence_mapping_missing: list[dict[str, Any]] = []
+
+    for raw_card in cards:
+        if not isinstance(raw_card, dict):
+            continue
+        card_id = str(raw_card.get("card_id") or "").strip().upper()
+        task_ids = [str(item or "").strip().upper() for item in raw_card.get("task_ids") or [] if str(item or "").strip()]
+        card_tags = {_normalize_contract_token(item) for item in raw_card.get("risk_tags") or [] if _normalize_contract_token(item)}
+        card_evidence = {_normalize_contract_token(item) for item in raw_card.get("mandatory_evidence") or [] if _normalize_contract_token(item)}
+
+        for task_id in task_ids:
+            cards_by_task.setdefault(task_id, []).append(raw_card)
+            task = tasks_by_id.get(task_id)
+            if not task:
+                continue
+            required_tags = set(task.get("risk_tags") or [])
+            required_evidence = set(task.get("mandatory_evidence") or [])
+            missing_tags = sorted(required_tags - card_tags)
+            missing_evidence = sorted(required_evidence - card_evidence)
+            if missing_tags or missing_evidence:
+                evidence_mapping_missing.append(
+                    {
+                        "card_id": card_id,
+                        "task_id": task_id,
+                        "missing_risk_tags": missing_tags,
+                        "missing_mandatory_evidence": missing_evidence,
+                    }
+                )
+
+    split_unclosed: list[dict[str, Any]] = []
+    for task_id, task in tasks_by_id.items():
+        risk_tags = set(task.get("risk_tags") or [])
+        if not (risk_tags & DB_RISK_TAGS):
+            continue
+        task_cards = cards_by_task.get(task_id, [])
+        if len(task_cards) <= 1:
+            continue
+        candidate_card_ids = {str(card.get("card_id") or "").strip().upper() for card in task_cards}
+        closure_ok = False
+        for card in task_cards:
+            closure = card.get("cross_card_closure")
+            if not isinstance(closure, dict):
+                continue
+            if not bool(closure.get("required")):
+                continue
+            owner = str(closure.get("closure_owner") or "").strip().upper()
+            if owner and owner in candidate_card_ids:
+                closure_ok = True
+                break
+        if not closure_ok:
+            split_unclosed.append(
+                {
+                    "task_id": task_id,
+                    "cards": sorted(candidate_card_ids),
+                    "risk_tags": sorted(risk_tags),
+                }
+            )
+
+    errors: list[dict[str, Any]] = []
+    if evidence_mapping_missing:
+        errors.append(
+            {
+                "code": "VKPLAN_EVIDENCE_MAPPING_BROKEN",
+                "message": "vk_cards 证据继承不完整（risk_tags/mandatory_evidence）",
+                "details": evidence_mapping_missing,
+            }
+        )
+    if split_unclosed:
+        errors.append(
+            {
+                "code": "VKPLAN_DB_CHAIN_SPLIT_UNCLOSED",
+                "message": "DB 风险链路拆卡后缺少 cross_card_closure 闭环声明",
+                "details": split_unclosed,
+            }
+        )
+
+    return {
+        "ok": not errors,
+        "implementation_plan": str(implementation_path),
+        "vk_cards": str(vk_cards_path),
+        "evidence_mapping_missing": evidence_mapping_missing,
+        "db_chain_split_unclosed": split_unclosed,
+        "errors": errors,
+    }
+
+
+def _merge_error_entries(existing: Any, new_errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for item in existing if isinstance(existing, list) else []:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        message = str(item.get("message") or "")
+        key = (code, message)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+
+    for item in new_errors:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        message = str(item.get("message") or "")
+        key = (code, message)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def _resolve_reported_path(repo_root: Path, raw_path: Any) -> Path | None:
+    value = str(raw_path or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = (repo_root / path).resolve()
+    if not path.exists() or not path.is_file():
+        return None
+    return path.resolve()
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -227,6 +634,27 @@ def _run_clarify_plan(passthrough_args: Sequence[str]) -> int:
         module._write_output(payload, args.output)
         return 2
 
+    implementation_path = _resolve_reported_path(repo_root, result.get("implementation_plan"))
+    if implementation_path is not None:
+        db_contract = _validate_plan_db_evidence_contract(implementation_path)
+        result["db_evidence_contract"] = db_contract
+        if not db_contract.get("ok"):
+            result["ok"] = False
+            result["errors"] = _merge_error_entries(result.get("errors"), db_contract.get("errors") or [])
+    else:
+        result["db_evidence_contract"] = {
+            "ok": False,
+            "errors": [
+                {
+                    "code": "PLAN_DB_EVIDENCE_MISSING",
+                    "message": "无法定位 implementation_plan，无法执行 DB 证据契约校验",
+                    "details": {},
+                }
+            ],
+        }
+        result["ok"] = False
+        result["errors"] = _merge_error_entries(result.get("errors"), result["db_evidence_contract"]["errors"])
+
     module._write_output(result, args.output)
     return 0 if result.get("ok") else 2
 
@@ -248,6 +676,31 @@ def _run_plan_vk_coverage(passthrough_args: Sequence[str]) -> int:
         }
         module._write_output(payload, args.output)
         return 2
+
+    task_split_dir = _resolve_task_split_dir_arg(repo_root, args.task_split_dir)
+    implementation_path = _resolve_reported_path(repo_root, result.get("implementation_plan"))
+    if implementation_path is not None:
+        db_contract = _validate_vkplan_db_evidence_contract(
+            repo_root=repo_root,
+            task_split_dir=task_split_dir,
+            implementation_path=implementation_path,
+        )
+        result["db_evidence_contract"] = db_contract
+        result["evidence_mapping_missing"] = db_contract.get("evidence_mapping_missing") or []
+        result["db_chain_split_unclosed"] = db_contract.get("db_chain_split_unclosed") or []
+        if not db_contract.get("ok"):
+            result["ok"] = False
+            result["errors"] = _merge_error_entries(result.get("errors"), db_contract.get("errors") or [])
+    else:
+        missing_impl_error = {
+            "code": "VKPLAN_EVIDENCE_MAPPING_BROKEN",
+            "message": "无法定位 implementation_plan，无法执行 vk 证据继承校验",
+            "details": {"task_split_dir": str(task_split_dir)},
+        }
+        result["ok"] = False
+        result["evidence_mapping_missing"] = result.get("evidence_mapping_missing") or []
+        result["db_chain_split_unclosed"] = result.get("db_chain_split_unclosed") or []
+        result["errors"] = _merge_error_entries(result.get("errors"), [missing_impl_error])
 
     module._write_output(result, args.output)
     return 0 if result.get("ok") else 2

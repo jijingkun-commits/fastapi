@@ -311,6 +311,9 @@ def record_attempt_evidence(
     subagent_id: str | None = None,
     ws_file: str | None = None,
     executor_mode: str | None = None,
+    changed_files: list[str] | None = None,
+    acceptance_results: list[dict[str, Any]] | None = None,
+    evidence_satisfied: bool | None = None,
 ) -> dict[str, Any]:
     normalized_card_id = _normalize_attempt_card_id(card_id)
 
@@ -330,12 +333,56 @@ def record_attempt_evidence(
         raw_executor_mode = str(applied.get("executor_mode") or "").strip()
         executor_mode = raw_executor_mode or None
 
+    normalized_changed_files: list[str] = []
+    if isinstance(changed_files, list):
+        normalized_changed_files = [str(item).strip() for item in changed_files if str(item).strip()]
+    elif isinstance(applied, dict) and isinstance(applied.get("changed_files"), list):
+        normalized_changed_files = [
+            str(item).strip() for item in (applied.get("changed_files") or []) if str(item).strip()
+        ]
+
+    normalized_acceptance_results: list[dict[str, Any]] = []
+    if isinstance(acceptance_results, list):
+        source_acceptance = acceptance_results
+    elif isinstance(applied, dict) and isinstance(applied.get("acceptance_results"), list):
+        source_acceptance = applied.get("acceptance_results") or []
+    else:
+        source_acceptance = []
+
+    for item in source_acceptance:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        cmd = str(item.get("cmd") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        exit_code = item.get("exit_code")
+        if not isinstance(exit_code, int):
+            continue
+        normalized_acceptance_results.append(
+            {
+                "kind": kind,
+                "cmd": cmd,
+                "exit_code": exit_code,
+                "summary": summary,
+            }
+        )
+
+    if evidence_satisfied is None and isinstance(applied, dict):
+        raw_evidence_satisfied = applied.get("evidence_satisfied")
+        if isinstance(raw_evidence_satisfied, bool):
+            evidence_satisfied = raw_evidence_satisfied
+    if evidence_satisfied is None:
+        evidence_satisfied = False
+
     execution_evidence = {
         "executor_mode": executor_mode,
         "subagent_id": subagent_id,
         "ws_file": ws_file,
         "commit_sha": commit_sha,
         "merge_sha": merge_sha,
+        "changed_files": normalized_changed_files,
+        "acceptance_results": normalized_acceptance_results,
+        "evidence_satisfied": evidence_satisfied,
     }
 
     evidence = {
@@ -361,6 +408,9 @@ def record_attempt_evidence(
         "merge_sha": merge_sha,
         "subagent_id": subagent_id,
         "ws_file": ws_file,
+        "changed_files": normalized_changed_files,
+        "acceptance_results": normalized_acceptance_results,
+        "evidence_satisfied": evidence_satisfied,
         "execution_evidence": execution_evidence,
         "execution_mode": str(execution_mode or "serial"),
         "trigger": str(trigger_source or "manual"),
@@ -383,6 +433,9 @@ def record_attempt_evidence(
         "merge_sha": merge_sha,
         "subagent_id": subagent_id,
         "ws_file": ws_file,
+        "changed_files": normalized_changed_files,
+        "acceptance_results": normalized_acceptance_results,
+        "evidence_satisfied": evidence_satisfied,
         "execution_evidence": execution_evidence,
         "evidence": evidence,
     }
@@ -2182,6 +2235,9 @@ def apply_action(
             "merge_sha": dispatch_result.merge_sha,
             "merge_owner": "wt_flow",
             "worktree_path": dispatch_result.worktree_path,
+            "changed_files": dispatch_result.changed_files,
+            "acceptance_results": dispatch_result.acceptance_results,
+            "evidence_satisfied": dispatch_result.evidence_satisfied,
         }
 
     return {"performed": False}
@@ -2445,6 +2501,9 @@ def main() -> int:
                 commit_sha=commit_sha or str(applied.get("commit_sha") or "").strip() or None,
                 merge_sha=merge_sha or str(applied.get("merge_sha") or "").strip() or None,
                 executor_mode=ctx.dispatch_executor,
+                changed_files=applied.get("changed_files") if isinstance(applied, dict) else None,
+                acceptance_results=applied.get("acceptance_results") if isinstance(applied, dict) else None,
+                evidence_satisfied=applied.get("evidence_satisfied") if isinstance(applied, dict) else None,
             )
 
             scoped_counts = count_statuses(ctx.scoped_tasks)
@@ -2514,6 +2573,9 @@ def main() -> int:
                     "ws_file": attempt_evidence["attempt"].get("ws_file"),
                     "commit_sha": attempt_evidence["attempt"].get("commit_sha"),
                     "merge_sha": attempt_evidence["attempt"].get("merge_sha"),
+                    "changed_files": attempt_evidence["attempt"].get("changed_files") or [],
+                    "acceptance_results": attempt_evidence["attempt"].get("acceptance_results") or [],
+                    "evidence_satisfied": bool(attempt_evidence["attempt"].get("evidence_satisfied")),
                 },
                 "task_ledger_file": str(task_ledger_file),
                 "local_mode": args.local_mode,
