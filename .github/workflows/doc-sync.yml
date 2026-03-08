@@ -12,6 +12,9 @@ on:
       - '.env*'
       - 'install/**'
       - 'scripts/**'
+      - '.cursor/rules/**'
+      - '.githooks/**'
+      - 'docs/**'
 
 jobs:
   check-doc-sync:
@@ -22,6 +25,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Check doc sync mapping
         run: |
           echo "========================================="
@@ -29,6 +37,11 @@ jobs:
           echo "========================================="
           echo ""
           bash scripts/check_doc_sync.sh --diff-range "origin/${{ github.base_ref }}...HEAD"
+
+      - name: Run docs_guard
+        run: |
+          PYTHON_BIN="$(bash scripts/repo_python.sh)"
+          "$PYTHON_BIN" scripts/docs_guard.py --strict
 
       - name: Summary
         run: |

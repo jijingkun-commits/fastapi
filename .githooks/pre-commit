@@ -3,3 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 "$ROOT_DIR/.githooks/sync_cursor_mirrors.sh"
+bash "$ROOT_DIR/scripts/check_doc_sync.sh" --cached
+PYTHON_BIN="$(bash "$ROOT_DIR/scripts/repo_python.sh")"
+"$PYTHON_BIN" "$ROOT_DIR/scripts/docs_guard.py" --strict

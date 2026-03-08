@@ -87,6 +87,64 @@ PATH_CHECK_IGNORE_TARGETS = {
 }
 PATH_CHECK_IGNORE_NORMALIZED = {item.rstrip("/") for item in PATH_CHECK_IGNORE_TARGETS}
 
+CURRENT_STATE_DOC_ROOTS = (
+    DOCS_DIR / "产品文档",
+    DOCS_DIR / "开发文档" / "架构设计",
+    DOCS_DIR / "API文档",
+)
+CURRENT_STATE_PROCESS_DOCS = {
+    DOCS_DIR / "开发文档" / "架构设计" / "防屎山记录手册.md",
+}
+PROCESS_DOC_ROOTS = (
+    DOCS_DIR / "plans",
+    DOCS_DIR / "内部参考",
+    REPORT_DIR,
+)
+CURRENT_STATE_TIMESTAMP_RE = re.compile(r"^> 更新时间：\d{4}-\d{2}-\d{2}$", re.MULTILINE)
+CURRENT_STATE_FORBIDDEN_HEADING_RULES = (
+    (
+        "incremental_heading",
+        re.compile(r"^\s{0,3}#{2,6}\s+.*增量需求.*$", re.MULTILINE),
+        "主文档禁止使用 `增量需求` 章节，新增事实必须融合到原功能位",
+    ),
+    (
+        "progress_heading",
+        re.compile(r"^\s{0,3}#{2,6}\s+.*实现进展.*$", re.MULTILINE),
+        "主文档禁止使用 `实现进展` 章节，应改写为当前架构/行为说明",
+    ),
+    (
+        "executed_heading",
+        re.compile(r"^\s{0,3}#{2,6}\s+.*已执行.*$", re.MULTILINE),
+        "主文档禁止使用 `已执行` 状态标题，应改写为当前落地形态",
+    ),
+    (
+        "implemented_heading",
+        re.compile(r"^\s{0,3}#{2,6}\s+.*已实现.*$", re.MULTILINE),
+        "主文档标题不应以 `已实现` 描述历史阶段，应直接描述当前能力",
+    ),
+    (
+        "supplement_heading",
+        re.compile(r"^\s{0,3}#{2,6}\s+.*补充[）)]?\s*$", re.MULTILINE),
+        "主文档禁止使用 `补充` 标题，应把补充内容并入原章节",
+    ),
+)
+CURRENT_STATE_LEGACY_ALLOWLIST = {
+    "docs/产品文档/技能系统需求.md": {"timestamp_missing"},
+    "docs/产品文档/用户管理需求.md": {"timestamp_missing"},
+    "docs/产品文档/模型路由需求.md": {"timestamp_missing"},
+    "docs/产品文档/待办助手需求.md": {"timestamp_missing"},
+    "docs/产品文档/配置治理需求.md": {"timestamp_missing"},
+    "docs/产品文档/系统需求.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/附件系统设计.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/前端UI设计方案.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/系统总览.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/问数引擎设计.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/后端架构.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/RAG集成设计.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/待办Agent设计.md": {"timestamp_missing"},
+    "docs/开发文档/架构设计/DIDP数据架构与指标提取.md": {"timestamp_missing"},
+}
+
 PATH_CHECK_PLACEHOLDER_TOKENS = (
     "...",
     "xxx_",
@@ -159,6 +217,57 @@ def resolve_relative_link(src: Path, raw_link: str) -> Path | None:
         return None
 
     return (src.parent / path_part).resolve()
+
+
+def is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_doc_role(path: Path) -> str:
+    if path in CURRENT_STATE_PROCESS_DOCS:
+        return "process"
+    for root in PROCESS_DOC_ROOTS:
+        if is_relative_to(path, root):
+            return "process"
+    for root in CURRENT_STATE_DOC_ROOTS:
+        if is_relative_to(path, root):
+            return "current_state"
+    return "support"
+
+
+def is_allowlisted(path: Path, issue_key: str, *, force_strict: bool) -> bool:
+    if force_strict:
+        return False
+    rel_path = str(path.relative_to(ROOT))
+    return issue_key in CURRENT_STATE_LEGACY_ALLOWLIST.get(rel_path, set())
+
+
+def resolve_selected_docs(raw_paths: list[str]) -> list[Path]:
+    selected: list[Path] = []
+    for raw_path in raw_paths:
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = (ROOT / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if not candidate.exists() or candidate.suffix.lower() != ".md":
+            continue
+        if not is_relative_to(candidate, DOCS_DIR):
+            continue
+        selected.append(candidate)
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for doc in selected:
+        if doc in seen:
+            continue
+        seen.add(doc)
+        unique.append(doc)
+    return sorted(unique)
 
 
 def format_path_for_detail(path: Path) -> str:
@@ -769,6 +878,53 @@ def check_summary_coverage(findings: list[Finding]) -> tuple[int, int]:
     return covered, total
 
 
+def check_current_state_docs(findings: list[Finding], selected_docs: list[Path]) -> tuple[int, int]:
+    timestamp_missing = 0
+    forbidden_headings = 0
+    force_strict = bool(selected_docs)
+    docs = selected_docs if selected_docs else list(iter_markdown_files())
+
+    for md_file in docs:
+        if resolve_doc_role(md_file) != "current_state":
+            continue
+
+        rel_file = str(md_file.relative_to(ROOT))
+        text = read_text(md_file)
+
+        if not CURRENT_STATE_TIMESTAMP_RE.search(text):
+            if not is_allowlisted(md_file, "timestamp_missing", force_strict=force_strict):
+                timestamp_missing += 1
+                findings.append(
+                    Finding(
+                        category="current_state_timestamp_missing",
+                        level="error",
+                        file=rel_file,
+                        detail="主文档缺少标准头部 `> 更新时间：YYYY-MM-DD`",
+                    )
+                )
+
+        for issue_key, pattern, message in CURRENT_STATE_FORBIDDEN_HEADING_RULES:
+            if is_allowlisted(md_file, issue_key, force_strict=force_strict):
+                continue
+            matches = [match.group(0).strip() for match in pattern.finditer(text)]
+            if not matches:
+                continue
+
+            forbidden_headings += len(matches)
+            preview = "；".join(matches[:2])
+            suffix = "" if len(matches) <= 2 else f"；... 共 {len(matches)} 处"
+            findings.append(
+                Finding(
+                    category="current_state_forbidden_heading",
+                    level="error",
+                    file=rel_file,
+                    detail=f"{message}；命中标题：{preview}{suffix}",
+                )
+            )
+
+    return timestamp_missing, forbidden_headings
+
+
 def check_report_naming(findings: list[Finding]) -> int:
     count = 0
     if not REPORT_DIR.exists():
@@ -1029,6 +1185,8 @@ def print_human_report(report: dict) -> None:
         f" ({stats['summary_coverage_ratio'] * 100:.2f}%)"
     )
     print(f"report_naming_errors: {stats['report_naming_errors']}")
+    print(f"current_state_timestamp_missing: {stats['current_state_timestamp_missing']}")
+    print(f"current_state_forbidden_headings: {stats['current_state_forbidden_headings']}")
     print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
     print(f"openclaw_gate_status_errors: {stats['openclaw_gate_status_errors']}")
     print(f"g01_evidence_binding_errors: {stats['g01_evidence_binding_errors']}")
@@ -1056,15 +1214,28 @@ def main() -> int:
         action="store_true",
         help="检查核心文档中的内联代码路径是否存在（结果以 warning 输出）",
     )
+    parser.add_argument(
+        "--paths",
+        nargs="*",
+        default=[],
+        help="仅对指定 markdown 文档执行主文档 current_state 强校验；显式传入时忽略 legacy allowlist",
+    )
     parser.add_argument("--json-out", type=str, default="", help="输出 JSON 报告路径")
     args = parser.parse_args()
 
     findings: list[Finding] = []
+    selected_docs = resolve_selected_docs(args.paths)
+    current_state_timestamp_missing, current_state_forbidden_headings = check_current_state_docs(
+        findings,
+        selected_docs,
+    )
 
     stats = {
         "broken_links": check_broken_links(findings),
         "summary_broken_targets": check_summary_targets(findings),
         "report_naming_errors": check_report_naming(findings),
+        "current_state_timestamp_missing": current_state_timestamp_missing,
+        "current_state_forbidden_headings": current_state_forbidden_headings,
         "blacklist_var_hits": check_blacklist_vars(findings),
         "openclaw_gate_status_errors": check_openclaw_gate_status(findings),
         "g01_evidence_binding_errors": check_g01_evidence_binding(findings),

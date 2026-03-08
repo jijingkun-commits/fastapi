@@ -100,6 +100,7 @@
 * [问数引擎测试案例](开发文档/测试管理/问数引擎测试案例.md)
 * [用户管理测试案例](开发文档/测试管理/用户管理测试案例.md)
 * [UAT用户验收测试案例](开发文档/测试管理/UAT用户验收测试案例.md)
+* [脚本链路证据注册表](开发文档/测试管理/脚本链路证据注册表.md)
 
 #### 主报告（长期入口）
 
@@ -170,6 +171,8 @@
 * [preference-intent-judge实施方案（LLM记忆判定与原子批量写入）](内部参考/迭代需求/preference-intent-judge_implementation_plan.md)
 * [cardrun内置wtimp执行器需求](内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md)
 * [cardrun内置wtimp执行器实施方案](内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md)
+* [文档单一真相源与动态融合治理需求](内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md)
+* [文档单一真相源与动态融合治理实施方案](内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md)
 
 > 说明：该目录以过程文档为主，详细条目按主题目录内索引查看。
 

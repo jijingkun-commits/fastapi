@@ -1,4 +1,5 @@
 # AI 模块详解
+> 更新时间：2026-03-08
 
 > **用途**: 作为 AI 架构设计权威源，定义模块边界、关键决策与状态契约，并提供实现落点索引。
 > **文档边界**: `架构设计/` 负责“为什么这样设计”；`代码解读/` 负责“代码如何运行与调试”。
@@ -2050,7 +2051,7 @@ Data Agent 采用两层漏斗模型处理用户查询：
 - `ENABLE_RESULT_ENRICHMENT`：全局开关，默认 `true`。
 - `RESULT_ENRICHMENT_RULE_TTL_SECONDS`：规则缓存 TTL，默认 `120`。
 
-## 跨 Agent 会话意图内核（已实现，2026-02）
+## 跨 Agent 会话意图内核
 
 > 适用范围：`multi_agent_graph.py`、`data_graph.py`、`todo_graph.py`。  
 > 目标：治理“补充回复误判 + 上下文真值分裂 + 重复澄清”三类问题。
@@ -2153,38 +2154,20 @@ graph TD
 - 当权限重写实际生效（`permission_rewritten=true`）时，`sql_execute` 优先使用 `permission_scope_summary.display_text` 输出具体范围（例如“机构：广州分行（440100）；部门：公司金融部（A012）”），避免只提示“已过滤”但无法判断口径。
 - `permission_scope_summary` 由 `evaluate_sql_policy` 基于 `UserPermissionContext` 统一构建并透传到 `query_context` 与 `sql_result.data`，避免在执行层重复拼装权限语义。
 
-### 8. 落地顺序（已执行）
+### 8. 当前运行时落点
 
-1. 已在 `multi_agent` 层统一 handoff 结构化载荷（兼容旧文本）。
-2. 已在 `data_graph` 接入 `SessionFrameReducer + ClarificationPlanner`。
-3. 已在 `todo_graph` 接入同一内核，替换分散规则。
-4. 已进入双写观测阶段，持续收敛旧 continuation/clarify 分支。
+1. Supervisor handoff 默认同时保留 `task_description` 兼容字段与 `frame/turn_act_hint` 结构化载荷，专家侧优先消费结构化真值。
+2. `data_graph.analyze_data_intent` 与 `todo_graph.analyze_intent` 统一消费 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`，不再各自维护补充轮主判定。
+3. `todo_intent_helpers.filter_messages_for_todo` 优先读取 `pending_handoff.frame`；文本 `task_description` 仅作为兼容回退。
+4. `response_message` 已纳入 `TodoAgentState` 统一管理，避免 `analyze -> clarify` 链路字段丢失。
+5. `missing_info` 仅允许 `todo_target/time_range/todo_action` 三类 canonical 槽位，非法值直接丢弃并记录日志。
+6. 创建待办确认后若用户先取消再补充细节，且历史会话帧仍表明 `todo_action=create`，系统优先恢复原创建草稿并重新进入 `need_confirm`。
+7. 确认文案与展示层只消费 canonical 槽位，不再把 UI 文案耦合进状态机决策。
+8. 当前对外聊天 API 与 SSE 主协议保持不变，结构收敛集中在 AI 内部状态、handoff 协议和确认链路。
 
-
-### 9. 实现进展（2026-02-08）
-
-已完成首批代码接入，保持外部 API 不变（`/api/v1/chat/stream` 入参与响应结构不变）：
-
-1. **会话意图内核落地**：新增 `app/ai/workflow/session_intent_kernel.py`，统一提供 `TurnActClassifier`、`SessionFrameReducer`、`Clarification FSM` 基础能力。
-2. **Handoff 协议兼容扩展**：`HandoffResult` 新增可选字段 `frame`、`turn_act_hint`，保留 `task_description` 兼容旧链路。
-3. **Supervisor 透传结构化上下文**：`multi_agent_graph` handoff 工具可携带 `frame/turn_act_hint`，减少专家侧纯文本解析损耗。
-4. **问数 Agent 接入 V2 内核**：`data_graph.analyze_data_intent` 已接入 `turn_act + session_frame + frame_source_map + clarify_fsm_state + clarify_round`，并将 handoff frame 纳入基线判定。
-5. **待办 Agent 接入与收敛**：`todo_graph.analyze_intent` 已接入同一内核，并清理重复定义，统一补充轮合并与澄清状态推进。
-6. **Handoff 预提取增强**：`todo_intent_helpers.filter_messages_for_todo` 优先消费 `pending_handoff.frame`，`task_description` 仅作为回退。
-7. **测试状态**：`tests/unit/test_todo_nodes.py`（含补充轮收敛用例）通过；`data_graph` 相关用例在当前环境受 `vanna.base` 依赖缺失影响，已通过语法编译和代码审查校验。
-
-
-### 10. 待办确认补充语义收敛（2026-02-18）
-
-本次针对“确认后补充答非所问”问题，新增以下收敛约束：
-
-1. **状态契约统一**：`response_message` 纳入全局 `TodoAgentState`，避免 `analyze -> clarify` 链路字段丢失。
-2. **缺项字段严格契约**：`missing_info` 在模型输出与内部状态中仅允许 `todo_target/time_range/todo_action`，非法值直接丢弃并记录日志。
-3. **取消后补充恢复**：当最近轮次存在“创建待办确认 -> 取消”后，用户发送补充语义时，优先尝试恢复最近创建草稿并回到 `need_confirm`，而非误转 `update + target_todo` 追问。
-4. **确认话术对齐执行语义**：创建确认文案明确“补充请直接说，放弃请回复取消”，避免“拒绝=补充”的语义冲突。
-5. **缺项槽位分层**：保留 `canonical slot` 归一层与用户展示层，状态机仅消费 canonical，展示文案统一由映射函数输出，避免业务逻辑和 UI 文案耦合。
-
-对应实现入口：
-- `app/ai/state.py`
+当前核心实现入口：
+- `app/ai/workflow/session_intent_kernel.py`
+- `app/ai/workflow/multi_agent_graph.py`
+- `app/ai/workflow/data_graph.py`
 - `app/ai/workflow/todo_graph.py`
 - `app/ai/prompts/todo_prompts.py`

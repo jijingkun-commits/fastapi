@@ -61,6 +61,8 @@ if [[ -z "${CHANGED_FILES//$'\n'/}" ]]; then
     exit 0
 fi
 
+PYTHON_BIN="$(bash scripts/repo_python.sh)"
+
 CHANGED_CODE="$(printf '%s\n' "$CHANGED_FILES" | grep -E '^(app/|web/src/|\.cursor/commands/|\.env|install/|scripts/)' || true)"
 CHANGED_DOCS="$(printf '%s\n' "$CHANGED_FILES" | grep -E '^docs/' || true)"
 
@@ -157,10 +159,22 @@ else
 fi
 
 # 特殊处理（防屎山）强制同步检查：命中已登记文件时必须更新手册
+CURRENT_STATE_DOCS="$(printf '%s\n' "$CHANGED_DOCS" | grep -E '^(docs/产品文档/|docs/开发文档/架构设计/|docs/API文档/)' | grep -v '^docs/开发文档/架构设计/防屎山记录手册\.md$' || true)"
+if [[ -n "${CURRENT_STATE_DOCS//$'\n'/}" ]]; then
+    CURRENT_STATE_DOC_ARRAY=()
+    while IFS= read -r doc_path; do
+        [[ -z "$doc_path" ]] && continue
+        CURRENT_STATE_DOC_ARRAY+=("$doc_path")
+    done <<EOF
+$CURRENT_STATE_DOCS
+EOF
+    "$PYTHON_BIN" scripts/docs_guard.py --strict --paths "${CURRENT_STATE_DOC_ARRAY[@]}"
+fi
+
 if [[ "$MODE" == "cached" ]]; then
-    python3 scripts/check_special_doc_sync.py --cached --strict
+    "$PYTHON_BIN" scripts/check_special_doc_sync.py --cached --strict
 else
-    python3 scripts/check_special_doc_sync.py --diff-range "$DIFF_RANGE" --strict
+    "$PYTHON_BIN" scripts/check_special_doc_sync.py --diff-range "$DIFF_RANGE" --strict
 fi
 
 exit 0

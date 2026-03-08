@@ -2,7 +2,7 @@
 
 > 文档版本：v1.0  
 > 更新时间：2026-03-08  
-> 设计状态：`pending_approval`
+> 设计状态：`approved`
 
 ## 0. 结论先行
 
@@ -46,6 +46,12 @@
   - 触达过的高污染主文档完成同位融合，读者无需翻到文末找“最新补充”。
 
 ## 2. product_contract
+
+- target_users: 仓库主维护者；需求/实现代理；review 与验收人员
+- core_scenarios: 新功能上线直接更新主文档原章节；架构调整只在过程文档记录推导；review 阶段阻断只改过程文档；触达存量污染主文档时执行同位融合
+- business_goals: current_state_doc_incremental_heading_count=0；current_state_doc_timestamp_coverage=100%；doc_sync_escape_count=0；reader_latest_path_length<=1
+- non_goals: 不一次性重写所有历史文档；不废弃过程文档体系；不把历史型文档强行纳入主文档治理
+- acceptance_gates: DSG-AC-01；DSG-AC-02；DSG-AC-03；DSG-AC-04；DSG-AC-05；DSG-AC-06
 
 ### 2.1 target_users
 
@@ -399,4 +405,22 @@ execution_notes:
   degrade_reason: ""
   alternative_tool: ""
   verification: "repo scan + docs_guard + spot review"
+```
+
+## 13. 审批记录
+
+- design_approved: true
+- approved_at: "2026-03-08 14:00 CST"
+- approved_round: "round-1"
+- approval_evidence: "用户明确回复‘确认’"
+- approval_mode: approved
+- go_no_go: GO
+
+```yaml
+design_approved: true
+approved_at: "2026-03-08 14:00 CST"
+approved_round: "round-1"
+approval_evidence: "用户明确回复‘确认’"
+approval_mode: approved
+go_no_go: GO
 ```

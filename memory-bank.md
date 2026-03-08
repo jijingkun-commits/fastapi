@@ -33,6 +33,8 @@
 - 2026-03-08｜Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
 - 2026-03-08｜编排层禁止硬编码语义关键词词表（ACTIVE）→ `AGENTS.md`
+- 2026-03-08｜主文档只表达当前态，过程文档只承载历史与证据（ACTIVE）→ `docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`
+
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -352,3 +354,13 @@
 - 影响范围：`AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`scripts/ci/check_lean_budget.py`、工作流/速查文档
 - 回退/失效条件：若未来热点目录和阈值有统一配置中心，可将脚本内阈值迁移到配置文件；在此之前保持脚本单一真理源
 - 关联文档/代码：`docs/工程规范/lean-guard.md`、`scripts/ci/check_lean_budget.py`
+
+### 2026-03-08 文档单一真相源与动态融合治理
+- 状态：ACTIVE
+- 决策主题：主文档动态融合治理口径冻结
+- 背景与问题：当前产品文档、架构文档持续通过“增量需求 / 实现进展 / 日期补充”承载新事实，导致当前态与历史过程混杂，review 与执行链无法稳定判断哪份文档才是最新口径
+- 最终决策：主文档只表达当前态；设计、实施、审批与风险证据只保留在 `docs/plans/` 与 `docs/内部参考/迭代需求/`；一旦触达主文档，必须把旧增量内容吸收进原章节并删除旧堆叠段
+- 取舍理由：项目未上线，优先保证长期设计合理性与单一真相源，而不是保留看似方便的历史追加写法
+- 影响范围：`docs/产品文档/*`、`docs/开发文档/架构设计/*`、`docs/API文档/*`、`.cursor/rules/doc_sync.mdc`、`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`
+- 回退/失效条件：仅允许通过受控 allowlist 针对存量历史债务短时放行；若未来统一文档平台内建角色化治理，可由平台规则替代当前仓内脚本
+- 关联文档/代码：`docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`、`docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md`、`docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md`
