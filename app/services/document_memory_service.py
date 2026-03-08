@@ -1058,6 +1058,42 @@ def _persist_canonical_document_no_commit(
     if resolved_slot_key is None and normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND:
         resolved_slot_key = resolved_doc_key
 
+    normalized_operation = str(operation or "upsert").strip().lower() or "upsert"
+    if normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND and normalized_operation == "archive":
+        archived_slot_key = resolved_slot_key or resolved_doc_key
+        if not archived_slot_key:
+            logger.warning(
+                "flush_canonical_memory archive 缺少 slot_key: user_id=%s, doc_kind=%s",
+                user_id,
+                normalized_doc_kind,
+            )
+            return 0
+
+        current = document_memory_repo.get_active_slot(
+            db,
+            user_id=user_id,
+            slot_key=archived_slot_key,
+            doc_kind=normalized_doc_kind,
+            source=source,
+            for_update=True,
+        )
+        if current is None:
+            logger.info(
+                "flush_canonical_memory archive 命中空槽位，跳过: user_id=%s, slot_key=%s",
+                user_id,
+                archived_slot_key,
+            )
+            return 0
+
+        archived = document_memory_repo.archive_slot(
+            db,
+            doc_id=int(current.id),
+            user_id=user_id,
+            event_time=resolved_event_time,
+            operation="archive",
+        )
+        return 1 if archived.get("found") else 0
+
     resolved_scope_ref = scope_ref
     if normalized_doc_kind == "daily":
         resolved_title = f"记忆日记 {resolved_doc_key}"

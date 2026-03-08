@@ -619,3 +619,76 @@ def test_flush_canonical_memory_atomic_batch_should_persist_all_memories(monkeyp
     assert len(captured["replace"]) == 2
     assert decision_contract["audit"]["memories_count"] == 2
     assert decision_contract["audit"]["rejected_items_count"] == 0
+
+
+def test_flush_canonical_memory_archive_should_archive_active_slot_instead_of_upsert(monkeypatch):
+    """archive 操作应真正归档活跃槽位，而不是继续写成 active 文档。"""
+
+    captured = {"archive_calls": [], "upsert_called": False, "replace_called": False}
+
+    class _CurrentDocument:
+        id = 41
+        revision = 3
+        last_event_time = datetime(2026, 3, 8, 10, 0, 0)
+
+    monkeypatch.setattr(
+        memory_service.document_memory_repo,
+        "get_active_slot",
+        lambda *args, **kwargs: _CurrentDocument(),
+    )
+
+    def _fake_archive_slot(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["archive_calls"].append(kwargs)
+        return {
+            "found": True,
+            "changed": True,
+            "status": "archived",
+            "revision": 3,
+            "last_event_time": kwargs["event_time"],
+            "operation": "archive",
+        }
+
+    def _unexpected_upsert(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["upsert_called"] = True
+        raise AssertionError("archive 不应走 upsert_document")
+
+    def _unexpected_replace(*args, **kwargs):  # noqa: ANN001, ARG001
+        captured["replace_called"] = True
+        raise AssertionError("archive 不应重建 chunks")
+
+    monkeypatch.setattr(memory_service.document_memory_repo, "archive_slot", _fake_archive_slot)
+    monkeypatch.setattr(memory_service.document_memory_repo, "upsert_document", _unexpected_upsert)
+    monkeypatch.setattr(memory_service.document_memory_repo, "replace_document_chunks", _unexpected_replace)
+
+    session = _DummySession()
+    count = memory_service.flush_canonical_memory(
+        session,
+        user_id=9,
+        source_thread_id="thread-archive",
+        source_message_id=2002,
+        decision_contract={
+            "decision": "accept",
+            "reason_code": "accepted",
+            "confidence": 0.91,
+            "memories": [
+                {
+                    "memory_kind": "response_preference",
+                    "operation": "archive",
+                    "slot_key": "user.preference.response_structure",
+                    "normalized_value": "detailed_zong_fen_zong_paragraphs",
+                    "canonical_text": "用户不再偏好总分总结构回答",
+                    "evidence_span": "忘记我的总分总回复风格",
+                }
+            ],
+            "audit": {"detector": "llm_primary", "decision_id": "decision-2002"},
+        },
+    )
+
+    assert count == 1
+    assert session.commit_called is True
+    assert captured["upsert_called"] is False
+    assert captured["replace_called"] is False
+    assert len(captured["archive_calls"]) == 1
+    assert captured["archive_calls"][0]["doc_id"] == 41
+    assert captured["archive_calls"][0]["user_id"] == 9
+    assert captured["archive_calls"][0]["operation"] == "archive"
