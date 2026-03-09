@@ -9,7 +9,7 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded, sendMessageAndWait } = require('./helpers/auth-helper');
+const { loginAndOpenThread, sendMessageAndWait } = require('./helpers/auth-helper');
 
 // 辅助函数: 发送消息并等待回复
 async function sendMessage(page, message) {
@@ -26,8 +26,8 @@ async function getLatestAIMessage(page) {
 
 
 test.describe('Todo Agent 多轮对话测试', () => {
-    test.beforeEach(async ({ page }) => {
-        await loginIfNeeded(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await loginAndOpenThread(page, testInfo.title);
     });
 
     test('Phase 1: 时间解析 - 下周二', async ({ page }) => {
@@ -100,8 +100,8 @@ test.describe('Todo Agent 多轮对话测试', () => {
 });
 
 test.describe('端到端完整流程', () => {
-    test.beforeEach(async ({ page }) => {
-        await loginIfNeeded(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await loginAndOpenThread(page, testInfo.title);
     });
 
     test('完整多轮对话模拟', async ({ page }) => {
@@ -127,8 +127,8 @@ test.describe('端到端完整流程', () => {
 
 // 🆕 新增测试 - 覆盖原测试案例的 Round 4/9/10
 test.describe('复杂场景测试 - Round 4/9/10', () => {
-    test.beforeEach(async ({ page }) => {
-        await loginIfNeeded(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await loginAndOpenThread(page, testInfo.title);
     });
 
     test('Round 4: 任务拆解 - 复合任务识别', async ({ page }) => {
@@ -163,7 +163,6 @@ test.describe('复杂场景测试 - Round 4/9/10', () => {
     test('Round 10: 结构化输出 - 待办清单生成', async ({ page }) => {
         // 先创建一些待办
         await sendMessage(page, '帮我创建一个高优先级任务: 准备项目汇报');
-        await page.waitForTimeout(1000);
 
         // 请求清单
         await sendMessage(page, '按优先级给我待办清单');

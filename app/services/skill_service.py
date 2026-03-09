@@ -93,6 +93,12 @@ class SkillService:
         "default_version": DEFAULT_VERSION,
         "skills": [],
     }
+    SKILL_TOOL_CONTRACT_DEFAULT = {
+        "required_tools": [],
+        "optional_tools": [],
+        "tool_groups": [],
+        "expose_after_load": True,
+    }
     LOCAL_SKILL_FILE_SOURCE_RETIRED_MESSAGE = "本地 SKILL.md / skills 目录导入链已退役；技能定义与版本请直接维护数据库真理源。"
 
     @classmethod
@@ -697,6 +703,7 @@ class SkillService:
             ).first()
             initial_status = cls.VERSION_STATUS_PUBLISHED if existing_published is None else cls.VERSION_STATUS_DRAFT
             published_at = datetime.now(timezone.utc) if initial_status == cls.VERSION_STATUS_PUBLISHED else None
+            tool_contract = cls._normalize_tool_contract(None)
 
             version_record = AgentSkillVersion(
                 definition_id=definition.id,
@@ -716,6 +723,7 @@ class SkillService:
                 conflicts_with=normalized_conflicts_with,
                 catalog_description=catalog_description,
                 when_to_use=when_to_use,
+                tool_contract=tool_contract,
                 published_at=published_at,
             )
             db.add(version_record)
@@ -762,6 +770,11 @@ class SkillService:
             changed = True
         if version_record.when_to_use != when_to_use:
             version_record.when_to_use = when_to_use
+            changed = True
+        current_tool_contract = getattr(version_record, 'tool_contract', None)
+        normalized_tool_contract = cls._normalize_tool_contract(current_tool_contract)
+        if current_tool_contract != normalized_tool_contract:
+            version_record.tool_contract = normalized_tool_contract
             changed = True
 
         published_record = db.execute(
@@ -902,6 +915,7 @@ class SkillService:
                 "auto_enabled": bool(item.auto_enabled),
                 "priority": int(item.priority or cls.DEFAULT_PRIORITY),
                 "scope": item.scope or cls.DEFAULT_SCOPE,
+                "tool_contract": cls._normalize_tool_contract(getattr(item, 'tool_contract', None)),
                 "published_at": item.published_at.isoformat() if item.published_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             }
@@ -2648,6 +2662,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                     v.conflicts_with,
                     v.catalog_description,
                     v.when_to_use,
+                    v.tool_contract,
                     v.status,
                     v.published_at,
                     v.updated_at,
@@ -2694,6 +2709,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                     v.conflicts_with,
                     v.catalog_description,
                     v.when_to_use,
+                    v.tool_contract,
                     CASE
                         WHEN jsonb_typeof(b.config_override -> 'scope') = 'string'
                         THEN lower(trim(both '"' from (b.config_override -> 'scope')::text))
@@ -2760,7 +2776,8 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                     NULLIF(bv.description, ''),
                     NULLIF(pv.description, ''),
                     NULLIF(d.description, '')
-                ) AS when_to_use
+                ) AS when_to_use,
+                COALESCE(bv.tool_contract, pv.tool_contract, '{}'::jsonb) AS tool_contract
             FROM t_agent_skill_definitions d
             LEFT JOIN published_versions pv
               ON pv.skill_id = d.skill_id
@@ -2859,6 +2876,123 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
             return int(default)
 
     @classmethod
+    def _normalize_tool_tokens(cls, raw_value: Any) -> List[str]:
+        """标准化工具 token 列表。"""
+
+        if raw_value is None:
+            return []
+        if isinstance(raw_value, str):
+            candidates = [raw_value]
+        elif isinstance(raw_value, list):
+            candidates = raw_value
+        else:
+            return []
+
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            token = str(item or '').strip().lower()
+            if not token or token in seen:
+                continue
+            normalized.append(token)
+            seen.add(token)
+        return normalized
+
+    @classmethod
+    def _normalize_tool_contract(cls, raw_value: Any) -> Dict[str, Any]:
+        """标准化 version 级工具授权契约。"""
+
+        payload: Dict[str, Any]
+        if raw_value is None:
+            payload = {}
+        elif isinstance(raw_value, dict):
+            payload = dict(raw_value)
+        elif isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except Exception:
+                parsed = {}
+            payload = dict(parsed) if isinstance(parsed, dict) else {}
+        else:
+            payload = {}
+
+        required_tools = cls._normalize_tool_tokens(payload.get('required_tools'))
+        optional_tools = [
+            token for token in cls._normalize_tool_tokens(payload.get('optional_tools'))
+            if token not in required_tools
+        ]
+        tool_groups = cls._normalize_tool_tokens(payload.get('tool_groups'))
+        expose_after_load_raw = payload.get('expose_after_load')
+        expose_after_load = True if expose_after_load_raw is None else bool(expose_after_load_raw)
+
+        return {
+            'required_tools': required_tools,
+            'optional_tools': optional_tools,
+            'tool_groups': tool_groups,
+            'expose_after_load': expose_after_load,
+        }
+
+    @classmethod
+    def _build_allowed_tool_registry_payload(
+        cls,
+        db: Session,
+        loaded_skill_registry: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """根据已加载 skill registry 派生当前会话允许的领域工具。"""
+
+        if not loaded_skill_registry:
+            return {}
+
+        requested_versions = {
+            str(skill_id): str((payload or {}).get('version') or cls.DEFAULT_VERSION)
+            for skill_id, payload in loaded_skill_registry.items()
+            if str(skill_id or '').strip()
+        }
+        version_map = cls._load_version_records(db, requested_versions)
+        allowed_tool_registry: Dict[str, Dict[str, Any]] = {}
+
+        for skill_id, version in requested_versions.items():
+            record = version_map.get((skill_id, version))
+            if record is None:
+                continue
+            tool_contract = cls._normalize_tool_contract(getattr(record, 'tool_contract', None))
+            contract_tools = tool_contract['required_tools'] + tool_contract['optional_tools']
+            for tool_name in contract_tools:
+                entry = allowed_tool_registry.setdefault(
+                    tool_name,
+                    {
+                        'tool_name': tool_name,
+                        'skill_ids': [],
+                        'versions': [],
+                        'tool_groups': list(tool_contract['tool_groups']),
+                    },
+                )
+                if skill_id not in entry['skill_ids']:
+                    entry['skill_ids'].append(skill_id)
+                if version not in entry['versions']:
+                    entry['versions'].append(version)
+                merged_groups = list(entry.get('tool_groups') or [])
+                for group in tool_contract['tool_groups']:
+                    if group not in merged_groups:
+                        merged_groups.append(group)
+                entry['tool_groups'] = merged_groups
+
+        return allowed_tool_registry
+
+    @classmethod
+    def build_allowed_tool_registry_from_loaded_registry(
+        cls,
+        loaded_skill_registry: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """从已加载 skill registry 回源重建允许的领域工具列表。"""
+
+        if not loaded_skill_registry:
+            return {}
+
+        with get_db_context() as db:
+            return cls._build_allowed_tool_registry_payload(db, loaded_skill_registry)
+
+    @classmethod
     def _list_definition_runtime_rows(
         cls,
         db: Session,
@@ -2933,6 +3067,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
         priority_default = int(getattr(row, 'priority', cls.DEFAULT_PRIORITY) or cls.DEFAULT_PRIORITY)
         catalog_path = cls._normalize_catalog_path(skill_id, getattr(row, 'catalog_path', None))
         catalog_order = cls._normalize_catalog_order(getattr(row, 'catalog_order', None), default=priority_default)
+        tool_contract = cls._normalize_tool_contract(getattr(row, 'tool_contract', None))
 
         return {
             'skill_id': skill_id,
@@ -2944,6 +3079,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
             'catalog_order': catalog_order,
             'scope': str(getattr(row, 'scope', None) or cls.DEFAULT_SCOPE),
             'binding_status': getattr(row, 'binding_status', None),
+            'tool_contract': tool_contract,
             'description_source': description_source,
             'description_length': len(raw_catalog_description),
         }
@@ -2960,6 +3096,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                 'catalog_order': item.get('catalog_order'),
                 'description': item.get('description'),
                 'when_to_use': item.get('when_to_use'),
+                'tool_contract': item.get('tool_contract'),
             }
             for item in manifest
         ]
@@ -3233,6 +3370,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                 'errors': errors,
                 'truncated_count': 0,
                 'loaded_skill_registry': existing_registry,
+                'allowed_tool_registry': cls.build_allowed_tool_registry_from_loaded_registry(existing_registry),
                 'loaded_skill_context': None,
                 'catalog_version': validation['catalog_version'],
                 'visible_skill_count': validation['visible_skill_count'],
@@ -3293,6 +3431,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
                 })
 
             context_payload = cls._build_loaded_skill_context_payload(db, updated_registry)
+            allowed_tool_registry = cls._build_allowed_tool_registry_payload(db, updated_registry)
 
         return {
             'requested_skill_ids': validation['normalized_skill_ids'],
@@ -3300,6 +3439,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
             'errors': errors,
             'truncated_count': 0,
             'loaded_skill_registry': updated_registry,
+            'allowed_tool_registry': allowed_tool_registry,
             'loaded_skill_context': context_payload['loaded_skill_context'],
             'catalog_version': validation['catalog_version'],
             'visible_skill_count': validation['visible_skill_count'],
@@ -3336,6 +3476,7 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
             'conflicts_with',
             'catalog_description',
             'when_to_use',
+            'tool_contract',
         }
         if target_version is None and version_scoped_fields.intersection(updates.keys()):
             raise ValueError('技能缺少可写版本记录，无法更新版本级 metadata')
@@ -3378,6 +3519,9 @@ cls, db: Session, user_id: int, skill_id: str) -> Dict[str, Any]:
             if 'when_to_use' in updates:
                 target_version.when_to_use = cls._clean_catalog_text(updates['when_to_use'], 160) or None
                 updated_fields.append('when_to_use')
+            if 'tool_contract' in updates:
+                target_version.tool_contract = cls._normalize_tool_contract(updates['tool_contract'])
+                updated_fields.append('tool_contract')
 
         db.commit()
         return {

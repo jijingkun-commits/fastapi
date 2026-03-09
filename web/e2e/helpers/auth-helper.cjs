@@ -1,20 +1,58 @@
 const { expect } = require('@playwright/test');
 
 const DEFAULT_USERNAME = 'jjk';
-const DEFAULT_API_BASE = process.env.E2E_API_BASE || 'http://127.0.0.1:8000';
+const CHAT_INPUT_SELECTOR = '[data-testid="chat-input"]';
+const CHAT_INPUT_CONTAINER_SELECTOR = '[data-testid="chat-input-container"]';
 
-/**
- * 通过后端 API 直接登录，并将 token 写入 sessionStorage。
- * 适用于 UI 登录不稳定或重定向异常时的兜底。
- */
+function resolveApiBase(apiBase = '') {
+    const value = String(apiBase || process.env.E2E_API_BASE || process.env.VK_BACKEND_BASE_URL || '').trim();
+    if (!value) {
+        throw new Error('缺少 E2E_API_BASE / VK_BACKEND_BASE_URL，无法执行 API 登录');
+    }
+    return value;
+}
+
+function normalizeThreadLabel(label = 'e2e') {
+    return String(label || 'e2e')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48) || 'e2e';
+}
+
+function buildE2EThreadId(label = 'e2e') {
+    return `${normalizeThreadLabel(label)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function seedAuthToken(page, token) {
+    if (!token) return;
+
+    await page.addInitScript((value) => {
+        try {
+            window.sessionStorage.setItem('auth:token', value);
+        } catch {}
+    }, token);
+}
+
+async function writeSessionToken(page, token) {
+    if (!token) return;
+
+    await page.evaluate((value) => {
+        try {
+            window.sessionStorage.setItem('auth:token', value);
+        } catch {}
+    }, token).catch(() => undefined);
+}
+
 async function loginViaApi(page, options = {}) {
     const {
         username = DEFAULT_USERNAME,
         password = '',
-        apiBase = DEFAULT_API_BASE,
+        apiBase = '',
     } = options;
+    const targetApiBase = resolveApiBase(apiBase);
 
-    const response = await page.request.post(`${apiBase}/api/v1/login`, {
+    const response = await page.request.post(`${targetApiBase}/api/v1/login`, {
         data: { username, password },
     });
 
@@ -30,165 +68,71 @@ async function loginViaApi(page, options = {}) {
         throw new Error('API 登录成功但未返回 access_token');
     }
 
-    await page.addInitScript((value) => {
-        window.sessionStorage.setItem('auth:token', value);
-    }, token);
-
-    await page.goto('/chat', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
-    await page.evaluate((value) => {
-        window.sessionStorage.setItem('auth:token', value);
-    }, token).catch(() => undefined);
-
     return token;
 }
 
-/**
- * 确保登录并进入聊天页。
- * 策略：
- * 1) 先尝试直接访问 /chat（若已有会话可直接通过）
- * 2) 尝试 UI 登录
- * 3) UI 登录失败则回退 API 登录
- */
-async function loginIfNeeded(page, options = {}) {
-    const {
-        username = DEFAULT_USERNAME,
-        password = '',
-        forceApi = false,
-        apiBase = DEFAULT_API_BASE,
-    } = options;
-
-    const chatInput = page.locator('[data-testid="chat-input"]');
-    const identifierInput = page.locator('input#identifier, input[placeholder*="用户名"]');
-
-    await page.goto('/chat');
-    await page.waitForLoadState('domcontentloaded');
-
-    if (await chatInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-        return;
-    }
-
-    // 尝试 UI 登录
-    if (!forceApi) {
-        const isAuthPage = page.url().includes('/auth') || await identifierInput.isVisible({ timeout: 3000 }).catch(() => false);
-
-        if (isAuthPage) {
-            await expect(identifierInput).toBeVisible({ timeout: 10000 });
-            await identifierInput.fill(username);
-
-            const passwordInput = page.locator('input#password, input[type="password"]');
-            if (await passwordInput.isVisible().catch(() => false)) {
-                await passwordInput.fill(password);
-            }
-
-            await page.getByRole('button', { name: '登录' }).click();
-
-            await Promise.race([
-                page.waitForURL('**/chat**', { timeout: 15000 }),
-                chatInput.waitFor({ state: 'visible', timeout: 15000 }),
-            ]).catch(() => undefined);
-        }
-    }
-
-    // UI 登录仍失败时，回退 API 登录
-    if (!await chatInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-        console.log('UI 登录未就绪，回退 API 登录...');
-        await loginViaApi(page, { username, password, apiBase });
-    }
-
-    await page.goto('/chat', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
-    await expect(chatInput).toBeVisible({ timeout: 30000 });
+async function loginAndGoto(page, targetPath = '/chat', options = {}) {
+    const token = await loginViaApi(page, options);
+    await seedAuthToken(page, token);
+    await page.goto(targetPath, { waitUntil: 'domcontentloaded' });
+    await writeSessionToken(page, token);
+    return token;
 }
+
 
 async function ensureChatReady(page) {
-    await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30000 });
+    await expect(page.locator(CHAT_INPUT_SELECTOR)).toBeVisible({ timeout: 30000 });
 }
 
-/**
- * 等待聊天输入框可用（非 streaming，非 waiting-confirm）
- * 检测 data-chat-state 属性：
- * - idle: 空闲，可以输入
- * - streaming: AI 正在响应
- * - waiting-confirm: 等待用户确认
- *
- * @param {import('@playwright/test').Page} page
- * @param {number} timeout 超时时间（毫秒），默认 60 秒
- */
 async function waitForChatReady(page, timeout = 60000) {
-    // 等待 chat-input-container 可见
-    await page.waitForSelector('[data-testid="chat-input-container"]', { state: 'visible', timeout: 10000 });
-
-    // 等待状态变为 idle
-    await page.waitForSelector('[data-testid="chat-input-container"][data-chat-state="idle"]', { timeout });
-
-    // 额外等待确保 UI 稳定
-    await page.waitForTimeout(500);
+    const container = page.locator(CHAT_INPUT_CONTAINER_SELECTOR);
+    await expect(container).toBeVisible({ timeout });
+    await expect(container).toHaveAttribute('data-chat-state', 'idle', { timeout });
 }
 
-/**
- * 等待 AI 响应完成（包括处理确认卡片）
- * 如果出现确认卡片，自动点击"确认"按钮
- *
- * @param {import('@playwright/test').Page} page
- * @param {number} timeout 超时时间（毫秒），默认 60 秒
- * @param {boolean} autoConfirm 是否自动确认，默认 true
- */
 async function waitForAIResponse(page, timeout = 60000, autoConfirm = true) {
-    const startTime = Date.now();
+    const container = page.locator(CHAT_INPUT_CONTAINER_SELECTOR);
 
-    while (Date.now() - startTime < timeout) {
-        const container = page.locator('[data-testid="chat-input-container"]');
+    await expect.poll(async () => {
         const state = await container.getAttribute('data-chat-state');
 
-        if (state === 'idle') {
-            // AI 响应完成，可以继续
-            await page.waitForTimeout(500);
-            return;
-        }
-
         if (state === 'waiting-confirm' && autoConfirm) {
-            // 出现确认卡片，使用 data-testid 选择器点击确认按钮
             const confirmBtn = page.locator('[data-testid="confirm-button"]');
-            if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-                // 等待按钮可点击（非 disabled）
-                const isDisabled = await confirmBtn.isDisabled().catch(() => true);
-                if (!isDisabled) {
-                    console.log('检测到确认卡片，点击确认');
-                    await confirmBtn.click();
-                    await page.waitForTimeout(1000);
-                    continue;
-                }
+            const visible = await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false);
+            const disabled = await confirmBtn.isDisabled().catch(() => true);
+            if (visible && !disabled) {
+                console.log('检测到确认卡片，点击确认');
+                await confirmBtn.click();
             }
         }
 
-        // 继续等待
-        await page.waitForTimeout(1000);
-    }
-
-    throw new Error(`等待 AI 响应超时 (${timeout}ms)`);
+        return await container.getAttribute('data-chat-state');
+    }, {
+        timeout,
+        intervals: [250, 500, 1000],
+    }).toBe('idle');
 }
 
-/**
- * 发送消息并等待 AI 响应完成
- * @param {import('@playwright/test').Page} page
- * @param {string} message 要发送的消息
- * @param {number} timeout 等待响应的超时时间
- * @param {boolean} autoConfirm 是否自动确认待办操作，默认 true
- */
 async function sendMessageAndWait(page, message, timeout = 60000, autoConfirm = true) {
-    // 1. 等待输入框可用
     await waitForChatReady(page, 30000);
-
-    // 2. 填写消息并发送
     await page.fill('textarea[data-testid="chat-input"]', message);
     await page.keyboard.press('Enter');
-
-    // 3. 等待 AI 响应完成（包括自动确认）
     await waitForAIResponse(page, timeout, autoConfirm);
 }
 
+async function loginAndOpenThread(page, label = 'e2e', options = {}, timeout = 60000) {
+    const threadId = buildE2EThreadId(label);
+    await loginAndGoto(page, `/chat?threadId=${encodeURIComponent(threadId)}`, options);
+    await waitForChatReady(page, timeout);
+    return threadId;
+}
+
 module.exports = {
-    loginIfNeeded,
+    buildE2EThreadId,
+    resolveApiBase,
     loginViaApi,
+    loginAndGoto,
+    loginAndOpenThread,
     ensureChatReady,
     waitForChatReady,
     waitForAIResponse,

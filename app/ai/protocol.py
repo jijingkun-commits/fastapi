@@ -95,6 +95,7 @@ class SkillRuntimeAdditionalKwargsPayload(TypedDict):
     catalog_version: str
     visible_skill_count: int
     loaded_skills: List[SkillRuntimeLoadedSkillPayload]
+    allowed_tools: List[str]
     replay_source: str
 
 
@@ -125,11 +126,29 @@ def _normalize_skill_runtime_loaded_skills(loaded_skills: Any) -> List[SkillRunt
     return normalized
 
 
+def _normalize_skill_runtime_allowed_tools(allowed_tools: Any) -> List[str]:
+    """标准化 skill_runtime.allowed_tools 列表。"""
+
+    if not isinstance(allowed_tools, list):
+        return []
+
+    normalized: List[str] = []
+    seen: Set[str] = set()
+    for item in allowed_tools:
+        tool_name = str(item or '').strip().lower()
+        if not tool_name or tool_name in seen:
+            continue
+        normalized.append(tool_name)
+        seen.add(tool_name)
+    return normalized
+
+
 def build_skill_runtime_additional_kwargs_payload(
     runtime_mode: Any,
     catalog_version: Any,
     visible_skill_count: Any,
     loaded_skills: Any,
+    allowed_tools: Any,
     replay_source: Any,
 ) -> Optional[SkillRuntimeAdditionalKwargsPayload]:
     """构建 skill_runtime canonical additional_kwargs 载荷。"""
@@ -153,6 +172,7 @@ def build_skill_runtime_additional_kwargs_payload(
         "catalog_version": normalized_catalog_version,
         "visible_skill_count": normalized_visible_skill_count,
         "loaded_skills": _normalize_skill_runtime_loaded_skills(loaded_skills),
+        "allowed_tools": _normalize_skill_runtime_allowed_tools(allowed_tools),
         "replay_source": normalized_replay_source,
     }
 
@@ -170,6 +190,7 @@ def normalize_skill_runtime_additional_kwargs(additional_kwargs: Any) -> Dict[st
         catalog_version=runtime_payload.get("catalog_version"),
         visible_skill_count=runtime_payload.get("visible_skill_count"),
         loaded_skills=runtime_payload.get("loaded_skills"),
+        allowed_tools=runtime_payload.get("allowed_tools"),
         replay_source=runtime_payload.get("replay_source"),
     )
     if canonical_payload is not None:

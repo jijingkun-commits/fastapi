@@ -79,8 +79,9 @@ Agent 会根据用户 Query 的语义相似度自动挂载相关技能。
 
 - 首轮预装：`preprocess` 按当前用户可见范围构建 `skill_catalog_manifest / skill_catalog_context`
 - 会话累积：模型通过 `load_skills` 显式加载正文，状态统一沉淀到 `loaded_skill_registry / loaded_skill_context`
-- 回放 canonical：最终 AIMessage 统一写 `additional_kwargs.skill_runtime`，字段至少包含 `runtime_mode / catalog_version / visible_skill_count / loaded_skills / replay_source`
-- 元数据字段：`catalog_path / catalog_order` 属于 definition 层；`catalog_description / when_to_use` 属于 version 层
+- 工具授权：领域工具不再以全局直出为主路径；运行时以已加载 skill 的 version contract 派生 `allowed_tool_registry`，遵循“先加载 skill，再开放工具”，未授权工具既不进入当前轮模型可见工具集，也会在执行层被统一拒绝
+- 回放 canonical：最终 AIMessage 统一写 `additional_kwargs.skill_runtime`，字段至少包含 `runtime_mode / catalog_version / visible_skill_count / loaded_skills / allowed_tools / replay_source`
+- 元数据字段：`catalog_path / catalog_order` 属于 definition 层；`catalog_description / when_to_use / tool_contract` 属于 version 层
 
 ---
 

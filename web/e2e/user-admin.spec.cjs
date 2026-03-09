@@ -8,6 +8,7 @@
  */
 
 const { test, expect } = require('@playwright/test');
+const { loginAndGoto } = require('./helpers/auth-helper');
 
 // 测试配置
 const ADMIN_USERNAME = 'jjk';  // 登录用账号（jjk 拥有管理员权限）
@@ -21,19 +22,7 @@ const toastLocator = (page, text) => {
 
 // 登录辅助函数
 async function loginAsAdmin(page) {
-    await page.goto('/auth');
-    await page.waitForLoadState('networkidle');
-    
-    // 如果已经登录（不在 auth 页面），直接返回
-    if (!page.url().includes('/auth')) {
-        return;
-    }
-    
-    await page.fill('#identifier', ADMIN_USERNAME);
-    await page.click('button[type="submit"]');
-    
-    // 等待登录成功 - 离开 /auth 页面
-    await page.waitForFunction(() => !window.location.pathname.includes('/auth'), { timeout: 15000 });
+    await loginAndGoto(page, '/admin/users', { username: ADMIN_USERNAME });
 }
 
 test.describe('用户管理模块', () => {
@@ -44,21 +33,19 @@ test.describe('用户管理模块', () => {
 
     test.describe('TC-USER-01: 用户列表', () => {
         test('应该正确显示用户列表页面', async ({ page }) => {
-            await page.goto('/admin/users');
             
             // 验证页面标题
             await expect(page.getByText('用户管理')).toBeVisible();
             await expect(page.getByText('管理系统用户账户')).toBeVisible();
             
             // 验证表格列头
-            await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
+            await expect(page.getByRole('columnheader', { name: '编号' })).toBeVisible();
             await expect(page.getByRole('columnheader', { name: '用户名' })).toBeVisible();
             await expect(page.getByRole('columnheader', { name: '角色' })).toBeVisible();
             await expect(page.getByRole('columnheader', { name: '状态' })).toBeVisible();
         });
 
         test('应该支持搜索功能', async ({ page }) => {
-            await page.goto('/admin/users');
             
             // 输入搜索关键词
             await page.fill('input[placeholder*="搜索"]', 'admin');
@@ -69,14 +56,12 @@ test.describe('用户管理模块', () => {
         });
 
         test('创建用户按钮应该可见', async ({ page }) => {
-            await page.goto('/admin/users');
             await expect(page.getByRole('button', { name: /创建用户/ })).toBeVisible();
         });
     });
 
     test.describe('TC-USER-02: 用户创建', () => {
         test('应该打开创建用户对话框', async ({ page }) => {
-            await page.goto('/admin/users');
             
             // 点击创建用户按钮
             await page.click('button:has-text("创建用户")');
@@ -93,15 +78,13 @@ test.describe('用户管理模块', () => {
         });
 
         test('创建用户时应该验证必填字段', async ({ page }) => {
-            await page.goto('/admin/users');
             await page.click('button:has-text("创建用户")');
-            await page.waitForSelector('[role="dialog"]', { state: 'visible' });
+            await expect(page.getByRole('dialog')).toBeVisible();
             
             // 不填写任何字段直接点击创建
             await page.click('button:has-text("创建"):not(:has-text("创建用户"))');
             
             // 验证方式：对话框仍然打开（因为验证失败不会关闭）
-            await page.waitForTimeout(500);
             await expect(page.getByRole('dialog')).toBeVisible();
             
             // 验证用户名输入框仍为空且可见（说明表单未提交）
@@ -109,9 +92,8 @@ test.describe('用户管理模块', () => {
         });
 
         test('应该成功创建新用户', async ({ page }) => {
-            await page.goto('/admin/users');
             await page.click('button:has-text("创建用户")');
-            await page.waitForSelector('[role="dialog"]', { state: 'visible' });
+            await expect(page.getByRole('dialog')).toBeVisible();
             
             // 生成唯一用户名和手机号
             const timestamp = Date.now();
@@ -135,9 +117,8 @@ test.describe('用户管理模块', () => {
         });
 
         test('应该拒绝重复用户名', async ({ page }) => {
-            await page.goto('/admin/users');
             await page.click('button:has-text("创建用户")');
-            await page.waitForSelector('[role="dialog"]', { state: 'visible' });
+            await expect(page.getByRole('dialog')).toBeVisible();
             
             // 使用已存在的用户名
             await page.fill('#username', 'admin');
@@ -146,7 +127,6 @@ test.describe('用户管理模块', () => {
             await page.click('button:has-text("创建"):not(:has-text("创建用户"))');
             
             // 验证方式：对话框在一段时间后仍然打开（创建失败不会关闭）
-            await page.waitForTimeout(2000);
             await expect(page.getByRole('dialog')).toBeVisible();
             
             // 额外验证：用户名输入框仍有值（表单未被清空）
@@ -156,7 +136,6 @@ test.describe('用户管理模块', () => {
 
     test.describe('TC-USER-03: 用户禁用/启用', () => {
         test('应该显示状态确认对话框', async ({ page }) => {
-            await page.goto('/admin/users');
             
             // 找到一个非 admin 用户的状态开关并点击
             // 查找状态为"启用"且不是 admin 的行
@@ -173,7 +152,6 @@ test.describe('用户管理模块', () => {
         });
 
         test('管理员不能禁用自己', async ({ page }) => {
-            await page.goto('/admin/users');
             
             // 找到 admin 用户行
             const adminRow = page.locator('tr:has(td:text("admin"))');

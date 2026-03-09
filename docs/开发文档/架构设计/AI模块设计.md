@@ -695,7 +695,7 @@ llm = get_scene_llm(
 `multi_agent_graph` 已按“规划保留、运行剥离”收敛到单轨运行态合同：
 
 1. **运行态目标源唯一化**：运行阶段只消费 `decomposed_goals`，不再读取 `state.intent_plan`。
-2. **运行态委派字段唯一化**：Router Guard 只校验 `handoff.target_agent` + `task_description`，缺失即阻塞（`invalid_target_agent` / `invalid_task_description`）。
+2. **运行态委派字段唯一化**：Router Guard 统一以 `handoff.target_agent + frame/task_description` 为入口；其中 `data.query` 会优先编译 canonical `frame.query_text` 后再校验，禁止继续放行缺失结构化 frame 的 data handoff。
 3. **运行态结构化结果唯一化**：仅写入 `additional_kwargs.router_result_v2`（`version=v2`）；历史字段（如 `route_decisions`）命中即 `legacy_field_detected` 并 fail-fast。
 4. **planner 输入冻结**：`decompose_goals` 输入固定为 `user_query + recent_5_persisted_user_visible_chat_turns`；窗口仅含已落库 `user/assistant`，`tool/system/内部中间态` 不入窗。
 5. **当前输入隔离**：当前轮用户输入仅作为 `user_query`；不计入 recent-5 历史窗口。
