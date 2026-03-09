@@ -1,44 +1,70 @@
 {
   "mcpServers": {
     "postgres": {
-      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@localhost:5432/chat_db", "--access-mode=unsafe"],
+      "command": "/Users/jijingkun/.volta/bin/npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/chat_db",
+        "--access-mode=unsafe"
+      ],
       "env": {
-        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "PATH": "/Users/jijingkun/.volta/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
     },
     "postgres-data-db": {
-      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@localhost:5432/data_db"],
+      "command": "/Users/jijingkun/.volta/bin/npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/data_db"
+      ],
       "env": {
-        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "PATH": "/Users/jijingkun/.volta/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
     },
     "playwright": {
-      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
-      "args": ["-y", "@executeautomation/playwright-mcp-server"]
+      "command": "/Users/jijingkun/.volta/bin/npx",
+      "args": [
+        "-y",
+        "@executeautomation/playwright-mcp-server"
+      ]
     },
     "context7": {
-      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "command": "/Users/jijingkun/.volta/bin/npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
       "env": {
         "DEFAULT_MINIMUM_TOKENS": "10000",
-        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "PATH": "/Users/jijingkun/.volta/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
     },
     "github-mcp-server": {
       "command": "/usr/local/bin/docker",
-      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ]
     },
     "minio": {
-      "command": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin/npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8090/mcp"],
+      "command": "/Users/jijingkun/.volta/bin/npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:8090/mcp"
+      ],
       "env": {
-        "PATH": "/Users/jijingkun/.nvm/versions/node/v20.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "PATH": "/Users/jijingkun/.volta/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
     },
     "vibe_kanban": {
-      "command": "/Users/jijingkun/.vibe-kanban/bin/v0.1.25-20260306111436/macos-arm64/vibe-kanban-mcp",
+      "command": "/Users/jijingkun/.vibe-kanban/bin/v0.1.26-20260307160046/macos-arm64/vibe-kanban-mcp",
       "args": [],
       "env": {
         "BACKEND_PORT": "3000",

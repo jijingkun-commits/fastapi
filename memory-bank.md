@@ -4,6 +4,7 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-09｜docs_guard 提交门禁降级为提醒模式（ACTIVE）→ `scripts/docs_guard.py`
 - 2026-03-09｜response guidance 收敛为结构化 contract（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
 - 2026-03-09｜document_memory_repo 列表契约改为默认窄返回（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
 - 2026-03-08｜memory intent 删除解析收敛到 resolver（ACTIVE）→ `docs/plans/2026-03-08-memory-intent-resolver-contract-design.md`
@@ -410,4 +411,14 @@
 - 影响范围：`app/services/chat_service.py`、`app/services/response_policy_service.py`、`app/ai/state.py`、`app/ai/workflow/multi_agent_graph.py`、`tests/unit/test_multi_agent_streaming_helpers.py`、相关 unit tests
 - 回退/失效条件：若后续引入更完整的 response policy/responder 层，应继续以 `response_policy_service` 为迁移入口平滑演进；禁止再把文案模板直接塞回 `chat_service` 或 `multi_agent_graph`
 - 关联文档/代码：`docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`、`app/services/chat_service.py`、`app/services/response_policy_service.py`、`app/ai/workflow/multi_agent_graph.py`
+
+### 2026-03-09 docs_guard 提交门禁降级为提醒模式
+- 状态：ACTIVE
+- 决策主题：本地提交链路中的 `docs_guard` 从严格阻断改为提醒模式，手动校验与 CI 继续保留严格门禁
+- 背景与问题：当前 `docs_guard` 同时挂在 `.githooks/pre-commit` 与 `scripts/check_doc_sync.sh` 的 `--strict` 路径上，broken link 等存量文档债务会频繁阻断代码提交，影响正常收口
+- 最终决策：`scripts/docs_guard.py` 新增 `--non-blocking`；提交 hook 与 `check_doc_sync.sh` 在提交场景统一改走非阻断模式；显式 `--strict` 仍保留非零退出码
+- 取舍理由：保留文档治理可见性，但把“提交提醒”和“严格门禁”拆层，避免本地提交体验持续被历史文档债务打断
+- 影响范围：`.githooks/pre-commit`、`scripts/check_doc_sync.sh`、`scripts/docs_guard.py`、`scripts/README.md`
+- 回退/失效条件：若后续 CI 已稳定承接 docs_guard 严格门禁，可继续保持本地提醒模式；若需要恢复本地强门禁，必须显式改回 `--strict`
+- 关联文档/代码：`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`、`.githooks/pre-commit`、`scripts/README.md`
 

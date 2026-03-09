@@ -8,10 +8,12 @@ PROJECT_CONFIG="$ROOT_DIR/.mcp.json"
 python3 - "$ROOT_DIR" "$GLOBAL_CONFIG" "$PROJECT_CONFIG" <<'PY'
 import json
 import os
+import selectors
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 
@@ -21,6 +23,7 @@ project_config = Path(sys.argv[3])
 
 status_order = {"OK": 0, "BLOCKED": 1, "FAIL": 2}
 rows = []
+HANDSHAKE_TIMEOUT_SECONDS = 10
 
 
 def add_row(name: str, enabled: bool, status: str, detail: str) -> None:
@@ -47,6 +50,14 @@ def handshake_json_line(command: str, args: list[str], env: dict[str, str]) -> t
         },
     }
     wire = json.dumps(req).encode("utf-8") + b"\n"
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+    proc = None
+    selector = selectors.DefaultSelector()
+
+    def decode(chunks: list[bytes]) -> str:
+        return b"".join(chunks).decode("utf-8", errors="replace").strip()
+
     try:
         proc = subprocess.Popen(
             [command, *args],
@@ -55,22 +66,57 @@ def handshake_json_line(command: str, args: list[str], env: dict[str, str]) -> t
             stderr=subprocess.PIPE,
             env=env,
         )
-        out, err = proc.communicate(wire, timeout=5)
+        assert proc.stdin and proc.stdout and proc.stderr
+        proc.stdin.write(wire)
+        proc.stdin.flush()
+
+        selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+        deadline = time.monotonic() + HANDSHAKE_TIMEOUT_SECONDS
+
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            events = selector.select(timeout=min(0.2, remaining))
+            for key, _ in events:
+                chunk = os.read(key.fileobj.fileno(), 4096)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if key.data == "stdout":
+                    stdout_chunks.append(chunk)
+                else:
+                    stderr_chunks.append(chunk)
+
+            stdout_text = decode(stdout_chunks)
+            if '"jsonrpc"' in stdout_text and '"result"' in stdout_text:
+                return True, "initialize handshake ok"
+
+            if proc.poll() is not None and not selector.get_map():
+                break
     except FileNotFoundError as exc:
         return False, f"launch failed: {exc}"
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-        stdout_text = out.decode("utf-8", errors="replace").strip()
-        stderr_text = err.decode("utf-8", errors="replace").strip()
-        detail = stdout_text or stderr_text or "handshake timeout"
-        return False, detail[:200]
+    finally:
+        try:
+            selector.close()
+        except Exception:
+            pass
+        if proc is not None:
+            try:
+                if proc.stdin:
+                    proc.stdin.close()
+            except Exception:
+                pass
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1)
 
-    stdout_text = out.decode("utf-8", errors="replace").strip()
-    stderr_text = err.decode("utf-8", errors="replace").strip()
-    if stdout_text.startswith('{') and '"result"' in stdout_text:
-        return True, "initialize handshake ok"
-    detail = stderr_text or stdout_text or f"exit={proc.returncode}"
+    stdout_text = decode(stdout_chunks)
+    stderr_text = decode(stderr_chunks)
+    detail = stdout_text or stderr_text or (f"exit={proc.returncode}" if proc is not None else "handshake timeout")
     return False, detail[:200]
 
 
@@ -145,14 +191,10 @@ for name, config in sorted(servers.items()):
                 ok, handshake_detail = handshake_json_line(command, config.get("args", []), runtime_env)
                 status = "OK" if ok else "FAIL"
                 detail = f"local binary present; {handshake_detail}"
-    elif name in {"postgres", "postgres-data-db"}:
-        detail = f"command present: {command}"
-    elif name == "minio":
-        detail = "remote MCP command present; endpoint health should be confirmed by runtime call"
-    elif name == "context7":
-        detail = "stdio MCP command present"
-    elif name == "playwright":
-        detail = "browser MCP command present"
+    elif name in {"postgres", "postgres-data-db", "minio", "context7", "playwright"}:
+        ok, handshake_detail = handshake_json_line(command, config.get("args", []), {**os.environ, **config.get("env", {})})
+        status = "OK" if ok else "FAIL"
+        detail = handshake_detail
     else:
         detail = f"command present: {command}"
 

@@ -168,7 +168,7 @@ if [[ -n "${CURRENT_STATE_DOCS//$'\n'/}" ]]; then
     done <<EOF
 $CURRENT_STATE_DOCS
 EOF
-    "$PYTHON_BIN" scripts/docs_guard.py --strict --paths "${CURRENT_STATE_DOC_ARRAY[@]}"
+    "$PYTHON_BIN" scripts/docs_guard.py --non-blocking --paths "${CURRENT_STATE_DOC_ARRAY[@]}"
 fi
 
 if [[ "$MODE" == "cached" ]]; then

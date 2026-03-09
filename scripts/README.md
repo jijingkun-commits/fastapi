@@ -22,7 +22,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 │   ├── setup_data.py           # 数据初始化入口
 │   ├── skill_offline_evaluation.py  # Skill 检索离线评测
 │   └── verify_data_db.py
-├── docs_guard.py               # 文档同步守卫（pre-commit）
+├── docs_guard.py               # 文档同步守卫（hook 提醒 + 手动/CI 严格校验）
 ├── check_doc_sync.sh           # 文档同步检查
 ├── check_special_doc_sync.py   # 防屎山手册强制同步检查
 ├── config_doctor.py            # 配置契约健康检查
@@ -44,6 +44,8 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 - `.cursor/scripts/` 中保留部分工作流脚本副本（兼容旧流程），但执行入口以 `scripts/` 为准。
 
 所有 symlink 保证现有引用（docs、commands、CI）无需修改；根目录不再保留与 `db/`、`data/` 的重复实体文件。
+
+- `scripts/docs_guard.py`：提交 hook 默认使用 `--non-blocking` 输出提醒；手动校验与 CI 仍建议使用 `--strict` 保持阻断语义。
 
 ### 重复脚本收敛清单（root -> 实体）
 

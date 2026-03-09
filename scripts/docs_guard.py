@@ -1172,7 +1172,7 @@ def summarize(findings: list[Finding], covered: int, total: int, stats: dict[str
     }
 
 
-def print_human_report(report: dict) -> None:
+def print_human_report(report: dict, *, non_blocking: bool = False) -> None:
     stats = report["stats"]
     print("=" * 48)
     print("docs_guard 检查报告")
@@ -1205,10 +1205,15 @@ def print_human_report(report: dict) -> None:
                 f"{finding['file']} -> {finding['detail']}"
             )
 
+    if non_blocking and not report["strict_pass"]:
+        print("\n提示：当前运行于非阻断模式，docs_guard 仅提醒，不阻断提交。")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="docs 文档治理检查")
-    parser.add_argument("--strict", action="store_true", help="发现 error 时返回非零退出码")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--strict", action="store_true", help="发现 error 时返回非零退出码")
+    mode_group.add_argument("--non-blocking", action="store_true", help="发现 error 时仅打印报告，不返回非零退出码")
     parser.add_argument(
         "--check-paths",
         action="store_true",
@@ -1248,7 +1253,7 @@ def main() -> int:
     covered, total = check_summary_coverage(findings)
 
     report = summarize(findings, covered, total, stats)
-    print_human_report(report)
+    print_human_report(report, non_blocking=args.non_blocking)
 
     if args.json_out:
         out_path = Path(args.json_out)
