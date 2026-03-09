@@ -10,7 +10,9 @@ export type AdminOverviewHealthLevel =
 
 export type AdminOverviewSeverity = "critical" | "warning" | "info";
 
-export type AdminOverviewFreshnessStatus = "fresh" | "expired" | "unknown";
+export type AdminOverviewCardStatus = "ok" | "no_data" | "stale" | "degraded" | "unknown";
+
+export type AdminOverviewFreshnessStatus = "fresh" | "stale" | "unknown";
 
 export type AdminOverviewRealtimeMode =
   | "connecting"
@@ -24,39 +26,55 @@ export interface AdminOverviewNumericSignal {
   level: AdminOverviewHealthLevel;
 }
 
-export interface AdminOverviewRequestQuality {
-  status: AdminOverviewHealthLevel;
+export interface AdminOverviewStatusMeta {
+  status: AdminOverviewCardStatus;
+  health_level: AdminOverviewHealthLevel;
+  sample_count?: number | null;
+  watermark_at?: string | null;
+  data_source?: string;
+  explain?: string;
+  window_sec?: number | null;
+}
+
+export type AdminOverviewSystemStatus = AdminOverviewStatusMeta;
+
+export type AdminOverviewTrafficHealth = AdminOverviewStatusMeta;
+
+export interface AdminOverviewRequestQuality extends AdminOverviewStatusMeta {
   score: number | null;
-  request_total?: number | null;
+  request_total: number | null;
   success_rate: number | null;
+  error_4xx_rate: number | null;
   error_5xx_rate: number | null;
   latency_p95_ms: number | null;
-  signals?: {
-    success_rate?: AdminOverviewNumericSignal;
-    error_5xx_rate?: AdminOverviewNumericSignal;
-    latency_p95_ms?: AdminOverviewNumericSignal;
-  };
+  qps: number | null;
+}
+
+export interface AdminOverviewQuestionActivity extends AdminOverviewStatusMeta {
+  score: number | null;
+  question_total: number | null;
+  question_success_rate: number | null;
+  question_latency_p95_ms: number | null;
+  question_qps: number | null;
+  stream_interrupt_rate: number | null;
 }
 
 export interface AdminOverviewStability {
-  status: AdminOverviewHealthLevel;
+  status: AdminOverviewCardStatus;
+  health_level: AdminOverviewHealthLevel;
   score: number | null;
   critical_alerts: number | null;
   warning_alerts: number | null;
   module_score?: number | null;
 }
 
-export interface AdminOverviewCapacityCost {
-  status: AdminOverviewHealthLevel;
+export interface AdminOverviewCapacityCost extends AdminOverviewStatusMeta {
   score: number | null;
   qps: number | null;
+  question_qps: number | null;
   cost_per_minute: number | null;
   budget_per_minute: number | null;
   budget_usage_pct: number | null;
-  budget_health_level: AdminOverviewHealthLevel;
-  signals?: {
-    budget_usage_pct?: AdminOverviewNumericSignal;
-  };
 }
 
 export interface AdminOverviewAlertItem {
@@ -75,9 +93,6 @@ export interface AdminOverviewFreshness {
   expired: boolean;
   max_delay_sec: number | null;
   source?: string;
-  signals?: {
-    data_delay_sec?: AdminOverviewNumericSignal;
-  };
 }
 
 export interface AdminOverviewModuleItem {
@@ -88,17 +103,12 @@ export interface AdminOverviewModuleItem {
   error_rate: number | null;
   latency_p95_ms: number | null;
   data_delay_sec: number | null;
-  signals?: {
-    error_rate?: AdminOverviewNumericSignal;
-    latency_p95_ms?: AdminOverviewNumericSignal;
-    data_delay_sec?: AdminOverviewNumericSignal;
-  };
 }
 
 export interface AdminOverviewChangeItem {
   id: string;
   title: string;
-  level: string;
+  level: AdminOverviewSeverity;
   occurred_at: string;
 }
 
@@ -112,10 +122,13 @@ export interface AdminOverviewSnapshot {
   snapshot_at: string;
   source: string;
   degraded: boolean;
+  system_status: AdminOverviewSystemStatus;
+  traffic_health: AdminOverviewTrafficHealth;
   health_score: number | null;
   health_level: AdminOverviewHealthLevel;
   budget_usage_pct: number | null;
   request_quality: AdminOverviewRequestQuality;
+  question_activity: AdminOverviewQuestionActivity;
   stability: AdminOverviewStability;
   capacity_cost: AdminOverviewCapacityCost;
   alerts: AdminOverviewAlertItem[];
@@ -128,10 +141,8 @@ export interface AdminOverviewSnapshot {
 export interface AdminOverviewTrendPoint {
   timestamp: string;
   health_score?: number | null;
-  request_success_rate?: number | null;
-  error_5xx_rate?: number | null;
-  latency_p95_ms?: number | null;
-  qps?: number | null;
+  request_qps?: number | null;
+  question_qps?: number | null;
   budget_usage_pct?: number | null;
 }
 

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,19 +17,37 @@ from app.main import app
 client = TestClient(app)
 
 
-class _OverviewServiceStub:
-    """总览服务桩。"""
+class _OverviewQueryServiceStub:
+    """总览查询服务桩。"""
 
-    def __init__(self, *, snapshot: dict[str, Any] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        snapshot: dict[str, Any] | None = None,
+        trends: dict[str, Any] | None = None,
+        series: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
         self._snapshot = snapshot or {}
+        self._trends = trends or {}
+        self._series = series or {}
         self._error = error
         self.trace_ids: list[str | None] = []
+        self.window_calls: list[str | None] = []
 
     def get_overview_snapshot(self, trace_id: str | None = None) -> dict[str, Any]:
         self.trace_ids.append(trace_id)
         if self._error is not None:
             raise self._error
         return dict(self._snapshot)
+
+    def get_overview_trends(self, *, window: str | None = None) -> dict[str, Any]:
+        self.window_calls.append(window)
+        if self._error is not None:
+            raise self._error
+        if window is None:
+            return dict(self._trends)
+        return dict(self._series)
 
 
 @pytest.fixture()
@@ -47,33 +64,35 @@ def admin_override():
     app.dependency_overrides.clear()
 
 
-def test_admin_overview_summary_requires_admin_auth():
+def test_admin_overview_summary_requires_admin_auth() -> None:
     """未登录访问应被拒绝。"""
 
     response = client.get("/api/v1/admin-overview/summary")
     assert response.status_code in [401, 403, 422]
 
 
-def test_admin_overview_summary_returns_snapshot(admin_override):
-    """管理员访问 summary 返回 canonical 快照。"""
+def test_admin_overview_summary_returns_v2_snapshot(admin_override) -> None:
+    """管理员访问 summary 返回 V2 canonical 快照。"""
 
     snapshot = {
-        "snapshot_at": "2026-02-14T08:00:00Z",
-        "source": "live",
+        "snapshot_at": "2026-03-09T04:00:00Z",
+        "source": "bucket",
         "degraded": False,
-        "health_score": 91.2,
+        "system_status": {"status": "ok", "health_level": "healthy"},
+        "traffic_health": {"status": "ok", "sample_count": 12},
+        "health_score": 92.5,
         "health_level": "healthy",
-        "budget_usage_pct": 62.1,
-        "request_quality": {"status": "healthy", "score": 93.1},
-        "stability": {"status": "warning", "score": 78.5},
-        "capacity_cost": {"status": "healthy", "score": 86.3, "budget_usage_pct": 62.1},
+        "request_quality": {"status": "ok", "request_total": 12},
+        "question_activity": {"status": "ok", "question_total": 4},
+        "stability": {"status": "ok", "score": 90.0},
+        "capacity_cost": {"status": "ok", "budget_usage_pct": 24.5},
         "alerts": [],
-        "freshness": {"status": "fresh", "score": 95.0, "expired": False},
+        "freshness": {"status": "fresh", "expired": False},
         "module_matrix": [],
         "change_feed": [],
-        "meta": {"generated_at": "2026-02-14T08:00:01Z", "trace_id": "trace-unit-001"},
+        "meta": {"generated_at": "2026-03-09T04:00:01Z", "trace_id": "trace-unit-v2"},
     }
-    service_stub = _OverviewServiceStub(snapshot=snapshot)
+    service_stub = _OverviewQueryServiceStub(snapshot=snapshot)
     app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
 
     try:
@@ -86,171 +105,138 @@ def test_admin_overview_summary_returns_snapshot(admin_override):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["health_score"] == 91.2
-    assert body["health_level"] == "healthy"
-    assert body["source"] == "live"
+    assert body["source"] == "bucket"
+    assert body["system_status"]["status"] == "ok"
+    assert body["request_quality"]["request_total"] == 12
+    assert body["question_activity"]["question_total"] == 4
     assert service_stub.trace_ids == ["trace-from-header"]
 
 
-def test_admin_overview_trends_returns_multi_window_payload(
-    admin_override,
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_admin_overview_trends_returns_multi_window_payload(admin_override) -> None:
     """不指定窗口时返回 1h/24h 双窗口结构。"""
 
-    from app.api.v1.endpoints import admin_overview_api as overview_api
+    trends = {
+        "windows": {
+            "1h": [{"timestamp": "2026-03-09T03:59:00Z", "request_qps": 1.0, "question_qps": 0.2}],
+            "24h": [{"timestamp": "2026-03-09T03:59:00Z", "request_qps": 1.0, "question_qps": 0.2}],
+        },
+        "snapshot_at": "2026-03-09T04:00:00Z",
+    }
+    service_stub = _OverviewQueryServiceStub(trends=trends)
+    app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
 
-    base_time = datetime(2026, 2, 14, 8, 0, tzinfo=timezone.utc)
+    try:
+        response = client.get("/api/v1/admin-overview/trends")
+    finally:
+        app.dependency_overrides.pop(get_admin_overview_service, None)
 
-    def _query_snapshots(_db, *, minutes: int):
-        rows = [
-            SimpleNamespace(
-                snapshot_minute=base_time,
-                health_score=Decimal("90.4"),
-                budget_usage_pct=Decimal("62.1"),
-                snapshot_payload={
-                    "request_quality": {
-                        "success_rate": 0.9924,
-                        "error_5xx_rate": 0.0038,
-                        "latency_p95_ms": 612,
-                    },
-                    "capacity_cost": {"qps": 39.6},
-                },
-            )
-        ]
-        if minutes == 24 * 60:
-            rows = [
-                SimpleNamespace(
-                    snapshot_minute=base_time.replace(day=13, hour=9),
-                    health_score=Decimal("81.2"),
-                    budget_usage_pct=Decimal("54.0"),
-                    snapshot_payload={
-                        "request_quality": {
-                            "success_rate": 0.983,
-                            "error_5xx_rate": 0.006,
-                            "latency_p95_ms": 710,
-                        },
-                        "capacity_cost": {"qps": 25.4},
-                    },
-                ),
-                *rows,
-            ]
-        return rows
-
-    monkeypatch.setattr(overview_api, "_query_snapshots_for_window", _query_snapshots)
-
-    response = client.get("/api/v1/admin-overview/trends")
     assert response.status_code == 200
-
     body = response.json()
     assert set(body["windows"].keys()) == {"1h", "24h"}
-    assert len(body["windows"]["1h"]) == 1
-    assert len(body["windows"]["24h"]) == 2
-    assert body["windows"]["1h"][0]["qps"] == 39.6
-    assert body["snapshot_at"].endswith("Z")
+    assert body["windows"]["1h"][0]["request_qps"] == 1.0
+    assert service_stub.window_calls == [None]
 
 
-def test_admin_overview_trends_returns_single_window_series(
-    admin_override,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """指定窗口时返回单窗口结构。"""
+def test_admin_overview_trends_returns_single_window_series(admin_override) -> None:
+    """指定窗口时返回单窗口序列。"""
 
-    from app.api.v1.endpoints import admin_overview_api as overview_api
+    series = {
+        "window": "24h",
+        "status": "ok",
+        "points": [{"timestamp": "2026-03-09T03:59:00Z", "request_qps": 1.0, "question_qps": 0.2}],
+        "snapshot_at": "2026-03-09T04:00:00Z",
+    }
+    service_stub = _OverviewQueryServiceStub(series=series)
+    app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
 
-    base_time = datetime(2026, 2, 14, 8, 0, tzinfo=timezone.utc)
+    try:
+        response = client.get("/api/v1/admin-overview/trends?window=24h")
+    finally:
+        app.dependency_overrides.pop(get_admin_overview_service, None)
 
-    def _query_snapshots(_db, *, minutes: int):
-        assert minutes == 60
-        return [
-            SimpleNamespace(
-                snapshot_minute=base_time,
-                health_score=Decimal("90.4"),
-                budget_usage_pct=Decimal("62.1"),
-                snapshot_payload={"request_quality": {}, "capacity_cost": {}},
-            )
-        ]
-
-    monkeypatch.setattr(overview_api, "_query_snapshots_for_window", _query_snapshots)
-
-    response = client.get("/api/v1/admin-overview/trends?window=1h")
     assert response.status_code == 200
-
     body = response.json()
-    assert body["window"] == "1h"
+    assert body["window"] == "24h"
+    assert body["status"] == "ok"
     assert len(body["points"]) == 1
-    assert body["points"][0]["health_score"] == 90.4
+    assert service_stub.window_calls == ["24h"]
 
 
-def test_admin_overview_stream_pushes_multiple_results(admin_override, monkeypatch: pytest.MonkeyPatch):
-    """总览流应持续推送 result 事件。"""
+async def _collect_stream_payload(response) -> str:
+    chunks: list[str] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk if isinstance(chunk, str) else chunk.decode("utf-8"))
+    return "".join(chunks)
 
-    from app.api.v1.endpoints import admin_overview_api as overview_api
 
-    monkeypatch.setattr(overview_api, "STREAM_PUSH_INTERVAL_SEC", 0)
+def test_admin_overview_stream_pushes_multiple_results(admin_override, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SSE 正常链路应持续推送 result 事件。"""
 
-    disconnected_states = iter([False, False, False, False, True])
-
-    async def _is_disconnected(_request):
-        return next(disconnected_states, True)
-
-    monkeypatch.setattr(overview_api.Request, "is_disconnected", _is_disconnected, raising=False)
-
-    service_stub = _OverviewServiceStub(
-        snapshot={
-            "snapshot_at": "2026-02-14T08:00:00Z",
-            "source": "live",
-            "degraded": False,
-            "health_score": 90.4,
-            "health_level": "healthy",
-            "budget_usage_pct": 62.1,
-            "request_quality": {"status": "healthy", "score": 93.1},
-            "stability": {"status": "warning", "score": 78.5},
-            "capacity_cost": {"status": "healthy", "score": 86.3},
-            "alerts": [],
-            "freshness": {"status": "fresh", "score": 95.0, "expired": False},
-            "module_matrix": [],
-            "change_feed": [],
-            "meta": {"generated_at": "2026-02-14T08:00:01Z", "trace_id": "trace-stream-001"},
-        }
+    snapshots = iter(
+        [
+            {
+                "snapshot_at": "2026-03-09T04:00:00Z",
+                "source": "bucket",
+                "degraded": False,
+                "system_status": {"status": "ok"},
+            },
+            {
+                "snapshot_at": "2026-03-09T04:00:10Z",
+                "source": "bucket",
+                "degraded": False,
+                "system_status": {"status": "ok"},
+            },
+        ]
     )
-    app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
 
-    try:
-        response = client.get("/api/v1/admin-overview/stream")
-    finally:
-        app.dependency_overrides.pop(get_admin_overview_service, None)
+    class _StreamingStub(_OverviewQueryServiceStub):
+        def get_overview_snapshot(self, trace_id: str | None = None) -> dict[str, Any]:
+            self.trace_ids.append(trace_id)
+            return next(snapshots)
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text.count("event: result") == 2
+    class _FakeRequest:
+        def __init__(self) -> None:
+            self.headers = {"X-Request-Id": "trace-stream-header"}
+            self.state = SimpleNamespace(correlation_id=None)
+            self._flags = iter([False, False, False, False, True])
 
+        async def is_disconnected(self) -> bool:
+            return next(self._flags)
 
-def test_admin_overview_stream_emits_interrupt_on_error(
-    admin_override,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """实时采集异常时应输出 interrupt 事件。"""
+    service_stub = _StreamingStub()
 
     from app.api.v1.endpoints import admin_overview_api as overview_api
 
-    monkeypatch.setattr(overview_api, "STREAM_PUSH_INTERVAL_SEC", 0)
+    async def _fake_sleep(seconds: float) -> None:
+        return None
 
-    disconnected_states = iter([False, True])
+    monkeypatch.setattr(overview_api.asyncio, "sleep", _fake_sleep)
 
-    async def _is_disconnected(_request):
-        return next(disconnected_states, True)
+    response = asyncio.run(overview_api.stream_admin_overview(_FakeRequest(), service_stub))
+    payload = asyncio.run(_collect_stream_payload(response))
 
-    monkeypatch.setattr(overview_api.Request, "is_disconnected", _is_disconnected, raising=False)
+    assert "event: result" in payload
+    assert '"snapshot_at": "2026-03-09T04:00:00Z"' in payload
+    assert '"snapshot_at": "2026-03-09T04:00:10Z"' in payload
 
-    service_stub = _OverviewServiceStub(error=RuntimeError("collector timeout"))
-    app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
 
-    try:
-        response = client.get("/api/v1/admin-overview/stream")
-    finally:
-        app.dependency_overrides.pop(get_admin_overview_service, None)
+def test_admin_overview_stream_emits_interrupt_on_error(admin_override) -> None:
+    """SSE 推送失败时应发出 interrupt 事件。"""
 
-    assert response.status_code == 200
-    assert "event: interrupt" in response.text
-    assert "stream_disconnected" in response.text
+    class _FakeRequest:
+        def __init__(self) -> None:
+            self.headers = {"X-Request-Id": "trace-stream-header"}
+            self.state = SimpleNamespace(correlation_id=None)
+            self._flags = iter([False, True])
+
+        async def is_disconnected(self) -> bool:
+            return next(self._flags)
+
+    from app.api.v1.endpoints import admin_overview_api as overview_api
+
+    service_stub = _OverviewQueryServiceStub(error=RuntimeError("boom"))
+    response = asyncio.run(overview_api.stream_admin_overview(_FakeRequest(), service_stub))
+    payload = asyncio.run(_collect_stream_payload(response))
+
+    assert "event: interrupt" in payload
+    assert '"reason": "stream_disconnected"' in payload

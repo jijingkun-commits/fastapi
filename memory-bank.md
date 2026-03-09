@@ -4,10 +4,45 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
-- 2026-03-09｜docs_guard 提交门禁降级为提醒模式（ACTIVE）→ `scripts/docs_guard.py`
-- 2026-03-09｜response guidance 收敛为结构化 contract（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
-- 2026-03-09｜document_memory_repo 列表契约改为默认窄返回（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
-- 2026-03-08｜memory intent 删除解析收敛到 resolver（ACTIVE）→ `docs/plans/2026-03-08-memory-intent-resolver-contract-design.md`
+### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
+- 状态：ACTIVE
+- 决策主题：把 `jjk-commit` 从“交付门禁 + 半套 merge 口径”收敛为交付编排层，并将真实 Git 生命周期统一下沉到共享 delivery engine
+- 背景与问题：当前 `jjk-commit` 文案仍以 `--ff-only` + 人工冲突处理为主，而 `wt-flow.sh` 已实现 `rebase + --no-ff merge + abort`；命令层和脚本层形成两套 merge 真理源，用户无法稳定判断应该信哪一套
+- 最终决策：新增共享 `Git Delivery Engine` 作为 `rebase / merge / continue / abort / status / prepare-base` 的唯一执行层；`jjk-commit` 仅保留交付门禁、验证证据、提交摘要与错误码翻译；`wt-flow.sh` 复用 engine，只保留 card/worktree 状态语义
+- 取舍理由：项目未上线，优先彻底收敛结构性分裂，而不是继续靠文案提醒或兼容补丁维持两套行为；这样既能提升可恢复性，也能让测试和文档只围绕一份真理源展开
+- 影响范围：`docs/plans/2026-03-09-jjk-commit-delivery-engine-{design,implementation}.md`、`.cursor/commands/jjk-commit.md`、`.agents/skills/jjk-commit/SKILL.md`、`scripts/coder4/wt-flow.sh`、`scripts/coder4/git-delivery-engine.sh`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
+- 回退/失效条件：若未来由统一工程流编排器完全接管本地 Git 生命周期，可将共享 engine 再次内聚进新的单一入口；在此之前，不得回退到 `jjk-commit` 与 `wt-flow` 各写一套 merge 逻辑
+- 关联文档/代码：`docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`、`docs/plans/2026-03-09-jjk-commit-delivery-engine-implementation.md`、`.cursor/commands/jjk-commit.md`、`scripts/coder4/wt-flow.sh`
+
+### 2026-03-09 共享开发库 Alembic 漂移收口规则
+- 状态：ACTIVE
+- 决策主题：共享开发库 revision 漂移时，必须补齐缺失历史迁移并新增 merge revision 收口，禁止直接篡改 `alembic_version`
+- 背景与问题：当前开发库记录在 `20260309_0023`，但本分支最初只携带另一条 `20260309_0022` 迁移，导致 `alembic current` 直接失败；若继续手工改版本表，会让数据库历史与代码历史永久脱钩
+- 最终决策：把缺失的 `20260308_0022`、`20260309_0023` 作为历史链补回当前分支，并用 `20260309_0024` merge revision 把双 head 合并为单 head；运行库临时补表只能用于保活，不得替代正式迁移收口
+- 取舍理由：让“代码认识数据库历史”比让“数据库伪装成当前分支历史”更稳，也更符合未上线阶段优先做结构正确性的原则
+- 影响范围：`alembic/versions/*`、共享开发库升级流程、后续 worktree 之间的迁移兼容策略
+- 回退/失效条件：若未来所有 worktree 改为独立数据库实例，跨分支 revision 漂移风险显著降低后，可把该规则降级为推荐项；在此之前保持强约束
+- 关联文档/代码：`alembic/versions/20260308_0022_add_skill_tool_contract.py`、`alembic/versions/20260309_0023_seed_data_handoff_tool_contract.py`、`alembic/versions/20260309_0024_merge_runtime_bucket_and_skill_tool_contract_heads.py`
+
+### 2026-03-09 管理后台总览旧快照表正式退役
+- 状态：ACTIVE
+- 决策主题：删除 `t_ops_metric_snapshot_minute`，总览运行态不再保留展示快照表
+- 背景与问题：旧快照表仍被 `AdminOverviewQueryService` 当作 fallback 与持久化使用，形成分钟桶与展示快照双真源；继续保留只会掩盖聚合链路问题并扩大语义漂移
+- 最终决策：总览读取与降级都只围绕 `t_runtime_metric_bucket_minute` 表达 `ok / no_data / stale / degraded`，删除 `OpsSnapshotService`、旧快照模型、相关测试与 Alembic 表结构
+- 取舍理由：项目未上线，优先把状态 owner 收敛到单表真理源；相比“保留兼容缓存”，彻底删除双写链路更简单、风险更可验证
+- 影响范围：`app/services/admin_overview_query_service.py`、`app/models/runtime_metric_bucket.py`、`alembic/versions/20260309_0025_drop_ops_metric_snapshot_minute.py`、总览相关测试与数据库设计文档
+- 回退/失效条件：若未来确有明确性能瓶颈，需要新增派生缓存时，必须作为独立只写缓存重新设计，且不得再次承担总览事实源或降级真相
+- 关联文档/代码：`docs/开发文档/架构设计/数据库设计.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`
+
+### 2026-03-09 管理后台总览真理源切换完成
+- 状态：ACTIVE
+- 决策主题：总览 V2 正式退役旧 collector、旧聚合服务与进程内双写缓存
+- 背景与问题：`AdminOverviewQueryService` 已经接管分钟桶读模型，但仓内仍保留 `admin_overview_service.py`、`overview_runtime_collector.py` 和 `runtime_request_metrics_store` 双写链路，导致状态 owner 与依赖方向仍有双源
+- 最终决策：总览读取只保留 `AdminOverviewQueryService`；请求埋点只写分钟桶 writer；删除旧 `admin_overview_service.py`、旧 `overview_runtime_collector.py` 及其失效测试，服务层导出同步切换到新查询服务
+- 取舍理由：项目未上线，优先让结构彻底收口而不是维持过渡兼容；删除双源后，`summary / trends / stream` 与埋点写入口的边界更稳定
+- 影响范围：`app/services/admin_overview_query_service.py`、`app/services/runtime_request_metrics.py`、`app/services/__init__.py`、旧总览服务/collector 文件及相关测试
+- 回退/失效条件：若未来确实需要单独的进程内观测缓存，只能作为独立调试工具引入，不得再次承担总览事实源或主查询链路职责
+- 关联文档/代码：`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-implementation.md`、`app/services/runtime_request_metrics.py`
 - 2026-03-08｜Lean Guard 上线：热点文件进入 shrink-only，禁止继续新增内部函数（ACTIVE）→ `docs/工程规范/lean-guard.md`
 - 2026-03-08｜Git 生命周期收口命令显式化：`/jjk-commit` 与 `/jjk-deleteworktree`（ACTIVE）→ `.cursor/commands/jjk-commit.md`
 - 2026-03-08｜治理前置命令显式化：`/jjk-arch-gate` 与 `/jjk-api-doc-sync`（ACTIVE）→ `docs/plans/2026-03-08-jjk-governance-skills-design.md`
@@ -60,6 +95,7 @@
 
 ## 决策记录
 
+<<<<<<< HEAD
 
 ### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
 - 状态：ACTIVE
@@ -70,6 +106,37 @@
 - 影响范围：`docs/plans/2026-03-09-jjk-commit-delivery-engine-{design,implementation}.md`、`.cursor/commands/jjk-commit.md`、`.agents/skills/jjk-commit/SKILL.md`、`scripts/coder4/wt-flow.sh`、`scripts/coder4/git-delivery-engine.sh`、`docs/开发文档/工作流/*`、`docs/开发文档/技巧与速查/*`
 - 回退/失效条件：若未来由统一工程流编排器完全接管本地 Git 生命周期，可将共享 engine 再次内聚进新的单一入口；在此之前，不得回退到 `jjk-commit` 与 `wt-flow` 各写一套 merge 逻辑
 - 关联文档/代码：`docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`、`docs/plans/2026-03-09-jjk-commit-delivery-engine-implementation.md`、`.cursor/commands/jjk-commit.md`、`scripts/coder4/wt-flow.sh`
+=======
+### 2026-03-09 共享开发库 Alembic 漂移收口规则
+- 状态：ACTIVE
+- 决策主题：共享开发库 revision 漂移时，必须补齐缺失历史迁移并新增 merge revision 收口，禁止直接篡改 `alembic_version`
+- 背景与问题：当前开发库记录在 `20260309_0023`，但本分支最初只携带另一条 `20260309_0022` 迁移，导致 `alembic current` 直接失败；若继续手工改版本表，会让数据库历史与代码历史永久脱钩
+- 最终决策：把缺失的 `20260308_0022`、`20260309_0023` 作为历史链补回当前分支，并用 `20260309_0024` merge revision 把双 head 合并为单 head；运行库临时补表只能用于保活，不得替代正式迁移收口
+- 取舍理由：让“代码认识数据库历史”比让“数据库伪装成当前分支历史”更稳，也更符合未上线阶段优先做结构正确性的原则
+- 影响范围：`alembic/versions/*`、共享开发库升级流程、后续 worktree 之间的迁移兼容策略
+- 回退/失效条件：若未来所有 worktree 改为独立数据库实例，跨分支 revision 漂移风险显著降低后，可把该规则降级为推荐项；在此之前保持强约束
+- 关联文档/代码：`alembic/versions/20260308_0022_add_skill_tool_contract.py`、`alembic/versions/20260309_0023_seed_data_handoff_tool_contract.py`、`alembic/versions/20260309_0024_merge_runtime_bucket_and_skill_tool_contract_heads.py`
+
+### 2026-03-09 管理后台总览旧快照表正式退役
+- 状态：ACTIVE
+- 决策主题：删除 `t_ops_metric_snapshot_minute`，总览运行态不再保留展示快照表
+- 背景与问题：旧快照表仍被 `AdminOverviewQueryService` 当作 fallback 与持久化使用，形成分钟桶与展示快照双真源；继续保留只会掩盖聚合链路问题并扩大语义漂移
+- 最终决策：总览读取与降级都只围绕 `t_runtime_metric_bucket_minute` 表达 `ok / no_data / stale / degraded`，删除 `OpsSnapshotService`、旧快照模型、相关测试与 Alembic 表结构
+- 取舍理由：项目未上线，优先把状态 owner 收敛到单表真理源；相比“保留兼容缓存”，彻底删除双写链路更简单、风险更可验证
+- 影响范围：`app/services/admin_overview_query_service.py`、`app/models/runtime_metric_bucket.py`、`alembic/versions/20260309_0025_drop_ops_metric_snapshot_minute.py`、总览相关测试与数据库设计文档
+- 回退/失效条件：若未来确有明确性能瓶颈，需要新增派生缓存时，必须作为独立只写缓存重新设计，且不得再次承担总览事实源或降级真相
+- 关联文档/代码：`docs/开发文档/架构设计/数据库设计.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`
+
+### 2026-03-09 管理后台总览真理源切换完成
+- 状态：ACTIVE
+- 决策主题：总览 V2 正式退役旧 collector、旧聚合服务与进程内双写缓存
+- 背景与问题：`AdminOverviewQueryService` 已经接管分钟桶读模型，但仓内仍保留 `admin_overview_service.py`、`overview_runtime_collector.py` 和 `runtime_request_metrics_store` 双写链路，导致状态 owner 与依赖方向仍有双源
+- 最终决策：总览读取只保留 `AdminOverviewQueryService`；请求埋点只写分钟桶 writer；删除旧 `admin_overview_service.py`、旧 `overview_runtime_collector.py` 及其失效测试，服务层导出同步切换到新查询服务
+- 取舍理由：项目未上线，优先让结构彻底收口而不是维持过渡兼容；删除双源后，`summary / trends / stream` 与埋点写入口的边界更稳定
+- 影响范围：`app/services/admin_overview_query_service.py`、`app/services/runtime_request_metrics.py`、`app/services/__init__.py`、旧总览服务/collector 文件及相关测试
+- 回退/失效条件：若未来确实需要单独的进程内观测缓存，只能作为独立调试工具引入，不得再次承担总览事实源或主查询链路职责
+- 关联文档/代码：`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-implementation.md`、`app/services/runtime_request_metrics.py`
+>>>>>>> 345a5b8 (refactor(admin-overview): drop legacy snapshot truth source)
 
 ### 2026-03-08 治理前置命令显式化
 - 状态：ACTIVE

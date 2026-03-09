@@ -6,7 +6,7 @@ from app.models.agent_skill import AgentSkill, AgentSkillDefinition, AgentSkillV
 from app.models.idempotency_key import IdempotencyKey
 from app.models.token_blacklist import TokenBlacklist
 from app.models.result_enrichment_rule import ResultEnrichmentRule, ResultEnrichmentRuleAudit
-from app.models.ops_metric_snapshot import OpsMetricSnapshotMinute
+from app.models.runtime_metric_bucket import RuntimeMetricBucketMinute
 from app.models.data_permission import DataPermissionTable, DataPermissionRow, DataPermissionColumn
 from app.models.llm_scene import LLMScene
 from app.models.user_memory import UserMemory
@@ -28,7 +28,7 @@ __all__ = [
     "TokenBlacklist",
     "ResultEnrichmentRule",
     "ResultEnrichmentRuleAudit",
-    "OpsMetricSnapshotMinute",
+    "RuntimeMetricBucketMinute",
     "DataPermissionTable",
     "DataPermissionRow",
     "DataPermissionColumn",
