@@ -18,7 +18,7 @@ ON t_todo(user_id, status) WHERE is_deleted = false;
 
 -- 用于按用户+截止日期排序
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_todo_user_due 
-ON t_todo(user_id, due_date) WHERE is_deleted = false AND is_completed = false;
+ON t_todo(user_id, due_date) WHERE is_deleted = false AND status != 'done';
 
 -- 3. 幂等性记录表索引
 -- 用于快速查找幂等键

@@ -62,7 +62,7 @@ class Todo(Base):
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="计划结束时间")
     actual_completion_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="实际完成时间")
     
-    # 状态管理（统一用 status 判断，移除冗余的 is_completed）
+    # 状态管理（统一用 status 判断，不保留冗余完成布尔位）
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo", comment="状态: todo/in_progress/done/cancelled")
     progress: Mapped[int] = mapped_column(Integer, default=0, comment="进度百分比")
     progress_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="具体进展说明")
