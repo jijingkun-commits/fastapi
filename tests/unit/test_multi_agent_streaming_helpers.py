@@ -25,10 +25,12 @@ from app.ai.workflow.multi_agent_graph import (
     _apply_router_contract_guard,
     _build_direct_lookup_findings,
     _build_streaming_delta_return,
+    _compile_data_goal_query_text,
     _create_streaming_agent_wrapper,
     _dispatch_custom_mode_chunk,
     _dispatch_messages_mode_chunk,
     _dispatch_values_mode_chunk,
+    _maybe_compile_supervisor_data_handoff_after_stream,
     _execute_streaming_wrapper,
     _emit_messages_mode_thinking,
     _emit_messages_mode_token,
@@ -594,6 +596,77 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
     assert kb_image_events == [({"img-1": "https://example.com/kb.png"}, "todo_expert")]
 
 
+def test_compile_data_goal_query_text_should_strip_external_clause_from_composite_query() -> None:
+    """goal title 泛化时，应从复合问题中提取 data 子任务文本。"""
+    query_text = _compile_data_goal_query_text(
+        user_query="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气",
+        goal={"kind": "data.query", "title": "数据查询"},
+    )
+
+    assert "贷款余额前10名" in query_text
+    assert "嘉兴天气" not in query_text
+
+
+
+def test_compile_supervisor_data_handoff_after_stream_should_preserve_direct_lookup_window() -> None:
+    """compiler 应在 supervisor 流结束后接管，避免打断同轮直接工具调用。"""
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气")],
+            "thread_id": "thread-1",
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                },
+                {
+                    "goal_id": "GOAL-02",
+                    "order": 2,
+                    "kind": "external.lookup",
+                    "title": "外部信息",
+                    "must_answer": True,
+                    "allowed_agents": [],
+                },
+            ],
+        },
+    )
+
+    final_state = {
+        "messages": [
+            ToolMessage(
+                content='{"results":[{"title":"嘉兴市天气预报_天气查询- 墨迹天气","content":"嘉兴市， 浙江省， 中国 今天 多云 多云 7° / 10° 北风 3级"}]}',
+                tool_call_id="tc-weather",
+                name="tavily_search",
+            ),
+            AIMessage(content="嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"),
+        ],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+        mock_parser.should_filter_content.return_value = False
+
+        handoff_return = _maybe_compile_supervisor_data_handoff_after_stream(
+            final_state,
+            initial_input_count=0,
+            ctx=ctx,
+        )
+
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["pending_handoff"]["frame"]["query_text"].startswith("查询2025年6月30日贷款余额前10名的客户")
+    assert "嘉兴天气" not in handoff_return["pending_handoff"]["frame"]["query_text"]
+    assert handoff_return["pending_handoff"]["route_decision"]["dispatch_reason"] == "compiled_data_goal_frame"
+    assert handoff_return["pending_handoff"]["direct_answer_markdown"] == "嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"
+    assert handoff_return["multi_intent_mode"] is True
+
+
 def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> None:
     """supervisor values 模式应保留 handoff 顺序并构造队列。"""
     ctx = _make_ctx(
@@ -632,7 +705,7 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
             {
                 "action": "handoff",
                 "target_agent": "data_expert",
-                "task_description": "查询网银功能",
+                "frame": {"query_text": "查询网银功能"},
             },
             {
                 "action": "handoff",
@@ -871,10 +944,8 @@ def test_build_direct_lookup_findings_ignores_tavily_error_output() -> None:
     assert findings == []
 
 
-
-
 def test_build_direct_lookup_findings_sanitizes_tavily_raw_markup_noise() -> None:
-    """Tavily 原始搜索文本含 HTML/站点噪声时，不应直接透传到最终答复。"""
+    """Tavily 原始文本含网页噪声时，不应直接透传 HTML/站点碎片。"""
     messages = [
         ToolMessage(
             content='嘉兴天气: " alt="" style="height:0.4rem;line-height:0.4rem;"> # 嘉兴天气 精细化预报 7天天气预报 2.3mm 3.3m/s 17:00 10.1℃；【嘉兴天气预报】 嘉兴天气预报7天_全国天气网: # 全国天气网 首页 国内天气 空气质量',
@@ -892,6 +963,7 @@ def test_build_direct_lookup_findings_sanitizes_tavily_raw_markup_noise() -> Non
     assert "#" not in summary
     assert "首页" not in summary
     assert "嘉兴天气" in summary
+
 
 def test_extract_supervisor_tool_observations_ignores_tavily_error_output() -> None:
     """handoff frame 不应携带 Tavily 错误文本。"""
@@ -1048,7 +1120,17 @@ async def test_run_streaming_dispatch_loop_filters_invalid_custom_chunks() -> No
         )
 
     assert handoff_return is None
-    assert final_state == {"messages": [], "decomposed_goals": []}
+    assert final_state["messages"] == []
+    assert final_state["decomposed_goals"] == [
+        {
+            "goal_id": "GOAL-01",
+            "order": 1,
+            "kind": "general.reply",
+            "title": "问题回复",
+            "must_answer": True,
+            "allowed_agents": [],
+        }
+    ]
     assert custom_events == [{"type": "status", "data": {"stage": "ok"}, "node": "supervisor"}]
 
 
@@ -1292,3 +1374,32 @@ def test_config_resolver_tool_policy_layers_merge_global_and_agent(monkeypatch) 
         "meta": {"source": "global", "priority": 2, "agent": "supervisor"},
     }
     assert layers["agent_policy_key"] == TOOL_POLICY_CONTRACT.agent_policy_key("supervisor")
+
+
+def test_prepare_streaming_inference_state_should_isolate_data_expert_subquery() -> None:
+    """data_expert 子任务推理态不应继续看到整句复合问题。"""
+    state = {
+        "messages": [
+            HumanMessage(content="查询2025年6月30日贷款余额前10名的客户，在查一下嘉兴的天气"),
+        ],
+        "pending_handoff": {
+            "target_agent": "data_expert",
+            "task_description": "查看2025-06-30贷款余额前10名客户，按贷款余额降序返回 Top10。",
+            "frame": {
+                "query_text": "查看2025-06-30贷款余额前10名客户，按贷款余额降序返回 Top10。",
+                "metric": "贷款余额",
+                "time_range": "2025-06-30",
+                "dimensions": ["客户"],
+                "query_shape": "top_n",
+                "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+            },
+        },
+    }
+
+    pruned_state, *_ = _prepare_streaming_inference_state(state, node_name="data_expert")
+
+    human_messages = [msg for msg in pruned_state["messages"] if isinstance(msg, HumanMessage)]
+    assert len(human_messages) == 1
+    assert "嘉兴的天气" not in human_messages[0].content
+    assert "贷款余额前10名" in human_messages[0].content
+    assert human_messages[0].name == "__internal_data_handoff__"

@@ -129,7 +129,7 @@ C --> O[Final Answer]
 | design_item | fr_id | trigger | input_contract | output_contract | failure_semantics | rollback_anchor(代码) |
 |---|---|---|---|---|---|---|
 | 运行态目标源单轨化 | FR-01 | 进入路由与分发路径 | `decomposed_goals` | `additional_kwargs.router_result_v2.route_decisions` | 缺失目标触发 `no_pending_goal` 并回流 supervisor | `revert:T01~T03` |
-| handoff 契约强校验 | FR-02 | 生成 handoff | `target_agent/task_description/frame` | `blocked_records` | 字段缺失触发 `invalid_*` 并回流 supervisor | `revert:T02` |
+| handoff 契约强校验 | FR-02 | 生成 handoff | `target_agent + (data.frame.query_text | non_data.task_description)` | `blocked_records` | 字段缺失触发 `invalid_*` 并回流 supervisor | `revert:T02` |
 | fallback 主体唯一化 | FR-03 | block/coverage 缺口/运行异常 | `blocked_handoffs` | `supervisor_fallback_activated` | 不允许专家兜底 | `revert:T03~T04` |
 | planner 规划能力保留 | FR-04 | 调用 `decompose_goals` | `user_query + messages(last_5_persisted_user_visible_chat_turns)` | `goals(source=...)` | `planner_model_failed -> heuristic_fallback`；指代无法消解时 `clarify_needed -> supervisor` | `revert:planner-preservation-delta` |
 | 回放字段归一 | FR-05 | 记录结构化路由结果 | `additional_kwargs.router_result_v2` | `additional_kwargs.router_result_v2(version=v2)` | 检测到 `legacy_field_detected` 或 `canonical_missing` 时 fail-fast 并记观测事件 | `revert:canonical-router-result-v2` |
@@ -240,11 +240,12 @@ clarify_handoff_contract:
         fr_id: FR-02
         trigger: 生成 handoff
         input_contract:
-          required_fields: [target_agent, task_description]
+          required_fields: [target_agent]
+          conditional_required_fields: [data.query.frame.query_text, non_data.task_description]
           optional_fields: [frame]
         output_contract:
           required_fields: [additional_kwargs.router_result_v2.router_contract_blocked]
-        failure_semantics: invalid_target_agent|invalid_task_description
+        failure_semantics: invalid_target_agent|invalid_task_description|invalid_data_query_contract
         observability_fields: [event, turn_id, target_agent, reason]
         rollback_anchor: revert:T02
         acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
@@ -406,3 +407,56 @@ clarify_consistency_check:
 
 - 审批结果：已于 2026-03-07 03:01 CST 完成审批。
 - 下游状态：可进入 `$jjk-plan`。
+
+## 13. 2026-03-08 架构收紧：data.query 子任务 contract v1
+
+### 13.1 新根因结论
+
+- 现有多意图链路中，`data.query` 只在 `decompose_goals` 阶段获得“这是一个数据目标”的类型信息；真正 dispatch 给 `data_expert` 时，旧链路仍遗留 `task_description` 文本驱动与运行态回填。
+- 同时，`data_expert` 当前会继续看到整句复合问题，因此意图分析阶段会混入与本子任务无关的外部信息/知识库语义。
+- 结果是：单问数据时正常，子 agent 路径下反而进入澄清或误判。
+
+### 13.2 冻结决策
+
+- `data.query` 在运行态新增结构化 handoff contract，唯一 owner 为 `pending_handoff.frame`。
+- `data.query` 不再写入 `task_description` 作为正式执行字段；所有展示摘要统一由 `frame.query_text` 投影生成。
+- `multi_agent_graph` 在当前 pending goal 为 `data.query` 时，直接基于 `user_query + current_goal + session_frame` 编译 canonical `pending_handoff.frame`，不再把 Supervisor 的自由 tool call 作为正常执行主链路。
+- `data_expert` 在多意图子任务路径下，只接收该数据子任务的输入视图，不再直接消费整句复合问题。
+- `router_guard` 对 `data.query` 增加结构化合同校验；合同不完整时，阻断并回流 `supervisor`。
+
+### 13.3 contract_v1 字段
+
+| 字段 | owner | 说明 |
+|---|---|---|
+| `query_text` | `pending_handoff.frame` | 数据子任务专属查询文本，供 `data_expert` 作为主输入 |
+| `metric` | `pending_handoff.frame` | 指标名，如 `贷款余额` |
+| `time_range` | `pending_handoff.frame` | 时间范围，如 `2025-06-30` |
+| `dimensions` | `pending_handoff.frame` | 维度列表，如 `客户` |
+| `chart_type` | `pending_handoff.frame` | 可选，图表补充轮使用 |
+| `org_level` | `pending_handoff.frame` | 可选，机构层级 |
+| `filters` | `pending_handoff.frame` | 可选，筛选条件 |
+| `query_shape` | `pending_handoff.frame` | `total/dimension/top_n` |
+| `ranking.limit` | `pending_handoff.frame` | 排名数量，如 `10` |
+| `ranking.sort_by` | `pending_handoff.frame` | 排序指标，如 `贷款余额` |
+| `ranking.sort_order` | `pending_handoff.frame` | `desc/asc` |
+
+### 13.4 运行态规则
+
+- `assign_to_data_expert` 仅保留给非 goal-compiler 场景/人工兜底；decompose_goals 已确认的 `data.query` 正常路径由系统自动编译 `frame`，运行态不再从 `task_description` 或用户整句原问题回填。
+- `router_guard` 仅对 `data.query` 强制校验：
+  - `frame.query_text` 必填，且必须是自然语言子任务描述；
+  - `frame.query_text` 禁止直接写 SQL/SELECT；
+  - 若 `query_shape=top_n`，则 `ranking.limit` 必须存在；
+  - `target_agent` 与 `allowed_agents` 仍按既有门禁执行。
+- `data_expert` 的推理消息窗口在多意图子任务路径下替换为“该子任务专属 user message”，禁止继续把整句复合问题作为最新用户输入；该 internal handoff message 不得落库为用户真实发言。
+- `external.lookup` 在复合问题中的主路径改为“直答 Markdown contract”：Supervisor 若已完成可直接回答的子问题，必须把该段用户可见 Markdown 原样沉淀为运行态正文；`payload.display_markdown` 优先读取这段直答 Markdown，原始 tool 结果只作为兜底证据来源，不再依赖天气/站点特化解析来恢复最终正文。
+- `external.lookup` 对外输出采用“双层 contract”：`summary` 保持单行稳定摘要供 coverage/匹配使用，`payload.display_markdown` 保留换行与 Markdown 供最终答复渲染使用。
+- `coverage_report` 除 `goal_results(success-only)` 外，还保留 `goal_attempts(all-with-evidence)`；最终答复对未完成 goal 必须优先展示最近一次失败/缺口原因，而不是统一回退成“缺少可用结果”。
+- `data_graph` 在 handoff 路径下只消费 `frame`；当 `frame.query_text` 已存在时，直接 short-circuit 到 handoff contract 解析，不再重复依赖二次意图分析模型。
+- 若 handoff 之外的意图分析模型不可用，`data_graph` 必须显式产出稳定失败文案并停止继续 SQL 生成，禁止伪装成 `free_query` 继续降级执行。
+
+### 13.5 为什么这是最小正确修复
+
+- 不触碰最终答复层，避免再次在下游文案修补。
+- 不引入 feature flag、旧字段兼容或额外兜底层。
+- 只把“数据子任务合同”和“expert 输入隔离”这两个真正出问题的层收紧。

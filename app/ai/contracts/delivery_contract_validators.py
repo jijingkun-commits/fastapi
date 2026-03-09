@@ -104,6 +104,7 @@ def _build_fallback_coverage_report(raw_data: Any) -> Dict[str, Any]:
         "missing_goals": missing,
         "matched_goal_ids": list(source.get("matched_goal_ids") or []),
         "goal_results": dict(source.get("goal_results") or {}),
+        "goal_attempts": dict(source.get("goal_attempts") or {}),
     }
 
 
@@ -154,6 +155,9 @@ def validate_coverage_report_contract(raw_data: Any) -> Tuple[Dict[str, Any], bo
         normalized = model.model_dump(by_alias=True)
         normalized["goal_results"] = {
             key: value for key, value in dict(normalized.get("goal_results") or {}).items()
+        }
+        normalized["goal_attempts"] = {
+            key: value for key, value in dict(normalized.get("goal_attempts") or {}).items()
         }
         return normalized, True, ""
     except ValidationError as exc:

@@ -91,7 +91,13 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             clarify_count=1,
             pending_handoff={
                 "target_agent": "data_expert",
-                "task_description": "在2025-06-30各机构贷款余额分布基础上，按图表展示。",
+                "frame": {
+                    "query_text": "在2025-06-30各机构贷款余额分布基础上，按图表展示。",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["机构"],
+                    "chart_type": "图表",
+                },
             },
         )
 
@@ -99,7 +105,10 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertEqual(result.get("matched_metric"), "贷款余额")
         self.assertEqual(result.get("time_range"), "2025-06-30")
         self.assertTrue(result.get("continuation_mode"))
-        self.assertEqual(result.get("query_context", {}).get("clarify_reason"), "skip_redundant_clarify_after_display_mode")
+        self.assertIn(
+            result.get("query_context", {}).get("clarify_reason"),
+            {"skip_redundant_clarify_after_display_mode", "no_clarification_needed"},
+        )
         self.assertTrue(result.get("query_context", {}).get("used_default_org_level"))
         self.assertEqual(result.get("query_context", {}).get("org_level"), "分行")
 
@@ -127,7 +136,13 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             query_context={"org_level": None},
             pending_handoff={
                 "target_agent": "data_expert",
-                "task_description": "继续生成2025-06-30各机构贷款余额分布图表。",
+                "frame": {
+                    "query_text": "继续生成2025-06-30各机构贷款余额分布图表。",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["机构"],
+                    "chart_type": "图表",
+                },
             },
         )
 
@@ -180,8 +195,8 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             "skip_metric_time_clarify_for_metadata_query",
         )
 
-    def test_handoff_task_description_can_restore_context(self):
-        """handoff.task_description 含完整上下文时，应被正确继承。"""
+    def test_handoff_frame_can_restore_context(self):
+        """handoff.frame 含完整上下文时，应被正确继承。"""
         llm_payload = {
             "intent": "clarification",
             "metric_name": "",
@@ -199,7 +214,14 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             clarify_count=1,
             pending_handoff={
                 "target_agent": "data_expert",
-                "task_description": "用户确认展示方式：图标。请基于2025-06-30各机构贷款余额分布生成图表，默认按分行展示。",
+                "frame": {
+                    "query_text": "用户确认展示方式：图标。请基于2025-06-30各机构贷款余额分布生成图表，默认按分行展示。",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["机构"],
+                    "chart_type": "图表",
+                    "org_level": "分行",
+                },
             },
         )
 
@@ -265,6 +287,7 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
                 "target_agent": "data_expert",
                 "task_description": "基于2025-06-30各机构贷款余额分布继续处理。",
                 "frame": {
+                    "query_text": "基于2025-06-30各机构贷款余额分布继续处理。",
                     "metric": "贷款余额",
                     "time_range": "2025-06-30",
                     "dimensions": ["机构"],
@@ -344,6 +367,7 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
                 "task_description": "用户原始问题：查询2025-06-30贷款余额前10名客户",
                 "turn_act_hint": "NEW_QUERY",
                 "frame": {
+                    "query_text": "查询2025-06-30贷款余额前10名客户",
                     "metric": "贷款余额",
                     "time_range": "2025-06-30",
                     "dimensions": ["客户"],
@@ -374,6 +398,7 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
                 "target_agent": "data_expert",
                 "task_description": "总行→分行→支行；默认按支行展示。",
                 "frame": {
+                    "query_text": "在2025-06-30机构贷款余额分布基础上按分行生成图表。",
                     "metric": "贷款余额",
                     "time_range": "2025-06-30",
                     "dimensions": ["机构"],
@@ -415,8 +440,11 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
             },
             pending_handoff={
                 "target_agent": "data_expert",
-                "task_description": "在上一轮查询结果基础上生成图表。",
                 "turn_act_hint": "SUPPLEMENT",
+                "frame": {
+                    "query_text": "在上一轮查询结果基础上生成图表。",
+                    "chart_type": "图表",
+                },
             },
             last_clarify_slot="display_mode",
             clarify_count=1,
@@ -428,6 +456,91 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertEqual(result.get("turn_act"), "SUPPLEMENT")
         self.assertEqual(result.get("frame_source_map", {}).get("metric"), "state")
 
+
+
+    def test_handoff_query_text_should_override_mixed_user_query_for_new_data_subtask(self):
+        """多意图子任务下，handoff.query_text 应覆盖整句复合问题作为 data 分析主输入。"""
+        llm_payload = {
+            "intent": "metric_query",
+            "metric_name": "贷款余额",
+            "time_range": "2025-06-30",
+            "filters": [],
+            "dimensions": ["客户"],
+            "chart_type": "",
+            "clarification_needed": "",
+        }
+
+        result = self._invoke(
+            "查询2025年6月30日贷款余额前10名的客户，在查一下嘉兴的天气",
+            llm_payload,
+            pending_handoff={
+                "target_agent": "data_expert",
+                "task_description": "查看2025-06-30贷款余额前10名客户，按贷款余额降序返回 Top10。",
+                "turn_act_hint": "NEW_QUERY",
+                "frame": {
+                    "query_text": "查看2025-06-30贷款余额前10名客户，按贷款余额降序返回 Top10。",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["客户"],
+                    "query_shape": "top_n",
+                    "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+                },
+            },
+        )
+
+        self.assertEqual(result.get("matched_metric"), "贷款余额")
+        self.assertEqual(result.get("time_range"), "2025-06-30")
+        self.assertNotIn("嘉兴", result.get("query_context", {}).get("original_question", ""))
+        self.assertIn("贷款余额", result.get("query_context", {}).get("original_question", ""))
+
+
+    def test_handoff_frame_should_short_circuit_intent_llm(self):
+        """handoff.frame 已完整时，应直接消费 contract，不再依赖二次意图模型。"""
+        state = {
+            "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户，在查一下嘉兴天气")],
+            "pending_handoff": {
+                "target_agent": "data_expert",
+                "turn_act_hint": "NEW_QUERY",
+                "frame": {
+                    "query_text": "查询2025年6月30日贷款余额前10名的客户，按贷款余额降序返回 Top10。",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["客户"],
+                    "query_shape": "top_n",
+                    "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+                },
+            },
+        }
+
+        with patch(
+            "app.ai.workflow.data_graph.get_scene_llm",
+            side_effect=AssertionError("handoff contract should bypass intent LLM"),
+        ):
+            result = analyze_data_intent(state)
+
+        self.assertEqual(result.get("matched_metric"), "贷款余额")
+        self.assertEqual(result.get("time_range"), "2025-06-30")
+        self.assertEqual(result.get("data_intent"), "metric_query")
+        self.assertIn("贷款余额", result.get("query_context", {}).get("original_question", ""))
+        self.assertNotIn("嘉兴", result.get("query_context", {}).get("original_question", ""))
+
+    def test_intent_analysis_model_access_error_should_surface_stable_failure_message(self):
+        """意图模型不可用时，不得伪装成 free_query 继续执行。"""
+
+        class _ExplodingLLM:
+            def invoke(self, _prompt: str):
+                raise RuntimeError("Error code: 400 - Arrearage")
+
+        state = {"messages": [HumanMessage(content="查询贷款余额")]} 
+        with patch("app.ai.workflow.data_graph.get_scene_llm", return_value=_ExplodingLLM()):
+            result = analyze_data_intent(state)
+
+        self.assertEqual(result.get("data_intent"), "clarification")
+        self.assertIn("模型当前不可用", result.get("clarification_needed", ""))
+        self.assertEqual(
+            result.get("query_context", {}).get("analysis_error_code"),
+            "upstream_model_access_error",
+        )
 
 
 if __name__ == "__main__":

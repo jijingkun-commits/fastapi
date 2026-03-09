@@ -9,6 +9,7 @@
     User -> preprocess -> supervisor -> [experts] -> postprocess -> User
 """
 import asyncio
+import html
 import json
 import logging
 import os
@@ -79,7 +80,6 @@ from app.ai.contracts.delivery_contract_validators import (
     validate_active_goals_contract,
     validate_coverage_report_contract,
 )
-from app.ai.workflow.session_intent_kernel import classify_data_handoff_task_description
 from app.ai.workflow.tool_observation_normalizer import summarize_tavily_tool_output
 
 # Schema 路由增强（借鉴 TypeAgent Dispatcher）
@@ -237,6 +237,8 @@ DATA_STRONG_HINTS = (
     "存款",
     "余额",
 )
+
+DELIVERY_RECOVERY_MARKER = "【交付补齐提示】"
 
 
 TURN_ACT_HINTS = {
@@ -1851,36 +1853,64 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
     deliverables: list[Dict[str, Any]] = []
 
     direct_findings = _build_direct_lookup_findings(turn_messages)
+    direct_answer_markdowns = [
+        _sanitize_direct_answer_markdown(
+            item.get("direct_answer_markdown"),
+            handoff_display_text=_normalize_tool_summary_text(item.get("task_description"), limit=120),
+        )
+        for item in trace
+        if _sanitize_direct_answer_markdown(
+            item.get("direct_answer_markdown"),
+            handoff_display_text=_normalize_tool_summary_text(item.get("task_description"), limit=120),
+        )
+    ]
+    consumed_direct_answer_markdowns: set[str] = set()
     if direct_findings:
-        summary = "；".join(f"{item['label']}：{item['summary']}" for item in direct_findings)
+        direct_answer_markdown = direct_answer_markdowns[-1] if direct_answer_markdowns else ""
+        display_markdown = direct_answer_markdown or _build_external_lookup_display_markdown_from_findings(direct_findings)
+        summary = _normalize_tool_summary_text(display_markdown, limit=220) if display_markdown else "；".join(
+            str(item.get("summary") or "").strip()
+            for item in direct_findings
+            if str(item.get("summary") or "").strip()
+        )
+        payload = {"findings": direct_findings}
+        if display_markdown:
+            payload["display_markdown"] = display_markdown
+        if direct_answer_markdown:
+            consumed_direct_answer_markdowns.add(direct_answer_markdown)
         deliverables.append(
             {
                 "kind": "external.lookup",
                 "status": "success",
                 "summary": summary,
-                "payload": {"findings": direct_findings},
+                "payload": payload,
             }
         )
 
     todo_structured = _extract_latest_structured_result(turn_messages, data_type="todo_list")
     data_structured = _extract_latest_structured_result(turn_messages, data_type="sql_result")
-    seen_supervisor_summaries: set[str] = set()
+    seen_general_reply_summaries: set[str] = set()
 
     for item in trace:
         target_agent = str(item.get("target_agent") or "")
         goal_id = str(item.get("goal_id") or "")
         result_excerpt = _normalize_tool_summary_text(item.get("result_excerpt"), limit=220)
         task_description = _normalize_tool_summary_text(item.get("task_description"), limit=120)
-        supervisor_excerpt = _normalize_tool_summary_text(item.get("supervisor_excerpt"), limit=220)
+        direct_answer_markdown = _sanitize_direct_answer_markdown(
+            item.get("direct_answer_markdown"),
+            handoff_display_text=task_description,
+        )
+        direct_answer_summary = _normalize_tool_summary_text(direct_answer_markdown, limit=220)
 
-        if supervisor_excerpt and supervisor_excerpt not in seen_supervisor_summaries:
-            seen_supervisor_summaries.add(supervisor_excerpt)
+        if direct_answer_markdown and direct_answer_markdown not in consumed_direct_answer_markdowns and direct_answer_summary and direct_answer_summary not in seen_general_reply_summaries:
+            seen_general_reply_summaries.add(direct_answer_summary)
+            consumed_direct_answer_markdowns.add(direct_answer_markdown)
             deliverables.append(
                 {
                     "kind": "general.reply",
                     "status": "success",
-                    "summary": supervisor_excerpt,
-                    "payload": {},
+                    "summary": direct_answer_summary,
+                    "payload": {"display_markdown": direct_answer_markdown},
                 }
             )
 
@@ -1888,9 +1918,9 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
             payload = dict((todo_structured or {}).get("data") or {})
             summary = result_excerpt or (todo_structured or {}).get("message") or ""
             if _is_coverage_reconcile_enabled():
-                status = "success" if (summary or payload) else "pending"
-                if not summary:
-                    summary = "待办结果待补齐"
+                status = "success" if (summary or payload) else "missing"
+                if status != "success" and not summary:
+                    summary = "待办结果仍待补齐"
             else:
                 status = "success"
                 if not summary:
@@ -1909,13 +1939,15 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
         if target_agent == AgentType.DATA:
             payload = dict((data_structured or {}).get("data") or {})
-            structured_message = str((data_structured or {}).get("message") or "").strip()
-            summary = structured_message or result_excerpt or ""
+            structured_message = _normalize_tool_summary_text((data_structured or {}).get("message"), limit=220)
             has_structured_result = data_structured is not None and bool(payload or structured_message)
+            summary = structured_message or result_excerpt or ""
             if _is_coverage_reconcile_enabled():
-                status = "success" if has_structured_result else "pending"
-                if status != "success" and not structured_message:
-                    summary = "数据结果待补齐"
+                status = "success" if has_structured_result else ("failed" if summary else "missing")
+                if status != "success" and summary:
+                    payload["failure_message"] = summary
+                if status == "missing" and not summary:
+                    summary = "数据结果仍待补齐"
             else:
                 status = "success"
                 if not summary:
@@ -1976,13 +2008,24 @@ def _can_match_deliverable_for_coverage(deliverable: Dict[str, Any]) -> bool:
     return _deliverable_has_runtime_evidence(deliverable)
 
 
+def _can_render_goal_attempt(deliverable: Dict[str, Any]) -> bool:
+    """判定交付物是否可作为“已尝试但未完成”的用户可见证据。"""
+    status = str(deliverable.get("status") or "").strip().lower()
+    if status == "success":
+        return True
+    return _deliverable_has_runtime_evidence(deliverable)
+
+
 def _match_goals_with_deliverables(
     goals: Sequence[Dict[str, Any]],
     deliverables: Sequence[Dict[str, Any]],
+    *,
+    include_non_success: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     """按顺序匹配 goal 与 deliverable。"""
     result: Dict[str, Dict[str, Any]] = {}
     used_indexes: set[int] = set()
+    matcher = _can_render_goal_attempt if include_non_success else _can_match_deliverable_for_coverage
 
     for goal in goals:
         goal_id = str(goal.get("goal_id") or "")
@@ -1992,7 +2035,7 @@ def _match_goals_with_deliverables(
         for idx, deliverable in enumerate(deliverables):
             if idx in used_indexes:
                 continue
-            if not _can_match_deliverable_for_coverage(deliverable):
+            if not matcher(deliverable):
                 continue
             deliverable_goal_id = str(deliverable.get("goal_id") or "")
             if goal_id and deliverable_goal_id and deliverable_goal_id == goal_id:
@@ -2003,7 +2046,7 @@ def _match_goals_with_deliverables(
             for idx, deliverable in enumerate(deliverables):
                 if idx in used_indexes:
                     continue
-                if not _can_match_deliverable_for_coverage(deliverable):
+                if not matcher(deliverable):
                     continue
                 deliverable_bucket = _goal_kind_bucket(str(deliverable.get("kind") or ""))
                 if goal_bucket == deliverable_bucket:
@@ -2014,7 +2057,7 @@ def _match_goals_with_deliverables(
             for idx, deliverable in enumerate(deliverables):
                 if idx in used_indexes:
                     continue
-                if not _can_match_deliverable_for_coverage(deliverable):
+                if not matcher(deliverable):
                     continue
                 if _goal_kind_bucket(str(deliverable.get("kind") or "")) != "external":
                     matched_idx = idx
@@ -2053,6 +2096,7 @@ def _compute_coverage_report(
     """计算问题覆盖率报告。"""
     goals = _coerce_active_goals_input(active_goals)
     matched = _match_goals_with_deliverables(goals, deliverables)
+    attempts = _match_goals_with_deliverables(goals, deliverables, include_non_success=True)
     missing: list[Dict[str, str]] = []
 
     for goal in goals:
@@ -2076,6 +2120,7 @@ def _compute_coverage_report(
         "missing_goals": missing,
         "matched_goal_ids": list(matched.keys()),
         "goal_results": matched,
+        "goal_attempts": attempts,
     }
 
 
@@ -2108,15 +2153,81 @@ def _render_todo_deliverable_text(deliverable: Dict[str, Any]) -> str:
     return f"{head} 重点：{'；'.join(item_texts)}。"
 
 
+def _extract_deliverable_display_markdown(deliverable: Dict[str, Any]) -> str:
+    """提取交付物中的用户可见 Markdown 正文。"""
+    payload = deliverable.get("payload") or {}
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("display_markdown") or "").strip()
+
+
+def _render_external_lookup_deliverable_text(deliverable: Dict[str, Any]) -> str:
+    """渲染外部信息交付内容，优先保留结构化富文本格式。"""
+    payload = deliverable.get("payload") or {}
+    if isinstance(payload, dict):
+        display_markdown = str(payload.get("display_markdown") or "").strip()
+        if display_markdown:
+            return display_markdown
+
+        findings = payload.get("findings")
+        if isinstance(findings, list):
+            summaries: list[str] = []
+            for item in findings[:3]:
+                if not isinstance(item, dict):
+                    continue
+                summary = str(item.get("summary") or "").strip()
+                if not summary:
+                    continue
+                summaries.append(summary)
+            if len(summaries) > 1:
+                return "\n".join(f"- {summary}" for summary in summaries)
+            if summaries:
+                return summaries[0]
+
+    return str(deliverable.get("summary") or "已处理完成。")
+
+
+def _extract_incomplete_goal_message(deliverable: Dict[str, Any]) -> str:
+    """提取未完成 goal 的稳定失败/缺口说明。"""
+    payload = deliverable.get("payload") or {}
+    if isinstance(payload, dict):
+        for field in ("failure_message", "message"):
+            text = _normalize_tool_summary_text(payload.get(field), limit=280)
+            if text:
+                return text
+
+    return _normalize_tool_summary_text(deliverable.get("summary"), limit=280)
+
+
 def _render_goal_answer(goal: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> str:
     """渲染单个 goal 的用户答复文本。"""
     title = str(goal.get("title") or goal.get("kind") or "问题").strip()
     if not deliverable:
         return f"{title}：暂未完成，缺少可用结果。"
 
+    status = str(deliverable.get("status") or "success").strip().lower() or "success"
+    if status != "success":
+        incomplete_message = _extract_incomplete_goal_message(deliverable)
+        if not incomplete_message:
+            return f"{title}：暂未完成，缺少可用结果。"
+        if "\n" in incomplete_message:
+            return f"{title}：暂未完成。\n{incomplete_message}"
+        return f"{title}：暂未完成，{incomplete_message}"
+
+    display_markdown = _extract_deliverable_display_markdown(deliverable)
+    if display_markdown:
+        if "\n" in display_markdown:
+            return f"{title}：\n{display_markdown}"
+        return f"{title}：{display_markdown}"
+
     bucket = _goal_kind_bucket(str(goal.get("kind") or ""))
     if bucket == "todo":
         return f"{title}：{_render_todo_deliverable_text(deliverable)}"
+    if bucket == "external":
+        external_text = _render_external_lookup_deliverable_text(deliverable).strip()
+        if "\n" in external_text:
+            return f"{title}：\n{external_text}"
+        return f"{title}：{external_text or '已处理完成。'}"
 
     summary = _normalize_tool_summary_text(deliverable.get("summary"), limit=280)
     if not summary:
@@ -2134,11 +2245,17 @@ def _render_final_answer(
         key=lambda item: int(item.get("order") or 0),
     )
     goal_results = dict(coverage_report.get("goal_results") or {})
+    goal_attempts = dict(coverage_report.get("goal_attempts") or {})
 
     lines: list[str] = ["按你的问题顺序，逐项回复如下："]
     for idx, goal in enumerate(goals, start=1):
         goal_id = str(goal.get("goal_id") or "")
-        lines.append(f"{idx}. {_render_goal_answer(goal, goal_results.get(goal_id))}")
+        deliverable = goal_results.get(goal_id) or goal_attempts.get(goal_id)
+        answer = _render_goal_answer(goal, deliverable)
+        answer_lines = str(answer).splitlines() or [""]
+        lines.append(f"{idx}. {answer_lines[0]}")
+        for extra_line in answer_lines[1:]:
+            lines.append(f"    {extra_line}" if extra_line else "")
 
     missing_goals = list(coverage_report.get("missing_goals") or [])
     if missing_goals:
@@ -2196,11 +2313,32 @@ def _build_coverage_clarification_questions(coverage_report: Dict[str, Any]) -> 
     return ["是否继续补齐当前未完成目标？"]
 
 
+def _resolve_handoff_display_text(handoff: Dict[str, Any], *, limit: int = 240) -> str:
+    """返回 handoff 的可展示摘要；data.query 仅消费 frame.query_text。"""
+    if not isinstance(handoff, dict):
+        return ""
+
+    frame = handoff.get("frame")
+    if handoff.get("target_agent") == AgentType.DATA:
+        if isinstance(frame, dict):
+            return _normalize_tool_summary_text(frame.get("query_text"), limit=limit)
+        return ""
+
+    task_description = _normalize_tool_summary_text(handoff.get("task_description"), limit=limit)
+    if task_description:
+        return task_description
+
+    if isinstance(frame, dict):
+        return _normalize_tool_summary_text(frame.get("query_text"), limit=limit)
+
+    return ""
+
+
 def _augment_data_handoff_payload(
     handoff_data: Dict[str, Any],
     state: MultiAgentState,
 ) -> Dict[str, Any]:
-    """规范化 data_expert handoff，避免 task_description 过度扩写污染专家意图。"""
+    """规范化 data_expert handoff，仅消费结构化 frame。"""
     if not isinstance(handoff_data, dict):
         return handoff_data
 
@@ -2208,10 +2346,8 @@ def _augment_data_handoff_payload(
         return handoff_data
 
     enriched = dict(handoff_data)
-    latest_user_text = _extract_latest_human_content(state.get("messages", []))
-
     base_frame = enriched.get("frame")
-    enriched["frame"] = dict(base_frame) if isinstance(base_frame, dict) else None
+    frame = dict(base_frame) if isinstance(base_frame, dict) else {}
 
     turn_act_hint = str(enriched.get("turn_act_hint") or "").strip().upper()
     if turn_act_hint not in TURN_ACT_HINTS:
@@ -2222,22 +2358,23 @@ def _augment_data_handoff_payload(
             turn_act_hint = "NEW_QUERY"
     enriched["turn_act_hint"] = turn_act_hint
 
-    raw_desc = str(enriched.get("task_description") or "").strip()
-    normalized_raw_desc = _normalize_tool_summary_text(raw_desc, limit=240)
-    user_desc = str(latest_user_text or "").strip()
-    task_desc_kind = classify_data_handoff_task_description(raw_desc, user_desc)
-    if task_desc_kind == "specific":
-        enriched["task_description"] = normalized_raw_desc
-    elif user_desc:
-        enriched["task_description"] = f"用户原始问题：{_normalize_tool_summary_text(user_desc, limit=240)}"
+    query_text = _normalize_text_content(frame.get("query_text"))
+    if query_text:
+        try:
+            from app.ai.workflow.data_graph import build_data_query_handoff_frame
+
+            enriched["frame"] = build_data_query_handoff_frame(query_text, base_frame=frame)
+        except Exception as exc:
+            logger.warning("data_handoff_frame_build_failed: %s", exc)
+            enriched["frame"] = frame
     else:
-        enriched["task_description"] = normalized_raw_desc
+        enriched["frame"] = frame or None
 
     logger.info(
-        "data_handoff_normalized: turn_act_hint=%s, has_frame=%s, desc_len=%s",
+        "data_handoff_normalized: turn_act_hint=%s, has_frame=%s, has_query_text=%s",
         enriched.get("turn_act_hint"),
         bool(enriched.get("frame")),
-        len(str(enriched.get("task_description") or "")),
+        bool(query_text),
     )
     return enriched
 
@@ -2517,7 +2654,7 @@ def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> li
         if "tavily" not in lowered_name:
             continue
 
-        summary = summarize_tavily_tool_output(tool_content)
+        summary = _summarize_tavily_tool_output(tool_content)
         if not summary:
             continue
 
@@ -2645,6 +2782,126 @@ def _normalize_handoff_batch_for_supervisor(
         normalized.append(handoff_data)
     return normalized
 
+_COMPOSITE_GOAL_SPLIT_PATTERN = re.compile(
+    r"(?:\n+|(?:另外|然后|顺便|并且|以及|同时)\s*[，,、 ]*|再(?=(?:查|看|帮|创建|新建|加|补|问)))"
+)
+
+
+def _infer_primary_goal_bucket_from_query_text(query_text: str) -> str:
+    """用与 decompose_goals 同源的启发式，粗判片段主目标桶。"""
+    normalized = _normalize_text_content(query_text)
+    if not normalized:
+        return "general"
+
+    plan = _infer_initial_intent_plan({"messages": [HumanMessage(content=normalized)]})
+    goals = [goal for goal in list(plan.get("goals") or []) if isinstance(goal, dict)]
+    if not goals:
+        return "general"
+    return _goal_kind_bucket(str(goals[0].get("kind") or "general.reply"))
+
+
+def _split_user_query_for_goal_compile(user_query: str) -> list[str]:
+    """按复合请求连接词切分用户问题，供 goal compiler 选择子任务文本。"""
+    normalized = _normalize_text_content(user_query)
+    if not normalized:
+        return []
+
+    parts = [
+        part.strip(" ，,。；;	")
+        for part in _COMPOSITE_GOAL_SPLIT_PATTERN.split(normalized)
+        if str(part).strip(" ，,。；;	")
+    ]
+    return parts or [normalized]
+
+
+def _compile_data_goal_query_text(
+    *,
+    user_query: str,
+    goal: Dict[str, Any],
+) -> str:
+    """根据 user_query + 当前 data goal 编译稳定 query_text。"""
+    goal_title = _normalize_text_content(goal.get("title"))
+    if goal_title and goal_title != _default_goal_title("data.query"):
+        if _infer_primary_goal_bucket_from_query_text(goal_title) == "data":
+            return goal_title
+
+    segments = _split_user_query_for_goal_compile(user_query)
+    for segment in segments:
+        if _infer_primary_goal_bucket_from_query_text(segment) == "data":
+            return segment
+
+    return user_query
+
+
+def _build_compiled_data_goal_handoff(
+    *,
+    state: MultiAgentState,
+    goal: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """基于当前 data goal 直接编译 canonical handoff，不再依赖 Supervisor data tool。"""
+    if _goal_kind_bucket(str(goal.get("kind") or "")) != "data":
+        return None
+
+    user_query = _resolve_semantic_user_query(state)
+    query_text = _compile_data_goal_query_text(user_query=user_query, goal=goal)
+    if not query_text:
+        return None
+
+    try:
+        from app.ai.workflow.data_graph import build_data_query_handoff_frame
+    except Exception as exc:
+        logger.warning("data_goal_compile_import_failed: %s", exc)
+        return None
+
+    base_frame = state.get("session_frame") if isinstance(state.get("session_frame"), dict) else None
+    frame = build_data_query_handoff_frame(query_text, base_frame=base_frame)
+    turn_act_hint = str(state.get("turn_act") or "").strip().upper()
+    if turn_act_hint not in TURN_ACT_HINTS:
+        turn_act_hint = "NEW_QUERY"
+
+    compiled = {
+        "action": "handoff",
+        "target_agent": AgentType.DATA,
+        "frame": frame,
+        "turn_act_hint": turn_act_hint,
+        "compiled_by": "goal_contract",
+    }
+    logger.info(
+        "data_goal_compiled: goal_id=%s, title=%s, query_text=%s",
+        goal.get("goal_id"),
+        goal.get("title"),
+        _normalize_tool_summary_text(query_text, limit=160),
+    )
+    return _augment_data_handoff_payload(compiled, state)
+
+
+def _inject_compiled_data_handoff_for_supervisor(
+    handoffs: Sequence[Dict[str, Any]],
+    *,
+    state: MultiAgentState,
+    active_goals: Sequence[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    """当当前 pending goal 为 data.query 时，用 goal compiler 生成单真源 handoff。"""
+    normalized_handoffs = [dict(item) for item in handoffs if isinstance(item, dict)]
+    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+    if not dispatch_queue:
+        return normalized_handoffs
+
+    current_goal = dict(dispatch_queue[0])
+    if _goal_kind_bucket(str(current_goal.get("kind") or "")) != "data":
+        return normalized_handoffs
+
+    compiled_handoff = _build_compiled_data_goal_handoff(state=state, goal=current_goal)
+    if not compiled_handoff:
+        return normalized_handoffs
+
+    remaining = [
+        dict(item)
+        for item in normalized_handoffs
+        if str(item.get("target_agent") or "").strip() != AgentType.DATA
+    ]
+    return [compiled_handoff, *remaining]
+
 
 def _build_router_dispatch_goal_queue(
     goals_or_plan: Optional[Sequence[Dict[str, Any]] | Dict[str, Any]],
@@ -2690,13 +2947,56 @@ def _build_router_blocked_entry(
     blocked = {
         "reason": reason,
         "target_agent": target_agent or "unknown",
-        "task_description": str(handoff.get("task_description") or ""),
+        "task_description": _resolve_handoff_display_text(handoff, limit=220),
     }
     if goal:
         blocked["goal_id"] = str(goal.get("goal_id") or "")
         blocked["goal_title"] = str(goal.get("title") or "")
         blocked["allowed_agents"] = list(goal.get("allowed_agents") or [])
     return blocked
+
+
+def _is_sql_like_data_query_text(query_text: str) -> bool:
+    """校验 data.query.query_text 是否被错误写成 SQL。"""
+    normalized = str(query_text or "").strip()
+    if not normalized:
+        return False
+
+    compact = re.sub(r"\s+", " ", normalized).strip().lower()
+    if not compact.startswith(("select ", "with ")):
+        return False
+
+    try:
+        import sqlglot
+
+        sqlglot.parse_one(normalized, dialect="postgres")
+        return True
+    except Exception:
+        return any(token in compact for token in (" from ", " group by ", " order by ", " limit "))
+
+
+def _validate_data_query_handoff_contract(handoff: Dict[str, Any]) -> str:
+    """校验 data.query handoff contract 是否具备最小可执行性。"""
+    frame = handoff.get("frame")
+    if not isinstance(frame, dict):
+        return "frame_missing"
+
+    query_text = _normalize_text_content(frame.get("query_text"))
+    if not query_text:
+        return "query_text_missing"
+    if _is_sql_like_data_query_text(query_text):
+        return "query_text_sql_like"
+
+    query_shape = str(frame.get("query_shape") or "").strip().lower()
+    if query_shape == "top_n":
+        ranking = frame.get("ranking")
+        if not isinstance(ranking, dict):
+            return "ranking_missing"
+        limit = _parse_non_negative_int(ranking.get("limit"), default=0)
+        if limit <= 0:
+            return "ranking_limit_missing"
+
+    return ""
 
 
 def _apply_router_contract_guard(
@@ -2752,16 +3052,6 @@ def _apply_router_contract_guard(
             )
             continue
 
-        task_description = str(handoff.get("task_description") or "").strip()
-        if not task_description:
-            blocked.append(
-                _build_router_blocked_entry(
-                    handoff=handoff,
-                    reason="invalid_task_description",
-                )
-            )
-            continue
-
         if not pending_goals:
             blocked.append(
                 _build_router_blocked_entry(
@@ -2772,6 +3062,17 @@ def _apply_router_contract_guard(
             continue
 
         current_goal = pending_goals[0]
+        goal_bucket = _goal_kind_bucket(str(current_goal.get("kind") or ""))
+        if goal_bucket != "data":
+            task_description = str(handoff.get("task_description") or "").strip()
+            if not task_description:
+                blocked.append(
+                    _build_router_blocked_entry(
+                        handoff=handoff,
+                        reason="invalid_task_description",
+                    )
+                )
+                continue
         allowed_agents = list(current_goal.get("allowed_agents") or [])
         if target_agent not in allowed_agents:
             blocked.append(
@@ -2783,12 +3084,25 @@ def _apply_router_contract_guard(
             )
             continue
 
+        if goal_bucket == "data":
+            contract_error = _validate_data_query_handoff_contract(handoff)
+            if contract_error:
+                blocked_entry = _build_router_blocked_entry(
+                    handoff=handoff,
+                    reason="invalid_data_query_contract",
+                    goal=current_goal,
+                )
+                blocked_entry["contract_error"] = contract_error
+                blocked.append(blocked_entry)
+                continue
+
         enriched_handoff = dict(handoff)
         enriched_handoff["goal_id"] = str(current_goal.get("goal_id") or "")
+        dispatch_reason = "compiled_data_goal_frame" if str(handoff.get("compiled_by") or "").strip() == "goal_contract" else "decomposed_goals_allowed_agents"
         enriched_handoff["route_decision"] = {
             "goal_id": str(current_goal.get("goal_id") or ""),
             "target_agent": target_agent,
-            "dispatch_reason": "decomposed_goals_allowed_agents",
+            "dispatch_reason": dispatch_reason,
             "priority": int(current_goal.get("order") or 0),
             "blocked_by": [],
         }
@@ -2796,6 +3110,63 @@ def _apply_router_contract_guard(
         pending_goals.pop(0)
 
     return accepted, blocked, pending_goals
+
+def _build_router_contract_repair_hints(blocked_handoffs: Sequence[Dict[str, Any]]) -> list[str]:
+    """根据阻塞的 handoff 生成可执行修复提示。"""
+    hints: list[str] = []
+    seen: set[str] = set()
+    for item in blocked_handoffs or []:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason") or "").strip()
+        contract_error = str(item.get("contract_error") or "").strip()
+        hint = ""
+        if reason == "invalid_data_query_contract":
+            if contract_error == "query_text_missing":
+                hint = "data.query 的 frame.query_text 必填，且必须直接描述数据子任务本身。"
+            elif contract_error == "query_text_sql_like":
+                hint = "data.query 的 frame.query_text 必须是自然语言子任务描述，禁止直接填写 SQL/SELECT 语句。"
+            elif contract_error == "ranking_limit_missing":
+                hint = "TopN 数据子任务必须补齐 frame.ranking.limit。"
+        if hint and hint not in seen:
+            seen.add(hint)
+            hints.append(hint)
+    return hints
+
+
+def _build_router_blocked_system_context(
+    *,
+    state: MultiAgentState,
+    pending_goals: Sequence[Dict[str, Any]],
+    blocked_handoffs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> str:
+    """构造 Router 门禁阻塞后的补齐提示上下文。"""
+    missing_goals = [
+        {
+            "goal_id": str(goal.get("goal_id") or ""),
+            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
+            "reason": "router_contract_blocked",
+        }
+        for goal in pending_goals
+    ]
+    if not missing_goals:
+        return str(state.get("system_context") or "")
+
+    active_plan = _build_active_goal_plan(state, source="router_guard")
+
+    recovery_context = _build_multi_intent_recovery_system_context(
+        str(state.get("system_context") or ""),
+        active_plan,
+        missing_goals,
+    )
+    repair_hints = _build_router_contract_repair_hints(blocked_handoffs or [])
+    if not repair_hints:
+        return recovery_context
+
+    hint_block = "\n".join(["【Router 合同修复提示】", *[f"- {hint}" for hint in repair_hints]])
+    if recovery_context:
+        return f"{recovery_context}\n{hint_block}"
+    return hint_block
 
 
 def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bool:
@@ -2807,8 +3178,8 @@ def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bo
     return False
 
 
-def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
-    """提取最近一条可展示的 AI 输出摘要。"""
+def _extract_latest_visible_ai_markdown(messages: Sequence[BaseMessage]) -> str:
+    """提取最近一条可展示的 AI Markdown 正文，保留换行与格式。"""
     from app.ai.protocol import AgentOutputParser
 
     for message in reversed(messages or []):
@@ -2817,20 +3188,459 @@ def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: i
         content = _normalize_text_content(getattr(message, "content", ""))
         if not content:
             continue
+        content = str(content).strip()
+        if not content:
+            continue
         if AgentOutputParser.should_filter_content(content):
             continue
-        return _normalize_tool_summary_text(content, limit=limit)
+        return content
     return ""
 
 
-def _extract_supervisor_direct_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
-    """提取 Supervisor 在委派前可直接交付的文本摘要。"""
-    return _extract_latest_visible_ai_excerpt(messages, limit=limit)
+def _sanitize_direct_answer_markdown(markdown: Any, *, handoff_display_text: str = "") -> str:
+    """清理直答 Markdown 中的调度/委派说明，仅保留用户可见正文。"""
+    text = str(markdown or "").strip()
+    if not text:
+        return ""
+
+    text = re.split(r"\n\s*---+\s*\n", text, maxsplit=1)[0].strip()
+    handoff_hint = _normalize_tool_summary_text(re.sub(r"[*_`]", "", handoff_display_text), limit=240)
+    blocked_markers = (
+        "decompose_goals",
+        "assign_to_",
+        "接下来我将",
+        "已为你发起",
+        "将由系统继续处理",
+        "系统继续处理",
+        "后续执行",
+    )
+
+    kept_blocks: list[str] = []
+    for block in re.split(r"\n\s*\n", text):
+        candidate = str(block or "").strip()
+        if not candidate:
+            continue
+        normalized_candidate = _normalize_tool_summary_text(candidate, limit=400)
+        compare_candidate = _normalize_tool_summary_text(re.sub(r"[*_`]", "", candidate), limit=400)
+        lowered_candidate = normalized_candidate.lower()
+        if handoff_hint and handoff_hint in compare_candidate:
+            break
+        if any(marker.lower() in lowered_candidate for marker in blocked_markers):
+            break
+        kept_blocks.append(candidate)
+
+    cleaned = "\n\n".join(kept_blocks).strip()
+    return cleaned or text
 
 
-def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[str, str]]:
+def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
+    """提取最近一条可展示的 AI 输出摘要。"""
+    return _normalize_tool_summary_text(_extract_latest_visible_ai_markdown(messages), limit=limit)
+
+
+
+def _build_external_lookup_display_markdown_from_findings(findings: Sequence[Dict[str, Any]]) -> str:
+    """根据外部查询 findings 构建用户可见富文本。"""
+    rich_blocks: list[str] = []
+    for item in findings or []:
+        if not isinstance(item, dict):
+            continue
+        display_markdown = str(item.get("display_markdown") or "").strip()
+        if display_markdown:
+            rich_blocks.append(display_markdown)
+
+    if rich_blocks:
+        return "\n\n".join(rich_blocks)
+
+    summaries = [
+        str(item.get("summary") or "").strip()
+        for item in findings or []
+        if isinstance(item, dict) and str(item.get("summary") or "").strip()
+    ]
+    if len(summaries) > 1:
+        return "\n".join(f"- {summary}" for summary in summaries)
+    if summaries:
+        return summaries[0]
+    return ""
+
+
+TAVILY_ERROR_HINTS = (
+    "no search results found for",
+    "suggestions: remove time_range argument",
+    "try a more detailed search using 'advanced' search_depth",
+)
+
+
+def _is_tool_message_error(message: ToolMessage) -> bool:
+    """判定 ToolMessage 是否为错误状态。"""
+    status = str(getattr(message, "status", "") or "").strip().lower()
+    return status in {"error", "failed", "failure"}
+
+
+def _is_tavily_tool_error_output(tool_content: str, payload: Any = None) -> bool:
+    """识别 Tavily 的无结果/报错输出，避免直接回显给用户。"""
+    normalized = str(tool_content or "").strip().lower()
+    if any(hint in normalized for hint in TAVILY_ERROR_HINTS):
+        return True
+
+    if isinstance(payload, dict):
+        status = str(payload.get("status") or "").strip().lower()
+        if status in {"error", "failed", "failure"}:
+            return True
+        if payload.get("error"):
+            return True
+        answer = str(payload.get("answer") or "").strip().lower()
+        if answer.startswith("no search results found for"):
+            return True
+
+    return False
+
+
+def _sanitize_tavily_text(tool_content: str) -> str:
+    """对 Tavily 原始文本做通用标记清洗，避免网页属性碎片直出。"""
+    text = html.unescape(str(tool_content or ""))
+    if not text.strip():
+        return ""
+    text = re.sub(r'\b(?:alt|style|class|id|src|href)\s*=\s*"[^"]*"', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:alt|style|class|id|src|href)\s*=\s*'[^']*'", ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(?:alt|style|class|id|src|href)\s*=\s*\S+', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = text.replace('#', ' ').replace('【', ' ').replace('】', ' ')
+    text = text.replace('>', ' ').replace('"', ' ').replace('_', ' ')
+    text = re.sub(r'\s+', ' ', text).strip(' ：:；;,，')
+    return _normalize_tool_summary_text(text, limit=220)
+
+
+def _normalize_weather_label(raw_label: str) -> str:
+    """标准化天气标签。"""
+    label = str(raw_label or "").strip().replace('（', '(').replace('）', ')')
+    if not label:
+        return ""
+
+    alias_match = re.search(r'(今天|明天|后天|周[一二三四五六日天])', label)
+    if alias_match:
+        alias = alias_match.group(1)
+        date_match = re.search(r'(\d{2}-\d{2})', label)
+        if date_match:
+            return f"{alias}（{date_match.group(1)}）"
+        return alias
+
+    return label
+
+
+def _extract_weather_segments_from_text(text: str) -> list[dict[str, str]]:
+    """从天气网页正文中提取日期段。"""
+    normalized = html.unescape(str(text or ""))
+    if not normalized.strip():
+        return []
+
+    normalized = re.sub(r'<[^>]+>', ' ', normalized)
+    normalized = normalized.replace('（', '(').replace('）', ')')
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    if not normalized:
+        return []
+
+    label_pattern = re.compile(
+        r'(?:\d{1,2}日\((?:今天|明天|后天|周[一二三四五六日天])\)|(?:今天|明天|后天|周[一二三四五六日天])(?:\s*\(\d{2}-\d{2}\))?(?=(?:\s|$)))'
+    )
+    matches = list(label_pattern.finditer(normalized))
+
+    weather_pattern = re.compile(
+        r'(晴转多云|晴转小雨|晴转阴|多云转晴|多云转阴|多云转小雨|小雨转多云|小雨转阴|阴转多云|阴转小雨|雷阵雨|阵雨|小雨|中雨|大雨|暴雨|雨夹雪|小雪|中雪|大雪|多云|晴|阴)'
+    )
+    temp_pattern = re.compile(r'(-?\d+\s*[°℃]\s*/\s*-?\d+\s*[°℃]|-?\d+~?-?\d*\s*[°℃])')
+
+    segments: list[dict[str, str]] = []
+    for index, match in enumerate(matches):
+        raw_label = match.group(0)
+        start_idx = match.end()
+        end_idx = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        segment_text = normalized[start_idx:end_idx].strip(' ：:；;,，')
+        if not segment_text:
+            continue
+
+        weather_match = weather_pattern.search(segment_text)
+        temp_match = temp_pattern.search(segment_text)
+        weather = weather_match.group(1).strip() if weather_match else ""
+        temperature = temp_match.group(1).replace(' ', '') if temp_match else ""
+
+        extra_text = segment_text
+        if weather_match:
+            extra_text = extra_text.replace(weather_match.group(0), ' ', 1)
+        if temp_match:
+            extra_text = extra_text.replace(temp_match.group(0), ' ', 1)
+        extra_text = re.sub(r'\b\d+\s*[优良轻中重]\b', ' ', extra_text)
+        extra_text = re.sub(r'今日天气提示[^今天明天后天周一二三四五六日天]*', ' ', extra_text)
+        extra_text = re.sub(r'\s+', ' ', extra_text).strip(' ：:；;,，')
+
+        if not any((weather, temperature, extra_text)):
+            continue
+        segments.append(
+            {
+                'label': _normalize_weather_label(raw_label),
+                'weather': weather,
+                'temperature': temperature,
+                'extra': extra_text,
+            }
+        )
+
+    if segments:
+        return segments[:5]
+
+    table_pattern = re.compile(
+        r'\|\s*(\d{4}年\d{2}月\d{2}日\(星期[一二三四五六日天]\))\s*\|\s*\|?\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|'
+    )
+    for match in table_pattern.finditer(normalized):
+        weather = str(match.group(2) or '').strip(' ：:；;,，')
+        temperature = re.sub(r'\s+', '', str(match.group(3) or ''))
+        extra_text = re.sub(r'\s+', ' ', str(match.group(4) or '')).strip(' ：:；;,，')
+        if not any((weather, temperature, extra_text)):
+            continue
+        segments.append(
+            {
+                'label': str(match.group(1) or '').strip(),
+                'weather': weather,
+                'temperature': temperature,
+                'extra': extra_text,
+            }
+        )
+
+    if segments:
+        return segments[:5]
+
+    forecast_pattern = re.compile(
+        r'(?:\d+\s*日\s*)?([一-鿿]{2,6})\s*(今日天气|天气|下周天气预报)\s*\((\d+\s*[–-]\s*\d+\s*天数)\)\s*:?',
+        re.IGNORECASE,
+    )
+    matches = list(forecast_pattern.finditer(normalized))
+    for index, match in enumerate(matches):
+        descriptor = str(match.group(2) or '').strip()
+        period = re.sub(r'\s+', '', str(match.group(3) or '')).replace('–', '-').replace('天数', '天')
+        start_idx = match.end()
+        end_idx = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        segment_text = normalized[start_idx:end_idx].strip(' ：:；;,，')
+        if not segment_text:
+            continue
+
+        if descriptor == '今日天气':
+            label = f'今日（{period}）'
+        elif descriptor == '下周天气预报':
+            label = f'下周（{period}）'
+        else:
+            label = period or descriptor
+
+        temp_match = re.search(r'max\s*(-?\d+)\s*°\s*c.*?min\s*(-?\d+)\s*°\s*c', segment_text, re.IGNORECASE)
+        temperature = ''
+        if temp_match:
+            max_temp, min_temp = temp_match.groups()
+            temperature = f'{min_temp}°C~{max_temp}°C'
+
+        sentences = [part.strip(' .') for part in re.split(r'(?<=[.。])\s+', segment_text) if part.strip(' .')]
+        cleaned_sentences: list[str] = []
+        for sentence in sentences:
+            cleaned_sentence = re.sub(r'\(max[^)]*min[^)]*\)', '', sentence, flags=re.IGNORECASE)
+            cleaned_sentence = re.sub(r'\s+', ' ', cleaned_sentence).strip(' .')
+            if cleaned_sentence:
+                cleaned_sentences.append(cleaned_sentence)
+
+        weather = cleaned_sentences[0] if cleaned_sentences else ''
+        extra = '；'.join(cleaned_sentences[1:3])
+        if not any((weather, temperature, extra)):
+            continue
+        segments.append(
+            {
+                'label': label,
+                'weather': weather,
+                'temperature': temperature,
+                'extra': extra,
+            }
+        )
+
+    return segments[:5]
+
+
+def _score_tavily_weather_result(item: Dict[str, Any]) -> int:
+    """为天气类结果做轻量排序，优先真实天气页，降权新闻/门户噪声。"""
+    if not isinstance(item, dict):
+        return 0
+
+    title = str(item.get('title') or '').lower()
+    url = str(item.get('url') or '').lower()
+    content = str(item.get('content') or item.get('snippet') or '').lower()
+    merged = ' '.join(part for part in (title, url, content) if part)
+    score = 0
+
+    weather_hints = (
+        '天气', 'weather', 'forecast', '气温', '实时天气', '天气预报', '墨迹天气', 'weather.com', 'weatherspark', 'weather-forecast', '1543天气网'
+    )
+    noise_hints = (
+        '网易', 'entertainment', '娱乐', '财经', '汽车', '科技', '时尚', '特别声明', '自媒体平台', '卫视', '日报', 'article', 'dy/article'
+    )
+    for hint in weather_hints:
+        if hint.lower() in merged:
+            score += 2
+    for hint in noise_hints:
+        if hint.lower() in merged:
+            score -= 3
+
+    return score
+
+
+def _extract_weather_city_name(title: str, content: str) -> str:
+    """从标题/正文提取城市名，避免把“72小时实时”等修饰词带进标题。"""
+    source_texts = [str(title or ''), str(content or '')]
+    patterns = (
+        r'([一-鿿]{2,6})市?未来\d+天(?:天气预报|天气)',
+        r'([一-鿿]{2,6})市?明[日天]天气',
+        r'([一-鿿]{2,6})市?后天(?:天气|的天气情况)',
+        r'([一-鿿]{2,6})市?72小时实时天气',
+        r'([一-鿿]{2,6})市?天气',
+    )
+    for source in source_texts:
+        for pattern in patterns:
+            match = re.search(pattern, source)
+            if match:
+                return match.group(1)
+    return '天气'
+
+
+def _extract_tavily_display_markdown(tool_content: str) -> str:
+    """从 Tavily 结果中提取用户可见富文本，优先识别天气网页。"""
+    stripped = str(tool_content or "").strip()
+    if not stripped:
+        return ""
+
+    payload: Any = None
+    if (stripped.startswith('{') and stripped.endswith('}')) or (
+        stripped.startswith('[') and stripped.endswith(']')
+    ):
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            payload = None
+
+    if _is_tavily_tool_error_output(stripped, payload=payload):
+        return ""
+
+    if isinstance(payload, dict):
+        answer = str(payload.get('answer') or '').strip()
+        if answer:
+            return answer
+        results = payload.get('results')
+    elif isinstance(payload, list):
+        results = payload
+    else:
+        return ""
+
+    if not isinstance(results, list):
+        return ""
+
+    ranked_results = sorted(
+        [item for item in results if isinstance(item, dict)],
+        key=_score_tavily_weather_result,
+        reverse=True,
+    )
+
+    fallback_blocks: list[str] = []
+    for item in ranked_results[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get('title') or '').strip()
+        content = str(item.get('content') or item.get('snippet') or '').strip()
+        if not content:
+            continue
+
+        segments = _extract_weather_segments_from_text(content)
+        if segments:
+            city = _extract_weather_city_name(title, content)
+            lines = [f"{city}天气："]
+            for segment in segments[:4]:
+                detail_parts = [part for part in (segment.get('weather'), segment.get('temperature'), segment.get('extra')) if part]
+                if not detail_parts:
+                    continue
+                lines.append(f"- {segment.get('label') or '近期'}：{'，'.join(detail_parts)}")
+            if len(lines) > 1:
+                return "\n".join(lines)
+
+        cleaned_content = _sanitize_tavily_text(content)
+        cleaned_title = _sanitize_tavily_text(title)
+        weather_like_result = _score_tavily_weather_result(item) > 0
+        if weather_like_result:
+            city = _extract_weather_city_name(title, content)
+            summary_text = cleaned_content or cleaned_title
+            if summary_text:
+                fallback_blocks.append(f"{city}天气：\n- 摘要：{summary_text}")
+                continue
+
+        if cleaned_content and cleaned_title:
+            fallback_blocks.append(f"{cleaned_title}\n\n{cleaned_content}")
+            continue
+        if cleaned_content:
+            fallback_blocks.append(cleaned_content)
+            continue
+        if cleaned_title:
+            fallback_blocks.append(cleaned_title)
+
+    return fallback_blocks[0] if fallback_blocks else ""
+
+
+def _summarize_tavily_tool_output(tool_content: str) -> str:
+    """从 Tavily 工具输出中提取可用于待办补充的摘要。"""
+    rich_text = _extract_tavily_display_markdown(tool_content)
+    if rich_text:
+        return _normalize_tool_summary_text(rich_text, limit=240)
+
+    stripped = str(tool_content or "").strip()
+    if not stripped:
+        return ""
+
+    payload: Any = None
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            payload = None
+
+    if _is_tavily_tool_error_output(stripped, payload=payload):
+        return ""
+
+    if isinstance(payload, dict):
+        answer = _normalize_tool_summary_text(payload.get("answer"), limit=220)
+        if answer:
+            return answer
+        results = payload.get("results")
+    elif isinstance(payload, list):
+        results = payload
+    else:
+        return _sanitize_tavily_text(stripped)
+
+    if not isinstance(results, list):
+        return _sanitize_tavily_text(stripped)
+
+    ranked_results = sorted(
+        [item for item in results if isinstance(item, dict)],
+        key=_score_tavily_weather_result,
+        reverse=True,
+    )
+    lines = []
+    for item in ranked_results[:2]:
+        snippet = _sanitize_tavily_text(item.get("content") or item.get("snippet"))
+        title = _sanitize_tavily_text(item.get("title"))
+        if snippet:
+            lines.append(snippet)
+        elif title:
+            lines.append(title)
+
+    merged = "；".join(lines)
+    if merged:
+        return _normalize_tool_summary_text(merged, limit=240)
+    return _sanitize_tavily_text(stripped)
+
+def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[str, Any]]:
     """提取 Supervisor 直接工具（天气/知识库）结果，供最终汇总使用。"""
-    findings: list[Dict[str, str]] = []
+    findings: list[Dict[str, Any]] = []
     seen: set[Tuple[str, str]] = set()
 
     for message in messages or []:
@@ -2846,8 +3656,10 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
         if not content:
             continue
 
+        display_markdown = ""
         if "tavily" in lowered_name:
-            summary = summarize_tavily_tool_output(content)
+            display_markdown = _extract_tavily_display_markdown(content)
+            summary = _normalize_tool_summary_text(display_markdown, limit=220) if display_markdown else summarize_tavily_tool_output(content)
             label = "天气/实时信息"
         elif "knowledge_search" in lowered_name:
             summary = _normalize_tool_summary_text(content, limit=220)
@@ -2862,7 +3674,10 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
         if key in seen:
             continue
         seen.add(key)
-        findings.append({"label": label, "summary": summary})
+        finding: Dict[str, Any] = {"label": label, "summary": summary}
+        if display_markdown:
+            finding["display_markdown"] = display_markdown
+        findings.append(finding)
 
     return findings[:3]
 
@@ -2905,11 +3720,11 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
                 {
                     "target_agent": pending_handoff.get("target_agent"),
                     "goal_id": pending_handoff.get("goal_id"),
-                    "task_description": pending_handoff.get("task_description"),
+                    "task_description": _resolve_handoff_display_text(pending_handoff, limit=220),
                     "result_excerpt": _extract_latest_visible_ai_excerpt(turn_messages),
-                    "supervisor_excerpt": _normalize_tool_summary_text(
-                        pending_handoff.get("supervisor_excerpt"),
-                        limit=220,
+                    "direct_answer_markdown": _sanitize_direct_answer_markdown(
+                        pending_handoff.get("direct_answer_markdown"),
+                        handoff_display_text=_resolve_handoff_display_text(pending_handoff, limit=220),
                     ),
                 }
             )
@@ -3392,11 +4207,39 @@ def _inject_streaming_context_messages(
     return list(pruned_messages[:insert_pos]) + context_messages + list(pruned_messages[insert_pos:])
 
 
+def _build_expert_inference_messages(
+    state: Dict[str, Any],
+    node_name: str,
+) -> list[BaseMessage]:
+    """为专家节点裁剪输入消息，避免子任务继续消费整句复合问题。"""
+    original_messages = state.get("messages", [])
+    if node_name != "data_expert":
+        return list(original_messages or [])
+
+    pending_handoff = state.get("pending_handoff")
+    if not isinstance(pending_handoff, dict):
+        return list(original_messages or [])
+    if str(pending_handoff.get("target_agent") or "").strip() != AgentType.DATA:
+        return list(original_messages or [])
+
+    handoff_frame = pending_handoff.get("frame")
+    if not isinstance(handoff_frame, dict):
+        return list(original_messages or [])
+
+    query_text = _normalize_text_content(handoff_frame.get("query_text"))
+    if not query_text:
+        return list(original_messages or [])
+
+    return [HumanMessage(content=query_text, name="__internal_data_handoff__")]
+
+
 def _prepare_streaming_inference_state(
     state: Dict[str, Any],
+    *,
+    node_name: str = "supervisor",
 ) -> Tuple[Dict[str, Any], int, int, int, int, int]:
     """构造 streaming_wrapper 调用 agent.astream 前的推理态 state。"""
-    original_messages = state.get("messages", [])
+    original_messages = _build_expert_inference_messages(state, node_name)
     inference_diagnostics: Dict[str, Any] = {}
     prepared_messages = _prepare_messages_for_supervisor_inference(
         original_messages,
@@ -3602,6 +4445,117 @@ def _dispatch_custom_mode_chunk(
     _remember_custom_mode_text(chunk, ctx)
 
 
+def _maybe_compile_supervisor_data_handoff_after_stream(
+    final_state: Dict[str, Any],
+    *,
+    initial_input_count: int,
+    ctx: StreamingContext,
+) -> Optional[Dict[str, Any]]:
+    """在 supervisor 流结束后补编 data.query handoff，避免过早打断直接工具调用。"""
+    if ctx.node_name != "supervisor":
+        return None
+
+    messages = final_state.get("messages", [])
+    delta_messages_for_scan = messages[initial_input_count:] if len(messages) > initial_input_count else []
+    if AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan):
+        return None
+
+    extracted_goals = _extract_decomposed_goals_from_messages(delta_messages_for_scan)
+    if extracted_goals:
+        decompose_plan = _build_active_goal_plan(
+            ctx.state,
+            runtime_goals=extracted_goals,
+            source="decompose_goals",
+        )
+        final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
+
+    runtime_goals = final_state.get("decomposed_goals")
+    if not isinstance(runtime_goals, list):
+        runtime_goals = ctx.state.get("decomposed_goals")
+
+    active_goals = _resolve_active_goals(
+        ctx.state,
+        runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
+    )
+    if not active_goals:
+        user_query = _resolve_semantic_user_query(ctx.state)
+        fallback_goals = _build_decomposed_goals_for_query(user_query) if user_query else []
+        active_goals = _resolve_active_goals(
+            ctx.state,
+            runtime_goals=fallback_goals,
+        )
+        if active_goals:
+            final_state["decomposed_goals"] = list(active_goals)
+    if not active_goals:
+        return None
+
+    guard_state = dict(ctx.state)
+    final_state["decomposed_goals"] = list(active_goals)
+    guard_state["decomposed_goals"] = list(active_goals)
+
+    normalized_batch = _inject_compiled_data_handoff_for_supervisor(
+        [],
+        state=guard_state,
+        active_goals=active_goals,
+    )
+    if not normalized_batch:
+        return None
+
+    direct_findings = _build_direct_lookup_findings(delta_messages_for_scan)
+    has_direct_lookup = bool(direct_findings)
+    planned_goal_count = _count_must_answer_goals(active_goals)
+    enable_multi_intent_mode = _should_enable_multi_intent_mode(
+        handoff_batch_size=len(normalized_batch),
+        has_direct_lookup=has_direct_lookup,
+        state=guard_state,
+    )
+
+    legacy_fields = _detect_legacy_router_result_fields(final_state, guard_state)
+    if legacy_fields:
+        return None
+
+    guarded_batch, blocked_handoffs, pending_goals = _apply_router_contract_guard(
+        normalized_batch,
+        state=guard_state,
+    )
+    if blocked_handoffs or not guarded_batch:
+        return None
+
+    existing_router_result = _extract_router_result_v2(final_state, guard_state)
+    final_state["router_result_v2"] = _build_router_result_v2_payload(
+        existing_payload=existing_router_result,
+        accepted_decisions=[dict(item.get("route_decision") or {}) for item in guarded_batch],
+        blocked_handoffs=[],
+        pending_goals=pending_goals,
+        turn_id=str(guard_state.get("turn_id") or ""),
+        event="intent_router_dispatch_ready",
+        reason="",
+    )
+    first_handoff = dict(guarded_batch[0])
+    direct_answer_markdown = _sanitize_direct_answer_markdown(
+        _extract_latest_visible_ai_markdown(delta_messages_for_scan),
+        handoff_display_text=_resolve_handoff_display_text(first_handoff, limit=240),
+    )
+    if direct_answer_markdown:
+        first_handoff["direct_answer_markdown"] = direct_answer_markdown
+
+    logger.info(
+        "[%s] supervisor流结束后自动编译 data handoff: accepted=%d, direct_findings=%d, planned_goals=%d, multi_intent=%s",
+        ctx.node_name,
+        len(guarded_batch),
+        len(direct_findings),
+        planned_goal_count,
+        enable_multi_intent_mode,
+    )
+    return _build_streaming_handoff_return(
+        final_state=final_state,
+        delta_messages=delta_messages_for_scan,
+        handoff_data=first_handoff,
+        handoff_queue=guarded_batch[1:],
+        multi_intent_mode=enable_multi_intent_mode,
+    )
+
+
 def _dispatch_values_mode_chunk(
     final_state: Dict[str, Any],
     initial_input_count: int,
@@ -3727,10 +4681,10 @@ def _dispatch_values_mode_chunk(
             if not guarded_batch and blocked_handoffs:
                 pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in pending_goals]
                 if pending_titles:
-                    final_state["system_context"] = response_policy_service.build_router_blocked_system_context(
-                        base_context=str(guard_state.get("system_context") or ""),
-                        active_plan=_build_active_goal_plan(guard_state, source="router_guard"),
+                    final_state["system_context"] = _build_router_blocked_system_context(
+                        state=guard_state,
                         pending_goals=pending_goals,
+                        blocked_handoffs=blocked_handoffs,
                     )
                     final_state["delivery_meta"] = {
                         **dict(final_state.get("delivery_meta") or {}),
@@ -3750,10 +4704,13 @@ def _dispatch_values_mode_chunk(
                     ctx.node_name,
                 )
             else:
-                supervisor_excerpt = _extract_supervisor_direct_excerpt(delta_messages_for_scan)
                 first_handoff = dict(guarded_batch[0])
-                if supervisor_excerpt:
-                    first_handoff["supervisor_excerpt"] = supervisor_excerpt
+                direct_answer_markdown = _sanitize_direct_answer_markdown(
+                    _extract_latest_visible_ai_markdown(delta_messages_for_scan),
+                    handoff_display_text=_resolve_handoff_display_text(first_handoff, limit=240),
+                )
+                if direct_answer_markdown:
+                    first_handoff["direct_answer_markdown"] = direct_answer_markdown
                 remaining_handoffs = guarded_batch[1:]
                 target_agent = str(first_handoff.get("target_agent") or "unknown")
                 logger.info(
@@ -3861,6 +4818,15 @@ async def _run_streaming_dispatch_loop(
         if handoff_return is not None:
             return final_state, handoff_return
 
+    if final_state is not None:
+        compiled_handoff = _maybe_compile_supervisor_data_handoff_after_stream(
+            final_state,
+            initial_input_count=initial_input_count,
+            ctx=ctx,
+        )
+        if compiled_handoff is not None:
+            return final_state, compiled_handoff
+
     return final_state, None
 
 
@@ -3929,7 +4895,7 @@ async def _execute_streaming_wrapper(
             prepared_token_estimate,
             pruned_token_estimate,
             token_budget,
-        ) = _prepare_streaming_inference_state(state)
+        ) = _prepare_streaming_inference_state(state, node_name=node_name)
 
         initial_input_count = input_message_count
 
@@ -4655,18 +5621,26 @@ def _create_decompose_goals_tool(llm: Any):
 
 
 def _create_task_handoff_tool(agent_name: str, description: str):
-    """创建带任务描述的 Handoff 工具。
-    
-    该工具允许 Supervisor 将任务委派给特定的 Agent，并提供明确的任务描述。
-    
-    修改说明：
-    - 返回 JSON 格式的委派指令，而不是 Command 对象
-    - Command 对象会被 ToolNode 序列化为字符串，导致无法正确路由
-    - 外层条件边会检测 pending_handoff 字段并路由到对应专家
-    """
-    
+    """创建 Handoff 工具。"""
+
     name = f"assign_to_{agent_name}"
-    
+
+    if agent_name == AgentType.DATA:
+        @tool(name, description=description)
+        def handoff_tool(
+            frame: Annotated[Dict[str, Any], "data.query 结构化合同（必填）：至少包含 query_text；query_text 必须是自然语言子任务描述，禁止直接填写 SQL；可选携带 metric/time_range/dimensions/chart_type/org_level/filters/query_shape/ranking"],
+            turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）：NEW_QUERY/SUPPLEMENT/CORRECTION/CONFIRM"] = None,
+        ) -> str:
+            """将数据查询子任务委派给 data_expert。"""
+            result = HandoffResult(
+                target_agent=agent_name,
+                frame=frame if isinstance(frame, dict) else None,
+                turn_act_hint=str(turn_act_hint or "").strip() or None,
+            )
+            return result.model_dump_json(ensure_ascii=False, exclude_none=True)
+
+        return handoff_tool
+
     @tool(name, description=description)
     def handoff_tool(
         task_description: Annotated[str, "详细描述下一个专家需要完成的任务，包含所有相关上下文和指令"],
@@ -4674,17 +5648,15 @@ def _create_task_handoff_tool(agent_name: str, description: str):
         turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）：NEW_QUERY/SUPPLEMENT/CORRECTION/CONFIRM"] = None,
     ) -> str:
         """将任务委派给指定的专家 Agent。返回 JSON 格式的委派指令。"""
-        # [Phase 2] 标准化输出：使用 HandoffResult 模型生成纯 JSON
         result = HandoffResult(
             target_agent=agent_name,
             task_description=task_description,
             frame=frame if isinstance(frame, dict) else None,
             turn_act_hint=str(turn_act_hint or "").strip() or None,
         )
-        return result.model_dump_json(ensure_ascii=False)
-    
-    return handoff_tool
+        return result.model_dump_json(ensure_ascii=False, exclude_none=True)
 
+    return handoff_tool
 
 
 async def _preprocess_multimodal(state: MultiAgentState) -> dict:
@@ -4982,6 +5954,7 @@ async def create_multi_agent_graph(
     handoff_tools = [
         _create_task_handoff_tool(agent_type, desc)
         for agent_type, desc in AGENT_DESCRIPTIONS.items()
+        if agent_type != AgentType.DATA
     ]
     
     # 2. 获取 Supervisor 的简单工具（可以直接调用）
@@ -5159,7 +6132,7 @@ async def create_multi_agent_graph(
                     writer,
                     {
                         "target_agent": target_agent,
-                        "task_description": pending_handoff.get("task_description"),
+                        "task_description": _resolve_handoff_display_text(pending_handoff, limit=220),
                         "queue_left": queue_left,
                     },
                     node="evaluate",
@@ -5183,7 +6156,7 @@ async def create_multi_agent_graph(
                         writer,
                         {
                             "target_agent": latest_completed[0].get("target_agent"),
-                            "task_description": latest_completed[0].get("task_description"),
+                            "task_description": _resolve_handoff_display_text(latest_completed[0], limit=220),
                         },
                         node="evaluate",
                     )
