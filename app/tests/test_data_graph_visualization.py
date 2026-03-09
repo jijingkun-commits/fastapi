@@ -355,6 +355,19 @@ def test_pick_chart_axes_prefers_multi_point_date_dimension_for_trend():
     assert y_key == "贷款余额"
 
 
+def test_interpret_result_single_row_table_should_not_inline_field_dump():
+    """单行表格结果应返回简明摘要，避免正文重复字段明细。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    row = [{"org_no": "A101010101", "org_name": "嘉兴银行总行", "贷款余额": 6636000000}]
+    text = module._interpret_result("查询2025年6月30日贷款余额前10名的客户", "SELECT ...", row)
+
+    assert "org_no" not in text
+    assert "org_name" not in text
+    assert "贷款余额 66.36 亿" not in text
+    assert "下方表格" in text
+
+
 def test_interpret_result_display_limit():
     """_interpret_result 在不同行数下应返回正确文案。"""
     module = importlib.import_module("app.ai.workflow.data_graph")

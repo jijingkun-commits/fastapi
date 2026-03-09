@@ -98,6 +98,25 @@ _EXECUTE_FALLBACK_ROUTE_MAP: Dict[str, str] = {
 }
 
 
+_MODEL_ACCESS_ERROR_HINTS: Tuple[str, ...] = (
+    "permission denied",
+    "subscription_not_found",
+    "insufficient balance",
+    "allocationquota",
+    "arrearage",
+    "forbidden",
+    "quota",
+)
+
+
+def _is_upstream_model_access_error(error_text: str) -> bool:
+    """识别上游模型账户/配额类错误，避免误降级成普通 free_query。"""
+    lowered = str(error_text or "").strip().lower()
+    if not lowered:
+        return False
+    return any(hint in lowered for hint in _MODEL_ACCESS_ERROR_HINTS)
+
+
 # ==================== 节点函数 ====================
 
 
@@ -1383,16 +1402,96 @@ def _extract_context_from_text(text: str) -> Dict[str, Any]:
     }
 
 
+def build_data_query_handoff_frame(
+    query_text: str,
+    base_frame: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构建 data.query 子任务结构化合同。"""
+    normalized_query = _normalize_text_content(query_text)
+    frame = dict(base_frame) if isinstance(base_frame, dict) else {}
+    parsed = _extract_context_from_text(normalized_query) if normalized_query else {}
+
+    def _positive_int(value: Any) -> int:
+        try:
+            parsed_value = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return parsed_value if parsed_value > 0 else 0
+
+    metric = _pick_first_non_empty_str(
+        frame.get("metric"),
+        frame.get("metric_name"),
+        parsed.get("metric_name"),
+    )
+    time_range = _pick_first_non_empty_str(
+        frame.get("time_range"),
+        parsed.get("time_range"),
+    )
+    dimensions = _pick_first_non_empty_list(
+        _ensure_text_list(frame.get("dimensions")),
+        _ensure_text_list(parsed.get("dimensions")),
+    )
+    chart_type = _pick_first_non_empty_str(
+        frame.get("chart_type"),
+        parsed.get("chart_type"),
+    )
+    org_level = _pick_first_non_empty_str(
+        frame.get("org_level"),
+        parsed.get("org_level"),
+    )
+    filters = _pick_first_non_empty_list(
+        _ensure_text_list(frame.get("filters")),
+    )
+
+    if normalized_query:
+        frame["query_text"] = normalized_query
+    if metric:
+        frame["metric"] = metric
+    if time_range:
+        frame["time_range"] = time_range
+    if dimensions:
+        frame["dimensions"] = dimensions
+    if chart_type:
+        frame["chart_type"] = chart_type
+    if org_level:
+        frame["org_level"] = org_level
+    if filters:
+        frame["filters"] = filters
+
+    if normalized_query:
+        query_shape = _pick_first_non_empty_str(
+            frame.get("query_shape"),
+            _detect_query_shape(normalized_query, dimensions),
+        )
+        if query_shape:
+            frame["query_shape"] = query_shape
+
+        if query_shape == "top_n":
+            ranking = dict(frame.get("ranking") or {}) if isinstance(frame.get("ranking"), dict) else {}
+            limit = _positive_int(ranking.get("limit")) or _extract_top_n(normalized_query, default_n=10)
+            sort_by = str(ranking.get("sort_by") or metric or "").strip()
+            sort_order = str(ranking.get("sort_order") or "desc").strip().lower() or "desc"
+            frame["ranking"] = {
+                "limit": limit,
+                "sort_by": sort_by,
+                "sort_order": sort_order,
+            }
+
+    return frame
+
+
 def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
-    """从 pending_handoff 提取结构化上下文（frame 优先，文本兜底）。"""
+    """从 pending_handoff 提取结构化上下文（仅消费 frame 真理源）。"""
     default_context = {
-        "task_description": "",
+        "query_text": "",
         "metric_name": "",
         "time_range": "",
         "dimensions": [],
         "chart_type": "",
         "org_level": "",
         "filters": [],
+        "query_shape": "",
+        "ranking": {},
         "turn_act_hint": "",
     }
 
@@ -1400,47 +1499,43 @@ def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
     if not isinstance(pending_handoff, dict):
         return default_context
 
-    task_description = str(pending_handoff.get("task_description") or "").strip()
-    text_parsed = _extract_context_from_text(task_description) if task_description else {}
-
     context = dict(default_context)
-    context["task_description"] = task_description
 
     handoff_frame = pending_handoff.get("frame")
-    if isinstance(handoff_frame, dict):
-        context["metric_name"] = _pick_first_non_empty_str(
-            handoff_frame.get("metric"),
-            handoff_frame.get("metric_name"),
-        )
-        context["time_range"] = _pick_first_non_empty_str(
-            handoff_frame.get("time_range"),
-        )
-        context["dimensions"] = _pick_first_non_empty_list(
-            _ensure_text_list(handoff_frame.get("dimensions")),
-        )
-        context["chart_type"] = _pick_first_non_empty_str(
-            handoff_frame.get("chart_type"),
-        )
-        context["org_level"] = _pick_first_non_empty_str(
-            handoff_frame.get("org_level"),
-        )
-        context["filters"] = _pick_first_non_empty_list(
-            _ensure_text_list(handoff_frame.get("filters")),
-        )
-        context["turn_act_hint"] = str(
-            pending_handoff.get("turn_act_hint")
-            or handoff_frame.get("turn_act_hint")
-            or ""
-        ).strip()
+    if not isinstance(handoff_frame, dict):
         return context
 
-    if task_description:
-        context["metric_name"] = str(text_parsed.get("metric_name") or "").strip()
-        context["time_range"] = str(text_parsed.get("time_range") or "").strip()
-        context["dimensions"] = _ensure_text_list(text_parsed.get("dimensions"))
-        context["chart_type"] = str(text_parsed.get("chart_type") or "").strip()
-        context["org_level"] = str(text_parsed.get("org_level") or "").strip()
-
+    context["query_text"] = _pick_first_non_empty_str(
+        handoff_frame.get("query_text"),
+    )
+    context["metric_name"] = _pick_first_non_empty_str(
+        handoff_frame.get("metric"),
+        handoff_frame.get("metric_name"),
+    )
+    context["time_range"] = _pick_first_non_empty_str(
+        handoff_frame.get("time_range"),
+    )
+    context["dimensions"] = _pick_first_non_empty_list(
+        _ensure_text_list(handoff_frame.get("dimensions")),
+    )
+    context["chart_type"] = _pick_first_non_empty_str(
+        handoff_frame.get("chart_type"),
+    )
+    context["org_level"] = _pick_first_non_empty_str(
+        handoff_frame.get("org_level"),
+    )
+    context["filters"] = _pick_first_non_empty_list(
+        _ensure_text_list(handoff_frame.get("filters")),
+    )
+    context["query_shape"] = _pick_first_non_empty_str(
+        handoff_frame.get("query_shape"),
+    )
+    context["ranking"] = dict(handoff_frame.get("ranking") or {}) if isinstance(handoff_frame.get("ranking"), dict) else {}
+    context["turn_act_hint"] = str(
+        pending_handoff.get("turn_act_hint")
+        or handoff_frame.get("turn_act_hint")
+        or ""
+    ).strip()
     return context
 
 
@@ -1695,14 +1790,19 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     existing_query_question = str(query_context.get("original_question") or "").strip()
 
     handoff_context = _extract_handoff_context(state)
+    handoff_query_text = str(handoff_context.get("query_text") or "").strip()
     handoff_metric = str(handoff_context.get("metric_name") or "").strip()
     handoff_time = str(handoff_context.get("time_range") or "").strip()
     handoff_dims = _ensure_text_list(handoff_context.get("dimensions"))
     handoff_filters = _ensure_text_list(handoff_context.get("filters"))
     handoff_chart_type = str(handoff_context.get("chart_type") or "").strip()
     handoff_org_level = str(handoff_context.get("org_level") or "").strip()
-    handoff_task_description = str(handoff_context.get("task_description") or "").strip()
+    handoff_context_text = handoff_query_text
     handoff_turn_act_hint = str(handoff_context.get("turn_act_hint") or "").strip()
+
+    if handoff_query_text and handoff_turn_act_hint == TURN_ACT_NEW_QUERY:
+        last_message = handoff_query_text
+        normalized_last_message = _normalize_user_message_for_intent(handoff_query_text)
 
     has_state_context = any([
         existing_metric,
@@ -1717,7 +1817,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         handoff_time,
         handoff_dims,
         handoff_filters,
-        handoff_task_description,
+        handoff_query_text,
     ])
 
     has_clarify_history = bool(str(state.get("last_clarify_slot") or "").strip()) or int(state.get("clarify_count") or 0) > 0
@@ -1785,38 +1885,52 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         parts.append(f"聚合维度: {'、'.join(baseline_dims)}")
     if existing_filters_str:
         parts.append(f"筛选: {existing_filters_str}")
-    if handoff_task_description:
-        handoff_summary = handoff_task_description.replace("\n", " ")[:180]
+    if handoff_context_text:
+        handoff_summary = handoff_context_text.replace("\n", " ")[:180]
         parts.append(f"handoff: {handoff_summary}")
     existing_context = "；".join(parts) if parts else "（无，为首轮或尚未提供）"
 
-    # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
-    # 使用 SQL 生成/内部分析 路由配置的模型，避免推理模型浪费 thinking tokens
-    llm = get_scene_llm(
-        scene_key=SCENE_KEY_DATA_INTENT_ANALYSIS,
-        internal=True,
-    )
-    prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
-        question=normalized_last_message,
-        existing_context=existing_context,
-        available_metrics=AVAILABLE_METRICS
-    )
-
     try:
-        response = llm.invoke(prompt)
-        content = _normalize_text_content(
-            response.content if hasattr(response, "content") else response
-        )
-
-        # 解析 JSON 响应
-        json_start = content.find('{')
-        json_end = content.rfind('}') + 1
-        if json_start >= 0 and json_end > json_start:
-            analysis = json.loads(content[json_start:json_end])
+        use_handoff_frame_analysis = bool(handoff_context_text)
+        if use_handoff_frame_analysis:
+            analysis = {
+                "intent": "visualization" if handoff_chart_type else "free_query",
+                "metric_name": "",
+                "time_range": "",
+                "filters": [],
+                "dimensions": [],
+                "chart_type": "",
+                "clarification_needed": "",
+            }
+            logger.info("意图分析结果: handoff_frame_short_circuit=%s", analysis)
         else:
-            analysis = {"intent": "free_query"}
+            # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
+            # 使用 SQL 生成/内部分析 路由配置的模型，避免推理模型浪费 thinking tokens
+            llm = get_scene_llm(
+                scene_key=SCENE_KEY_DATA_INTENT_ANALYSIS,
+                internal=True,
+            )
+            prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
+                question=normalized_last_message,
+                existing_context=existing_context,
+                available_metrics=AVAILABLE_METRICS
+            )
 
-        logger.info(f"意图分析结果: {analysis}")
+            response = llm.invoke(prompt)
+            content = _normalize_text_content(
+                response.content if hasattr(response, "content") else response
+            )
+
+            # 解析 JSON 响应
+            json_start = content.find('{')
+            json_end = content.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                analysis = json.loads(content[json_start:json_end])
+            else:
+                analysis = {"intent": "free_query"}
+
+            logger.info(f"意图分析结果: {analysis}")
+
 
         current_context = _extract_context_from_text(normalized_last_message)
 
@@ -1912,7 +2026,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
         combined_text_parts = [normalized_last_message, " ".join(merged_dims)]
         if not context_reset_for_new_query:
-            combined_text_parts.insert(1, handoff_task_description)
+            combined_text_parts.insert(1, handoff_context_text)
         combined_text = " ".join([part for part in combined_text_parts if part])
         compact_combined_text = re.sub(r"\s+", "", combined_text)
         org_dimension_requested = any(
@@ -1972,7 +2086,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
         # 是否实际消费了 handoff 上下文（用于日志和排障）
         used_handoff_context = False
-        if handoff_task_description and not context_reset_for_new_query:
+        if handoff_context_text and not context_reset_for_new_query:
             if (not current_metric and handoff_metric) or (not current_time and handoff_time):
                 used_handoff_context = True
             elif not current_dims and handoff_dims:
@@ -2078,7 +2192,6 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "intent_policy_source": policy_meta.get("source"),
                 "intent_policy_cache_hit": policy_meta.get("cache_hit"),
                 "intent_policy_cache_age_sec": policy_meta.get("cache_age_sec"),
-                "handoff_task_description": handoff_task_description or None,
                 "handoff_turn_act_hint": handoff_turn_act_hint or None,
             }
         }
@@ -2087,9 +2200,24 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         
     except Exception as e:
         logger.exception(f"意图分析失败: {e}")
+        error_text = str(e)
+        failure_message = (
+            "数据子任务解析依赖的模型当前不可用，请稍后重试。"
+            if _is_upstream_model_access_error(error_text)
+            else "数据子任务解析失败，请稍后重试。"
+        )
         return {
-            "data_intent": "free_query",
-            "query_context": {"original_question": last_message}
+            "data_intent": "clarification",
+            "clarification_needed": failure_message,
+            "query_context": {
+                "original_question": normalized_last_message or last_message,
+                "analysis_error": failure_message,
+                "analysis_error_code": (
+                    "upstream_model_access_error"
+                    if _is_upstream_model_access_error(error_text)
+                    else "intent_analysis_failed"
+                ),
+            },
         }
 
 
@@ -4225,26 +4353,17 @@ def _interpret_result(question: str, sql: str, result: List[Dict]) -> str:
                     "建议尝试指定该日期查询。"
                 )
         
-        # 格式化所有字段
+        # 单行多列结果会与下方 sql_result 卡片重复，正文保持简明摘要即可。
+        if len(row) > 1:
+            return "查询完成，共返回 1 条记录，详见下方表格。"
+
         formatted_parts = []
         for k, v in row.items():
             label = _friendly_col(k)
             display_val = _format_value(v)
             formatted_parts.append(f"- **{label}**：{display_val}")
-        
-        # 提取问题中的关键词作为标题
-        title = question[:30] if question else "查询结果"
-        
-        if len(row) <= 3:
-            # 少量字段：紧凑展示
-            inline = "，".join(
-                f"**{_friendly_col(k)}** {_format_value(v)}"
-                for k, v in row.items()
-            )
-            return f"{inline}"
-        else:
-            return f"查询结果：\n\n" + "\n".join(formatted_parts)
-    
+        return "查询结果：\n\n" + "\n".join(formatted_parts)
+
     elif row_count <= 5:
         return f"查询完成，共返回 {row_count} 条记录。"
     else:

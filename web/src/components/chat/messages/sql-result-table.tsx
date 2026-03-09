@@ -57,7 +57,7 @@ export function SqlResultTable({
   }
 
   return (
-    <div className="mx-auto w-fit max-w-full rounded-lg border border-gray-200 overflow-hidden bg-white">
+    <div className="w-full max-w-full overflow-hidden rounded-lg border border-gray-200 bg-white">
       {permissionScopeApplied && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
           注：{resolvedScopeHint}。
@@ -66,7 +66,7 @@ export function SqlResultTable({
 
       {/* 表格 */}
       <div className="max-w-full overflow-x-auto">
-        <table className="w-max text-sm">
+        <table className="min-w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {columns.map((col, idx) => (

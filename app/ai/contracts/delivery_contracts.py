@@ -75,6 +75,7 @@ class CoverageReportContract(BaseModel):
     missing_goals: List[CoverageMissingGoalContract] = Field(default_factory=list)
     matched_goal_ids: List[str] = Field(default_factory=list)
     goal_results: Dict[str, DeliverableContract] = Field(default_factory=dict)
+    goal_attempts: Dict[str, DeliverableContract] = Field(default_factory=dict)
 
 
 class FinalAnswerContract(BaseModel):

@@ -8,7 +8,6 @@
 import sys
 from pathlib import Path
 
-import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 
@@ -22,8 +21,8 @@ def test_extract_latest_handoff_from_messages_tool_message_not_last():
 
     handoff_json = HandoffResult(
         target_agent="data_expert",
-        task_description="查询2025年6月30日的贷款余额",
-    ).model_dump_json(ensure_ascii=False)
+        frame={"query_text": "查询2025年6月30日的贷款余额"},
+    ).model_dump_json(ensure_ascii=False, exclude_none=True)
 
     delta_messages = [
         ToolMessage(content=handoff_json, tool_call_id="1"),
@@ -34,7 +33,7 @@ def test_extract_latest_handoff_from_messages_tool_message_not_last():
     assert handoff is not None
     assert handoff["action"] == "handoff"
     assert handoff["target_agent"] == "data_expert"
-    assert "贷款余额" in handoff["task_description"]
+    assert handoff["frame"]["query_text"] == "查询2025年6月30日的贷款余额"
 
 
 def test_extract_latest_handoff_from_messages_returns_none_when_missing():
@@ -51,12 +50,12 @@ def test_extract_all_handoffs_from_messages_preserves_order():
 
     data_handoff = HandoffResult(
         target_agent="data_expert",
-        task_description="先查询嘉兴天气并补充到分析上下文",
-    ).model_dump_json(ensure_ascii=False)
+        frame={"query_text": "查询嘉兴天气并补充到分析上下文"},
+    ).model_dump_json(ensure_ascii=False, exclude_none=True)
     todo_handoff = HandoffResult(
         target_agent="todo_expert",
         task_description="创建待办：跟进网银功能评审",
-    ).model_dump_json(ensure_ascii=False)
+    ).model_dump_json(ensure_ascii=False, exclude_none=True)
 
     delta_messages = [
         ToolMessage(content=data_handoff, tool_call_id="1"),
@@ -66,15 +65,14 @@ def test_extract_all_handoffs_from_messages_preserves_order():
 
     handoffs = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages)
     assert [item["target_agent"] for item in handoffs] == ["data_expert", "todo_expert"]
-    assert "嘉兴天气" in handoffs[0]["task_description"]
+    assert handoffs[0]["frame"]["query_text"] == "查询嘉兴天气并补充到分析上下文"
     assert "网银功能评审" in handoffs[1]["task_description"]
 
 
-def test_augment_data_handoff_payload_should_use_user_raw_question():
-    """data handoff 规范化应保留用户原始问题并避免过度推断。"""
+def test_augment_data_handoff_payload_should_not_backfill_query_text_from_user_message():
+    """data handoff 缺失 frame.query_text 时，不应再从用户原问题自动回填。"""
     from app.ai.state import AgentType
     from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
-    from langchain_core.messages import HumanMessage
 
     handoff = {
         "action": "handoff",
@@ -83,36 +81,60 @@ def test_augment_data_handoff_payload_should_use_user_raw_question():
         "frame": None,
         "turn_act_hint": "",
     }
-    state = {
-        "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户")],
-    }
 
-    normalized = _augment_data_handoff_payload(handoff, state)
+    normalized = _augment_data_handoff_payload(handoff, state={})
 
-    assert normalized["task_description"] == "用户原始问题：查询2025年6月30日贷款余额前10名的客户"
     assert normalized["turn_act_hint"] == "NEW_QUERY"
     assert normalized.get("frame") is None
+    assert normalized["task_description"] == "请执行复杂口径确认后再输出。"
 
 
-def test_augment_data_handoff_payload_should_keep_existing_frame():
-    """已有结构化 frame 时应保持透传，仅补齐描述与 turn_act。"""
+def test_augment_data_handoff_payload_should_preserve_specific_frame_for_mixed_query():
+    """复合问题中若 Supervisor 已生成精确 data frame，不应再受整句原问题污染。"""
     from app.ai.state import AgentType
     from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
-    from langchain_core.messages import HumanMessage
 
     handoff = {
         "action": "handoff",
         "target_agent": AgentType.DATA,
-        "task_description": "请按模型建议处理",
-        "frame": {"metric": "贷款余额", "time_range": "2025-06-30"},
+        "frame": {
+            "query_text": "查看2025-06-30贷款余额前10名客户，按贷款余额降序返回 Top10。",
+        },
         "turn_act_hint": "",
     }
-    state = {
-        "messages": [HumanMessage(content="查询2025年6月30日贷款余额")],
+    normalized = _augment_data_handoff_payload(handoff, state={})
+
+    assert normalized["turn_act_hint"] == "NEW_QUERY"
+    assert "嘉兴" not in normalized["frame"]["query_text"]
+    assert "贷款余额前10名" in normalized["frame"]["query_text"]
+    assert normalized["frame"]["metric"] == "贷款余额"
+    assert normalized["frame"]["time_range"] == "2025-06-30"
+    assert normalized["frame"]["dimensions"] == ["客户"]
+    assert normalized["frame"]["query_shape"] == "top_n"
+    assert normalized["frame"]["ranking"]["limit"] == 10
+
+
+def test_augment_data_handoff_payload_should_normalize_existing_frame():
+    """已有结构化 frame 时应保持透传，并补齐 query_shape/ranking/turn_act。"""
+    from app.ai.state import AgentType
+    from app.ai.workflow.multi_agent_graph import _augment_data_handoff_payload
+
+    handoff = {
+        "action": "handoff",
+        "target_agent": AgentType.DATA,
+        "frame": {
+            "query_text": "查询2025年6月30日贷款余额前10名的客户",
+            "metric": "贷款余额",
+            "time_range": "2025-06-30",
+        },
+        "turn_act_hint": "",
     }
 
-    normalized = _augment_data_handoff_payload(handoff, state)
+    normalized = _augment_data_handoff_payload(handoff, state={})
 
-    assert normalized["frame"] == {"metric": "贷款余额", "time_range": "2025-06-30"}
+    assert normalized["frame"]["metric"] == "贷款余额"
+    assert normalized["frame"]["time_range"] == "2025-06-30"
+    assert normalized["frame"]["query_text"] == "查询2025年6月30日贷款余额前10名的客户"
+    assert normalized["frame"]["query_shape"] == "top_n"
+    assert normalized["frame"]["ranking"]["limit"] == 10
     assert normalized["turn_act_hint"] == "NEW_QUERY"
-    assert normalized["task_description"] == "用户原始问题：查询2025年6月30日贷款余额"

@@ -27,7 +27,7 @@ class HandoffResult(BaseModel):
     """[Phase 2] 标准 Handoff 结果模型。"""
     action: str = Field(default="handoff", description="操作类型")
     target_agent: str = Field(..., description="目标专家 Agent 名称")
-    task_description: str = Field(..., description="任务描述与上下文")
+    task_description: Optional[str] = Field(default=None, description="任务描述与上下文（非 data.query 必填）")
     frame: Optional[Dict[str, Any]] = Field(default=None, description="结构化会话帧（可选）")
     turn_act_hint: Optional[str] = Field(default=None, description="回合行为提示（可选）")
 

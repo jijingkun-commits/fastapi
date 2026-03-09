@@ -1999,7 +1999,7 @@ Data Agent 采用两层漏斗模型处理用户查询：
 
 为解决“第二轮仅补充图表词却再次追问指标+时间”的体验问题，`app/ai/workflow/data_graph.py` 的 `analyze_data_intent` 已增加三层上下文融合与缺项驱动澄清策略：
 
-1. **上下文融合优先级**：当前轮明确输入 > `pending_handoff.task_description` > 历史 state。  
+1. **上下文融合优先级**：当前轮明确输入 > `pending_handoff.frame.query_text` > 历史 state。  
 2. **补充型短回复识别（收紧）**：基于“有历史上下文 + 输入长度 + 结构化信号（图表/层级/时间/维度）”综合判定 continuation；若识别到指标切换（如 `贷款余额 -> 存款户数`），强制视为新问题。  
 3. **新问题上下文隔离**：命中“新问题信号”时，重置历史继承，避免旧时间/旧维度污染新问题。  
 4. **缺项驱动澄清**：仅在关键槽位缺失时追问（指标、时间；图表分布场景补充机构层级）。  
@@ -2007,8 +2007,8 @@ Data Agent 采用两层漏斗模型处理用户查询：
 6. **默认口径**：机构分布图表场景未指定层级时，默认按 `分行` 执行，并在 `query_context.used_default_org_level=true` 留痕。  
 7. **策略可配置 + 缓存**：意图归一化/图表别名/指标同义词可通过 `t_system_config` 的 `data_graph.intent_policy`（JSON）配置；运行时带 60 秒本地缓存，降低重复读取开销。  
 8. **日志增强**：新增 `continuation_reason/context_reset_for_new_query/intent_policy_source/intent_policy_cache_hit` 等排障字段。  
-9. **Data Handoff 规范化（2026-02-16）**：Supervisor 在委派 `data_expert` 前会对 payload 做轻量归一化：`task_description` 优先保留“用户原始问题”，并补齐 `turn_act_hint`（默认 `NEW_QUERY`）；不在 Supervisor 侧推断问数槽位，避免规则膨胀与误判。  
-10. **Handoff frame 强优先（2026-02-16）**：`data_graph._extract_handoff_context` 在 `frame` 存在时仅消费结构化字段，`task_description` 仅作为无 frame 时兜底，减少“文本噪声误提取机构层级”的风险。  
+9. **Data Goal Compiler（2026-03）**：当 `decompose_goals` 命中 `data.query` 时，`multi_agent_graph` 会直接基于 `user_query + current_goal + session_frame` 编译 canonical `pending_handoff.frame`，并补齐 `turn_act_hint`（默认 `NEW_QUERY`）；禁止再把 `task_description` 当作 data 子任务真值源。  
+10. **Handoff frame 单真源（2026-03）**：`data_graph._extract_handoff_context` 只消费 `pending_handoff.frame`，不再回退读取 `task_description`，避免文本噪声重新进入 data.query 语义链路。  
 11. **NEW_QUERY 提示优先（2026-02-16）**：当 `turn_act_hint=NEW_QUERY` 且无历史 state 上下文时，禁止将当前轮误判为补充轮（`SUPPLEMENT`）。  
 12. **结构化澄清级别（2026-02-16）**：意图分析输出新增 `clarify_level`（`required|optional`）。当关键槽位已齐备且 `clarify_level=optional` 时，Data Agent 跳过该澄清并继续执行；`required` 仍按澄清流程处理，避免依赖口径关键词硬编码。  
 13. **session_frame 回收兜底（2026-02-18）**：在 MultiAgent 父图状态裁剪导致 `matched_metric/time_range/dimensions/viz_type/query_context` 丢失时，`analyze_data_intent` 会优先从 `session_frame` 回收同义槽位，保障“生成图表/分行”等补充轮延续上一轮已确认上下文。  
@@ -2057,7 +2057,7 @@ Data Agent 采用两层漏斗模型处理用户查询：
 
 ### 1. 现状痛点（结构性）
 
-1. **真值源分裂**：同一轮决策同时依赖 `state`、`pending_handoff.task_description`、消息窗口，优先级在各节点实现不一致。
+1. **真值源分裂**：同一轮决策同时依赖 `state`、`pending_handoff.frame.query_text`、消息窗口，优先级在各节点实现不一致。
 2. **行为判定分裂**：`data_expert` 与 `todo_expert` 各自维护补充/澄清规则，策略难以对齐。
 3. **澄清策略分裂**：缺项驱动、重复保护、确认流程分别在不同节点实现，导致边界条件下反复追问。
 
@@ -2103,17 +2103,17 @@ graph TD
 | `viz_type` | `session_frame.chart_type` | 同上 |
 | `pending_operation.action` | `session_frame.todo_action` | Todo 先接入 |
 | `pending_operation.data` | `session_frame.todo_fields` | Todo 先接入 |
-| `pending_handoff.task_description` | `handoff_structured_frame` | 先增量扩展，保留文本兼容 |
+| `pending_handoff.frame.query_text` | `handoff_structured_frame.query_text` | 已收敛为 data.query 单真源；禁止回退旧文本字段 |
 
 ### 5. Handoff 协议演进（内部）
 
-当前 `HandoffResult` 已兼容结构化扩展字段：
+当前 `HandoffResult` 的运行态约束如下：
 
-- 保留：`task_description`（兼容字段）
-- 增加：`frame`（结构化槽位）
+- `data.query`：必须提供 `frame.query_text`，专家侧只消费 `frame` 真值。
+- `todo.query/todo.write`：继续使用 `task_description` 作为文本任务描述，可选补充 `frame`。
 - 增加：`turn_act_hint`（可选，辅助专家侧判定）
 - 增加：`frame.tool_observations`（可选，Supervisor 工具观测摘要）
-- 约束：`task_description` 用于兼容与审计，不应承载高密度执行脚本；专家优先消费 `frame` 真值。
+- 约束：`data.query` 禁止回退旧文本字段；`task_description` 不再承担 data 子任务语义恢复。
 
 `tool_observations` 约定（2026-02）：
 - 产生方：Supervisor（如 `tavily_search` 工具调用后）
@@ -2166,7 +2166,7 @@ graph TD
 已完成首批代码接入，保持外部 API 不变（`/api/v1/chat/stream` 入参与响应结构不变）：
 
 1. **会话意图内核落地**：新增 `app/ai/workflow/session_intent_kernel.py`，统一提供 `TurnActClassifier`、`SessionFrameReducer`、`Clarification FSM` 基础能力。
-2. **Handoff 协议兼容扩展**：`HandoffResult` 新增可选字段 `frame`、`turn_act_hint`，保留 `task_description` 兼容旧链路。
+2. **Handoff 协议收敛**：`data.query` 已切到 `goal compiler -> frame + turn_act_hint` 单轨合同；`task_description` 仅保留给 todo 类 handoff。
 3. **Supervisor 透传结构化上下文**：`multi_agent_graph` handoff 工具可携带 `frame/turn_act_hint`，减少专家侧纯文本解析损耗。
 4. **问数 Agent 接入 V2 内核**：`data_graph.analyze_data_intent` 已接入 `turn_act + session_frame + frame_source_map + clarify_fsm_state + clarify_round`，并将 handoff frame 纳入基线判定。
 5. **待办 Agent 接入与收敛**：`todo_graph.analyze_intent` 已接入同一内核，并清理重复定义，统一补充轮合并与澄清状态推进。

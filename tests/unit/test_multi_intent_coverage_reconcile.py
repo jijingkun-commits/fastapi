@@ -46,7 +46,7 @@ def test_coverage_reconcile_marks_missing_goal_without_runtime_evidence() -> Non
     report = _compute_coverage_report(_active_goals_todo_only(), deliverables)
     route = _resolve_coverage_gate_route(state={"coverage_retry_count": 0}, coverage_report=report)
 
-    assert deliverables[0]["status"] == "pending"
+    assert deliverables[0]["status"] == "missing"
     assert report["pass"] is False
     assert report["missing_goals"][0]["goal_id"] == "GOAL-01"
     assert route["route"] == "supervisor"

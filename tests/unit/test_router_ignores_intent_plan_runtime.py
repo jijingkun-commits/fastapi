@@ -8,6 +8,7 @@ from app.ai.workflow.multi_agent_graph import (
     StreamingContext,
     _apply_router_contract_guard,
     _dispatch_values_mode_chunk,
+    _resolve_handoff_display_text,
 )
 
 
@@ -122,3 +123,79 @@ def test_dispatch_values_mode_chunk_fail_fast_when_legacy_router_field_detected(
     assert final_state["router_result_v2"]["event"] == "intent_router_legacy_field_detected"
     assert final_state["router_result_v2"]["reason"] == "legacy_field_detected"
     assert final_state["router_result_v2"]["router_contract_blocked_count"] == 1
+
+
+def test_apply_router_contract_guard_blocks_data_query_without_query_text() -> None:
+    """data.query handoff 缺失结构化 query_text 时应在 router_guard 阻断。"""
+    handoffs = [{
+        "target_agent": "data_expert",
+        "frame": {"metric": "贷款余额", "query_shape": "top_n", "ranking": {"limit": 10}},
+    }]
+    state = {
+        "decomposed_goals": [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "data.query",
+                "title": "数据查询",
+                "must_answer": True,
+                "allowed_agents": ["data_expert"],
+            }
+        ]
+    }
+
+    accepted, blocked, pending = _apply_router_contract_guard(handoffs, state=state)
+
+    assert accepted == []
+    assert len(blocked) == 1
+    assert blocked[0]["reason"] == "invalid_data_query_contract"
+    assert pending and pending[0]["goal_id"] == "GOAL-01"
+
+
+def test_apply_router_contract_guard_blocks_data_query_with_sql_like_query_text() -> None:
+    """data.query 的 frame.query_text 若被写成 SQL，应在 router_guard 阻断。"""
+    handoffs = [{
+        "target_agent": "data_expert",
+        "frame": {
+            "query_text": "SELECT cust_no, cust_name FROM loan_table ORDER BY loan_balance DESC LIMIT 10",
+            "metric": "贷款余额",
+            "time_range": "2025-06-30",
+            "dimensions": ["客户"],
+            "query_shape": "top_n",
+            "ranking": {"limit": 10},
+        },
+    }]
+    state = {
+        "decomposed_goals": [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "data.query",
+                "title": "数据查询",
+                "must_answer": True,
+                "allowed_agents": ["data_expert"],
+            }
+        ]
+    }
+
+    accepted, blocked, pending = _apply_router_contract_guard(handoffs, state=state)
+
+    assert accepted == []
+    assert len(blocked) == 1
+    assert blocked[0]["reason"] == "invalid_data_query_contract"
+    assert blocked[0]["contract_error"] == "query_text_sql_like"
+    assert pending and pending[0]["goal_id"] == "GOAL-01"
+
+
+
+def test_resolve_handoff_display_text_prefers_frame_for_data_query() -> None:
+    """data.query 展示摘要只允许读取 frame.query_text，不回退 task_description。"""
+    text = _resolve_handoff_display_text(
+        {
+            "target_agent": "data_expert",
+            "task_description": "旧字段：请查询整句复合问题",
+            "frame": {"query_text": "查询 2025-06-30 贷款余额前 10 名客户"},
+        }
+    )
+
+    assert text == "查询 2025-06-30 贷款余额前 10 名客户"
