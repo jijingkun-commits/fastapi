@@ -18,6 +18,10 @@ export type ThreadRuntimeState = {
 
 export const DRAFT_THREAD_KEY = "__draft__";
 
+export function isDraftThreadKey(threadKey: string): boolean {
+  return threadKey === DRAFT_THREAD_KEY || threadKey.startsWith(`${DRAFT_THREAD_KEY}:`);
+}
+
 export function createEmptyThreadRuntime(): ThreadRuntimeState {
   return {
     messages: [],

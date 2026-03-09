@@ -48,6 +48,7 @@ import {
     createEmptyThreadRuntime,
     createLocalActiveRunSnapshot,
     DRAFT_THREAD_KEY,
+    isDraftThreadKey,
     getErrorMessageFromResult,
     getImageUrlFromResult,
     getThreadKey,
@@ -122,8 +123,10 @@ export function useSSEStream(): StreamContextValue {
     }, []);
 
     const [threadId, setThreadId] = useQueryState("threadId");
+    const [draftSessionId, setDraftSessionId] = useState(() => uuidv4());
     const initialThreadIdExistsRef = useRef(threadId !== null);
     const threadIdRef = useRef<string | null>(threadId);
+    const draftSessionIdRef = useRef(draftSessionId);
     const latestThreadResolvedRef = useRef(false);
     const threadRuntimeRef = useRef<Record<string, ThreadRuntimeState>>({});
     const stopByThreadRef = useRef<Record<string, (() => void) | null>>({});
@@ -142,10 +145,26 @@ export function useSSEStream(): StreamContextValue {
         scheduleActiveRunPollRef.current?.(delayMs);
     }, []);
 
+    const resolveThreadKey = useCallback((resolvedThreadId: string | null | undefined, draftId = draftSessionIdRef.current) => {
+        if (resolvedThreadId) {
+            return getThreadKey(resolvedThreadId);
+        }
+        return `${DRAFT_THREAD_KEY}:${draftId}`;
+    }, []);
+
+    const getCurrentThreadKey = useCallback(() => {
+        return resolveThreadKey(threadIdRef.current, draftSessionIdRef.current);
+    }, [resolveThreadKey]);
+
+    const startNewThread = useCallback(() => {
+        setThreadId(null);
+        setDraftSessionId(uuidv4());
+    }, [setThreadId]);
+
     const buildLocalStreamingFallbackRuns = useCallback((serverActiveRuns: Record<string, ActiveRunItem>) => {
         const fallbackRuns: Record<string, ActiveRunItem> = {};
         for (const [threadKey, isStreaming] of Object.entries(isStreamingByThreadRef.current)) {
-            if (!isStreaming || threadKey === DRAFT_THREAD_KEY || threadKey in serverActiveRuns) {
+            if (!isStreaming || isDraftThreadKey(threadKey) || threadKey in serverActiveRuns) {
                 continue;
             }
             fallbackRuns[threadKey] = createLocalActiveRunSnapshot(
@@ -168,7 +187,7 @@ export function useSSEStream(): StreamContextValue {
     }, []);
 
     const clearThreadUnread = useCallback((threadKey: string) => {
-        if (threadKey === DRAFT_THREAD_KEY) {
+        if (isDraftThreadKey(threadKey)) {
             return;
         }
         setUnreadReplies((prev) => {
@@ -182,10 +201,10 @@ export function useSSEStream(): StreamContextValue {
     }, [setUnreadReplies]);
 
     const markThreadUnread = useCallback((threadKey: string) => {
-        if (threadKey === DRAFT_THREAD_KEY) {
+        if (isDraftThreadKey(threadKey)) {
             return;
         }
-        if (getThreadKey(threadIdRef.current) === threadKey) {
+        if (getCurrentThreadKey() === threadKey) {
             clearThreadUnread(threadKey);
             return;
         }
@@ -212,7 +231,7 @@ export function useSSEStream(): StreamContextValue {
         const prev = threadRuntimeRef.current[threadKey] ?? createEmptyThreadRuntime();
         const next = updater(prev);
         threadRuntimeRef.current[threadKey] = next;
-        if (getThreadKey(threadIdRef.current) === threadKey) {
+        if (getCurrentThreadKey() === threadKey) {
             syncVisibleThreadRuntime(threadKey);
         }
         return next;
@@ -255,7 +274,7 @@ export function useSSEStream(): StreamContextValue {
         delete isStreamingByThreadRef.current[fromKey];
         delete stopInFlightByThreadRef.current[fromKey];
 
-        if (getThreadKey(threadIdRef.current) === toKey) {
+        if (getCurrentThreadKey() === toKey) {
             syncVisibleThreadRuntime(toKey);
         }
     }, [syncVisibleThreadRuntime]);
@@ -273,7 +292,8 @@ export function useSSEStream(): StreamContextValue {
     }, [clearThreadUnread, ensureActiveRunPolling, setActiveRuns]);
 
     const removeThreadActiveRun = useCallback((threadKey: string) => {
-        activeRunIdByThreadRef.current[threadKey] = null;
+        delete activeRunIdByThreadRef.current[threadKey];
+        delete suppressUnreadOnInactiveRef.current[threadKey];
         setActiveRuns((prev) => {
             if (!(threadKey in prev)) {
                 return prev;
@@ -462,10 +482,11 @@ export function useSSEStream(): StreamContextValue {
 
     useEffect(() => {
         threadIdRef.current = threadId;
-        const visibleThreadKey = getThreadKey(threadId);
+        draftSessionIdRef.current = draftSessionId;
+        const visibleThreadKey = resolveThreadKey(threadId, draftSessionId);
         clearThreadUnread(visibleThreadKey);
         syncVisibleThreadRuntime(visibleThreadKey);
-    }, [clearThreadUnread, threadId, syncVisibleThreadRuntime]);
+    }, [clearThreadUnread, draftSessionId, resolveThreadKey, threadId, syncVisibleThreadRuntime]);
 
     useEffect(() => {
         let cancelled = false;
@@ -507,7 +528,7 @@ export function useSSEStream(): StreamContextValue {
                 }
 
                 for (const existingThreadId of Object.keys(activeRunIdByThreadRef.current)) {
-                    if (existingThreadId === DRAFT_THREAD_KEY) {
+                    if (isDraftThreadKey(existingThreadId)) {
                         continue;
                     }
                     if (activeThreadIds.has(existingThreadId)) {
@@ -519,7 +540,7 @@ export function useSSEStream(): StreamContextValue {
                     const shouldShowUnread = suppressUnreadOnInactiveRef.current[existingThreadId] !== true;
                     suppressUnreadOnInactiveRef.current[existingThreadId] = false;
                     syncThreadUnreadState(existingThreadId, shouldShowUnread);
-                    activeRunIdByThreadRef.current[existingThreadId] = null;
+                    delete activeRunIdByThreadRef.current[existingThreadId];
                     patchThreadRuntime(existingThreadId, { isLoading: false, currentStatus: null });
                 }
 
@@ -647,7 +668,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
     }, [patchThreadRuntime, updateThreadRuntime]);
 
     useEffect(() => {
-        const currentThreadKey = getThreadKey(threadId);
+        const currentThreadKey = resolveThreadKey(threadId, draftSessionId);
         if (isStreamingByThreadRef.current[currentThreadKey]) {
             return;
         }
@@ -685,7 +706,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
         return () => {
             cancelled = true;
         };
-    }, [threadId, loadThreadMessages, resolveLatestThread, syncVisibleThreadRuntime]);
+    }, [draftSessionId, threadId, loadThreadMessages, resolveLatestThread, resolveThreadKey, syncVisibleThreadRuntime]);
 
     /**
      * 获取消息元数据
@@ -704,7 +725,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
      * 停止生成
      */
     const stop = useCallback(() => {
-        const currentThreadKey = getThreadKey(threadIdRef.current);
+        const currentThreadKey = getCurrentThreadKey();
         if (stopInFlightByThreadRef.current[currentThreadKey]) {
             return;
         }
@@ -766,7 +787,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
                 stopInFlightByThreadRef.current[currentThreadKey] = false;
             }
         })();
-    }, [patchThreadRuntime, removeThreadActiveRun, upsertThreadActiveRun]);
+    }, [getCurrentThreadKey, patchThreadRuntime, removeThreadActiveRun, upsertThreadActiveRun]);
 
     /**
      * 提取文本辅助函数
@@ -806,7 +827,8 @@ ${typeof m.content === 'string' ? m.content : ''}`
         update?: { messages?: Message[] | Message | string; context?: Record<string, unknown>; attachments?: Attachment[] },
         _options?: unknown,
     ) => {
-        const requestThreadKey = getThreadKey(threadId);
+        const requestThreadKey = resolveThreadKey(threadId, draftSessionId);
+        const requestSelectionKey = requestThreadKey;
         try {
             if (update?.messages) {
                 if (typeof update.messages === "string") {
@@ -833,6 +855,9 @@ ${typeof m.content === 'string' ? m.content : ''}`
                 error: undefined,
                 interrupt: null,
             });
+            if (threadId) {
+                upsertThreadActiveRun(createLocalActiveRunSnapshot(threadId, "", "running"));
+            }
             const idempotencyKey = uuidv4();
 
             let currentTodoId: number | undefined;
@@ -860,9 +885,12 @@ ${typeof m.content === 'string' ? m.content : ''}`
                     },
                     onInit: (id: string, runId?: string) => {
                         const resolvedThreadKey = getThreadKey(id);
+                        const shouldSelectInitializedThread = getCurrentThreadKey() === requestSelectionKey;
                         rekeyThreadRuntime(runtimeKeyRef.current, resolvedThreadKey);
                         runtimeKeyRef.current = resolvedThreadKey;
-                        void setThreadId(id);
+                        if (shouldSelectInitializedThread) {
+                            void setThreadId(id);
+                        }
                         upsertThread({
                             thread_id: id,
                             title: buildLocalThreadTitle(prompt),
@@ -885,7 +913,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
                         suppressUnreadOnInactiveRef.current[runtimeKeyRef.current] = true;
                         patchThreadRuntime(runtimeKeyRef.current, { error: new Error(message) });
                         toast.error("请求失败", { description: message });
-                        activeRunIdByThreadRef.current[runtimeKeyRef.current] = null;
+                        removeThreadActiveRun(runtimeKeyRef.current);
                     },
                     onResult: (data: ResultEventData, meta?: StreamResultMeta) => {
                         handleStructuredResultEvent(runtimeKeyRef.current, aiId, data, false, meta);
@@ -913,7 +941,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
                             currentStatus: null,
                         });
                         stopByThreadRef.current[runtimeKeyRef.current] = null;
-                        activeRunIdByThreadRef.current[runtimeKeyRef.current] = null;
+                        removeThreadActiveRun(runtimeKeyRef.current);
                         isStreamingByThreadRef.current[runtimeKeyRef.current] = false;
                     },
                     onKbImages: (images: Record<string, string>) => {
@@ -944,13 +972,13 @@ ${typeof m.content === 'string' ? m.content : ''}`
                 patchThreadRuntime(finalThreadKey, { isLoading: false });
                 stopByThreadRef.current[finalThreadKey] = null;
                 currentAiIdByThreadRef.current[finalThreadKey] = null;
-                activeRunIdByThreadRef.current[finalThreadKey] = activeRunIdByThreadRef.current[finalThreadKey] ?? null;
                 isStreamingByThreadRef.current[finalThreadKey] = false;
             });
         } catch (e) {
             patchThreadRuntime(requestThreadKey, { error: e, isLoading: false });
         }
     }, [
+        draftSessionId,
         threadId,
         enableThinking,
         selectedModel,
@@ -963,9 +991,12 @@ ${typeof m.content === 'string' ? m.content : ''}`
         applyFinalAnswerToMessage,
         applyClarificationToMessage,
         finalizeStreamLifecycle,
+        getCurrentThreadKey,
         updateThreadRuntime,
+        removeThreadActiveRun,
         syncThreadUnreadState,
         upsertThreadActiveRun,
+        resolveThreadKey,
         upsertThread,
     ]);
 
@@ -1081,6 +1112,7 @@ ${typeof m.content === 'string' ? m.content : ''}`
         resume,
         getMessagesMetadata,
         setBranch,
+        startNewThread,
         threadId,
         enableThinking,
         setEnableThinking,

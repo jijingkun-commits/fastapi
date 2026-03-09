@@ -133,7 +133,7 @@ async function setupMockBackend(page, scenario) {
           doneDelay: 700,
         },
       };
-      const script = scriptMap[threadId] || { answer: `${threadId}-完成`, firstDelay: 50, doneDelay: 220 };
+      const script = { initDelay: 0, ...(scriptMap[threadId] || { answer: `${threadId}-完成`, firstDelay: 50, doneDelay: 220 }) };
       if (scenarioName === 'MSC-CL-010') {
         hiddenActivePollsByThread[threadId] = 2;
         if (threadId === 'thread-A') {
@@ -143,17 +143,29 @@ async function setupMockBackend(page, scenario) {
       if (scenarioName === 'MSC-CL-011' && incomingThreadId == null) {
         script.doneDelay = 2200;
       }
+      if (scenarioName === 'MSC-CL-012' || scenarioName === 'MSC-CL-014') {
+        script.initDelay = 450;
+        script.doneDelay = scenarioName === 'MSC-CL-014' ? 5000 : 2200;
+      }
+      if (scenarioName === 'MSC-CL-013' && threadId === 'thread-B') {
+        script.doneDelay = 2200;
+      }
 
       return new Response(new ReadableStream({
         start(controller) {
           const send = (event, data) => {
-            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            controller.enqueue(encoder.encode(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`));
           };
           const close = () => {
             controller.close();
           };
 
-          send('init', { thread_id: threadId, run_id: runId });
+          setTimeout(() => {
+            send('init', { thread_id: threadId, run_id: runId });
+          }, script.initDelay);
           setTimeout(() => {
             if (cancelledRuns.has(runId)) {
               send('stopped', { thread_id: threadId, run_id: runId, reason: 'user_cancelled' });
@@ -163,7 +175,7 @@ async function setupMockBackend(page, scenario) {
               return;
             }
             send('token', { content: `${prompt} -> ${threadId === 'thread-A' ? 'A-首段' : 'B-首段'}` });
-          }, script.firstDelay);
+          }, script.initDelay + script.firstDelay);
 
           setTimeout(() => {
             if (cancelledRuns.has(runId)) {
@@ -181,7 +193,7 @@ async function setupMockBackend(page, scenario) {
             ];
             delete activeRuns[threadId];
             close();
-          }, script.doneDelay);
+          }, script.initDelay + script.doneDelay);
         },
       }), {
         status: 200,
@@ -477,7 +489,7 @@ test.describe('Chat Multi Session Concurrency', () => {
   test('MSC-CL-011: 新线程分配后侧边栏立即显示 running', async ({ page }) => {
     await openChat(page, 'MSC-CL-011');
 
-    await page.getByRole('button', { name: 'New thread' }).first().click();
+    await page.getByRole('button', { name: '新建对话' }).first().click();
     await page.waitForFunction(() => new URL(window.location.href).searchParams.get('threadId') === null);
 
     await page.fill('[data-testid="chat-input"]', '新线程问题');
@@ -489,5 +501,52 @@ test.describe('Chat Multi Session Concurrency', () => {
     const indicator = page.locator(`[data-thread-id="${threadId}"] [data-testid="thread-reply-status"]`);
 
     await expect(indicator).toHaveAttribute('data-reply-status', 'running', { timeout: 5000 });
+  });
+
+  test('MSC-CL-012: 点新建后，晚到 init 不得把页面抢回旧会话', async ({ page }) => {
+    await openChat(page, 'MSC-CL-012');
+
+    await page.fill('[data-testid="chat-input"]', '晚到-init-问题');
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '新建对话' }).first().click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get('threadId'), { timeout: 10000 }).toBeNull();
+
+    const threadAIndicator = page.locator('[data-thread-id="thread-A"] [data-testid="thread-reply-status"]');
+    await expect(threadAIndicator).toHaveAttribute('data-reply-status', 'running', { timeout: 1000 });
+
+    await page.waitForTimeout(900);
+    await expect.poll(() => new URL(page.url()).searchParams.get('threadId'), { timeout: 10000 }).toBeNull();
+  });
+
+  test('MSC-CL-013: 新后台会话完成时，不得把旧的已读会话重新打成蓝点', async ({ page }) => {
+    await openChat(page, 'MSC-CL-013');
+
+    const threadAIndicator = page.locator('[data-thread-id="thread-A"] [data-testid="thread-reply-status"]');
+    const threadBIndicator = page.locator('[data-thread-id="thread-B"] [data-testid="thread-reply-status"]');
+
+    await page.fill('[data-testid="chat-input"]', '问题-A');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => page.locator('[data-testid="ai-message"]', { hasText: 'A-回答完成' }).count(), { timeout: 10000 }).toBeGreaterThan(0);
+    await expect(threadAIndicator).toHaveAttribute('data-reply-status', 'none');
+
+    await switchThread(page, 'thread-B');
+    await page.fill('[data-testid="chat-input"]', '问题-B');
+    await page.keyboard.press('Enter');
+    await switchThread(page, 'thread-C');
+
+    await expect(threadBIndicator).toHaveAttribute('data-reply-status', 'unread', { timeout: 12000 });
+    await expect(threadAIndicator).toHaveAttribute('data-reply-status', 'none');
+  });
+
+  test('MSC-CL-014: 切走当前会话后，后台运行态要立刻显示 spinner', async ({ page }) => {
+    await openChat(page, 'MSC-CL-014');
+
+    const threadAIndicator = page.locator('[data-thread-id="thread-A"] [data-testid="thread-reply-status"]');
+    await page.fill('[data-testid="chat-input"]', '问题-A');
+    await page.keyboard.press('Enter');
+    await switchThread(page, 'thread-B');
+
+    await expect(threadAIndicator).toHaveAttribute('data-reply-status', 'running', { timeout: 1000 });
   });
 });
