@@ -26,6 +26,9 @@ class _FakeQuery:
     def first(self):
         return None
 
+    def all(self):
+        return []
+
 
 class _FakeDB:
     """最小化 DB 对象。"""
@@ -49,6 +52,37 @@ class _FakeDB:
 @contextmanager
 def _fake_get_db_context():
     yield _FakeDB()
+
+
+class _ActivityGraph:
+    """产生可见输出与状态事件的 Graph。"""
+
+    def __init__(self) -> None:
+        self._snapshot = SimpleNamespace(tasks=[], values={"messages": []})
+
+    async def astream(self, *args, **kwargs):
+        yield {
+            "type": "token",
+            "data": {"content": "第一段输出"},
+            "node": "supervisor",
+        }
+        yield {
+            "type": "status",
+            "data": {"message": "继续处理中"},
+            "node": "planner",
+        }
+        yield {
+            "type": "result",
+            "data": {
+                "result_type": "todo_list",
+                "message": "已整理待办",
+                "todos": [],
+            },
+            "node": "planner",
+        }
+
+    async def aget_state(self, config):
+        return self._snapshot
 
 
 class _CancelableGraph:
@@ -111,6 +145,34 @@ def _reset_run_control_state():
     run_control_service.reset()
     run_control_service.enable_override = prev_enable
     run_control_service.stopped_event_override = prev_stopped
+
+
+def test_stream_marks_activity_for_visible_output_and_status_progress():
+    """流式输出应把首个可见输出与状态进度同步到 run activity。"""
+
+    run_id = "run_activity_stream_001"
+    graph = _ActivityGraph()
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return graph
+
+    with patch("app.services.chat_service.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: SimpleNamespace(id=1)
+    ), patch.object(ChatService, "get_graph", _fake_get_graph), patch(
+        "app.services.chat_service.run_control_service.mark_activity"
+    ) as mock_mark_activity:
+        svc = ChatService()
+        _collect_events(
+            svc.stream(
+                prompt="查询贷款余额",
+                thread_id="thread-activity-stream",
+                user_id=1,
+                run_id=run_id,
+            )
+        )
+
+    assert any(call.args == (run_id,) and call.kwargs.get("force") is True for call in mock_mark_activity.call_args_list)
+    assert any(call.args == (run_id,) and call.kwargs.get("force") is False for call in mock_mark_activity.call_args_list)
 
 
 def test_stream_cancel_stops_token_backfill_and_emits_stopped_event():

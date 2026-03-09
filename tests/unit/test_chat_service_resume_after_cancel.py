@@ -24,6 +24,9 @@ class _FakeQuery:
     def first(self):
         return None
 
+    def all(self):
+        return []
+
 
 class _FakeDB:
     """最小化 DB 对象。"""

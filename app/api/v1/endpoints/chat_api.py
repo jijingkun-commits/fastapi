@@ -6,7 +6,10 @@
 - 恢复被中断的流程（人工审核）
 """
 import logging
+from datetime import datetime
 from typing import Optional, List, Any
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -16,8 +19,11 @@ from app.db.session import get_db
 
 from app.services.chat_service import sse_stream, sse_resume_stream
 from app.services.run_control_service import (
+    ActiveRunExistsError,
+    ParallelLimitExceededError,
     RunNotFoundError,
     RunPermissionDeniedError,
+    RunThreadMismatchError,
     run_control_service,
 )
 from app.schemas.chat import ChatRequest, FeedbackRequest
@@ -88,17 +94,42 @@ class ResumeRequest(BaseModel):
 class CancelRunRequest(BaseModel):
     """取消运行请求模型。"""
 
-    reason: str = "user_cancelled"
-    cancel_mode: str = "soft"
+    thread_id: Optional[str] = None
+
+
+class ActiveRunItemResponse(BaseModel):
+    """活跃运行项响应。"""
+
+    run_id: str
+    thread_id: str
+    status: str
+    updated_at: str
+    last_activity_at: Optional[str] = None
+
+
+class ActiveRunListResponse(BaseModel):
+    """活跃运行列表响应。"""
+
+    items: List[ActiveRunItemResponse]
+    active_count: int
+    poll_hint_seconds: int
+    server_time: str
+
+
+def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 # ==================== Stream Endpoint ====================
 
 @router.post("/stream")
 async def chat_stream(
-    payload: ChatRequest, 
+    payload: ChatRequest,
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """流式对话接口。
     
@@ -107,6 +138,9 @@ async def chat_stream(
     """
     trace_id = request.headers.get("X-Trace-Id", "-")
     remote = getattr(request.client, "host", "-")
+    resolved_thread_id = payload.thread_id or str(uuid4())
+    resolved_run_id = payload.run_id
+
     logger.info(
         "Chat流请求 来自=%s 提示词长度=%d 延迟毫秒=%d trace_id=%s user_id=%d thinking=%s run_id=%s",
         remote,
@@ -117,16 +151,45 @@ async def chat_stream(
         payload.enable_thinking,
         payload.run_id,
     )
+
+    if run_control_service.is_enabled():
+        try:
+            run_snapshot = run_control_service.create_run(
+                thread_id=resolved_thread_id,
+                user_id=current_user.id,
+                run_id=resolved_run_id,
+                db=db,
+            )
+        except ActiveRunExistsError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "active_run_exists",
+                    "thread_id": exc.thread_id,
+                    "run_id": exc.active_run_id,
+                },
+            )
+        except ParallelLimitExceededError as exc:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error_code": "parallel_limit_exceeded",
+                    "active_count": exc.active_count,
+                    "limit": exc.limit,
+                },
+            )
+        resolved_run_id = run_snapshot.run_id
+
     gen = sse_stream(
         payload.prompt,
         payload.delay_ms,
-        payload.thread_id,
+        resolved_thread_id,
         current_user.id,
         payload.enable_thinking,
         payload.model_id,
         payload.attachments,
         payload.current_todo_id,
-        payload.run_id,
+        resolved_run_id,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 
@@ -160,6 +223,37 @@ async def resume_stream(
     return StreamingResponse(gen, media_type="text/event-stream")
 
 
+@router.get("/runs/active", response_model=ActiveRunListResponse)
+def list_active_runs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """返回当前用户全部 active runs。"""
+
+    if not run_control_service.is_active_runs_query_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "active_runs_unavailable", "message": "运行态暂不可用，请稍后重试"},
+        )
+
+    items = [
+        ActiveRunItemResponse(
+            run_id=snapshot.run_id,
+            thread_id=snapshot.thread_id,
+            status=snapshot.status,
+            updated_at=_serialize_datetime(snapshot.updated_at) or "",
+            last_activity_at=_serialize_datetime(snapshot.last_activity_at),
+        )
+        for snapshot in run_control_service.list_active_runs_by_user(user_id=current_user.id, db=db)
+    ]
+    return ActiveRunListResponse(
+        items=items,
+        active_count=len(items),
+        poll_hint_seconds=2,
+        server_time=_serialize_datetime(datetime.now()) or "",
+    )
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(
     run_id: str,
@@ -173,11 +267,17 @@ async def cancel_run(
     trace_id = request.headers.get("X-Trace-Id", "-")
     request_payload = payload or CancelRunRequest()
 
+    if not request_payload.thread_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "thread_id_required", "message": "thread_id is required"},
+        )
+
     logger.info(
-        "取消 run 请求: run_id=%s, user_id=%s, reason=%s, trace_id=%s",
+        "取消 run 请求: run_id=%s, user_id=%s, thread_id=%s, trace_id=%s",
         run_id,
         current_user.id,
-        request_payload.reason,
+        request_payload.thread_id,
         trace_id,
     )
 
@@ -186,9 +286,32 @@ async def cancel_run(
             run_id=run_id,
             requester_user_id=current_user.id,
             is_admin=getattr(current_user, "role", "") == "admin",
-            reason=request_payload.reason,
-            cancel_mode=request_payload.cancel_mode,
+            reason="user_cancelled",
+            cancel_mode="hard",
+            thread_id=request_payload.thread_id,
             db=db,
+        )
+    except RunThreadMismatchError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "thread_id_mismatch",
+                "message": str(exc),
+                "run_id": exc.run_id,
+                "thread_id": request_payload.thread_id,
+            },
+        )
+    except ValueError as exc:
+        if "thread_id" not in str(exc):
+            raise
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "thread_id_mismatch",
+                "message": str(exc),
+                "run_id": run_id,
+                "thread_id": request_payload.thread_id,
+            },
         )
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

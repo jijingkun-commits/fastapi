@@ -9,7 +9,7 @@
  * - 批量删除对话
  */
 import { Button } from "@/components/ui/button";
-import { useThreads, Thread } from "@/providers/Thread";
+import { useThreads } from "@/providers/Thread";
 import { useEffect, useState } from "react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
@@ -18,273 +18,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   PanelRightOpen,
   PanelRightClose,
   Trash2,
-  Edit2,
-  Check,
-  X,
-  MessageSquare,
   CheckSquare,
   Square,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { toast } from "sonner";
 import { deleteThreadsBatch } from "@/lib/backend";
-import { cn } from "@/lib/utils";
-
-interface ThreadItemProps {
-  thread: Thread;
-  isActive: boolean;
-  onSelect: (threadId: string) => void;
-  onDelete: (threadId: string) => void;
-  onRename: (threadId: string, title: string) => void;
-  // 批量选择相关
-  isSelectMode?: boolean;
-  isSelected?: boolean;
-  onToggleSelect?: (threadId: string) => void;
-}
-
-function ThreadItem({
-  thread,
-  isActive,
-  onSelect,
-  onDelete,
-  onRename,
-  isSelectMode = false,
-  isSelected = false,
-  onToggleSelect,
-}: ThreadItemProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState(thread.title);
-  const [isHovered, setIsHovered] = useState(false);
-
-  const handleRename = async () => {
-    if (editTitle.trim() && editTitle !== thread.title) {
-      try {
-        await onRename(thread.thread_id, editTitle.trim());
-        toast.success("标题已更新");
-      } catch {
-        toast.error("更新标题失败");
-        setEditTitle(thread.title);
-      }
-    }
-    setIsEditing(false);
-  };
-
-  const handleDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirm("确定要删除这个对话吗？")) {
-      try {
-        await onDelete(thread.thread_id);
-        toast.success("对话已删除");
-      } catch {
-        toast.error("删除对话失败");
-      }
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleRename();
-    } else if (e.key === "Escape") {
-      setEditTitle(thread.title);
-      setIsEditing(false);
-    }
-  };
-
-  const handleClick = () => {
-    if (isSelectMode && onToggleSelect) {
-      onToggleSelect(thread.thread_id);
-    } else {
-      onSelect(thread.thread_id);
-    }
-  };
-
-  return (
-    <div
-      className="w-full"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <div
-        className={cn(
-          "app-sidebar-item group relative flex w-full items-center rounded-lg px-3 py-1.5 transition-all duration-150",
-          (isSelected || isActive) && "app-sidebar-item-active"
-        )}
-        role="button"
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handleClick();
-          }
-        }}
-      >
-        {/* 批量选择模式：显示 Checkbox */}
-        {isSelectMode ? (
-          <Checkbox
-            checked={isSelected}
-            onClick={(e) => e.stopPropagation()}
-            onCheckedChange={() => onToggleSelect?.(thread.thread_id)}
-            className="mr-2 h-4 w-4 shrink-0"
-          />
-        ) : (
-          <div className={cn(
-            "mr-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-            isActive || isSelected
-              ? "app-sidebar-icon-pill"
-              : "app-sidebar-icon bg-white/70"
-          )}>
-            <MessageSquare className="h-3.5 w-3.5" />
-          </div>
-        )}
-
-        {isEditing ? (
-          <div
-            className="flex flex-1 items-center gap-1"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onBlur={handleRename}
-              className="h-6 flex-1 text-sm"
-              autoFocus
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="app-sidebar-item h-6 w-6 hover:text-[var(--app-sidebar-icon-active)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleRename();
-              }}
-            >
-              <Check className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="app-sidebar-item h-6 w-6"
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditTitle(thread.title);
-                setIsEditing(false);
-              }}
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div
-              className={`flex-1 truncate text-left text-[13px] leading-snug ${
-                isActive || isSelected
-                  ? "font-medium text-[var(--app-sidebar-item-active-fg)]"
-                  : "text-[var(--app-sidebar-item-fg)]"
-              }`}
-            >
-              {thread.title || "新对话"}
-            </div>
-
-            {/* 操作按钮 - 悬停时显示（非选择模式） */}
-            {!isSelectMode && isHovered && (
-              <div className="absolute right-1 flex items-center gap-0.5 bg-gradient-to-l from-[var(--app-sidebar-bg)] via-[var(--app-sidebar-bg)] to-transparent pl-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="app-sidebar-item h-6 w-6 hover:text-[var(--app-sidebar-icon-active)]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsEditing(true);
-                  }}
-                >
-                  <Edit2 className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="app-sidebar-item h-6 w-6 text-rose-500/80 hover:text-rose-600 hover:bg-rose-50/80"
-                  onClick={handleDelete}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ThreadList({
-  threads,
-  onThreadClick,
-  isSelectMode,
-  selectedIds,
-  onToggleSelect,
-}: {
-  threads: Thread[];
-  onThreadClick?: (threadId: string) => void;
-  isSelectMode?: boolean;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (threadId: string) => void;
-}) {
-  const [threadId, setThreadId] = useQueryState("threadId");
-  const { deleteThread, updateThreadTitle } = useThreads();
-
-  const handleSelect = (id: string) => {
-    onThreadClick?.(id);
-    if (id !== threadId) {
-      setThreadId(id);
-    }
-  };
-
-  if (threads.length === 0) {
-    return (
-      <div className="app-sidebar-secondary flex h-32 w-full flex-col items-center justify-center gap-2">
-        <MessageSquare className="h-8 w-8 text-gray-200" />
-        <span className="text-sm">暂无对话</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-px overflow-y-auto px-2 py-0.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
-      {threads.map((t) => (
-        <ThreadItem
-          key={t.thread_id}
-          thread={t}
-          isActive={t.thread_id === threadId}
-          onSelect={handleSelect}
-          onDelete={deleteThread}
-          onRename={updateThreadTitle}
-          isSelectMode={isSelectMode}
-          isSelected={selectedIds?.has(t.thread_id)}
-          onToggleSelect={onToggleSelect}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ThreadHistoryLoading() {
-  return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-1 overflow-y-auto px-2 py-1.5">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <Skeleton key={`skeleton-${i}`} className="h-9 w-full rounded-lg" />
-      ))}
-    </div>
-  );
-}
+import { ThreadHistoryLoading, ThreadList } from "@/components/chat/history/thread-list";
 
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
@@ -293,7 +37,7 @@ export default function ThreadHistory() {
     parseAsBoolean.withDefault(false)
   );
 
-  const { threads, threadsLoading, refreshThreads } = useThreads();
+  const { threads, threadsLoading, refreshThreads, activeRuns, setActiveRuns, unreadReplies, setUnreadReplies } = useThreads();
 
   // 批量选择状态
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -340,6 +84,20 @@ export default function ThreadHistory() {
     try {
       await deleteThreadsBatch(Array.from(selectedIds));
       toast.success(`已删除 ${selectedIds.size} 个对话`);
+      setActiveRuns((prev) => {
+        const next = { ...prev };
+        for (const threadId of selectedIds) {
+          delete next[threadId];
+        }
+        return next;
+      });
+      setUnreadReplies((prev) => {
+        const next = { ...prev };
+        for (const threadId of selectedIds) {
+          delete next[threadId];
+        }
+        return next;
+      });
       setSelectedIds(new Set());
       setIsSelectMode(false);
       refreshThreads();
@@ -450,6 +208,8 @@ export default function ThreadHistory() {
             isSelectMode={isSelectMode}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
+            activeRuns={activeRuns}
+            unreadReplies={unreadReplies}
           />
         )}
       </div>
@@ -496,6 +256,8 @@ export default function ThreadHistory() {
                 isSelectMode={isSelectMode}
                 selectedIds={selectedIds}
                 onToggleSelect={handleToggleSelect}
+                activeRuns={activeRuns}
+                unreadReplies={unreadReplies}
               />
             )}
           </SheetContent>

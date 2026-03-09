@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.models.chat_run import ChatRunStatus
+from app.models.chat_run import ChatRun, ChatRunStatus
 from app.services.run_control_service import (
     RunControlService,
     RunPermissionDeniedError,
@@ -109,3 +109,67 @@ def test_recover_active_runs_cleanup_orphan() -> None:
     assert cleaned[0].run_id == created.run_id
     assert cleaned[0].status == ChatRunStatus.STOPPED.value
     assert cleaned[0].cancel_reason in {"orphan_cleanup", "cancel_timeout"}
+
+
+def test_run_control_active_query_gate_rejects_same_thread_conflict(db_session) -> None:
+    """同一 thread 存在 active run 时必须返回结构化冲突。"""
+
+    svc = _build_service()
+    first = svc.create_run(thread_id="thread-same", user_id=601, db=db_session)
+
+    with pytest.raises(Exception) as exc_info:
+        svc.create_run(thread_id="thread-same", user_id=601, db=db_session)
+
+    assert exc_info.value.active_run_id == first.run_id
+    assert exc_info.value.thread_id == "thread-same"
+
+
+def test_run_control_active_query_gate_rejects_parallel_limit(db_session) -> None:
+    """单用户 active run 超过 3 时必须拒绝新建。"""
+
+    svc = _build_service()
+    for index in range(3):
+        svc.create_run(thread_id=f"thread-limit-{index}", user_id=701, db=db_session)
+
+    with pytest.raises(Exception) as exc_info:
+        svc.create_run(thread_id="thread-limit-overflow", user_id=701, db=db_session)
+
+    assert exc_info.value.active_count == 3
+    assert exc_info.value.limit == 3
+
+
+def test_last_activity_persistence_and_sort_prefers_last_activity_at(db_session) -> None:
+    """active 列表必须优先按 last_activity_at 排序。"""
+
+    svc = _build_service()
+    first = svc.create_run(thread_id="thread-a", user_id=801, run_id="run-a", db=db_session)
+    second = svc.create_run(thread_id="thread-b", user_id=801, run_id="run-b", db=db_session)
+    third = svc.create_run(thread_id="thread-c", user_id=801, run_id="run-c", db=db_session)
+
+    rows = {row.run_id: row for row in db_session.query(ChatRun).filter(ChatRun.user_id == 801).all()}
+    rows[first.run_id].updated_at = datetime(2026, 3, 8, 10, 0, 0)
+    rows[first.run_id].last_activity_at = datetime(2026, 3, 8, 10, 5, 0)
+    rows[second.run_id].updated_at = datetime(2026, 3, 8, 10, 10, 0)
+    rows[second.run_id].last_activity_at = None
+    rows[third.run_id].updated_at = datetime(2026, 3, 8, 10, 2, 0)
+    rows[third.run_id].last_activity_at = datetime(2026, 3, 8, 10, 6, 0)
+    db_session.commit()
+
+    active_runs = svc.list_active_runs_by_user(user_id=801, db=db_session)
+
+    assert [run.run_id for run in active_runs] == ["run-c", "run-a", "run-b"]
+    assert active_runs[2].last_activity_at is None
+
+
+def test_last_activity_persistence_and_sort_filters_terminal_runs(db_session) -> None:
+    """active 查询只允许返回 running/stopping。"""
+
+    svc = _build_service()
+    running = svc.create_run(thread_id="thread-running", user_id=901, run_id="run-running", db=db_session)
+    stopped = svc.create_run(thread_id="thread-stopped", user_id=901, run_id="run-stopped", db=db_session)
+    svc.mark_stopped(run_id=stopped.run_id, reason="user_cancelled", db=db_session)
+
+    active_runs = svc.list_active_runs_by_user(user_id=901, db=db_session)
+
+    assert [run.run_id for run in active_runs] == [running.run_id]
+    assert all(run.status in {ChatRunStatus.RUNNING.value, ChatRunStatus.STOPPING.value} for run in active_runs)

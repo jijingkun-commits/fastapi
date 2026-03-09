@@ -30,7 +30,7 @@ scope_contract:
   success_criteria:
     - 并发正确性: A/B 两会话并发提交均完成且消息无串写
     - 停止隔离: 停止 B 时 A 保持 running
-    - 刷新恢复: 首屏加载后 1s 内恢复运行态徽标
+    - 刷新恢复: 首屏加载后 1s 内恢复侧边栏运行态状态点
     - 停留同步: 页面停留期间（active_count>0）运行态更新延迟 P95 < 3s
 ```
 
@@ -68,7 +68,7 @@ product_contract:
   acceptance_gates:
     - MSC-CL-001: A/B 并发提交后均完成且状态分离
     - MSC-CL-002: 仅停止目标会话
-    - MSC-CL-003: 刷新后恢复 active 徽标与 stop 可用
+    - MSC-CL-003: 刷新后恢复 active 状态点与 stop 可用
     - MSC-CL-004: 同线程重复提交返回 409 active_run_exists
     - MSC-CL-005: 达并发上限返回 429
     - MSC-CL-006: cancel 缺失 thread_id 返回 400
@@ -116,10 +116,10 @@ flowchart LR
   AR --> DB
   AR --> DEC{"active_count > 0 ?"}
   DEC -->|yes| POLL["poll success=2s; failure backoff=5s/10s"]
-  DEC -->|no| UI["Merge badges + stop entries"]
+  DEC -->|no| UI["Merge sidebar status dots + stop entries"]
   POLL --> DB
   POLL --> DEC
-  AR --> UI["Merge badges + stop entries"]
+  AR --> UI["Merge sidebar status dots + stop entries"]
 ```
 
 ### 3.3 生命周期与并发门禁
@@ -128,20 +128,21 @@ flowchart LR
 | run 状态机 | `running -> stopping -> stopped/completed/failed` |
 | 同线程提交 | 若同 `thread_id` 已有 active run，返回 `409 active_run_exists`，不做隐式替换 |
 | 用户并发上限 | 默认 3（`MAX_PARALLEL_STREAMS_PER_USER`，范围 1-10），超限返回 `429` |
-| active 列表刷新 | 冷启动拉取后，`active_count>0` 时成功固定 2 秒轮询；失败后退避到 5 秒、10 秒；任意一次成功立即恢复 2 秒；`active_count=0` 立即停止轮询；仅连续 3 次失败时显示轻提示 |
+| active 列表刷新 | 冷启动拉取后，`active_count>0` 时成功固定 2 秒轮询；失败后退避到 5 秒、10 秒；任意一次成功立即恢复 2 秒；`active_count=0` 且本地无 streaming 线程时停止轮询；若本地线程仍在 streaming，则保留本地 running 快照继续轮询；仅连续 3 次失败时显示轻提示 |
+| 侧边栏状态列 | 仅当 `status=running` 时显示旋转小圆圈（`running`）；后台线程收到用户尚未查看的新回复时显示蓝色实心点（`unread`）；当前线程已读且不在运行时不显示任何圆圈（`none`）；`status=stopping` 不得继续显示 spinner；新线程在 `init` 返回 `thread_id` 后必须立即插入侧边栏，先用本地首问摘要占位标题承载 `running` 状态；`unread` 仅保留当前页面会话，不跨刷新持久化 |
 | poll_hint_seconds 策略 | 健康态返回 `2`；失败退避态返回 `5` 或 `10`；由后端决定，前端不硬编码 |
 | active 接口范围 | P0 固定返回当前用户全部 active runs；不做分页，不接受 `limit` |
 | active 查询来源 | 每次直接查询 `t_chat_run`；禁用缓存与内存快照兜底 |
 | active 查询过滤 | 固定 `user_id=current_user.id` 且 `status in (running, stopping)` |
-| active 查询执行 | 服务层以 `effective_activity_time = coalesce(last_activity_at, updated_at)` 做最终排序；不做分页 |
+| active 查询执行 | 服务层以 `last_activity_at 非空优先 -> effective_activity_time -> updated_at -> run_id` 做最终排序；不做分页 |
 | active 索引策略 | P0 新增 `idx_chat_run_user_status_updated(user_id, status, updated_at DESC)`，同时支撑 active 列表与并发计数 |
 | active 接口顶层字段 | `items`、`active_count`、`poll_hint_seconds`、`server_time` |
 | active 接口 item 字段 | `run_id`、`thread_id`、`status`、`updated_at`、`last_activity_at` |
-| active 接口排序 | `last_activity_at DESC` -> `updated_at DESC` -> `run_id DESC` |
+| active 接口排序 | `last_activity_at 非空优先` -> `effective_activity_time DESC` -> `updated_at DESC` -> `run_id DESC` |
 | last_activity_at 策略 | 持久化在 `t_chat_run`；关键事件立即写；流式事件最多每 2 秒落库一次；读取时为空可回退 `updated_at` |
 | active 接口状态枚举 | `status` 仅允许 `running`、`stopping` |
 | active 接口禁止返回 | 不返回 `messages`、`prompt`、`user_id`、`error_detail` |
-| cancel 成功响应 | 必须返回最新 `run_id`、`thread_id`、`status`、`accepted`、`idempotent` |
+| cancel 成功响应 | 必须返回最新 `run_id`、`thread_id`、`status`、`accepted`、`idempotent`；`hard cancel` 成功时目标 run 直接收口为 `stopped` |
 | cancel 失败错误码 | 固定为 `400`、`403`、`404` |
 | 停止幂等 | 目标 run 已处于 `stopping/stopped/completed/failed` 时，返回 `accepted=true,idempotent=true` |
 | 桶清理策略 | 终态保留 30 秒后清理，最多保留 10 个 bucket，超限按 LRU 清理非运行态 |
@@ -165,7 +166,9 @@ active_runs_response_contract:
     fetch_mode: fetch_all_filtered_rows
     final_sort_owner: service_layer
     effective_activity_time: coalesce(last_activity_at, updated_at)
+    last_activity_present_first: true
     final_sort_order:
+      - last_activity_at IS NOT NULL DESC
       - effective_activity_time DESC
       - updated_at DESC
       - run_id DESC
@@ -194,7 +197,8 @@ active_runs_response_contract:
     - updated_at
     - last_activity_at
   item_sort_order:
-    - last_activity_at DESC
+    - last_activity_at IS NOT NULL DESC
+    - effective_activity_time DESC
     - updated_at DESC
     - run_id DESC
   item_allowed_statuses:
@@ -291,6 +295,7 @@ cancel_run_response_contract:
   semantics:
     - 产品语义收敛为单一“用户取消”动作；客户端不暴露自定义 reason 与 cancel_mode
     - 成功响应必须返回最新 `thread_id` 与最新 `status`，供前端立即更新目标会话运行态
+    - `hard cancel` 成功时直接返回 `stopped`；`stopping` 仅保留给兼容/恢复中的内部态，不再作为前端 spinner 展示依据
     - terminal 状态与 stopping 状态走幂等成功响应，不返回 `409`
     - 失败语义固定为参数不合法 `400`、权限不足 `403`、目标不存在 `404`
 ```
@@ -361,6 +366,7 @@ requirement_seeds:
       filter_fields: [user_id, status]
       allowed_statuses: [running, stopping]
       final_sort_order:
+        - last_activity_at IS NOT NULL DESC
         - coalesce(last_activity_at, updated_at) DESC
         - updated_at DESC
         - run_id DESC
@@ -475,7 +481,7 @@ implementation_seeds:
   - task_id: T-08
     title: 前端 E2E 并发与隔离用例
     file_paths:
-      - web/e2e/chat-multi-session-concurrency.spec.ts
+      - web/e2e/chat-multi-session-concurrency.spec.cjs
     symbols: [MSC-CL-001, MSC-CL-002, MSC-CL-003]
     change_type: add
     blocked_by: [T-02, T-03, T-04, T-05]
@@ -516,7 +522,7 @@ risk_rollback_contract:
     - key: ENABLE_ACTIVE_RUNS_QUERY
       default: true
       rollback_value: false
-      impact: 关闭活跃会话徽标与跨会话 stop 入口
+      impact: 关闭活跃会话状态点与跨会话 stop 入口
     - key: ENABLE_PER_USER_PARALLEL_GATE
       default: true
       rollback_value: false
@@ -561,13 +567,15 @@ risk_rollback_contract:
 |---|---|---|---|
 | MSC-CL-001 | A/B 会话并发提交 | 双会话完成且消息不串写 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-001"` |
 | MSC-CL-002 | 停止 B 不影响 A | B 停止、A 继续输出 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-002"` |
-| MSC-CL-003 | 刷新后恢复运行态 | 徽标与 stop 可恢复 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-003"` |
+| MSC-CL-003 | 刷新后恢复运行态 | 旋转运行图标与 stop 可恢复 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-003"` |
 | MSC-CL-004 | 同线程重复提交 | 返回 409 active_run_exists | `pytest tests/api/test_chat_api.py -k "active_run_exists"` |
 | MSC-CL-005 | 用户并发超限 | 返回 429 | `pytest tests/unit/test_run_control_service.py -k "parallel_limit"` |
 | MSC-CL-006 | cancel 缺失 thread_id | 返回 400 | `pytest tests/api/test_chat_api.py -k "missing_thread_id"` |
 | MSC-CL-007 | cancel thread_id 不匹配 | 返回 400 | `pytest tests/api/test_chat_api.py -k "thread_mismatch"` |
-| MSC-CL-008 | 停留期间 active 自动同步 | active_count>0 时徽标状态可更新 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-008"` |
+| MSC-CL-008 | 停留期间 active 自动同步 | active_count>0 时侧边栏运行图标可更新；active 消失后未读蓝点可自动出现，进入线程后清除 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-008"` |
 | MSC-CL-009 | 多 worker 一致性 | active 列表不漏报 | `pytest tests/api/test_chat_api.py -k "multi_worker_active_runs"` |
+| MSC-CL-010 | active 空窗保留本地 running | active 接口短暂空窗时侧边栏 running 图标不丢失，直至本地流结束 | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-010"` |
+| MSC-CL-011 | 新线程立即入栏 | 新线程收到 `init` 后立即出现在侧边栏并显示 `running` | `pnpm --dir web exec playwright test web/e2e --grep "MSC-CL-011"` |
 
 ---
 
@@ -696,7 +704,7 @@ clarify_handoff_contract:
       - 当前数据库支持用户级并发门禁所需锁语义
       - 前端可在 Sidebar 与 ChatInput 共用 thread 上下文
       - 运行态恢复要求会话级即时可见，不要求 token 级回放
-      - `/chat/runs/active` 固定按 `user_id + active statuses` 直查 `t_chat_run`，并由服务层按 `coalesce(last_activity_at, updated_at)` 排序
+      - `/chat/runs/active` 固定按 `user_id + active statuses` 直查 `t_chat_run`，并由服务层按 `last_activity_at 非空优先 -> effective_activity_time -> updated_at -> run_id` 排序
       - `last_activity_at` 持久化在 `t_chat_run`，并采用关键事件立即写 + 流式 2 秒节流写
       - P0 为 `t_chat_run` 新增 `idx_chat_run_user_status_updated(user_id, status, updated_at DESC)`
       - P0 不修改 `t_chat_message` 表结构，run 与消息的硬关联留待 P1/P2 评估

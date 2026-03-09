@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db.session import get_db
 from app.api.deps import get_current_user
+from app.models.chat_run import ChatRun
 
 
 client = TestClient(app)
@@ -287,12 +288,114 @@ class TestFeedbackAPI:
         app.dependency_overrides.clear()
 
 
+class TestStreamAPI:
+    """流式对话接口测试。"""
+
+    def test_stream_preflight_returns_409_for_same_thread_active_run(self):
+        from app.services.run_control_service import ActiveRunExistsError
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_enabled", return_value=True), patch(
+            "app.api.v1.endpoints.chat_api.run_control_service.create_run"
+        ) as mock_create_run, patch("app.api.v1.endpoints.chat_api.sse_stream") as mock_sse_stream:
+            mock_create_run.side_effect = ActiveRunExistsError(thread_id="thread-dup", active_run_id="run-active")
+
+            response = client.post(
+                "/api/v1/chat/stream",
+                json={"prompt": "hello", "thread_id": "thread-dup", "delay_ms": 0},
+            )
+
+            assert response.status_code == 409
+            assert response.json()["message"]["error_code"] == "active_run_exists"
+            assert response.json()["message"]["thread_id"] == "thread-dup"
+            assert response.json()["message"]["run_id"] == "run-active"
+            assert mock_sse_stream.call_count == 0
+
+        app.dependency_overrides.clear()
+
+    def test_stream_preflight_returns_429_for_parallel_limit(self):
+        from app.services.run_control_service import ParallelLimitExceededError
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_enabled", return_value=True), patch(
+            "app.api.v1.endpoints.chat_api.run_control_service.create_run"
+        ) as mock_create_run, patch("app.api.v1.endpoints.chat_api.sse_stream") as mock_sse_stream:
+            mock_create_run.side_effect = ParallelLimitExceededError(active_count=3, limit=3)
+
+            response = client.post(
+                "/api/v1/chat/stream",
+                json={"prompt": "hello", "thread_id": "thread-overflow", "delay_ms": 0},
+            )
+
+            assert response.status_code == 429
+            assert response.json()["message"]["error_code"] == "parallel_limit_exceeded"
+            assert response.json()["message"]["active_count"] == 3
+            assert response.json()["message"]["limit"] == 3
+            assert mock_sse_stream.call_count == 0
+
+        app.dependency_overrides.clear()
+
+
+class TestActiveRunsAPI:
+    """active runs 查询接口测试。"""
+
+    def test_active_runs_contract_returns_current_user_items(self):
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_active_runs_query_enabled", return_value=True), patch(
+            "app.api.v1.endpoints.chat_api.run_control_service.list_active_runs_by_user"
+        ) as mock_list:
+            mock_list.return_value = [
+                MagicMock(
+                    run_id="run-1",
+                    thread_id="thread-1",
+                    status="running",
+                    updated_at=datetime(2026, 3, 8, 12, 0, 0),
+                    last_activity_at=datetime(2026, 3, 8, 12, 0, 5),
+                )
+            ]
+
+            response = client.get("/api/v1/chat/runs/active")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert list(data.keys()) == ["items", "active_count", "poll_hint_seconds", "server_time"]
+            assert data["active_count"] == 1
+            assert data["items"][0]["run_id"] == "run-1"
+            assert data["items"][0]["thread_id"] == "thread-1"
+            assert data["items"][0]["status"] == "running"
+            assert "messages" not in data["items"][0]
+            mock_list.assert_called_once()
+
+        app.dependency_overrides.clear()
+
+
 class TestCancelRunAPI:
     """运行时取消接口测试。"""
 
     def test_cancel_run_unauthorized(self):
         """未认证请求应返回 401。"""
-        response = client.post("/api/v1/chat/runs/run-1/cancel", json={"reason": "user_cancelled"})
+        response = client.post("/api/v1/chat/runs/run-1/cancel", json={"thread_id": "thread-1"})
         assert response.status_code == 401
 
     def test_cancel_run_success(self):
@@ -312,21 +415,30 @@ class TestCancelRunAPI:
                 accepted=True,
                 run_id="run-1",
                 thread_id="thread-1",
-                status="stopping",
+                status="stopped",
                 idempotent=False,
                 reason="user_cancelled",
             )
 
             response = client.post(
                 "/api/v1/chat/runs/run-1/cancel",
-                json={"reason": "user_cancelled", "cancel_mode": "soft"},
+                json={"thread_id": "thread-1"},
             )
 
             assert response.status_code == 200
             data = response.json()
             assert data["accepted"] is True
             assert data["run_id"] == "run-1"
-            assert data["status"] == "stopping"
+            assert data["status"] == "stopped"
+            mock_cancel.assert_called_once_with(
+                run_id="run-1",
+                requester_user_id=1,
+                is_admin=False,
+                reason="user_cancelled",
+                cancel_mode="hard",
+                thread_id="thread-1",
+                db=mock_db,
+            )
             mock_checkpoint.assert_awaited_once_with("thread-1", run_id="run-1")
 
         app.dependency_overrides.clear()
@@ -348,7 +460,7 @@ class TestCancelRunAPI:
 
             response = client.post(
                 "/api/v1/chat/runs/run-missing/cancel",
-                json={"reason": "user_cancelled"},
+                json={"thread_id": "thread-missing"},
             )
 
             assert response.status_code == 404
@@ -372,9 +484,90 @@ class TestCancelRunAPI:
 
             response = client.post(
                 "/api/v1/chat/runs/run-locked/cancel",
-                json={"reason": "user_cancelled"},
+                json={"thread_id": "thread-locked"},
             )
 
             assert response.status_code == 403
 
+        app.dependency_overrides.clear()
+
+    def test_multi_session_contract_matrix_cancel_missing_thread_id_returns_400(self):
+        """cancel 请求缺少 thread_id 时固定返回 400。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
+            response = client.post("/api/v1/chat/runs/run-1/cancel", json={})
+
+            assert response.status_code == 400
+            assert mock_cancel.call_count == 0
+
+        app.dependency_overrides.clear()
+
+    def test_multi_session_contract_matrix_cancel_thread_mismatch_returns_400(self):
+        """cancel 请求 thread_id 不匹配时固定返回 400。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+
+        isolated_client = TestClient(app, raise_server_exceptions=False)
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
+            mock_cancel.side_effect = ValueError("thread_id mismatch")
+
+            response = isolated_client.post(
+                "/api/v1/chat/runs/run-1/cancel",
+                json={"thread_id": "thread-other"},
+            )
+
+            assert response.status_code == 400
+
+        app.dependency_overrides.clear()
+
+
+def test_multi_worker_active_runs_reads_directly_from_db(db_session):
+    """active runs 接口应以 DB 为真理源，而非依赖本 worker 内存态。"""
+
+    from app.api.v1.endpoints.chat_api import run_control_service
+
+    app.dependency_overrides[get_current_user] = _mock_user
+
+    def _mock_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _mock_get_db
+    db_session.add(
+        ChatRun(
+            run_id="run-db-only",
+            thread_id="thread-db",
+            user_id=1,
+            status="running",
+            created_at=datetime(2026, 3, 8, 12, 0, 0),
+            updated_at=datetime(2026, 3, 8, 12, 0, 1),
+            last_activity_at=datetime(2026, 3, 8, 12, 0, 2),
+        )
+    )
+    db_session.commit()
+
+    try:
+        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_active_runs_query_enabled", return_value=True), patch.dict(
+            run_control_service._runs, {}, clear=True
+        ), patch.dict(run_control_service._active_run_by_thread, {}, clear=True):
+            response = client.get("/api/v1/chat/runs/active")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["active_count"] == 1
+        assert data["items"][0]["run_id"] == "run-db-only"
+        assert data["items"][0]["thread_id"] == "thread-db"
+        assert data["items"][0]["status"] == "running"
+    finally:
         app.dependency_overrides.clear()

@@ -356,6 +356,9 @@ export function ChatInput({
                                     {isLoading ? (
                                         <Button
                                             key="stop"
+                                            type="button"
+                                            data-testid="chat-stop-button"
+                                            aria-label="停止生成"
                                             onClick={onStop}
                                             size="icon"
                                             className="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800"
