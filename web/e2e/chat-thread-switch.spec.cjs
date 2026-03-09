@@ -126,7 +126,7 @@ test.describe('会话切换稳定性回归', () => {
     await page.goto('/chat?threadId=thread-A', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15000 });
 
-    const newThreadButton = page.getByRole('button', { name: 'New thread' }).first();
+    const newThreadButton = page.getByRole('button', { name: '新建对话' }).first();
     await expect(newThreadButton).toBeVisible({ timeout: 10000 });
 
     await expect

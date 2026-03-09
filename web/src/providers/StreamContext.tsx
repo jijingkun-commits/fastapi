@@ -60,6 +60,8 @@ export interface StreamContextValue {
     getMessagesMetadata: (msg: Message) => MessageMetadata | undefined;
     /** 设置分支 */
     setBranch: (branch: unknown) => void;
+    /** 显式进入新对话草稿 */
+    startNewThread: () => void;
     /** 当前线程 ID */
     threadId: string | null;
     /** 深度思考开关 */

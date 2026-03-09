@@ -111,7 +111,7 @@ export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
-  const [threadId, _setThreadId] = useQueryState("threadId");
+  const [threadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -142,14 +142,14 @@ export function Thread() {
   const messages = stream.messages;
   const isLoading = stream.isLoading;
   // 从 Context 获取所有持久化状态
-  const { selectedModel, handleModelChange, thinkingCapability } = stream as any;
+  const { selectedModel, handleModelChange, thinkingCapability, startNewThread } = stream as any;
 
   const lastError = useRef<string | undefined>(undefined);
 
 
 
-  const setThreadId = (id: string | null) => {
-    _setThreadId(id);
+  const handleNewThread = () => {
+    startNewThread();
 
     // close artifact and reset artifact context
     closeArtifact();
@@ -351,7 +351,7 @@ export function Thread() {
           <ChatHeader
             chatHistoryOpen={chatHistoryOpen ?? false}
             onToggleChatHistory={() => setChatHistoryOpen((p) => !p)}
-            onNewThread={() => setThreadId(null)}
+            onNewThread={handleNewThread}
             isLargeScreen={isLargeScreen}
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
