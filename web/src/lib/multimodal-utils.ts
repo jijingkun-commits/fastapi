@@ -39,9 +39,9 @@ export async function fileToContentBlock(
 
   if (!isSupported) {
     toast.error(
-      `Unsupported file type: ${file.name}.`,
+      `不支持的文件类型：${file.name}`,
     );
-    return Promise.reject(new Error(`Unsupported file type: ${file.type}`));
+    return Promise.reject(new Error(`不支持的文件类型：${file.type}`));
   }
 
   // 对于图片，生成预览 URL

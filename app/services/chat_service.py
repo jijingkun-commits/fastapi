@@ -362,7 +362,7 @@ def _normalize_result_event_payload(
         extra_fields=extra_fields,
     )
     if not payload:
-        raise ValueError("invalid result payload")
+        raise ValueError("返回结果格式错误")
 
     if not isinstance(payload.get("type"), str) or not str(payload.get("type")).strip():
         payload["type"] = _infer_result_type(payload)
@@ -1379,7 +1379,7 @@ class ChatService:
                         run_control_service.fail_run(resolved_run_id, error_message=raw_error_msg, db=db)
 
             # 保存错误消息到数据库（确保对话历史不丢失）
-            ai_content = "".join(full_answer) if full_answer else f"[System Error: {display_error_msg}]"
+            ai_content = "".join(full_answer) if full_answer else f"[系统错误：{display_error_msg}]"
             self._save_conversation_fallback(
                 thread_id=thread_id,
                 user_id=user_id,
@@ -1913,7 +1913,7 @@ async def sse_resume_stream(
 
         # 保存错误消息到数据库（确保对话历史不丢失）
         # 注意：resume 场景不需要保存 human 消息，只保存 AI 错误响应
-        ai_content = "".join(full_answer) if full_answer else f"[System Error: {display_error_msg}]"
+        ai_content = "".join(full_answer) if full_answer else f"[系统错误：{display_error_msg}]"
         svc._save_conversation_fallback(
             thread_id=thread_id,
             user_id=user_id,

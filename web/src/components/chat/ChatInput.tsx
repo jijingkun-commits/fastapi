@@ -41,7 +41,7 @@ import { useQueryState } from "nuqs";
 /** 快捷提示词配置 */
 export const QUICK_PROMPTS = [
     { label: "贷款余额(测试)", value: "查询2025年6月30日的贷款余额" },
-    { label: "Top10大户", value: "查询2025年6月30日贷款余额前10名的客户" },
+    { label: "前10大户", value: "查询2025年6月30日贷款余额前10名的客户" },
     { label: "机构分布", value: "查询2025年6月30日各机构的贷款余额分布" },
     { label: "贷款余额", value: "查询本月贷款余额总额" },
     { label: "存款总额", value: "查询本月存款总额" },
@@ -230,7 +230,7 @@ export function ChatInput({
                                         form?.requestSubmit();
                                     }
                                 }}
-                                placeholder={selectedTodo ? `对「${selectedTodo.title}」说点什么...（补充、修改、完成、删除）` : "Type your message..."}
+                                placeholder={selectedTodo ? `对「${selectedTodo.title}」说点什么...（补充、修改、完成、删除）` : "请输入消息..."}
                                 className="field-sizing-content resize-none border-none bg-transparent w-full px-[var(--chat-content-inline-padding)] py-3 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none text-[15px] leading-relaxed min-h-[52px] max-h-[200px]"
                                 style={{ fieldSizing: 'content' } as any}
                                 data-testid="chat-input"
@@ -381,7 +381,7 @@ export function ChatInput({
 
             {/* 底部免责声明 - 始终显示 */}
             <p className="text-center text-xs text-gray-500 mt-2 px-4 transition-all duration-300">
-                AI 可能会出错。请谨慎甄别，要是出错了它可不负责哦~
+                智能助手可能会出错，请谨慎甄别结果。
             </p>
         </div>
     );

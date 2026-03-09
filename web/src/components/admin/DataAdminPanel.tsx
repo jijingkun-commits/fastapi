@@ -362,7 +362,7 @@ export function DataAdminPanel() {
       return;
     }
     if (payload.key_column_candidates.length === 0) {
-      toast.warning("至少填写一个 key 候选列");
+      toast.warning("至少填写一个键候选列");
       return;
     }
     if (payload.result_date_column_candidates.length === 0) {
@@ -429,11 +429,11 @@ export function DataAdminPanel() {
     try {
       const parsed = JSON.parse(testRowsInput);
       if (!Array.isArray(parsed)) {
-        throw new Error("rows 必须是数组");
+        throw new Error("样例数据行必须是数组");
       }
       rows = parsed as Record<string, unknown>[];
     } catch {
-      toast.error("测试样例 rows 必须是合法 JSON 数组");
+      toast.error("测试样例数据行必须是合法 JSON 数组");
       return;
     }
 
@@ -833,7 +833,7 @@ export function DataAdminPanel() {
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>key 候选列（逗号分隔）</Label>
+              <Label>键候选列（逗号分隔）</Label>
               <Input
                 value={ruleForm.key_column_candidates}
                 onChange={(e) =>
@@ -843,7 +843,7 @@ export function DataAdminPanel() {
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>来源表（schema.table）</Label>
+              <Label>来源表（库模式.表名）</Label>
               <Input
                 value={ruleForm.source_table}
                 onChange={(e) => setRuleForm((prev) => ({ ...prev, source_table: e.target.value }))}
@@ -851,7 +851,7 @@ export function DataAdminPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label>来源 key 列</Label>
+              <Label>来源键列</Label>
               <Input
                 value={ruleForm.source_key_column}
                 onChange={(e) =>
@@ -861,7 +861,7 @@ export function DataAdminPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label>来源 value 列</Label>
+              <Label>来源值列</Label>
               <Input
                 value={ruleForm.source_value_column}
                 onChange={(e) =>

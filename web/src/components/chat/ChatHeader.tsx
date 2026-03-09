@@ -135,7 +135,7 @@ export function ChatHeader({
 
         if (typeof currentUser?.id === "number") {
             items.push({
-                label: "用户 ID",
+                label: "用户编号",
                 value: String(currentUser.id),
             });
         }
@@ -205,7 +205,7 @@ export function ChatHeader({
                     <TooltipIconButton
                         size="lg"
                         className="p-4"
-                        tooltip="New thread"
+                        tooltip="新建对话"
                         variant="ghost"
                         onClick={onNewThread}
                     >

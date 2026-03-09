@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ViewState } from "@/components/ui/view-state";
+import { getMemoryDocKindLabel, getMemoryStatusLabel } from "@/lib/memory-admin-labels";
 import {
   archiveMemory,
   deleteMemory,
@@ -315,7 +316,7 @@ export function MemoryAdminPanel() {
         <ViewState
           type="empty"
           title="暂无记忆数据"
-          description="可尝试放宽筛选条件，或切换状态查看 archived 数据。"
+          description="可尝试放宽筛选条件，或切换状态查看已归档数据。"
         />
       );
     }
@@ -326,13 +327,13 @@ export function MemoryAdminPanel() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[78px]">ID</TableHead>
+                <TableHead className="w-[78px]">编号</TableHead>
                 <TableHead>标题 / 摘要</TableHead>
-                <TableHead className="w-[80px]">user_id</TableHead>
-                <TableHead className="w-[90px]">类型</TableHead>
+                <TableHead className="w-[80px]">用户编号</TableHead>
+                <TableHead className="w-[90px]">文档类型</TableHead>
                 <TableHead className="w-[100px]">状态</TableHead>
-                <TableHead className="w-[90px]">revision</TableHead>
-                <TableHead className="w-[120px]">chunks</TableHead>
+                <TableHead className="w-[90px]">版本</TableHead>
+                <TableHead className="w-[120px]">分块数</TableHead>
                 <TableHead className="w-[180px]">更新时间</TableHead>
                 <TableHead className="w-[260px] min-w-[260px]">操作</TableHead>
               </TableRow>
@@ -343,17 +344,17 @@ export function MemoryAdminPanel() {
                   <TableCell className="font-mono">{item.memory_id}</TableCell>
                   <TableCell>
                     <p className="font-medium text-foreground line-clamp-1">
-                      {item.title || item.doc_key || `memory-${item.memory_id}`}
+                      {item.title || item.doc_key || `记忆-${item.memory_id}`}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
                       {item.summary_md || "-"}
                     </p>
                   </TableCell>
                   <TableCell className="font-mono">{item.user_id}</TableCell>
-                  <TableCell>{item.doc_kind || "-"}</TableCell>
+                  <TableCell>{getMemoryDocKindLabel(item.doc_kind)}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={resolveStatusBadgeClass(item.status)}>
-                      {item.status}
+                      {getMemoryStatusLabel(item.status)}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono">{item.revision}</TableCell>
@@ -361,7 +362,7 @@ export function MemoryAdminPanel() {
                     <p>
                       {item.ready_chunks}/{item.chunk_total}
                     </p>
-                    <p className="text-muted-foreground">failed {item.failed_chunks}</p>
+                    <p className="text-muted-foreground">失败 {item.failed_chunks}</p>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDateTime(item.update_time)}
@@ -442,7 +443,7 @@ export function MemoryAdminPanel() {
         <div>
           <h1 className="app-page-title">用户个性化永久记忆</h1>
           <p className="app-page-subtitle mt-1">
-            统一通过 `memory-admin-api` 完成列表筛选、详情抽屉与治理动作。
+            统一通过记忆管理接口完成列表筛选、详情抽屉与治理动作。
           </p>
         </div>
         <Button
@@ -482,8 +483,8 @@ export function MemoryAdminPanel() {
             <CardHeader className="pb-2">
               <CardDescription>向量状态</CardDescription>
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                pending {overview.embedding_status.pending} / ready {overview.embedding_status.ready} /
-                failed {overview.embedding_status.failed}
+                待处理 {overview.embedding_status.pending} / 已就绪 {overview.embedding_status.ready} /
+                失败 {overview.embedding_status.failed}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -513,12 +514,12 @@ export function MemoryAdminPanel() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">筛选条件</CardTitle>
-              <CardDescription>支持 user_id / doc_kind / status / source / 日期 / 关键词过滤。</CardDescription>
+              <CardDescription>支持按用户编号 / 文档类型代码 / 状态 / 来源代码 / 日期 / 关键词过滤。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-user-id">user_id</Label>
+                  <Label htmlFor="memory-filter-user-id">用户编号</Label>
                   <Input
                     id="memory-filter-user-id"
                     value={filterDraft.userId}
@@ -529,18 +530,18 @@ export function MemoryAdminPanel() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-doc-kind">doc_kind</Label>
+                  <Label htmlFor="memory-filter-doc-kind">文档类型代码</Label>
                   <Input
                     id="memory-filter-doc-kind"
                     value={filterDraft.docKind}
                     onChange={(event) =>
                       setFilterDraft((prev) => ({ ...prev, docKind: event.target.value }))
                     }
-                    placeholder="daily / preference"
+                    placeholder="例如：daily / preference"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-status">status</Label>
+                  <Label htmlFor="memory-filter-status">状态</Label>
                   <Select
                     value={filterDraft.status}
                     onValueChange={(value) =>
@@ -551,39 +552,39 @@ export function MemoryAdminPanel() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="active">active</SelectItem>
-                      <SelectItem value="archived">archived</SelectItem>
-                      <SelectItem value="all">all</SelectItem>
+                      <SelectItem value="active">启用</SelectItem>
+                      <SelectItem value="archived">已归档</SelectItem>
+                      <SelectItem value="all">全部</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-source">source</Label>
+                  <Label htmlFor="memory-filter-source">来源代码</Label>
                   <Input
                     id="memory-filter-source"
                     value={filterDraft.source}
                     onChange={(event) =>
                       setFilterDraft((prev) => ({ ...prev, source: event.target.value }))
                     }
-                    placeholder="memory"
+                    placeholder="例如：memory"
                   />
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2 xl:col-span-2">
-                  <Label htmlFor="memory-filter-keyword">keyword</Label>
+                  <Label htmlFor="memory-filter-keyword">关键词</Label>
                   <Input
                     id="memory-filter-keyword"
                     value={filterDraft.keyword}
                     onChange={(event) =>
                       setFilterDraft((prev) => ({ ...prev, keyword: event.target.value }))
                     }
-                    placeholder="标题、key 或正文关键词"
+                    placeholder="标题、键名或正文关键词"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-updated-from">updated_from</Label>
+                  <Label htmlFor="memory-filter-updated-from">更新时间起</Label>
                   <Input
                     id="memory-filter-updated-from"
                     type="date"
@@ -594,7 +595,7 @@ export function MemoryAdminPanel() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="memory-filter-updated-to">updated_to</Label>
+                  <Label htmlFor="memory-filter-updated-to">更新时间止</Label>
                   <Input
                     id="memory-filter-updated-to"
                     type="date"

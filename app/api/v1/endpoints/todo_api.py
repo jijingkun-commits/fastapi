@@ -52,7 +52,7 @@ class TodoUpdateRequest(BaseModel):
     def validate_status(cls, v: Optional[str]) -> Optional[str]:
         # 注意：这里是“写入值”校验，不接受 pending/completed 这类查询别名
         if v is not None and v not in ["todo", "in_progress", "done", "cancelled"]:
-            raise ValueError("状态必须为 todo, in_progress, done 或 cancelled")
+            raise ValueError("状态仅支持：待办、进行中、已完成、已取消")
         return v
         
     @field_validator('progress')
@@ -67,7 +67,7 @@ class TodoUpdateRequest(BaseModel):
     def parse_datetime(cls, v: Optional[str]) -> Optional[datetime]:
         """验证并转换时间格式字符串为 datetime 对象。
         
-        支持 ISO 8601 格式，如 '2023-10-01T10:00:00'
+        支持标准日期时间格式，如 '2023-10-01T10:00:00'
         """
         if v is None:
             return None
@@ -78,7 +78,7 @@ class TodoUpdateRequest(BaseModel):
         try:
             return datetime.fromisoformat(v.replace('Z', '+00:00'))
         except ValueError:
-            raise ValueError("时间格式错误，请使用 ISO 8601 格式")
+            raise ValueError("时间格式错误，请使用标准日期时间格式，例如 2023-10-01T10:00:00")
 
 
 class RecurringConfigRequest(BaseModel):

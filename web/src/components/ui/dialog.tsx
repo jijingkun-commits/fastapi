@@ -80,7 +80,7 @@ function DialogContent({
         {showClose && (
           <DialogPrimitive.Close className="ring-offset-background focus-visible:ring-ring text-muted-foreground hover:bg-accent hover:text-foreground absolute top-4 right-4 rounded-[var(--ds-radius-sm)] p-1.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none">
             <XIcon className="size-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">关闭</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>

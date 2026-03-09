@@ -413,7 +413,7 @@ export function SkillAdminPanel() {
   const handleSyncTemplateToUser = async () => {
     const parsedUserId = Number.parseInt(syncUserId.trim(), 10);
     if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
-      toast.error("请输入有效用户 ID");
+      toast.error("请输入有效用户编号");
       return;
     }
 
@@ -447,7 +447,7 @@ export function SkillAdminPanel() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="app-page-title">技能管理</h1>
-          <p className="app-page-subtitle">管理 Agent 技能向量和配置</p>
+          <p className="app-page-subtitle">管理智能体技能向量和配置</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={listLoading}>
           {listLoading ? "刷新中..." : "刷新"}
@@ -458,7 +458,7 @@ export function SkillAdminPanel() {
         <Alert variant="destructive">
           <AlertTitle>向量维度不匹配</AlertTitle>
           <AlertDescription>
-            数据库中的向量维度 ({vectorStatus.embedding_dim}) 与当前 embedding 模型输出维度 (
+            数据库中的向量维度 ({vectorStatus.embedding_dim}) 与当前向量模型输出维度 (
             {vectorStatus.current_model_dim}) 不一致。请重新生成所有技能的向量。
           </AlertDescription>
         </Alert>
@@ -578,7 +578,7 @@ export function SkillAdminPanel() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="h-10 px-3 text-xs">技能 ID</TableHead>
+                    <TableHead className="h-10 px-3 text-xs">技能编号</TableHead>
                     <TableHead className="h-10 px-3 text-xs">名称</TableHead>
                     <TableHead className="h-10 px-3 text-xs">描述</TableHead>
                     <TableHead className="h-10 px-3 text-xs">向量</TableHead>
@@ -633,7 +633,7 @@ export function SkillAdminPanel() {
             <CardHeader className="px-4 pb-2">
               <CardTitle className="text-base">统一模板治理</CardTitle>
               <CardDescription className="text-xs">
-                编辑 `skill.user_bootstrap_template`，并按需同步到指定用户
+                编辑技能启动模板（`skill.user_bootstrap_template`），并按需同步到指定用户
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 px-4">
@@ -648,7 +648,7 @@ export function SkillAdminPanel() {
                   />
                 </div>
                 <p className="pb-1 text-xs text-muted-foreground">
-                  模板技能数：{templateItems.length}（空 skill_id 行在保存时会自动忽略）
+                  模板技能数：{templateItems.length}（空技能编号行在保存时会自动忽略）
                 </p>
               </div>
 
@@ -686,11 +686,11 @@ export function SkillAdminPanel() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="h-9 px-3 text-xs">Skill ID</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">技能编号</TableHead>
                         <TableHead className="h-9 px-3 text-xs">版本</TableHead>
                         <TableHead className="h-9 px-3 text-xs">启用</TableHead>
                         <TableHead className="h-9 px-3 text-xs">优先级</TableHead>
-                        <TableHead className="h-9 px-3 text-xs">config_override(JSON)</TableHead>
+                        <TableHead className="h-9 px-3 text-xs">配置覆盖（JSON）</TableHead>
                         <TableHead className="h-9 px-3 text-xs text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -789,7 +789,7 @@ export function SkillAdminPanel() {
                 <div className="flex flex-wrap gap-2">
                   <Input
                     className="h-9 w-[180px] text-sm"
-                    placeholder="用户 ID"
+                    placeholder="用户编号"
                     value={syncUserId}
                     onChange={(event) => setSyncUserId(event.target.value)}
                   />
@@ -799,7 +799,7 @@ export function SkillAdminPanel() {
                 </div>
                 {lastSyncResult ? (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    最近一次同步：user_id={lastSyncResult.user_id}，总计 {lastSyncResult.total}，成功{" "}
+                    最近一次同步：用户编号={lastSyncResult.user_id}，总计 {lastSyncResult.total}，成功{" "}
                     {lastSyncResult.synced_count}，跳过 {lastSyncResult.skipped_count}，失败 {lastSyncResult.failed_count}
                   </p>
                 ) : null}
@@ -836,7 +836,7 @@ export function SkillAdminPanel() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="h-10 px-3 text-xs">技能 ID</TableHead>
+                      <TableHead className="h-10 px-3 text-xs">技能编号</TableHead>
                       <TableHead className="h-10 px-3 text-xs">名称</TableHead>
                       <TableHead className="h-10 px-3 text-xs">相似度</TableHead>
                     </TableRow>
@@ -868,7 +868,7 @@ export function SkillAdminPanel() {
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-sm text-muted-foreground">技能 ID</p>
+              <p className="mb-1 text-sm text-muted-foreground">技能编号</p>
               <code className="rounded bg-muted px-2 py-1 text-sm">{selectedSkill?.skill_id}</code>
             </div>
             <div>

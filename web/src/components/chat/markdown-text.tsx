@@ -192,7 +192,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         {language}
       </span>
       <TooltipIconButton
-        tooltip="Copy"
+        tooltip="复制"
         onClick={onCopy}
         className="markdown-code-block__copy"
       >

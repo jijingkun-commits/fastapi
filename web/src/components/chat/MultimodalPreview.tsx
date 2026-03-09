@@ -50,7 +50,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
       imgClass =
         "rounded-md object-cover h-24 w-24 text-xl cursor-pointer hover:opacity-80 transition-opacity";
 
-    const imageName = String(block.metadata?.name || "uploaded image");
+    const imageName = String(block.metadata?.name || "已上传图片");
 
     return (
       <>
@@ -72,7 +72,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
                 e.stopPropagation();
                 onRemove?.();
               }}
-              aria-label="Remove image"
+              aria-label="移除图片"
             >
               <XIcon className="h-4 w-4" />
             </button>
@@ -92,7 +92,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   // PDF block
   if (block.type === "file" && block.mimeType === "application/pdf") {
     const filename =
-      block.metadata?.filename || block.metadata?.name || "PDF file";
+      block.metadata?.filename || block.metadata?.name || "PDF 文件";
     return (
       <div
         className={cn(
@@ -119,7 +119,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
             type="button"
             className="ml-2 self-start rounded-full bg-gray-200 p-1 text-red-600 hover:bg-gray-300"
             onClick={onRemove}
-            aria-label="Remove PDF"
+            aria-label="移除 PDF"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -135,7 +135,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
     block.mimeType === "text/csv";
   if (block.type === "file" && isSpreadsheet) {
     const filename =
-      block.metadata?.filename || block.metadata?.name || "Spreadsheet";
+      block.metadata?.filename || block.metadata?.name || "表格文件";
     return (
       <div
         className={cn(
@@ -162,7 +162,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
             type="button"
             className="ml-2 self-start rounded-full bg-gray-200 p-1 text-green-600 hover:bg-gray-300"
             onClick={onRemove}
-            aria-label="Remove file"
+            aria-label="移除文件"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -180,13 +180,13 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
       )}
     >
       <File className="h-5 w-5 flex-shrink-0" />
-      <span className="truncate text-xs">Unsupported file type</span>
+      <span className="truncate text-xs">不支持的文件类型</span>
       {removable && (
         <button
           type="button"
           className="ml-2 rounded-full bg-gray-200 p-1 text-gray-500 hover:bg-gray-300"
           onClick={onRemove}
-          aria-label="Remove file"
+          aria-label="移除文件"
         >
           <XIcon className="h-4 w-4" />
         </button>

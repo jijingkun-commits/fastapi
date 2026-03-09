@@ -596,7 +596,7 @@ export function useSSEStream(): StreamContextValue {
 
         const runId = activeRunIdRef.current;
         if (!runId) {
-            toast.warning("当前会话未分配 run_id，已本地停止", {
+            toast.warning("当前会话未分配运行编号，已在本地停止", {
                 description: "服务端任务可能仍在后台执行。",
             });
             localAbort();

@@ -45,7 +45,7 @@ class LogoutResponse(BaseModel):
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     """登录接口：用户名/手机号 + 密码。"""
     if not payload.username and not payload.mobile:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="username或mobile至少提供一个")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或手机号至少填写一个")
     try:
         user = authenticate(db, payload.username, payload.mobile, payload.password)
     except Exception as e:

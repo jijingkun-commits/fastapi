@@ -18,6 +18,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ViewState } from "@/components/ui/view-state";
+import { getMemoryDocKindLabel, getMemoryStatusLabel } from "@/lib/memory-admin-labels";
 
 interface MemoryDetailDrawerProps {
   open: boolean;
@@ -202,11 +203,11 @@ export function MemoryDetailDrawer({
       <div className="space-y-4">
         <div className="rounded-lg border border-border/80 bg-muted/30 p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">memory_id {detail.memory_id}</Badge>
-            <Badge variant="outline">user_id {detail.user_id}</Badge>
-            <Badge variant="outline">{detail.doc_kind}</Badge>
-            <Badge variant="outline">{detail.status}</Badge>
-            <Badge variant="outline">revision {detail.revision}</Badge>
+            <Badge variant="outline">记忆编号 {detail.memory_id}</Badge>
+            <Badge variant="outline">用户编号 {detail.user_id}</Badge>
+            <Badge variant="outline">{getMemoryDocKindLabel(detail.doc_kind)}</Badge>
+            <Badge variant="outline">{getMemoryStatusLabel(detail.status)}</Badge>
+            <Badge variant="outline">版本 {detail.revision}</Badge>
           </div>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-3 text-xs text-muted-foreground">
             <dt>来源</dt>
@@ -219,7 +220,7 @@ export function MemoryDetailDrawer({
             <dd className="text-foreground">{formatDateTime(detail.update_time)}</dd>
             <dt>分块状态</dt>
             <dd className="text-foreground">
-              {detail.chunk_total} / ready {detail.ready_chunks} / failed {detail.failed_chunks}
+              总分块 {detail.chunk_total} / 已就绪 {detail.ready_chunks} / 失败 {detail.failed_chunks}
             </dd>
           </dl>
         </div>
@@ -246,9 +247,9 @@ export function MemoryDetailDrawer({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="pending">pending</SelectItem>
-                <SelectItem value="ready">ready</SelectItem>
-                <SelectItem value="failed">failed</SelectItem>
+                <SelectItem value="pending">待处理</SelectItem>
+                <SelectItem value="ready">已就绪</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
               </SelectContent>
             </Select>
 

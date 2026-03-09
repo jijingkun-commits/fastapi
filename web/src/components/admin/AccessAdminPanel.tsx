@@ -146,12 +146,12 @@ export function AccessAdminPanel() {
     }
   };
 
-  // 保存 Schema 白名单
+  // 保存库模式白名单
   const saveSchemas = async () => {
     setSaving(true);
     try {
       await updateSchemaWhitelist(editedSchemas);
-      toast.success("Schema 白名单已保存");
+      toast.success("库模式白名单已保存");
       loadConfig();
     } catch (e: any) {
       toast.error(e.message);
@@ -252,7 +252,7 @@ export function AccessAdminPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="app-page-title">数据访问控制</h1>
-          <p className="app-page-subtitle mt-1">管理 AI 问数功能的数据库访问权限</p>
+          <p className="app-page-subtitle mt-1">管理智能问数功能的数据库访问权限</p>
         </div>
         <Button variant="outline" size="sm" onClick={loadConfig} className="gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" />
@@ -272,7 +272,7 @@ export function AccessAdminPanel() {
           </TabsTrigger>
           <TabsTrigger value="schemas" className="gap-1.5 text-sm">
             <Database className="h-3.5 w-3.5" />
-            Schema 白名单
+            库模式白名单
           </TabsTrigger>
           <TabsTrigger value="test" className="gap-1.5 text-sm">
             <FlaskConical className="h-3.5 w-3.5" />
@@ -298,7 +298,7 @@ export function AccessAdminPanel() {
                 )}
               </div>
               <CardDescription>
-                只允许 AI 查询白名单中的表
+                只允许智能问数查询白名单中的表
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -363,7 +363,7 @@ export function AccessAdminPanel() {
             <CardHeader className="pb-4">
               <CardTitle className="text-lg">表黑名单</CardTitle>
               <CardDescription>
-                绝对禁止 AI 访问的表（优先级高于白名单）
+                绝对禁止智能问数访问的表（优先级高于白名单）
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -426,15 +426,15 @@ export function AccessAdminPanel() {
         <TabsContent value="schemas">
           <Card>
             <CardHeader className="pb-4">
-              <CardTitle className="text-lg">Schema 白名单</CardTitle>
+              <CardTitle className="text-lg">库模式白名单</CardTitle>
               <CardDescription>
-                允许访问整个 Schema 下的所有表（如 information_schema）
+                允许访问整个库模式下的所有表（如 information_schema）
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="flex gap-2">
                 <Input
-                  placeholder="输入 Schema 名（如 public）"
+                  placeholder="输入库模式名（如 public）"
                   value={newSchema}
                   onChange={(e) => setNewSchema(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addSchema()}
@@ -465,22 +465,22 @@ export function AccessAdminPanel() {
                     ))}
                   </div>
                   <p className="mt-2.5 text-xs text-muted-foreground">
-                    共 {editedSchemas.length} 个 Schema
+                    共 {editedSchemas.length} 个库模式
                   </p>
                 </div>
               ) : (
                 <div className="flex items-center justify-center rounded-lg border border-dashed py-8">
                   <div className="text-center">
                     <Database className="mx-auto h-8 w-8 text-muted-foreground/40" />
-                    <p className="mt-2 text-sm text-muted-foreground">暂无 Schema 白名单</p>
-                    <p className="text-xs text-muted-foreground/60">在上方输入 Schema 名添加</p>
+                    <p className="mt-2 text-sm text-muted-foreground">暂无库模式白名单</p>
+                    <p className="text-xs text-muted-foreground/60">在上方输入库模式名添加</p>
                   </div>
                 </div>
               )}
 
               <div className="flex justify-end pt-2 border-t">
                 <Button onClick={saveSchemas} disabled={saving} size="sm">
-                  {saving ? "保存中..." : "保存 Schema 白名单"}
+                  {saving ? "保存中..." : "保存库模式白名单"}
                 </Button>
               </div>
             </CardContent>
@@ -563,7 +563,7 @@ export function AccessAdminPanel() {
             <CardHeader className="pb-4">
               <CardTitle className="text-lg">业务数据库可用表</CardTitle>
               <CardDescription>
-                点击"加入白名单"可快速添加（添加后需在白名单 Tab 保存）
+                点击“加入白名单”可快速添加（添加后需在白名单标签页保存）
               </CardDescription>
             </CardHeader>
             <CardContent>

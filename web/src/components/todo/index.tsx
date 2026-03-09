@@ -271,7 +271,7 @@ export default function TodoListCard({
                         </span>
                         {selectedId !== null && (
                             <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                                按 E 编辑 | Enter 完成
+                                按 E 编辑｜按回车完成
                             </span>
                         )}
                     </div>
