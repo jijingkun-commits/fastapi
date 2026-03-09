@@ -478,3 +478,107 @@ def test_sse_resume_dedup_test_result_payload_exposes_event_id_and_sequence() ->
     assert "sequence_number" not in payload
     assert payload["envelope"]["id"] == "evt-resume-0007"
     assert payload["envelope"]["sequence_number"] == 7
+
+
+
+def test_stream_fallback_emits_final_ai_text_even_after_result_placeholder() -> None:
+    """先收到 result 占位消息时，流末仍应补发最终 AI 正文。"""
+
+    final_text = """按你的问题顺序，逐项回复如下：
+1. 嘉兴天气：未来一周多云转晴，气温 12-21℃。
+2. 画圆：
+![生成的图表](/api/v1/assets/proxy/demo/chart.png)
+以上问题已全部覆盖。"""
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                HumanMessage(content="查询嘉兴近一周的天气，再帮我画一个圆", id="human-chart"),
+                AIMessage(content=final_text),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "result",
+                "data": {
+                    "data_type": "image",
+                    "data": {"url": "/api/v1/assets/proxy/demo/chart.png"},
+                    "message": "图表已生成",
+                },
+                "node": "fig_inter",
+            }
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="查询嘉兴近一周的天气，再帮我画一个圆", thread_id="thread-chart", user_id=1)
+        )
+
+    token_events = [payload for event, payload in events if event == "token"]
+    assert any(payload.get("content") == final_text for payload in token_events)
+
+    done_events = [payload for event, payload in events if event == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["final_content"] == final_text
+
+
+def test_resume_fallback_emits_final_ai_text_even_after_result_placeholder() -> None:
+    """恢复流同样不能因为 result 占位消息而丢掉最终 AI 正文。"""
+
+    final_text = """按你的问题顺序，逐项回复如下：
+1. 嘉兴天气：未来一周多云转晴，气温 12-21℃。
+2. 画圆：
+![生成的图表](/api/v1/assets/proxy/demo/chart.png)
+以上问题已全部覆盖。"""
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                AIMessage(content=final_text),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "result",
+                "data": {
+                    "data_type": "image",
+                    "data": {"url": "/api/v1/assets/proxy/demo/chart.png"},
+                    "message": "图表已生成",
+                },
+                "node": "fig_inter",
+            }
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    async def _fake_get_checkpointer():
+        return _FakeCheckpoint()
+
+    with patch("app.db.postgres_checkpoint.get_checkpointer", _fake_get_checkpointer), patch.object(
+        ChatService, "get_graph", _fake_get_graph
+    ):
+        events = _collect_events(
+            sse_resume_stream(thread_id="thread-chart-resume", decision={"type": "accept"}, user_id=1)
+        )
+
+    token_events = [payload for event, payload in events if event == "token"]
+    assert any(payload.get("content") == final_text for payload in token_events)
+
+    done_events = [payload for event, payload in events if event == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["final_content"] == final_text

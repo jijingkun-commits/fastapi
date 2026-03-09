@@ -936,6 +936,7 @@ class ChatService:
         
         # 用于收集完整回复
         full_answer = []
+        text_output_emitted = False
         tool_data = []
         thinking_content = None
         final_answer_content: Optional[str] = None
@@ -1086,6 +1087,7 @@ class ChatService:
                     if event_type == "token":
                         content = event_data.get("content", "")
                         if content:
+                            text_output_emitted = True
                             full_answer.append(content)
                             _record_visible_activity(force=False)
                             if not client_disconnected:
@@ -1111,6 +1113,7 @@ class ChatService:
                     elif event_type == "final_answer":
                         content = _normalize_message_content(event_data.get("content", ""))
                         if content:
+                            text_output_emitted = True
                             final_answer_content = content
                             full_answer.clear()
                             full_answer.append(content)
@@ -1332,10 +1335,13 @@ class ChatService:
 
                     # 只有 AI 消息才需要补充发送 content
                     if isinstance(last_msg, AIMessage):
-                        # 检查是否有 content 需要补充 (如果 full_answer 为空，说明没有流式输出过)
-                        if last_msg.content and not full_answer:
+                        # 避免被 result 占位消息误伤：只要还没真正发过文本，就允许补发最终 AI 正文
+                        if last_msg.content and not text_output_emitted:
                             # 兼容 OpenAI Responses block 列表内容
                             content = _normalize_message_content(last_msg.content)
+                            streamed_content = "".join(full_answer)
+                            if content and content == streamed_content:
+                                content = ""
                             if content:
                                 # 过滤掉看起来像 JSON 的原始分析结果
                                 is_raw_json = (
@@ -1691,6 +1697,7 @@ async def sse_resume_stream(
 
     # 用于收集完整回复
     full_answer = []
+    text_output_emitted = False
     final_answer_content: Optional[str] = None
     cancelled_stream = False
     cancel_after_token_count = 0
@@ -1810,6 +1817,7 @@ async def sse_resume_stream(
                 if event_type == "token":
                     content = event_data.get("content", "")
                     if content:
+                        text_output_emitted = True
                         full_answer.append(content)
                         _record_visible_activity(force=False)
                         yield format_sse("token", {"content": content, "node": chunk.get("node", "")})
@@ -1822,6 +1830,7 @@ async def sse_resume_stream(
                 elif event_type == "final_answer":
                     content = _normalize_message_content(event_data.get("content", ""))
                     if content:
+                        text_output_emitted = True
                         final_answer_content = content
                         full_answer.clear()
                         full_answer.append(content)
@@ -1965,11 +1974,10 @@ async def sse_resume_stream(
                 last_msg = messages[-1]
                 if last_msg.type == "ai":
                     content = _normalize_message_content(getattr(last_msg, "content", ""))
-                    # 避免重复发送：只有当内容不同于已流式输出的内容时才补发
                     streamed_content = "".join(full_answer)
-                    if content and content != streamed_content and not full_answer:
-                         yield format_sse("token", {"content": content})
-                         done_payload["final_content"] = content
+                    if content and content != streamed_content and not text_output_emitted:
+                        yield format_sse("token", {"content": content})
+                        done_payload["final_content"] = content
 
         message_id = svc._get_latest_ai_message_id(thread_id)
         if message_id is not None:
