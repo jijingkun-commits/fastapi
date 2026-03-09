@@ -16,34 +16,66 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
 
         const buildSummaryPayload = (snapshotAt, degraded = false) => ({
             snapshot_at: snapshotAt,
-            source: degraded ? 'fallback_snapshot' : 'live',
+            source: degraded ? 'empty' : 'bucket',
             degraded,
-            health_score: degraded ? 86.2 : 90.4,
-            health_level: degraded ? 'warning' : 'healthy',
-            budget_usage_pct: 62.1,
+            health_score: degraded ? null : 90.4,
+            health_level: degraded ? 'unknown' : 'healthy',
+            budget_usage_pct: degraded ? null : 62.1,
+            system_status: {
+                status: degraded ? 'degraded' : 'ok',
+                health_level: degraded ? 'unknown' : 'healthy',
+                sample_count: degraded ? 0 : 1,
+                watermark_at: degraded ? null : snapshotAt,
+                data_source: degraded ? 'empty' : 'bucket',
+                explain: degraded ? '聚合链路暂时降级，当前展示可解释空态。' : '聚合链路正常。',
+            },
+            traffic_health: {
+                status: degraded ? 'no_data' : 'ok',
+                health_level: degraded ? 'unknown' : 'healthy',
+                sample_count: degraded ? 0 : 1380,
+                watermark_at: degraded ? null : snapshotAt,
+                data_source: degraded ? 'empty' : 'bucket',
+                explain: degraded ? '分钟桶不可用，当前窗口无法确认业务样本。' : '业务请求样本正常。',
+            },
             request_quality: {
-                status: 'healthy',
-                score: 92.6,
-                request_total: 1380,
-                success_rate: 0.9924,
-                error_5xx_rate: 0.0038,
-                latency_p95_ms: 612,
+                status: degraded ? 'degraded' : 'ok',
+                health_level: degraded ? 'unknown' : 'healthy',
+                score: degraded ? null : 92.6,
+                request_total: degraded ? 0 : 1380,
+                success_rate: degraded ? null : 0.9924,
+                error_5xx_rate: degraded ? null : 0.0038,
+                latency_p95_ms: degraded ? null : 612,
+                qps: degraded ? null : 39.6,
+                explain: degraded ? '请求质量暂不可判定。' : '全业务 API 请求质量正常。',
+            },
+            question_activity: {
+                status: degraded ? 'degraded' : 'ok',
+                health_level: degraded ? 'unknown' : 'healthy',
+                score: degraded ? null : 89.6,
+                question_total: degraded ? 0 : 72,
+                question_success_rate: degraded ? null : 0.985,
+                question_latency_p95_ms: degraded ? null : 648,
+                question_qps: degraded ? null : 2.1,
+                stream_interrupt_rate: degraded ? null : 0.012,
+                explain: degraded ? '提问链路暂不可判定。' : '提问链路活跃且健康。',
             },
             stability: {
-                status: 'warning',
-                score: 78.8,
-                critical_alerts: 1,
-                warning_alerts: 2,
-                module_score: 81.2,
+                status: degraded ? 'degraded' : 'ok',
+                health_level: degraded ? 'critical' : 'healthy',
+                score: degraded ? null : 88.4,
+                critical_alerts: degraded ? 1 : 1,
+                warning_alerts: degraded ? 0 : 1,
+                module_score: degraded ? null : 88.0,
             },
             capacity_cost: {
-                status: 'healthy',
-                score: 87.9,
-                qps: degraded ? 34.2 : 39.6,
-                cost_per_minute: 15.5,
+                status: degraded ? 'degraded' : 'ok',
+                score: degraded ? null : 87.9,
+                qps: degraded ? null : 39.6,
+                cost_per_minute: degraded ? null : 15.5,
                 budget_per_minute: 25,
-                budget_usage_pct: 62.1,
-                budget_health_level: 'healthy',
+                budget_usage_pct: degraded ? null : 62.1,
+                health_level: degraded ? 'unknown' : 'healthy',
+                question_qps: degraded ? null : 2.1,
             },
             alerts: [
                 {
@@ -55,17 +87,17 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                 },
             ],
             freshness: {
-                status: degraded ? 'expired' : 'fresh',
-                score: degraded ? 60 : 94,
-                health_level: degraded ? 'warning' : 'healthy',
-                delay_sec: degraded ? 132 : 28,
+                status: degraded ? 'unknown' : 'fresh',
+                score: degraded ? null : 94,
+                health_level: degraded ? 'unknown' : 'healthy',
+                delay_sec: degraded ? null : 28,
                 expired: degraded,
                 max_delay_sec: 300,
-                source: degraded ? 'polling' : 'live',
+                source: degraded ? 'empty' : 'bucket',
             },
             module_matrix: [
                 {
-                    key: 'users',
+                    key: 'user',
                     label: '用户管理',
                     health_level: 'healthy',
                     score: 88.2,
@@ -124,23 +156,27 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                                 {
                                     timestamp: '2026-02-14T07:50:00Z',
                                     health_score: 88.1,
-                                    qps: 31.2,
+                                    request_qps: 31.2,
+                                    question_qps: 1.8,
                                 },
                                 {
                                     timestamp: '2026-02-14T08:00:00Z',
                                     health_score: 90.4,
-                                    qps: 39.6,
+                                    request_qps: 39.6,
+                                    question_qps: 2.1,
                                 },
                             ],
                             '24h': [
                                 {
                                     timestamp: '2026-02-13T09:00:00Z',
-                                    qps: 25.4,
+                                    request_qps: 25.4,
+                                    question_qps: 1.1,
                                     health_score: 81.2,
                                 },
                                 {
                                     timestamp: '2026-02-14T08:00:00Z',
-                                    qps: 39.6,
+                                    request_qps: 39.6,
+                                    question_qps: 2.1,
                                     health_score: 90.4,
                                 },
                             ],
@@ -159,6 +195,7 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                             health_level: 'warning',
                             freshness: {
                                 delay_sec: 66,
+                                status: 'fresh',
                                 expired: false,
                             },
                         },
@@ -194,14 +231,14 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
 
         await test.step('Then: 首屏可见 8 块驾驶舱信息卡', async () => {
             const cards = [
-                'overview-card-health',
+                'overview-card-system-status',
                 'overview-card-request-quality',
                 'overview-card-stability',
                 'overview-card-capacity-cost',
                 'overview-card-alerts',
                 'overview-card-freshness',
                 'overview-card-module-matrix',
-                'overview-card-change-feed',
+                'overview-card-question-activity',
             ];
 
             for (const cardId of cards) {
@@ -221,7 +258,7 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
             await page.goBack();
             await expect(page).toHaveURL(/\/admin(?:\?.*)?$/);
 
-            await page.getByTestId('overview-module-link-users').click();
+            await page.getByTestId('overview-module-link-user').click();
             await expect(page).toHaveURL(/\/admin\/users(?:\?.*)?$/);
         });
     });

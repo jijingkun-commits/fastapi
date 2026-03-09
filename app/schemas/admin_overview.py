@@ -15,10 +15,8 @@ class AdminOverviewTrendPoint(BaseModel):
 
     timestamp: str
     health_score: Optional[float] = None
-    request_success_rate: Optional[float] = None
-    error_5xx_rate: Optional[float] = None
-    latency_p95_ms: Optional[float] = None
-    qps: Optional[float] = None
+    request_qps: Optional[float] = None
+    question_qps: Optional[float] = None
     budget_usage_pct: Optional[float] = None
 
 
@@ -33,6 +31,7 @@ class AdminOverviewTrendSeriesResponse(BaseModel):
     """单窗口趋势响应。"""
 
     window: AdminOverviewTrendWindow
+    status: str
     points: list[AdminOverviewTrendPoint] = Field(default_factory=list)
     snapshot_at: Optional[str] = None
 
@@ -45,10 +44,13 @@ class AdminOverviewSummaryResponse(BaseModel):
     snapshot_at: str
     source: str
     degraded: bool
+    system_status: dict[str, Any] = Field(default_factory=dict)
+    traffic_health: dict[str, Any] = Field(default_factory=dict)
     health_score: Optional[float] = None
     health_level: str
     budget_usage_pct: Optional[float] = None
     request_quality: dict[str, Any] = Field(default_factory=dict)
+    question_activity: dict[str, Any] = Field(default_factory=dict)
     stability: dict[str, Any] = Field(default_factory=dict)
     capacity_cost: dict[str, Any] = Field(default_factory=dict)
     alerts: list[dict[str, Any]] = Field(default_factory=list)
@@ -119,4 +121,3 @@ __all__ = [
     "AdminOverviewStreamInterruptEvent",
     "AdminOverviewStreamDoneEvent",
 ]
-

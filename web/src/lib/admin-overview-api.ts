@@ -11,10 +11,12 @@ import { apiFetch } from "@/lib/backend";
 import type {
   AdminOverviewAlertItem,
   AdminOverviewCapacityCost,
+  AdminOverviewCardStatus,
   AdminOverviewChangeItem,
   AdminOverviewFreshness,
   AdminOverviewHealthLevel,
   AdminOverviewModuleItem,
+  AdminOverviewQuestionActivity,
   AdminOverviewRealtimeStatus,
   AdminOverviewRequestQuality,
   AdminOverviewSeverity,
@@ -25,6 +27,8 @@ import type {
   AdminOverviewStreamEvent,
   AdminOverviewStreamInterruptEvent,
   AdminOverviewStreamResultEvent,
+  AdminOverviewSystemStatus,
+  AdminOverviewTrafficHealth,
   AdminOverviewTrendPoint,
   AdminOverviewTrendSeries,
   AdminOverviewTrendsResponse,
@@ -85,6 +89,13 @@ function normalizeHealthLevel(value: unknown): AdminOverviewHealthLevel {
   return "unknown";
 }
 
+function normalizeCardStatus(value: unknown): AdminOverviewCardStatus {
+  if (value === "ok" || value === "no_data" || value === "stale" || value === "degraded") {
+    return value;
+  }
+  return "unknown";
+}
+
 function normalizeSeverity(value: unknown): AdminOverviewSeverity {
   if (value === "critical" || value === "warning" || value === "info") {
     return value;
@@ -103,16 +114,54 @@ function nowIsoString(): string {
   return new Date().toISOString();
 }
 
+function normalizeStatusMeta(raw: unknown) {
+  const data = isRecord(raw) ? raw : {};
+
+  return {
+    status: normalizeCardStatus(data.status),
+    health_level: normalizeHealthLevel(data.health_level),
+    sample_count: toNumber(data.sample_count),
+    watermark_at: data.watermark_at == null ? null : toStringValue(data.watermark_at),
+    data_source: toStringValue(data.data_source || data.source) || undefined,
+    explain: toStringValue(data.explain) || undefined,
+    window_sec: toNumber(data.window_sec),
+  };
+}
+
+function normalizeSystemStatus(raw: unknown): AdminOverviewSystemStatus {
+  return normalizeStatusMeta(raw);
+}
+
+function normalizeTrafficHealth(raw: unknown): AdminOverviewTrafficHealth {
+  return normalizeStatusMeta(raw);
+}
+
 function normalizeRequestQuality(raw: unknown): AdminOverviewRequestQuality {
   const data = isRecord(raw) ? raw : {};
 
   return {
-    status: normalizeHealthLevel(data.status),
+    ...normalizeStatusMeta(data),
     score: toNumber(data.score),
     request_total: toNumber(data.request_total),
     success_rate: toNumber(data.success_rate),
+    error_4xx_rate: toNumber(data.error_4xx_rate),
     error_5xx_rate: toNumber(data.error_5xx_rate),
     latency_p95_ms: toNumber(data.latency_p95_ms),
+    qps: toNumber(data.qps),
+  };
+}
+
+function normalizeQuestionActivity(raw: unknown): AdminOverviewQuestionActivity {
+  const data = isRecord(raw) ? raw : {};
+
+  return {
+    ...normalizeStatusMeta(data),
+    score: toNumber(data.score),
+    question_total: toNumber(data.question_total),
+    question_success_rate: toNumber(data.question_success_rate),
+    question_latency_p95_ms: toNumber(data.question_latency_p95_ms),
+    question_qps: toNumber(data.question_qps),
+    stream_interrupt_rate: toNumber(data.stream_interrupt_rate),
   };
 }
 
@@ -120,7 +169,8 @@ function normalizeStability(raw: unknown): AdminOverviewStability {
   const data = isRecord(raw) ? raw : {};
 
   return {
-    status: normalizeHealthLevel(data.status),
+    status: normalizeCardStatus(data.status),
+    health_level: normalizeHealthLevel(data.health_level),
     score: toNumber(data.score),
     critical_alerts: toNumber(data.critical_alerts),
     warning_alerts: toNumber(data.warning_alerts),
@@ -132,13 +182,13 @@ function normalizeCapacityCost(raw: unknown): AdminOverviewCapacityCost {
   const data = isRecord(raw) ? raw : {};
 
   return {
-    status: normalizeHealthLevel(data.status),
+    ...normalizeStatusMeta(data),
     score: toNumber(data.score),
     qps: toNumber(data.qps),
+    question_qps: toNumber(data.question_qps),
     cost_per_minute: toNumber(data.cost_per_minute),
     budget_per_minute: toNumber(data.budget_per_minute),
     budget_usage_pct: toNumber(data.budget_usage_pct),
-    budget_health_level: normalizeHealthLevel(data.budget_health_level),
   };
 }
 
@@ -160,7 +210,7 @@ function normalizeAlerts(raw: unknown): AdminOverviewAlertItem[] {
 
 function normalizeFreshness(raw: unknown): AdminOverviewFreshness {
   const data = isRecord(raw) ? raw : {};
-  const status = data.status === "fresh" || data.status === "expired" ? data.status : "unknown";
+  const status = data.status === "fresh" || data.status === "stale" ? data.status : "unknown";
 
   return {
     status,
@@ -201,7 +251,7 @@ function normalizeChangeFeed(raw: unknown): AdminOverviewChangeItem[] {
     .map((item, index) => ({
       id: toStringValue(item.id, `change_${index}`),
       title: toStringValue(item.title, "配置变更"),
-      level: toStringValue(item.level, "info"),
+      level: normalizeSeverity(item.level),
       occurred_at: toStringValue(item.occurred_at),
     }));
 }
@@ -221,10 +271,13 @@ function normalizeSummaryPayload(raw: unknown): AdminOverviewSnapshot {
     snapshot_at: snapshotAt,
     source: toStringValue(payload.source, "unknown"),
     degraded: Boolean(payload.degraded),
+    system_status: normalizeSystemStatus(payload.system_status),
+    traffic_health: normalizeTrafficHealth(payload.traffic_health),
     health_score: toNumber(payload.health_score),
     health_level: normalizeHealthLevel(payload.health_level),
     budget_usage_pct: toNumber(payload.budget_usage_pct),
     request_quality: normalizeRequestQuality(payload.request_quality),
+    question_activity: normalizeQuestionActivity(payload.question_activity),
     stability: normalizeStability(payload.stability),
     capacity_cost: normalizeCapacityCost(payload.capacity_cost),
     alerts: normalizeAlerts(payload.alerts),
@@ -256,10 +309,8 @@ function normalizeTrendPoint(raw: unknown): AdminOverviewTrendPoint | null {
   return {
     timestamp,
     health_score: toNumber(raw.health_score),
-    request_success_rate: toNumber(raw.request_success_rate || raw.success_rate),
-    error_5xx_rate: toNumber(raw.error_5xx_rate),
-    latency_p95_ms: toNumber(raw.latency_p95_ms),
-    qps: toNumber(raw.qps),
+    request_qps: toNumber(raw.request_qps || raw.qps),
+    question_qps: toNumber(raw.question_qps),
     budget_usage_pct: toNumber(raw.budget_usage_pct),
   };
 }
@@ -475,28 +526,75 @@ export function buildEmptyAdminOverviewSnapshot(snapshotAt = nowIsoString()): Ad
     health_score: null,
     health_level: "unknown",
     budget_usage_pct: null,
+    system_status: {
+      status: "unknown",
+      health_level: "unknown",
+      sample_count: null,
+      watermark_at: null,
+      data_source: "empty",
+      explain: "总览尚未初始化",
+    },
+    traffic_health: {
+      status: "unknown",
+      health_level: "unknown",
+      sample_count: null,
+      watermark_at: null,
+      data_source: "empty",
+      explain: "暂无业务样本",
+      window_sec: null,
+    },
     request_quality: {
       status: "unknown",
+      health_level: "unknown",
       score: null,
       request_total: null,
       success_rate: null,
+      error_4xx_rate: null,
       error_5xx_rate: null,
       latency_p95_ms: null,
+      qps: null,
+      sample_count: null,
+      watermark_at: null,
+      data_source: "empty",
+      explain: "暂无业务样本",
+      window_sec: null,
+    },
+    question_activity: {
+      status: "unknown",
+      health_level: "unknown",
+      score: null,
+      question_total: null,
+      question_success_rate: null,
+      question_latency_p95_ms: null,
+      question_qps: null,
+      stream_interrupt_rate: null,
+      sample_count: null,
+      watermark_at: null,
+      data_source: "empty",
+      explain: "暂无用户提问样本",
+      window_sec: null,
     },
     stability: {
       status: "unknown",
+      health_level: "unknown",
       score: null,
       critical_alerts: null,
       warning_alerts: null,
     },
     capacity_cost: {
       status: "unknown",
+      health_level: "unknown",
       score: null,
       qps: null,
+      question_qps: null,
       cost_per_minute: null,
       budget_per_minute: null,
       budget_usage_pct: null,
-      budget_health_level: "unknown",
+      sample_count: null,
+      watermark_at: null,
+      data_source: "empty",
+      explain: "暂无容量与成本样本",
+      window_sec: null,
     },
     alerts: [],
     freshness: {
