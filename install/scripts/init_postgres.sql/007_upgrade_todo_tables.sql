@@ -83,10 +83,10 @@ CREATE INDEX IF NOT EXISTS idx_todo_due_date ON t_todo(due_date);
 CREATE INDEX IF NOT EXISTS idx_todo_reminder ON t_todo(reminder_enabled, reminder_advance_minutes) WHERE reminder_enabled = true;
 CREATE INDEX IF NOT EXISTS idx_todo_user_status_due ON t_todo(user_id, status, due_date);
 
--- 4. 数据迁移：根据 is_completed 设置 status
+-- 4. 数据迁移：补齐空 status，统一以状态字段表达完成态
 UPDATE t_todo 
 SET status = CASE 
-    WHEN is_completed = true THEN 'done' 
+    WHEN COALESCE(progress, 0) >= 100 OR actual_completion_time IS NOT NULL THEN 'done' 
     ELSE 'todo' 
 END
 WHERE status IS NULL OR status = '';

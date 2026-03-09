@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# 文档同步强校验脚本
+# 文档同步检查脚本
 # 用法：
-#   scripts/check_doc_sync.sh --cached
-#   scripts/check_doc_sync.sh --diff-range origin/master...HEAD
+#   scripts/check_doc_sync.sh --cached [--strict|--non-blocking]
+#   scripts/check_doc_sync.sh --diff-range origin/master...HEAD [--strict|--non-blocking]
 
 set -eo pipefail
 
 MODE="cached"
 DIFF_RANGE=""
+STRICT_MODE="false"
 
 usage() {
     cat <<'EOF'
 用法:
-  scripts/check_doc_sync.sh --cached
-  scripts/check_doc_sync.sh --diff-range <base...head>
+  scripts/check_doc_sync.sh --cached [--strict|--non-blocking]
+  scripts/check_doc_sync.sh --diff-range <base...head> [--strict|--non-blocking]
 EOF
 }
 
@@ -32,6 +33,14 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             fi
             shift 2
+            ;;
+        --strict)
+            STRICT_MODE="true"
+            shift
+            ;;
+        --non-blocking)
+            STRICT_MODE="false"
+            shift
             ;;
         -h|--help)
             usage
@@ -137,7 +146,11 @@ else
     if [[ ${#MISSING_DOCS[@]} -gt 0 ]]; then
         echo ""
         echo "========================================"
-        echo "  文档同步检查失败（阻断）"
+        if [[ "$STRICT_MODE" == "true" ]]; then
+            echo "  文档同步检查失败（阻断）"
+        else
+            echo "  文档同步检查告警（允许继续）"
+        fi
         echo "========================================"
         echo ""
         echo "检测到以下代码变更："
@@ -149,13 +162,22 @@ else
         echo "提示："
         echo "  - 文档映射规则见 .cursor/rules/doc_sync.mdc"
         echo "  - 建议先执行 /jjk-doc-check 再提交"
+        if [[ "$STRICT_MODE" != "true" ]]; then
+            echo "  - 当前为非阻断模式：本次仅告警，不阻断提交"
+        fi
         echo ""
         echo "========================================"
         echo ""
-        exit 1
+        if [[ "$STRICT_MODE" == "true" ]]; then
+            exit 1
+        fi
     fi
 
-    echo "文档映射检查通过"
+    if [[ ${#MISSING_DOCS[@]} -gt 0 && "$STRICT_MODE" != "true" ]]; then
+        echo "文档映射检查完成（已提示告警）"
+    else
+        echo "文档映射检查通过"
+    fi
 fi
 
 # 特殊处理（防屎山）强制同步检查：命中已登记文件时必须更新手册

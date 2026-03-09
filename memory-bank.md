@@ -4,6 +4,16 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+### 2026-03-09 待办完成态收敛为 `status` 单字段
+- 状态：ACTIVE
+- 决策主题：待办完成态统一由 `t_todo.status` 表达，不再保留旧完成布尔镜像
+- 背景与问题：模型、仓储、前端展示已按 `status='done'` 工作，但初始化 SQL、增量脚本和前端类型仍残留旧布尔语义，导致 schema 脚本与运行时口径漂移
+- 最终决策：`Todo.status` 为唯一状态 owner；完成时间使用 `actual_completion_time`；前端按 `status === 'done'` 计算展示；SQL 脚本统一改为围绕 `status/progress/actual_completion_time` 收口
+- 取舍理由：项目未上线，优先消除双真源与误导性字段；直接删除遗留布尔语义比继续保留兼容层更简单、更可验证
+- 影响范围：`app/models/todo.py`、`web/src/types/todo.ts`、`install/sql/init_postgres.sql`、`install/scripts/init_postgres.sql/*`、`docs/开发文档/架构设计/数据库设计.md`
+- 回退/失效条件：若未来需要派生完成标记，只能作为只读计算字段存在，且不得承担持久化真理源或写入口
+- 关联文档/代码：`app/repositories/todo_repository.py`、`docs/开发文档/架构设计/数据库设计.md`、`install/sql/init_postgres.sql`
+
 ### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
 - 状态：ACTIVE
 - 决策主题：把 `jjk-commit` 从“交付门禁 + 半套 merge 口径”收敛为交付编排层，并将真实 Git 生命周期统一下沉到共享 delivery engine

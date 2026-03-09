@@ -305,7 +305,7 @@ CREATE TABLE IF NOT EXISTS t_todo (
     start_time TIMESTAMP,
     due_date TIMESTAMP,
     actual_completion_time TIMESTAMP,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    status VARCHAR(20) NOT NULL DEFAULT 'todo',
     progress INTEGER NOT NULL DEFAULT 0,
     progress_notes TEXT,
     priority INTEGER NOT NULL DEFAULT 2,
@@ -337,7 +337,7 @@ CREATE INDEX IF NOT EXISTS idx_todo_due_date ON t_todo(due_date);
 CREATE INDEX IF NOT EXISTS idx_todo_is_deleted ON t_todo(is_deleted);
 
 COMMENT ON TABLE t_todo IS '待办任务表';
-COMMENT ON COLUMN t_todo.status IS '状态: pending/in_progress/completed/cancelled';
+COMMENT ON COLUMN t_todo.status IS '状态: todo/in_progress/done/cancelled';
 COMMENT ON COLUMN t_todo.priority IS '优先级: 1=低, 2=中, 3=高';
 COMMENT ON COLUMN t_todo.progress IS '进度百分比: 0-100';
 

@@ -70,7 +70,7 @@ docs/
 3. 设计推导、审批记录、实施拆解、测试证据只能写入 `docs/plans/` 或 `docs/内部参考/`，过程层永远不能反向替代主文档成为“当前口径”。
 4. 主文档头部必须维护 `> 更新时间：YYYY-MM-DD`，用于标识当前真相最近一次收敛时间。
 5. 主文档中的日期只允许作为当前契约的背景注记，不得形成独立变更日志章节。
-6. 本规则由 `scripts/docs_guard.py` 与 `scripts/check_doc_sync.sh` 联合阻断。
+6. 本规则由 `scripts/docs_guard.py` 与 `scripts/check_doc_sync.sh` 联合执行：本地 `check_doc_sync.sh` 默认告警不阻断，显式 `--strict` 与 CI 仍保持阻断语义。
 
 ---
 

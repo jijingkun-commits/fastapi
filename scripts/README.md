@@ -23,7 +23,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 │   ├── skill_offline_evaluation.py  # Skill 检索离线评测
 │   └── verify_data_db.py
 ├── docs_guard.py               # 文档同步守卫（hook 提醒 + 手动/CI 严格校验）
-├── check_doc_sync.sh           # 文档同步检查
+├── check_doc_sync.sh           # 文档同步检查（本地默认告警，--strict 阻断）
 ├── check_special_doc_sync.py   # 防屎山手册强制同步检查
 ├── config_doctor.py            # 配置契约健康检查
 ├── release_rollout_manager.py  # C-5 灰度发布/回滚管理（规则+命令）
@@ -46,6 +46,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 所有 symlink 保证现有引用（docs、commands、CI）无需修改；根目录不再保留与 `db/`、`data/` 的重复实体文件。
 
 - `scripts/docs_guard.py`：提交 hook 默认使用 `--non-blocking` 输出提醒；手动校验与 CI 仍建议使用 `--strict` 保持阻断语义。
+- `scripts/check_doc_sync.sh`：本地默认输出 warning 并允许继续提交；显式追加 `--strict` 时改回阻断模式，适合 CI / 人工收口。
 
 ### 重复脚本收敛清单（root -> 实体）
 

@@ -32,8 +32,6 @@ export interface Todo {
     start_time?: string
     actual_completion_time?: string
     create_time?: string
-    /** 前端计算字段，等价于 status === 'done'，后端不返回该字段 */
-    is_completed?: boolean
 
     // 重复任务
     is_recurring?: boolean
