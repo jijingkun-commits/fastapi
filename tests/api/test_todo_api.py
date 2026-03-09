@@ -48,7 +48,6 @@ def _mock_todo(todo_id: int = 1, title: str = "测试待办"):
     todo.category = "工作"
     todo.progress = 0
     todo.progress_notes = None
-    todo.is_completed = False
     todo.is_deleted = False
     todo.created_at = datetime.now()
     todo.updated_at = datetime.now()
