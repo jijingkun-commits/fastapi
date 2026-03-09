@@ -58,9 +58,10 @@
   - 保存消息后只做 `enqueue_memory_intent_job`。
   - 不执行 LLM 判定，不等待判定结果。
 - Memory Intent Worker（异步）：
+  - 运行时由 FastAPI `lifespan` 启动常驻 poller；每个进程各自启动 1 个 worker，依赖 job 租约与 `SKIP LOCKED` 去重抢占。
   - 事务抢占队列任务（`FOR UPDATE SKIP LOCKED`）。
   - 调 `lightweight` 生成结构化判定。
-  - 归一化后写入文档记忆并触发 embedding 补偿。
+  - 与任务状态机共用同一数据库事务写入文档记忆；成功后再统一提交 `succeeded`，失败则回滚并进入重试/死信。
 - 记忆存储层（业务两表）：
   - `t_user_memory_document`（文档）
   - `t_user_memory_chunk`（分块与检索）
@@ -73,7 +74,7 @@
 flowchart LR
     A["用户消息入站"] --> B["保存 t_chat_message"]
     B --> C["enqueue: t_user_memory_intent_job"]
-    C --> D["Worker 抢占 pending(SKIP LOCKED)"]
+    C --> D["Lifespan worker 抢占 pending(SKIP LOCKED)"]
     D --> E["LLM 判定(JSON)"]
     E --> F{"level"}
     F -->|none| G["丢弃并记审计"]

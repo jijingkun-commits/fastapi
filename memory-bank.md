@@ -4,6 +4,16 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+### 2026-03-09 记忆异步队列由 FastAPI lifespan 常驻 worker 消费
+- 状态：ACTIVE
+- 决策主题：`memory.intent_async_enabled` 开启时，记忆意图队列必须由 FastAPI `lifespan` 启动的常驻 worker 负责消费，禁止只入队不接消费者
+- 背景与问题：聊天侧已切到“主链路只入队”，但运行时没有消费者和 `process_job` 接线，导致删除/写入承诺停留在口头，后台 `t_user_memory_document` 状态长期不变
+- 最终决策：新增 `app/core/memory_intent_runtime.py` 作为运行时入口；`app/main.py` 在 `lifespan` 启停 worker；`flush_canonical_memory()` 增加 `manage_transaction`，让记忆落库与 job 状态机共用同一事务
+- 取舍理由：FastAPI 官方推荐长期生命周期任务挂在 `lifespan`，而不是把需要状态机/重试的工作塞进 request background task；当前项目已具备 PostgreSQL 队列与 `SKIP LOCKED` 租约，补齐消费者比改文案或再堆 fallback 更直接、更简洁
+- 影响范围：`app/main.py`、`app/core/memory_intent_runtime.py`、`app/services/document_memory_service.py`、所有 `memory.intent_async_enabled` 记忆写入/删除链路
+- 回退/失效条件：若未来拆为独立 worker 进程或外部任务系统，`lifespan` 只保留健康探测与启动门禁；在此之前不得回退为“只入队无消费者”
+- 关联文档/代码：`docs/plans/2026-03-03-user-personalized-memory-llm-async-design.md`、`docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`、`docs/内部参考/迭代需求/debug_report_memory_intent_runtime.md`
+
 ### 2026-03-09 待办完成态收敛为 `status` 单字段
 - 状态：ACTIVE
 - 决策主题：待办完成态统一由 `t_todo.status` 表达，不再保留旧完成布尔镜像

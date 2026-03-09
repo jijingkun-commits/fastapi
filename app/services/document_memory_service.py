@@ -1171,6 +1171,7 @@ def flush_canonical_memory(
     operation: str = "upsert",
     event_time: datetime | None = None,
     decision_contract: dict[str, Any] | None = None,
+    manage_transaction: bool = True,
 ) -> int:
     """将 canonical_text 落库到 document/chunk 两表。"""
 
@@ -1239,7 +1240,7 @@ def flush_canonical_memory(
                     rejected_items_count=0,
                     item_errors=[],
                 )
-            if persisted_count > 0:
+            if persisted_count > 0 and manage_transaction:
                 db.commit()
             normalized_contract["audit"] = {
                 **audit_payload,
@@ -1253,6 +1254,8 @@ def flush_canonical_memory(
             decision_contract.update(normalized_contract)
             return persisted_count
         except Exception:
+            if not manage_transaction:
+                raise
             rollback = getattr(db, "rollback", None)
             if callable(rollback):
                 rollback()
@@ -1290,10 +1293,12 @@ def flush_canonical_memory(
             operation=operation,
             event_time=event_time,
         )
-        if persisted > 0:
+        if persisted > 0 and manage_transaction:
             db.commit()
         return persisted
     except Exception:
+        if not manage_transaction:
+            raise
         rollback = getattr(db, "rollback", None)
         if callable(rollback):
             rollback()

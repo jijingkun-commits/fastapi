@@ -8,6 +8,7 @@ from app.api.v1.router import api_router
 from app.core.config import INIT_DB_ON_STARTUP
 from app.db.init_db import init_db
 from app.db.postgres_checkpoint import get_checkpointer, close_checkpointer
+from app.core.memory_intent_runtime import start_memory_intent_runtime, stop_memory_intent_runtime
 
 
 @asynccontextmanager
@@ -81,8 +82,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    start_memory_intent_runtime(app)
+
     yield
-    
+
+    await stop_memory_intent_runtime(app)
+
     # 关闭时清理资源
     await close_checkpointer()
 
