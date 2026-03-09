@@ -46,7 +46,7 @@ const navItems = [
         icon: Shield,
     },
     {
-        title: "LLM 模型配置",
+        title: "大模型配置",
         href: "/admin/llm",
         icon: Bot,
     },

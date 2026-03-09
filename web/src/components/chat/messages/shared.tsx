@@ -38,7 +38,7 @@ function ContentCopyable({
     <TooltipIconButton
       onClick={(e) => handleCopy(e)}
       variant="ghost"
-      tooltip="Copy content"
+      tooltip="复制内容"
       disabled={disabled}
     >
       <AnimatePresence
@@ -104,7 +104,7 @@ function FeedbackButtons({
     <>
       <TooltipIconButton
         disabled={disabled}
-        tooltip="Good response"
+        tooltip="这条回答有帮助"
         variant="ghost"
         onClick={() => handleFeedback(1)}
         className={score === 1 ? "text-green-600 bg-green-50" : ""}
@@ -113,7 +113,7 @@ function FeedbackButtons({
       </TooltipIconButton>
       <TooltipIconButton
         disabled={disabled}
-        tooltip="Bad response"
+        tooltip="这条回答没帮助"
         variant="ghost"
         onClick={() => handleFeedback(-1)}
         className={score === -1 ? "text-red-600 bg-red-50" : ""}
@@ -230,7 +230,7 @@ export function CommandBar({
       <div className="flex items-center gap-2">
         <TooltipIconButton
           disabled={isLoading}
-          tooltip="Cancel edit"
+          tooltip="取消编辑"
           variant="ghost"
           onClick={() => {
             setIsEditing(false);
@@ -240,7 +240,7 @@ export function CommandBar({
         </TooltipIconButton>
         <TooltipIconButton
           disabled={isLoading}
-          tooltip="Submit"
+          tooltip="提交"
           variant="secondary"
           onClick={handleSubmitEdit}
         >
@@ -259,7 +259,7 @@ export function CommandBar({
       {isAiMessage && !!handleRegenerate && (
         <TooltipIconButton
           disabled={isLoading}
-          tooltip="Refresh"
+          tooltip="重新生成"
           variant="ghost"
           onClick={handleRegenerate}
         >
@@ -276,7 +276,7 @@ export function CommandBar({
       {showEdit && (
         <TooltipIconButton
           disabled={isLoading}
-          tooltip="Edit"
+          tooltip="编辑"
           variant="ghost"
           onClick={() => {
             setIsEditing?.(true);

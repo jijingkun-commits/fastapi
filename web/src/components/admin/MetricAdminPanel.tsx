@@ -78,7 +78,7 @@ const PIE_COLORS = ["#2F6868", "#5BA3A3", "#F59E0B", "#D1D5DB"];
 const SOURCE_LABELS: Record<string, string> = {
     manual: "手动 SELECT",
     result_lookup: "结果表查询",
-    ai_extract: "AI 提取",
+    ai_extract: "智能提取",
     none: "未处理",
 };
 
@@ -272,10 +272,10 @@ function BatchPanel({ onComplete }: { onComplete: () => void }) {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="result_lookup">
-                                    结果表查询（快速，无需 AI）
+                                    结果表查询（快速，无需智能提取）
                                 </SelectItem>
                                 <SelectItem value="ai_extract">
-                                    AI 提取 SELECT（较慢）
+                                    智能提取查询模板（较慢）
                                 </SelectItem>
                             </SelectContent>
                         </Select>
@@ -444,7 +444,7 @@ export function MetricAdminPanel() {
                 unit: result.unit || "",
             });
             setActiveTab("manual");
-            toast.success("AI 提取完成，请检查并编辑后保存");
+            toast.success("智能提取完成，请检查并编辑后保存");
         } catch (e: any) {
             toast.error(e.message || "转换失败");
         } finally {
@@ -455,7 +455,7 @@ export function MetricAdminPanel() {
     // 保存
     const handleSave = async () => {
         if (!form.metric_id || !form.metric_name || !form.description || !form.sql_template) {
-            toast.warning("请填写必填字段：指标 ID、名称、描述、SQL 模板");
+            toast.warning("请填写必填字段：指标编号、名称、描述、SQL 模板");
             return;
         }
         setSaving(true);
@@ -507,7 +507,7 @@ export function MetricAdminPanel() {
         const labels: Record<string, { text: string; cls: string }> = {
             manual: { text: "手动", cls: "bg-blue-100 text-blue-700" },
             result_lookup: { text: "结果表", cls: "bg-emerald-100 text-emerald-700" },
-            ai_extract: { text: "AI", cls: "bg-violet-100 text-violet-700" },
+            ai_extract: { text: "智能", cls: "bg-violet-100 text-violet-700" },
         };
         const info = labels[src];
         if (!info) return null;
@@ -521,7 +521,7 @@ export function MetricAdminPanel() {
                 <div>
                     <h1 className="app-page-title">指标管理</h1>
                     <p className="app-page-subtitle mt-1">
-                        管理问数助手的指标定义，支持 AI 从 ETL 脚本提取 SELECT 模板
+                        管理问数助手的指标定义，支持从 ETL 脚本中智能提取查询模板
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -594,7 +594,7 @@ export function MetricAdminPanel() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead className="w-28">指标 ID</TableHead>
+                                    <TableHead className="w-28">指标编号</TableHead>
                                     <TableHead>名称</TableHead>
                                     <TableHead className="w-20">分类</TableHead>
                                     <TableHead className="w-16">单位</TableHead>
@@ -693,7 +693,7 @@ export function MetricAdminPanel() {
                                 {target?.query_template && (
                                     <div>
                                         <p className="text-[10px] font-medium text-emerald-700 mb-1">
-                                            query_template（可执行）
+                                            查询模板（可执行）
                                         </p>
                                         <pre className="text-xs bg-white p-3 rounded-md border overflow-x-auto whitespace-pre-wrap">
                                             {target.query_template}
@@ -702,7 +702,7 @@ export function MetricAdminPanel() {
                                 )}
                                 <div>
                                     <p className="text-[10px] font-medium text-muted-foreground mb-1">
-                                        sql_template（原始{target?.query_template ? "" : "，ETL 格式"}）
+                                        原始 SQL 模板{target?.query_template ? "" : "（ETL 格式）"}
                                     </p>
                                     <pre className="text-xs bg-white p-3 rounded-md border overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto">
                                         {target?.sql_template || "(无)"}
@@ -727,7 +727,7 @@ export function MetricAdminPanel() {
                         <TabsList className="mb-4">
                             <TabsTrigger value="manual">手动填写</TabsTrigger>
                             {dialogMode === "create" && (
-                                <TabsTrigger value="ai">AI 转换</TabsTrigger>
+                                <TabsTrigger value="ai">智能转换</TabsTrigger>
                             )}
                         </TabsList>
 
@@ -739,7 +739,7 @@ export function MetricAdminPanel() {
                                         粘贴 ETL 脚本
                                     </label>
                                     <p className="text-xs text-muted-foreground mb-2">
-                                        支持 DELETE + INSERT INTO ... SELECT 格式的 ETL 脚本，AI 将自动提取 SELECT 查询模板和指标元信息
+                                        支持 DELETE + INSERT INTO ... SELECT 格式的 ETL 脚本，系统将自动提取查询模板和指标元信息
                                     </p>
                                     <Textarea
                                         value={etlScript}
@@ -756,10 +756,10 @@ export function MetricAdminPanel() {
                                     {converting ? (
                                         <span className="flex items-center gap-2">
                                             <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                            AI 提取中...
+                                            智能提取中...
                                         </span>
                                     ) : (
-                                        "AI 提取 SELECT 模板"
+                                        "智能提取查询模板"
                                     )}
                                 </Button>
                             </TabsContent>
@@ -770,7 +770,7 @@ export function MetricAdminPanel() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-sm font-medium mb-1 block">
-                                        指标 ID <span className="text-red-500">*</span>
+                                        指标编号 <span className="text-red-500">*</span>
                                     </label>
                                     <Input
                                         value={form.metric_id}

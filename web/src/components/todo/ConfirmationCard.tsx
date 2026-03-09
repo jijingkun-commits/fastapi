@@ -348,7 +348,7 @@ export default function ConfirmationCard({
                                         value={todo.time || ''}
                                         onChange={(e) => handleEdit('time', e.target.value)}
                                         className="h-8 text-sm"
-                                        placeholder="YYYY-MM-DD HH:MM"
+                                        placeholder="例如：2026-03-09 09:30"
                                     />
                                 </div>
 

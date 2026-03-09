@@ -127,7 +127,7 @@ export function LLMAdminPanel() {
     setSavingApiKey(true);
     try {
       await updateProviderApiKey(editingApiKey.id, newApiKey);
-      toast.success("API Key 已更新");
+      toast.success("接口密钥已更新");
       setEditingApiKey(null);
       setNewApiKey("");
       loadData();
@@ -196,8 +196,8 @@ export function LLMAdminPanel() {
     <div className="admin-page-content space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="app-page-title">LLM 模型配置</h1>
-          <p className="app-page-subtitle">管理 AI 模型提供商和模型配置</p>
+          <h1 className="app-page-title">大模型配置</h1>
+          <p className="app-page-subtitle">管理模型提供商和模型配置</p>
         </div>
         <Button variant="outline" onClick={loadData}>
           刷新
@@ -241,7 +241,7 @@ export function LLMAdminPanel() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">默认 Chat 模型</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">默认对话模型</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-lg font-bold truncate">
@@ -263,7 +263,7 @@ export function LLMAdminPanel() {
         <TabsContent value="providers">
           <Card>
             <CardHeader>
-              <CardTitle>LLM 提供商</CardTitle>
+              <CardTitle>模型提供商</CardTitle>
               <CardDescription>管理模型提供商的连接配置</CardDescription>
             </CardHeader>
             <CardContent>
@@ -272,8 +272,8 @@ export function LLMAdminPanel() {
                   <TableRow>
                     <TableHead>代码</TableHead>
                     <TableHead>名称</TableHead>
-                    <TableHead>Base URL</TableHead>
-                    <TableHead>API Key</TableHead>
+                    <TableHead>基础地址</TableHead>
+                    <TableHead>接口密钥</TableHead>
                     <TableHead>模型数</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>操作</TableHead>
@@ -459,7 +459,7 @@ export function LLMAdminPanel() {
               <CardTitle>模型分类路由表</CardTitle>
               <CardDescription>
                 按能力需求分层，不同场景使用不同级别的模型。
-                目标：提高速度、降低 token 消耗、提高回复准确度。
+                目标：提高速度、降低令牌消耗、提高回复准确度。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -567,20 +567,20 @@ export function LLMAdminPanel() {
       <Dialog open={!!editingApiKey} onOpenChange={() => setEditingApiKey(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>更新 API Key - {editingApiKey?.name}</DialogTitle>
+            <DialogTitle>更新接口密钥 - {editingApiKey?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>当前 API Key（脱敏）</Label>
+              <Label>当前接口密钥（脱敏）</Label>
               <code className="block p-2 bg-muted rounded text-sm">
                 {editingApiKey?.api_key_masked || "未设置"}
               </code>
             </div>
             <div className="space-y-2">
-              <Label>新 API Key</Label>
+              <Label>新接口密钥</Label>
               <Input
                 type="password"
-                placeholder="输入新的 API Key"
+                placeholder="输入新的接口密钥"
                 value={newApiKey}
                 onChange={(e) => setNewApiKey(e.target.value)}
               />

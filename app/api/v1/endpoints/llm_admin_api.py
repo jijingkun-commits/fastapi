@@ -746,13 +746,13 @@ def update_model_routing(request: ModelRoutingUpdateRequest, db: Session = Depen
         raise HTTPException(status_code=400, detail=f"模型不存在或未启用: {request.model_code}")
 
     if request.config_key == MODEL_ROUTING_DEFAULT_CHAT and model.model_type != "chat":
-        raise HTTPException(status_code=400, detail="默认对话模型必须为 chat 类型")
+        raise HTTPException(status_code=400, detail="默认对话模型必须是对话类型模型")
     if request.config_key == MODEL_ROUTING_EMBEDDING and model.model_type != "embedding":
-        raise HTTPException(status_code=400, detail="Embedding 路由仅支持 embedding 类型模型")
+        raise HTTPException(status_code=400, detail="向量模型路由仅支持向量类型模型")
     if request.config_key == MODEL_ROUTING_VISION and not _is_supported_vision_route_model(model):
         raise HTTPException(
             status_code=400,
-            detail="Vision 路由仅支持 vision/chat/reasoning 类型模型",
+            detail="视觉模型路由仅支持视觉、对话或推理类型模型",
         )
 
     route_group_by_key = {

@@ -285,7 +285,7 @@ export function UserAdminPanel() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[80px]">ID</TableHead>
+              <TableHead className="w-[80px]">编号</TableHead>
               <TableHead>用户名</TableHead>
               <TableHead>手机号</TableHead>
               <TableHead>角色</TableHead>

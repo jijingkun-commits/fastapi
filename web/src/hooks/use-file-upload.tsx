@@ -43,7 +43,7 @@ export function useFileUpload({
 
     if (duplicateFiles.length > 0) {
       toast.error(
-        `Duplicate file(s): ${duplicateFiles.map((f) => f.name).join(", ")}.`,
+        `重复文件：${duplicateFiles.map((f) => f.name).join(", ")}`,
       );
     }
 

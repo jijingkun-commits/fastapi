@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ViewState } from "@/components/ui/view-state";
+import { getMemoryStatusLabel } from "@/lib/memory-admin-labels";
 
 interface MemorySearchDebugPanelProps {
   defaultUserId?: number;
@@ -86,7 +87,7 @@ export function MemorySearchDebugPanel({
     if (!statusData) {
       return "未加载";
     }
-    return `pending ${statusData.pending} / ready ${statusData.ready} / failed ${statusData.failed}`;
+    return `待处理 ${statusData.pending} / 已就绪 ${statusData.ready} / 失败 ${statusData.failed}`;
   }, [statusData]);
 
   const loadEmbeddingStatus = useCallback(async () => {
@@ -112,7 +113,7 @@ export function MemorySearchDebugPanel({
   const handleSearchDebug = async () => {
     const userId = parseOptionalPositiveInt(queryUserId);
     if (!userId) {
-      toast.warning("调试查询需要填写合法 user_id");
+      toast.warning("调试查询需要填写合法用户编号");
       return;
     }
     const normalizedQuery = queryText.trim();
@@ -163,9 +164,9 @@ export function MemorySearchDebugPanel({
         status_filter: statusFilter,
       });
       setLastActionMessage(
-        `重建任务状态：${payload.status}，总量 ${payload.total}，成功 ${payload.ready}，失败 ${payload.failed}`,
+        `重建任务状态：${getMemoryStatusLabel(payload.status)}，总量 ${payload.total}，成功 ${payload.ready}，失败 ${payload.failed}`,
       );
-      toast.success(`重建任务已提交（${payload.status}）`);
+      toast.success(`重建任务已提交（${getMemoryStatusLabel(payload.status)}）`);
       await loadEmbeddingStatus();
       onGovernanceActionDone?.();
     } catch (error: unknown) {
@@ -186,9 +187,9 @@ export function MemorySearchDebugPanel({
         run_async: runAsync,
       });
       setLastActionMessage(
-        `失败重试状态：${payload.status}，重置 ${payload.reset}，处理 ${payload.processed}，成功 ${payload.ready}`,
+        `失败重试状态：${getMemoryStatusLabel(payload.status)}，重置 ${payload.reset}，处理 ${payload.processed}，成功 ${payload.ready}`,
       );
-      toast.success(`失败重试已触发（${payload.status}）`);
+      toast.success(`失败重试已触发（${getMemoryStatusLabel(payload.status)}）`);
       await loadEmbeddingStatus();
       onGovernanceActionDone?.();
     } catch (error: unknown) {
@@ -204,14 +205,14 @@ export function MemorySearchDebugPanel({
       <CardHeader>
         <CardTitle className="text-base">召回调试与向量治理</CardTitle>
         <CardDescription>
-          调试面板统一使用 `memory-admin-api`，可查看召回分数并触发重建/重试。
+          调试面板统一使用记忆管理接口，可查看召回分数并触发重建/重试。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-4 rounded-lg border border-border/80 p-4">
             <div className="space-y-2">
-              <Label htmlFor="memory-debug-user-id">调试 user_id</Label>
+              <Label htmlFor="memory-debug-user-id">调试用户编号</Label>
               <Input
                 id="memory-debug-user-id"
                 value={queryUserId}
@@ -220,7 +221,7 @@ export function MemorySearchDebugPanel({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="memory-debug-query">调试 query</Label>
+              <Label htmlFor="memory-debug-query">调试查询词</Label>
               <Input
                 id="memory-debug-query"
                 value={queryText}
@@ -281,22 +282,22 @@ export function MemorySearchDebugPanel({
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Badge variant="outline" className="justify-center py-1.5">
-                total {statusData?.total ?? "-"}
+                总量 {statusData?.total ?? "-"}
               </Badge>
               <Badge variant="outline" className="justify-center py-1.5">
-                pending {statusData?.pending ?? "-"}
+                待处理 {statusData?.pending ?? "-"}
               </Badge>
               <Badge variant="outline" className="justify-center py-1.5">
-                ready {statusData?.ready ?? "-"}
+                已就绪 {statusData?.ready ?? "-"}
               </Badge>
               <Badge variant="outline" className="justify-center py-1.5">
-                failed {statusData?.failed ?? "-"}
+                失败 {statusData?.failed ?? "-"}
               </Badge>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="memory-action-user-id">治理 user_id（可选）</Label>
+                <Label htmlFor="memory-action-user-id">治理用户编号（可选）</Label>
                 <Input
                   id="memory-action-user-id"
                   value={actionUserId}
@@ -305,7 +306,7 @@ export function MemorySearchDebugPanel({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="memory-action-doc-id">治理 doc_id（可选）</Label>
+                <Label htmlFor="memory-action-doc-id">治理文档编号（可选）</Label>
                 <Input
                   id="memory-action-doc-id"
                   value={actionDocId}
@@ -327,11 +328,11 @@ export function MemorySearchDebugPanel({
             <div className="flex flex-wrap gap-4">
               <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Switch checked={includePending} onCheckedChange={setIncludePending} />
-                包含 pending
+                包含待处理
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Switch checked={includeFailed} onCheckedChange={setIncludeFailed} />
-                包含 failed
+                包含失败
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Switch checked={runAsync} onCheckedChange={setRunAsync} />
@@ -366,11 +367,11 @@ export function MemorySearchDebugPanel({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[72px]">doc_id</TableHead>
+                    <TableHead className="w-[72px]">文档编号</TableHead>
                     <TableHead>引用</TableHead>
-                    <TableHead className="w-[90px] text-right">text</TableHead>
-                    <TableHead className="w-[90px] text-right">vector</TableHead>
-                    <TableHead className="w-[90px] text-right">final</TableHead>
+                    <TableHead className="w-[90px] text-right">文本分</TableHead>
+                    <TableHead className="w-[90px] text-right">向量分</TableHead>
+                    <TableHead className="w-[90px] text-right">综合分</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

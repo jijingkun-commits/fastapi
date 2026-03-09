@@ -13,7 +13,7 @@ const notoSansSC = Noto_Sans_SC({
 
 export const metadata: Metadata = {
   title: "嘉银助手",
-  description: "Agent Chat UX by LangChain",
+  description: "嘉银助手智能对话界面",
 };
 
 export default function RootLayout({

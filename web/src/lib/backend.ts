@@ -73,7 +73,7 @@ export async function login(payload: { username?: string; mobile?: string; passw
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }, { auth: false });
-  if (!r.ok) throw new Error("login failed");
+  if (!r.ok) throw new Error("登录失败");
   return r.json();
 }
 
@@ -106,7 +106,7 @@ export interface CurrentUserProfile {
  */
 export async function getMe(token?: string): Promise<CurrentUserProfile> {
   const r = await apiFetch(`/api/v1/me`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
-  if (!r.ok) throw new Error("me failed");
+  if (!r.ok) throw new Error("获取当前用户信息失败");
   return r.json();
 }
 
@@ -754,7 +754,7 @@ export async function cancelRun(
 ): Promise<CancelRunResponse> {
   const resolvedRunId = runId.trim();
   if (!resolvedRunId) {
-    throw new Error("run_id 不能为空");
+    throw new Error("运行编号不能为空");
   }
 
   const r = await apiFetch(`/api/v1/chat/runs/${encodeURIComponent(resolvedRunId)}/cancel`, {
@@ -793,7 +793,7 @@ export async function resumeChat(
     }),
     signal: options?.signal,
   });
-  if (!r.ok || !r.body) throw new Error("resume failed");
+  if (!r.ok || !r.body) throw new Error("恢复会话失败");
 
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
