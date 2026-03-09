@@ -40,6 +40,36 @@ export class ApiError extends Error {
   }
 }
 
+function extractApiErrorMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const message = record.message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+    if (message && typeof message === "object") {
+      const nested = (message as Record<string, unknown>).message;
+      if (typeof nested === "string" && nested.trim().length > 0) {
+        return nested;
+      }
+      const errorCode = (message as Record<string, unknown>).error_code;
+      if (typeof errorCode === "string" && errorCode.trim().length > 0) {
+        return errorCode;
+      }
+    }
+    const detail = record.detail;
+    if (typeof detail === "string" && detail.trim().length > 0) {
+      return detail;
+    }
+  }
+  return fallback;
+}
+
+async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => null);
+  return extractApiErrorMessage(payload, fallback);
+}
+
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
@@ -184,7 +214,7 @@ export interface StreamCallbacks {
   /** 流初始化（返回 thread_id） */
   onInit?: (threadId: string, runId?: string) => void;
   /** 流结束 */
-  onDone?: (threadId?: string, messageId?: number) => void;
+  onDone?: (threadId?: string, messageId?: number, meta?: Record<string, unknown>) => void;
   /** 错误 */
   onError?: (message: string) => void;
   /** 需要人工审核（interrupt） */
@@ -309,13 +339,14 @@ function normalizeFinalAnswerEventData(data: unknown): FinalAnswerEventData | nu
 function normalizeDoneEventData(
   data: unknown,
   fallbackThreadId?: string,
-): { threadId?: string; messageId?: number; finalContent?: string } {
+): { threadId?: string; messageId?: number; finalContent?: string; meta?: Record<string, unknown> } {
   const doneData = (isObjectRecord(data) ? data : {}) as Partial<DoneEventData>;
   const threadId =
     toOptionalString(doneData.thread_id) ?? toOptionalString(fallbackThreadId);
   const messageId = toOptionalMessageId(doneData.message_id);
   const finalContent = toOptionalString(doneData.final_content);
-  return { threadId, messageId, finalContent };
+  const meta = isObjectRecord(doneData.meta) ? doneData.meta : undefined;
+  return { threadId, messageId, finalContent, meta };
 }
 
 function normalizeInterruptData(data: unknown): InterruptData | null {
@@ -581,7 +612,7 @@ function dispatchSSEEvent(
         doneControl.doneCalled = true;
       }
       const doneData = normalizeDoneEventData(event.data, fallbackThreadId);
-      onDone?.(doneData.threadId, doneData.messageId);
+      onDone?.(doneData.threadId, doneData.messageId, doneData.meta);
       return;
     }
     case "error": {
@@ -651,7 +682,9 @@ export async function streamLLM(
   });
 
   if (!response.ok) {
-    throw new Error(response.statusText);
+    const message = await readApiErrorMessage(response, response.statusText || "请求失败");
+    cb.onError?.(message);
+    return;
   }
 
   // ... (Stream processing logic)
@@ -664,6 +697,8 @@ export async function streamLLM(
   const decoder = new TextDecoder();
   let buffer = "";
   const doneControl = { doneCalled: false };
+  let terminatedByAbort = false;
+  let terminatedByError = false;
 
   try {
     while (true) {
@@ -680,14 +715,14 @@ export async function streamLLM(
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      // aborted
+      terminatedByAbort = true;
     } else {
+      terminatedByError = true;
       cb.onError?.(err.message || "Stream error");
     }
   } finally {
-    // 确保在正常结束或异常时调用 onDone，避免状态卡死
-    // 使用 doneCalled 标记防止重复调用
-    if (!doneControl.doneCalled) {
+    // 只有真实完成或 SSE 自然结束才允许走 onDone；abort/error 交由上层按未完成语义处理。
+    if (!doneControl.doneCalled && !terminatedByAbort && !terminatedByError) {
       doneControl.doneCalled = true;
       cb.onDone?.(options?.threadId);
     }
@@ -750,27 +785,53 @@ export interface CancelRunResponse {
 
 export async function cancelRun(
   runId: string,
-  payload?: { reason?: string; cancel_mode?: "soft" | "hard" | string },
+  threadId: string,
 ): Promise<CancelRunResponse> {
   const resolvedRunId = runId.trim();
   if (!resolvedRunId) {
     throw new Error("run_id 不能为空");
   }
 
+  const resolvedThreadId = threadId.trim();
+  if (!resolvedThreadId) {
+    throw new Error("thread_id 不能为空");
+  }
+
   const r = await apiFetch(`/api/v1/chat/runs/${encodeURIComponent(resolvedRunId)}/cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      reason: payload?.reason ?? "user_cancelled",
-      cancel_mode: payload?.cancel_mode ?? "hard",
-    }),
+    body: JSON.stringify({ thread_id: resolvedThreadId }),
   });
 
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: "取消运行失败" }));
-    throw new ApiError(err.detail || "取消运行失败", r.status);
+    const message = await readApiErrorMessage(r, "取消运行失败");
+    throw new ApiError(message, r.status);
   }
 
+  return r.json();
+}
+
+export interface ActiveRunItem {
+  run_id: string;
+  thread_id: string;
+  status: "running" | "stopping" | string;
+  updated_at: string;
+  last_activity_at?: string | null;
+}
+
+export interface ActiveRunsResponse {
+  items: ActiveRunItem[];
+  active_count: number;
+  poll_hint_seconds: number;
+  server_time: string;
+}
+
+export async function listActiveRuns(): Promise<ActiveRunsResponse> {
+  const r = await apiFetch(`/api/v1/chat/runs/active`);
+  if (!r.ok) {
+    const message = await readApiErrorMessage(r, "获取活跃会话失败");
+    throw new ApiError(message, r.status);
+  }
   return r.json();
 }
 

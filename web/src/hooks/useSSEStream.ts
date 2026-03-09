@@ -20,6 +20,7 @@ import { v4 as uuidv4 } from "uuid";
 import {
     cancelRun,
     getLatestThread,
+    listActiveRuns,
     startLLMStream,
     getThreadMessages,
     startResumeStream,
@@ -27,196 +28,56 @@ import {
     DecisionType,
     Attachment,
 } from "@/lib/backend";
-import type { StreamResultMeta } from "@/lib/backend";
+import type { ActiveRunItem, StreamResultMeta } from "@/lib/backend";
 import { fromBackendMessages } from "@/lib/message-normalizer";
-import { coerceResultEventData } from "@/lib/validators/result-event";
 import { useThreads } from "@/providers/Thread";
 import { StateType, StreamContextValue, MessageMetadata, StreamStatus } from "@/providers/StreamContext";
-import { useMessageUpdater } from "@/hooks/use-message-updater";
+import {
+    addToolCallToMessages,
+    appendImageToMessages,
+    appendThinkingToMessages,
+    appendTokenToMessages,
+} from "@/hooks/use-message-updater";
 import { useModelConfig } from "@/hooks/use-model-config";
 import type { KbImages } from "@/components/chat/utils";
 import { safeParseJson, SelectedTodoSchema } from "@/lib/utils";
 import type { ClarificationEventData, ResultEventData, StatusEventData } from "@/types/message";
+import {
+    buildClarificationDisplayText,
+    coerceResultEventArray,
+    createEmptyThreadRuntime,
+    createLocalActiveRunSnapshot,
+    DRAFT_THREAD_KEY,
+    getErrorMessageFromResult,
+    getImageUrlFromResult,
+    getThreadKey,
+    getToolOutputPreview,
+    normalizeClarificationQuestions,
+    resolveResultEventId,
+    isRunningStatus,
+    normalizeStatusData,
+    resultEventsAccumulator,
+    ThreadRuntimeState,
+    toActiveRunMap,
+} from "@/hooks/useSSEStream.helpers";
 
 type MessageWithAdditionalKwargs = Message & {
     additional_kwargs?: Record<string, unknown>;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
+const NON_UNREAD_DONE_STATUSES = new Set(["stopped", "failed", "cancelled", "aborted"]);
+
+function buildLocalThreadTitle(prompt: string): string {
+    const firstNonEmptyLine = prompt
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+    return firstNonEmptyLine?.slice(0, 24) || "新对话";
 }
 
-function getImageUrlFromResult(data: ResultEventData): string | null {
-    if (data.data_type !== "image" || !isRecord(data.data)) {
-        return null;
-    }
-
-    const value = data.data.url;
-    if (typeof value !== "string") {
-        return null;
-    }
-
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-}
-
-function getErrorMessageFromResult(data: ResultEventData): string {
-    if (typeof data.message === "string" && data.message.trim().length > 0) {
-        return data.message;
-    }
-    if (isRecord(data.data) && typeof data.data.message === "string" && data.data.message.trim().length > 0) {
-        return data.data.message;
-    }
-    return "未知错误";
-}
-
-function getToolOutputPreview(output: unknown): string {
-    if (typeof output === "string") {
-        return output.slice(0, 100);
-    }
-    try {
-        const serialized = JSON.stringify(output);
-        if (typeof serialized === "string") {
-            return serialized.slice(0, 100);
-        }
-        return String(output).slice(0, 100);
-    } catch {
-        return String(output).slice(0, 100);
-    }
-}
-
-function normalizeStatusData(statusData: StatusEventData): StreamStatus | null {
-    const message = statusData.message.trim();
-    if (message.length === 0) {
-        return null;
-    }
-    return {
-        message,
-        phase: statusData.phase ?? "processing",
-    };
-}
-
-function normalizeClarificationQuestions(questions: string[]): string[] {
-    const normalized: string[] = [];
-    for (const question of questions) {
-        const trimmed = question.trim();
-        if (!trimmed || normalized.includes(trimmed)) {
-            continue;
-        }
-        normalized.push(trimmed);
-    }
-    return normalized;
-}
-
-function buildClarificationDisplayText(data: ClarificationEventData): string {
-    const message = typeof data.message === "string" ? data.message.trim() : "";
-    const questions = normalizeClarificationQuestions(data.questions);
-    const formattedQuestions = questions
-        .map((question, index) => `${index + 1}. ${question}`)
-        .join("\n");
-
-    if (message && formattedQuestions) {
-        return `${message}\n\n${formattedQuestions}`;
-    }
-    if (formattedQuestions) {
-        return formattedQuestions;
-    }
-    return message;
-}
-
-function resolveResultEventId(resultEvent: ResultEventData): string | undefined {
-    if (typeof resultEvent.event_id === "string" && resultEvent.event_id.trim().length > 0) {
-        return resultEvent.event_id;
-    }
-
-    const envelopeId = resultEvent.envelope?.id;
-    if (typeof envelopeId === "string" && envelopeId.trim().length > 0) {
-        return envelopeId;
-    }
-
-    return undefined;
-}
-
-function resolveResultSequence(resultEvent: ResultEventData): number | undefined {
-    if (typeof resultEvent.sequence_number === "number" && Number.isFinite(resultEvent.sequence_number)) {
-        return Math.trunc(resultEvent.sequence_number);
-    }
-
-    const envelopeSequence = resultEvent.envelope?.sequence_number;
-    if (typeof envelopeSequence === "number" && Number.isFinite(envelopeSequence)) {
-        return Math.trunc(envelopeSequence);
-    }
-
-    return undefined;
-}
-
-function coerceResultEventArray(value: unknown): ResultEventData[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-
-    const normalized: ResultEventData[] = [];
-    for (const item of value) {
-        const resultEvent = coerceResultEventData(item);
-        if (resultEvent) {
-            normalized.push(resultEvent);
-        }
-    }
-    return normalized;
-}
-
-function dedupByEventId(
-    existingEvents: ResultEventData[],
-    incomingEvent: ResultEventData,
-): { events: ResultEventData[]; dedupDropped: boolean } {
-    const incomingEventId = resolveResultEventId(incomingEvent);
-    if (!incomingEventId) {
-        return {
-            events: [...existingEvents, incomingEvent],
-            dedupDropped: false,
-        };
-    }
-
-    const duplicated = existingEvents.some((eventItem) => resolveResultEventId(eventItem) === incomingEventId);
-    if (duplicated) {
-        return {
-            events: existingEvents,
-            dedupDropped: true,
-        };
-    }
-
-    return {
-        events: [...existingEvents, incomingEvent],
-        dedupDropped: false,
-    };
-}
-
-function resultEventsAccumulator(
-    existingEvents: ResultEventData[],
-    incomingEvent: ResultEventData,
-): { events: ResultEventData[]; dedupDropped: boolean } {
-    const deduped = dedupByEventId(existingEvents, incomingEvent);
-    if (deduped.dedupDropped) {
-        return deduped;
-    }
-
-    const sortedEvents = [...deduped.events].sort((left, right) => {
-        const leftSequence = resolveResultSequence(left);
-        const rightSequence = resolveResultSequence(right);
-
-        if (leftSequence === undefined || rightSequence === undefined) {
-            return 0;
-        }
-        if (leftSequence === rightSequence) {
-            return 0;
-        }
-        return leftSequence - rightSequence;
-    });
-
-    return {
-        events: sortedEvents,
-        dedupDropped: false,
-    };
+function shouldMarkThreadUnreadAfterDone(doneMeta?: Record<string, unknown>): boolean {
+    const status = doneMeta?.status;
+    return typeof status !== "string" || !NON_UNREAD_DONE_STATUSES.has(status);
 }
 
 /**
@@ -241,15 +102,7 @@ export function useSSEStream(): StreamContextValue {
         handleModelChange
     } = useModelConfig();
 
-    // 2. Message Updater Hook
-    const {
-        appendToAiMessage,
-        appendImageToAiMessage,
-        addToolCallToMessage,
-        handleThinking
-    } = useMessageUpdater(setMessages);
-
-    // 3. UI Toggles (HideToolCalls)
+    // 2. UI Toggles (HideToolCalls)
     // 注意：useMultiAgent 已废弃（2026-01-31），系统默认使用多智能体模式
     const [hideToolCalls, setHideToolCallsState] = useState(false);
 
@@ -268,25 +121,172 @@ export function useSSEStream(): StreamContextValue {
         }
     }, []);
 
-    const stopRef = useRef<(() => void) | null>(null);
-    const currentAiIdRef = useRef<string | null>(null);
-    const activeRunIdRef = useRef<string | null>(null);
-    const stopInFlightRef = useRef(false);
-    const latestThreadResolvedRef = useRef(false);
-    const isStreamingRef = useRef<boolean>(false);
-
     const [threadId, setThreadId] = useQueryState("threadId");
     const initialThreadIdExistsRef = useRef(threadId !== null);
     const threadIdRef = useRef<string | null>(threadId);
-    const { refreshThreads } = useThreads();
+    const latestThreadResolvedRef = useRef(false);
+    const threadRuntimeRef = useRef<Record<string, ThreadRuntimeState>>({});
+    const stopByThreadRef = useRef<Record<string, (() => void) | null>>({});
+    const currentAiIdByThreadRef = useRef<Record<string, string | null>>({});
+    const activeRunIdByThreadRef = useRef<Record<string, string | null>>({});
+    const stopInFlightByThreadRef = useRef<Record<string, boolean>>({});
+    const isStreamingByThreadRef = useRef<Record<string, boolean>>({});
+    const pollTimeoutRef = useRef<number | null>(null);
+    const pollFailureCountRef = useRef(0);
+    const pollWarningShownRef = useRef(false);
+    const scheduleActiveRunPollRef = useRef<((delayMs: number) => void) | null>(null);
+    const suppressUnreadOnInactiveRef = useRef<Record<string, boolean>>({});
+    const { refreshThreads, upsertThread, setActiveRuns, setUnreadReplies } = useThreads();
 
-    useEffect(() => {
-        threadIdRef.current = threadId;
-    }, [threadId]);
+    const ensureActiveRunPolling = useCallback((delayMs = 0) => {
+        scheduleActiveRunPollRef.current?.(delayMs);
+    }, []);
 
-    const bindMessageIdToAiMessage = useCallback((aiId: string, messageId?: number) => {
+    const buildLocalStreamingFallbackRuns = useCallback((serverActiveRuns: Record<string, ActiveRunItem>) => {
+        const fallbackRuns: Record<string, ActiveRunItem> = {};
+        for (const [threadKey, isStreaming] of Object.entries(isStreamingByThreadRef.current)) {
+            if (!isStreaming || threadKey === DRAFT_THREAD_KEY || threadKey in serverActiveRuns) {
+                continue;
+            }
+            fallbackRuns[threadKey] = createLocalActiveRunSnapshot(
+                threadKey,
+                activeRunIdByThreadRef.current[threadKey] ?? "",
+                "running",
+            );
+        }
+        return fallbackRuns;
+    }, []);
+
+    const syncVisibleThreadRuntime = useCallback((threadKey: string) => {
+        const runtime = threadRuntimeRef.current[threadKey] ?? createEmptyThreadRuntime();
+        setMessages(runtime.messages);
+        setIsLoading(runtime.isLoading);
+        setError(runtime.error);
+        setInterrupt(runtime.interrupt);
+        setCurrentStatus(runtime.currentStatus);
+        setKbImages(runtime.kbImages);
+    }, []);
+
+    const clearThreadUnread = useCallback((threadKey: string) => {
+        if (threadKey === DRAFT_THREAD_KEY) {
+            return;
+        }
+        setUnreadReplies((prev) => {
+            if (!(threadKey in prev)) {
+                return prev;
+            }
+            const next = { ...prev };
+            delete next[threadKey];
+            return next;
+        });
+    }, [setUnreadReplies]);
+
+    const markThreadUnread = useCallback((threadKey: string) => {
+        if (threadKey === DRAFT_THREAD_KEY) {
+            return;
+        }
+        if (getThreadKey(threadIdRef.current) === threadKey) {
+            clearThreadUnread(threadKey);
+            return;
+        }
+        setUnreadReplies((prev) => {
+            if (prev[threadKey]) {
+                return prev;
+            }
+            return {
+                ...prev,
+                [threadKey]: true,
+            };
+        });
+    }, [clearThreadUnread, setUnreadReplies]);
+
+    const syncThreadUnreadState = useCallback((threadKey: string, hasUnreadReply: boolean) => {
+        if (hasUnreadReply) {
+            markThreadUnread(threadKey);
+            return;
+        }
+        clearThreadUnread(threadKey);
+    }, [clearThreadUnread, markThreadUnread]);
+
+    const updateThreadRuntime = useCallback((threadKey: string, updater: (prev: ThreadRuntimeState) => ThreadRuntimeState) => {
+        const prev = threadRuntimeRef.current[threadKey] ?? createEmptyThreadRuntime();
+        const next = updater(prev);
+        threadRuntimeRef.current[threadKey] = next;
+        if (getThreadKey(threadIdRef.current) === threadKey) {
+            syncVisibleThreadRuntime(threadKey);
+        }
+        return next;
+    }, [syncVisibleThreadRuntime]);
+
+    const patchThreadRuntime = useCallback((threadKey: string, patch: Partial<ThreadRuntimeState>) => {
+        updateThreadRuntime(threadKey, (prev) => ({ ...prev, ...patch }));
+    }, [updateThreadRuntime]);
+
+    const updateThreadMessages = useCallback((threadKey: string, updater: (prev: Message[]) => Message[]) => {
+        updateThreadRuntime(threadKey, (prev) => ({ ...prev, messages: updater(prev.messages) }));
+    }, [updateThreadRuntime]);
+
+    const rekeyThreadRuntime = useCallback((fromKey: string, toKey: string) => {
+        if (fromKey === toKey) {
+            return;
+        }
+
+        const sourceRuntime = threadRuntimeRef.current[fromKey];
+        if (sourceRuntime) {
+            const targetRuntime = threadRuntimeRef.current[toKey] ?? createEmptyThreadRuntime();
+            threadRuntimeRef.current[toKey] = {
+                ...targetRuntime,
+                ...sourceRuntime,
+                kbImages: { ...targetRuntime.kbImages, ...sourceRuntime.kbImages },
+                historyLoaded: targetRuntime.historyLoaded || sourceRuntime.historyLoaded,
+            };
+            delete threadRuntimeRef.current[fromKey];
+        }
+
+        stopByThreadRef.current[toKey] = stopByThreadRef.current[fromKey] ?? stopByThreadRef.current[toKey] ?? null;
+        currentAiIdByThreadRef.current[toKey] = currentAiIdByThreadRef.current[fromKey] ?? currentAiIdByThreadRef.current[toKey] ?? null;
+        activeRunIdByThreadRef.current[toKey] = activeRunIdByThreadRef.current[fromKey] ?? activeRunIdByThreadRef.current[toKey] ?? null;
+        isStreamingByThreadRef.current[toKey] = isStreamingByThreadRef.current[fromKey] ?? isStreamingByThreadRef.current[toKey] ?? false;
+        stopInFlightByThreadRef.current[toKey] = stopInFlightByThreadRef.current[fromKey] ?? stopInFlightByThreadRef.current[toKey] ?? false;
+
+        delete stopByThreadRef.current[fromKey];
+        delete currentAiIdByThreadRef.current[fromKey];
+        delete activeRunIdByThreadRef.current[fromKey];
+        delete isStreamingByThreadRef.current[fromKey];
+        delete stopInFlightByThreadRef.current[fromKey];
+
+        if (getThreadKey(threadIdRef.current) === toKey) {
+            syncVisibleThreadRuntime(toKey);
+        }
+    }, [syncVisibleThreadRuntime]);
+
+    const upsertThreadActiveRun = useCallback((snapshot: ActiveRunItem) => {
+        const threadKey = getThreadKey(snapshot.thread_id);
+        activeRunIdByThreadRef.current[threadKey] = snapshot.run_id;
+        suppressUnreadOnInactiveRef.current[threadKey] = false;
+        clearThreadUnread(threadKey);
+        setActiveRuns((prev) => ({
+            ...prev,
+            [snapshot.thread_id]: snapshot,
+        }));
+        ensureActiveRunPolling(500);
+    }, [clearThreadUnread, ensureActiveRunPolling, setActiveRuns]);
+
+    const removeThreadActiveRun = useCallback((threadKey: string) => {
+        activeRunIdByThreadRef.current[threadKey] = null;
+        setActiveRuns((prev) => {
+            if (!(threadKey in prev)) {
+                return prev;
+            }
+            const next = { ...prev };
+            delete next[threadKey];
+            return next;
+        });
+    }, [setActiveRuns]);
+
+    const bindMessageIdToAiMessage = useCallback((threadKey: string, aiId: string, messageId?: number) => {
         if (!messageId) return;
-        setMessages((prev) => {
+        updateThreadMessages(threadKey, (prev) => {
             const updated = [...prev];
             const idx = updated.findIndex((m) => m.id === aiId);
             if (idx !== -1) {
@@ -297,9 +297,10 @@ export function useSSEStream(): StreamContextValue {
             }
             return updated;
         });
-    }, []);
+    }, [updateThreadMessages]);
 
     const storeStructuredResultToMessage = useCallback((
+        threadKey: string,
         aiId: string,
         data: ResultEventData,
     ) => {
@@ -310,7 +311,7 @@ export function useSSEStream(): StreamContextValue {
 
         let dedupDropped = false;
 
-        setMessages((prev) => {
+        updateThreadMessages(threadKey, (prev) => {
             const updated = [...prev];
             const idx = updated.findIndex((m) => m.id === aiId);
             if (idx === -1) {
@@ -363,11 +364,12 @@ export function useSSEStream(): StreamContextValue {
         }
 
         if (data.message) {
-            appendToAiMessage(aiId, data.message);
+            updateThreadMessages(threadKey, (prev) => appendTokenToMessages(prev, aiId, data.message ?? ""));
         }
-    }, [appendToAiMessage]);
+    }, [updateThreadMessages]);
 
     const applyFinalAnswerToMessage = useCallback((
+        threadKey: string,
         aiId: string,
         content: string,
         meta?: Record<string, unknown>,
@@ -377,7 +379,7 @@ export function useSSEStream(): StreamContextValue {
             return;
         }
 
-        setMessages((prev) => {
+        updateThreadMessages(threadKey, (prev) => {
             const updated = [...prev];
             const idx = updated.findIndex((m) => m.id === aiId);
             if (idx === -1) {
@@ -397,9 +399,10 @@ export function useSSEStream(): StreamContextValue {
             } as Message;
             return updated;
         });
-    }, []);
+    }, [updateThreadMessages]);
 
     const applyClarificationToMessage = useCallback((
+        threadKey: string,
         aiId: string,
         data: ClarificationEventData,
     ) => {
@@ -412,7 +415,7 @@ export function useSSEStream(): StreamContextValue {
             return;
         }
 
-        setMessages((prev) => {
+        updateThreadMessages(threadKey, (prev) => {
             const updated = [...prev];
             const idx = updated.findIndex((m) => m.id === aiId);
             if (idx === -1) {
@@ -435,18 +438,120 @@ export function useSSEStream(): StreamContextValue {
             } as Message;
             return updated;
         });
-    }, []);
+    }, [updateThreadMessages]);
 
-    const completeStreamLifecycle = useCallback((aiId: string, messageId?: number) => {
-        bindMessageIdToAiMessage(aiId, messageId);
-        setCurrentStatus(null);
-        setIsLoading(false);
-        stopRef.current = null;
-        currentAiIdRef.current = null;
-        activeRunIdRef.current = null;
-        isStreamingRef.current = false;
-        refreshThreads();
-    }, [bindMessageIdToAiMessage, refreshThreads]);
+    const finalizeStreamLifecycle = useCallback((
+        threadKey: string,
+        aiId: string,
+        options?: { messageId?: number; markUnread?: boolean },
+    ) => {
+        bindMessageIdToAiMessage(threadKey, aiId, options?.messageId);
+        suppressUnreadOnInactiveRef.current[threadKey] = false;
+        syncThreadUnreadState(threadKey, options?.markUnread ?? false);
+        patchThreadRuntime(threadKey, {
+            currentStatus: null,
+            isLoading: false,
+            error: undefined,
+        });
+        stopByThreadRef.current[threadKey] = null;
+        currentAiIdByThreadRef.current[threadKey] = null;
+        removeThreadActiveRun(threadKey);
+        isStreamingByThreadRef.current[threadKey] = false;
+        void refreshThreads();
+    }, [bindMessageIdToAiMessage, patchThreadRuntime, refreshThreads, removeThreadActiveRun, syncThreadUnreadState]);
+
+    useEffect(() => {
+        threadIdRef.current = threadId;
+        const visibleThreadKey = getThreadKey(threadId);
+        clearThreadUnread(visibleThreadKey);
+        syncVisibleThreadRuntime(visibleThreadKey);
+    }, [clearThreadUnread, threadId, syncVisibleThreadRuntime]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const scheduleNext = (delayMs: number) => {
+            if (pollTimeoutRef.current) {
+                clearTimeout(pollTimeoutRef.current);
+            }
+            pollTimeoutRef.current = window.setTimeout(() => {
+                void pollOnce();
+            }, delayMs);
+        };
+        scheduleActiveRunPollRef.current = scheduleNext;
+
+        const pollOnce = async () => {
+            try {
+                const response = await listActiveRuns();
+                if (cancelled) {
+                    return;
+                }
+
+                pollFailureCountRef.current = 0;
+                pollWarningShownRef.current = false;
+
+                const serverActiveRuns = toActiveRunMap(response.items);
+                // active 接口短暂空窗时，保留本地仍在 streaming 的线程，避免 running 图标闪没。
+                const localFallbackRuns = buildLocalStreamingFallbackRuns(serverActiveRuns);
+                const nextActiveRuns = { ...localFallbackRuns, ...serverActiveRuns };
+                const activeThreadIds = new Set(Object.keys(nextActiveRuns));
+                setActiveRuns(nextActiveRuns);
+
+                for (const [activeThreadId, snapshot] of Object.entries(nextActiveRuns)) {
+                    activeRunIdByThreadRef.current[activeThreadId] = snapshot.run_id;
+                    updateThreadRuntime(activeThreadId, (prev) => ({
+                        ...prev,
+                        isLoading: isRunningStatus(snapshot.status) || Boolean(isStreamingByThreadRef.current[activeThreadId]),
+                        error: undefined,
+                    }));
+                }
+
+                for (const existingThreadId of Object.keys(activeRunIdByThreadRef.current)) {
+                    if (existingThreadId === DRAFT_THREAD_KEY) {
+                        continue;
+                    }
+                    if (activeThreadIds.has(existingThreadId)) {
+                        continue;
+                    }
+                    if (isStreamingByThreadRef.current[existingThreadId]) {
+                        continue;
+                    }
+                    const shouldShowUnread = suppressUnreadOnInactiveRef.current[existingThreadId] !== true;
+                    suppressUnreadOnInactiveRef.current[existingThreadId] = false;
+                    syncThreadUnreadState(existingThreadId, shouldShowUnread);
+                    activeRunIdByThreadRef.current[existingThreadId] = null;
+                    patchThreadRuntime(existingThreadId, { isLoading: false, currentStatus: null });
+                }
+
+                if (response.active_count > 0 || Object.keys(localFallbackRuns).length > 0) {
+                    scheduleNext(Math.max(response.poll_hint_seconds, 1) * 1000);
+                }
+            } catch (err) {
+                if (cancelled) {
+                    return;
+                }
+                pollFailureCountRef.current += 1;
+                if (pollFailureCountRef.current >= 3 && !pollWarningShownRef.current) {
+                    pollWarningShownRef.current = true;
+                    toast.warning("会话运行态同步存在延迟", {
+                        description: "侧边栏状态将在下次成功轮询后恢复。",
+                    });
+                }
+                scheduleNext(pollFailureCountRef.current <= 1 ? 5000 : 10000);
+            }
+        };
+
+        void pollOnce();
+
+        return () => {
+            cancelled = true;
+            scheduleActiveRunPollRef.current = null;
+            if (pollTimeoutRef.current) {
+                clearTimeout(pollTimeoutRef.current);
+                pollTimeoutRef.current = null;
+            }
+        };
+    }, [buildLocalStreamingFallbackRuns, patchThreadRuntime, setActiveRuns, syncThreadUnreadState, updateThreadRuntime]);
 
     const resolveLatestThread = useCallback(async (): Promise<boolean> => {
         if (latestThreadResolvedRef.current) {
@@ -478,6 +583,7 @@ export function useSSEStream(): StreamContextValue {
     }, [setThreadId]);
 
     const handleStructuredResultEvent = useCallback((
+        threadKey: string,
         aiId: string,
         data: ResultEventData,
         isResume: boolean,
@@ -491,23 +597,24 @@ export function useSSEStream(): StreamContextValue {
 
         const imageUrl = getImageUrlFromResult(normalizedResultData);
         if (imageUrl) {
-            appendImageToAiMessage(aiId, imageUrl);
+            updateThreadMessages(threadKey, (prev) => appendImageToMessages(prev, aiId, imageUrl));
         }
 
-        storeStructuredResultToMessage(aiId, normalizedResultData);
+        storeStructuredResultToMessage(threadKey, aiId, normalizedResultData);
         if (isResume) {
             console.log(`恢复流收到结构化结果: ${normalizedResultData.data_type}`);
             return;
         }
         console.log(`收到结构化结果: ${normalizedResultData.data_type}`);
-    }, [appendImageToAiMessage, storeStructuredResultToMessage]);
+    }, [storeStructuredResultToMessage, updateThreadMessages]);
 
     /**
      * 加载历史消息
      */
     const loadThreadMessages = useCallback(async (id: string) => {
+        const threadKey = getThreadKey(id);
         try {
-            setIsLoading(true);
+            patchThreadRuntime(threadKey, { isLoading: true, error: undefined });
             const rawMessages = await getThreadMessages(id);
             const normalized = fromBackendMessages(rawMessages);
             const converted = normalized.map((m) => ({
@@ -518,24 +625,41 @@ export function useSSEStream(): StreamContextValue {
                 ...(m.additionalKwargs && { additional_kwargs: m.additionalKwargs }),
                 ...(m.feedbackScore !== undefined && { feedback_score: m.feedbackScore }),
                 ...(m.thinkingContent && {
-                    content: `<think>\n${m.thinkingContent}\n</think>\n\n${typeof m.content === 'string' ? m.content : ''}`
+                    content: `<think>
+${m.thinkingContent}
+</think>
+
+${typeof m.content === 'string' ? m.content : ''}`
                 }),
             } as Message));
-            setMessages(converted);
+            updateThreadRuntime(threadKey, (prev) => ({
+                ...prev,
+                messages: converted,
+                historyLoaded: true,
+                isLoading: Boolean(activeRunIdByThreadRef.current[threadKey]) || Boolean(isStreamingByThreadRef.current[threadKey]),
+                error: undefined,
+            }));
         } catch (err) {
             console.error("加载历史消息失败:", err);
             toast.error("加载历史消息失败");
-        } finally {
-            setIsLoading(false);
+            patchThreadRuntime(threadKey, { error: err, isLoading: false });
         }
-    }, []);
+    }, [patchThreadRuntime, updateThreadRuntime]);
 
     useEffect(() => {
-        if (isStreamingRef.current) return;
+        const currentThreadKey = getThreadKey(threadId);
+        if (isStreamingByThreadRef.current[currentThreadKey]) {
+            return;
+        }
         let cancelled = false;
 
         const run = async () => {
             if (threadId) {
+                const runtime = threadRuntimeRef.current[currentThreadKey];
+                if (runtime?.historyLoaded) {
+                    syncVisibleThreadRuntime(currentThreadKey);
+                    return;
+                }
                 await loadThreadMessages(threadId);
                 return;
             }
@@ -546,14 +670,14 @@ export function useSSEStream(): StreamContextValue {
 
             if (!shouldResolveLatestOnInitialEmptyThread) {
                 if (!cancelled) {
-                    setMessages([]);
+                    syncVisibleThreadRuntime(DRAFT_THREAD_KEY);
                 }
                 return;
             }
 
             const switchedToLatest = await resolveLatestThread();
             if (!cancelled && !switchedToLatest && threadIdRef.current === null) {
-                setMessages([]);
+                syncVisibleThreadRuntime(DRAFT_THREAD_KEY);
             }
         };
 
@@ -561,7 +685,7 @@ export function useSSEStream(): StreamContextValue {
         return () => {
             cancelled = true;
         };
-    }, [threadId, loadThreadMessages, resolveLatestThread]);
+    }, [threadId, loadThreadMessages, resolveLatestThread, syncVisibleThreadRuntime]);
 
     /**
      * 获取消息元数据
@@ -580,49 +704,52 @@ export function useSSEStream(): StreamContextValue {
      * 停止生成
      */
     const stop = useCallback(() => {
-        if (stopInFlightRef.current) {
+        const currentThreadKey = getThreadKey(threadIdRef.current);
+        if (stopInFlightByThreadRef.current[currentThreadKey]) {
             return;
         }
 
-        const localAbort = () => {
-            stopRef.current?.();
-            stopRef.current = null;
-            currentAiIdRef.current = null;
-            activeRunIdRef.current = null;
-            setCurrentStatus(null);
-            setIsLoading(false);
-            isStreamingRef.current = false;
+        const localAbort = (preserveActiveSnapshot: boolean) => {
+            stopByThreadRef.current[currentThreadKey]?.();
+            stopByThreadRef.current[currentThreadKey] = null;
+            currentAiIdByThreadRef.current[currentThreadKey] = null;
+            activeRunIdByThreadRef.current[currentThreadKey] = preserveActiveSnapshot
+                ? activeRunIdByThreadRef.current[currentThreadKey]
+                : null;
+            isStreamingByThreadRef.current[currentThreadKey] = false;
+            patchThreadRuntime(currentThreadKey, {
+                currentStatus: null,
+                isLoading: false,
+            });
+            if (!preserveActiveSnapshot) {
+                removeThreadActiveRun(currentThreadKey);
+            }
         };
 
-        const runId = activeRunIdRef.current;
-        if (!runId) {
+        const runId = activeRunIdByThreadRef.current[currentThreadKey];
+        const resolvedThreadId = threadIdRef.current;
+        if (!runId || !resolvedThreadId) {
             toast.warning("当前会话未分配 run_id，已本地停止", {
                 description: "服务端任务可能仍在后台执行。",
             });
-            localAbort();
+            localAbort(false);
             return;
         }
 
-        stopInFlightRef.current = true;
+        stopInFlightByThreadRef.current[currentThreadKey] = true;
         void (async () => {
             try {
                 let lastError: unknown = null;
                 for (let attempt = 1; attempt <= 2; attempt += 1) {
                     try {
-                        const result = await cancelRun(runId, {
-                            reason: "user_cancelled",
-                            cancel_mode: "hard",
-                        });
-
-                        const runControlDisabled = result.status === "disabled" || result.reason === "run_control_disabled";
-                        if (runControlDisabled) {
-                            toast.warning("当前环境未开启强停止，已本地停止", {
-                                description: "服务端任务可能仍在后台执行。",
-                            });
-                        } else {
-                            toast.success("已停止本轮任务");
+                        const result = await cancelRun(runId, resolvedThreadId);
+                        const preserveActiveSnapshot = result.status === "stopping";
+                        if (preserveActiveSnapshot) {
+                            upsertThreadActiveRun(createLocalActiveRunSnapshot(resolvedThreadId, result.run_id, result.status));
                         }
-                        localAbort();
+                        suppressUnreadOnInactiveRef.current[currentThreadKey] = true;
+                        toast.success("已停止本轮任务");
+                        localAbort(preserveActiveSnapshot);
                         return;
                     } catch (err) {
                         lastError = err;
@@ -634,12 +761,12 @@ export function useSSEStream(): StreamContextValue {
 
                 console.error("取消 run 失败:", lastError);
                 toast.error("停止失败，任务可能仍在后台执行");
-                localAbort();
+                localAbort(false);
             } finally {
-                stopInFlightRef.current = false;
+                stopInFlightByThreadRef.current[currentThreadKey] = false;
             }
         })();
-    }, []);
+    }, [patchThreadRuntime, removeThreadActiveRun, upsertThreadActiveRun]);
 
     /**
      * 提取文本辅助函数
@@ -679,15 +806,15 @@ export function useSSEStream(): StreamContextValue {
         update?: { messages?: Message[] | Message | string; context?: Record<string, unknown>; attachments?: Attachment[] },
         _options?: unknown,
     ) => {
+        const requestThreadKey = getThreadKey(threadId);
         try {
-            // Optimistic update
             if (update?.messages) {
                 if (typeof update.messages === "string") {
-                    setMessages((prev) => [...prev, { type: "human", content: update.messages } as Message]);
+                    updateThreadMessages(requestThreadKey, (prev) => [...prev, { type: "human", content: update.messages } as Message]);
                 } else if (Array.isArray(update.messages)) {
-                    setMessages((prev) => [...prev, ...(update.messages as Message[])]);
+                    updateThreadMessages(requestThreadKey, (prev) => [...prev, ...(update.messages as Message[])]);
                 } else {
-                    setMessages((prev) => [...prev, update.messages as Message]);
+                    updateThreadMessages(requestThreadKey, (prev) => [...prev, update.messages as Message]);
                 }
             }
 
@@ -695,16 +822,19 @@ export function useSSEStream(): StreamContextValue {
             if (!prompt.trim() && (!update?.attachments || update.attachments.length === 0)) return;
 
             const aiId = uuidv4();
-            currentAiIdRef.current = aiId;
-            activeRunIdRef.current = null;
-            setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
-            setCurrentStatus(null);
-            setIsLoading(true);
-            isStreamingRef.current = true;
+            const runtimeKeyRef = { current: requestThreadKey };
+            currentAiIdByThreadRef.current[requestThreadKey] = aiId;
+            activeRunIdByThreadRef.current[requestThreadKey] = null;
+            isStreamingByThreadRef.current[requestThreadKey] = true;
+            updateThreadMessages(requestThreadKey, (prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
+            patchThreadRuntime(requestThreadKey, {
+                currentStatus: null,
+                isLoading: true,
+                error: undefined,
+                interrupt: null,
+            });
             const idempotencyKey = uuidv4();
 
-            // 读取当前选中的待办 ID（使用 Zod 校验）
-            // 注意：不要在发送前清除，避免 current_todo_id 丢失
             let currentTodoId: number | undefined;
             if (typeof window !== 'undefined') {
                 const stored = sessionStorage.getItem('selectedTodo');
@@ -716,62 +846,82 @@ export function useSSEStream(): StreamContextValue {
                 prompt,
                 {
                     onToken: (token: string) => {
-                        appendToAiMessage(aiId, token);
-                        setCurrentStatus(null);
+                        updateThreadMessages(runtimeKeyRef.current, (prev) => appendTokenToMessages(prev, aiId, token));
+                        patchThreadRuntime(runtimeKeyRef.current, { currentStatus: null });
                     },
-                    onThinking: (content: string) => handleThinking(aiId, content),
-                    onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
+                    onThinking: (content: string) => {
+                        updateThreadMessages(runtimeKeyRef.current, (prev) => appendThinkingToMessages(prev, aiId, content));
+                    },
+                    onToolStart: (name: string, input: Record<string, unknown>) => {
+                        updateThreadMessages(runtimeKeyRef.current, (prev) => addToolCallToMessages(prev, aiId, name, input));
+                    },
                     onToolEnd: (name: string, output: unknown) => {
                         console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                     },
                     onInit: (id: string, runId?: string) => {
-                        setThreadId(id);
-                        activeRunIdRef.current = runId ?? null;
+                        const resolvedThreadKey = getThreadKey(id);
+                        rekeyThreadRuntime(runtimeKeyRef.current, resolvedThreadKey);
+                        runtimeKeyRef.current = resolvedThreadKey;
+                        void setThreadId(id);
+                        upsertThread({
+                            thread_id: id,
+                            title: buildLocalThreadTitle(prompt),
+                            updated_at: new Date().toISOString(),
+                        });
+                        patchThreadRuntime(resolvedThreadKey, { isLoading: true });
+                        upsertThreadActiveRun(createLocalActiveRunSnapshot(id, runId ?? "", "running"));
                     },
-                    onDone: (_tid?: string, messageId?: number) => {
-                        completeStreamLifecycle(aiId, messageId);
+                    onDone: (_tid?: string, messageId?: number, meta?: Record<string, unknown>) => {
+                        finalizeStreamLifecycle(runtimeKeyRef.current, aiId, {
+                            messageId,
+                            markUnread: shouldMarkThreadUnreadAfterDone(meta),
+                        });
                         if (messageId) {
                             console.log("已更新消息数据库ID:", messageId);
                         }
                     },
                     onError: (message: string) => {
-                        setError(new Error(message));
+                        syncThreadUnreadState(runtimeKeyRef.current, false);
+                        suppressUnreadOnInactiveRef.current[runtimeKeyRef.current] = true;
+                        patchThreadRuntime(runtimeKeyRef.current, { error: new Error(message) });
                         toast.error("请求失败", { description: message });
-                        activeRunIdRef.current = null;
+                        activeRunIdByThreadRef.current[runtimeKeyRef.current] = null;
                     },
-                    // 处理结构化结果事件（待办列表等）
-                    // 图片完全依赖 LLM 在回复中保留 Markdown 语法
                     onResult: (data: ResultEventData, meta?: StreamResultMeta) => {
-                        handleStructuredResultEvent(aiId, data, false, meta);
+                        handleStructuredResultEvent(runtimeKeyRef.current, aiId, data, false, meta);
                     },
                     onFinalAnswer: (data) => {
-                        applyFinalAnswerToMessage(aiId, data.content, data.meta);
-                        setCurrentStatus(null);
+                        applyFinalAnswerToMessage(runtimeKeyRef.current, aiId, data.content, data.meta);
+                        patchThreadRuntime(runtimeKeyRef.current, { currentStatus: null });
                     },
-                    // 处理状态更新事件
                     onStatus: (statusData: StatusEventData) => {
                         const normalizedStatus = normalizeStatusData(statusData);
                         if (!normalizedStatus) return;
                         console.log(`📊 状态更新(${normalizedStatus.phase}): ${normalizedStatus.message}`);
-                        setCurrentStatus(normalizedStatus);
+                        patchThreadRuntime(runtimeKeyRef.current, { currentStatus: normalizedStatus });
                     },
-                    // 处理澄清问题事件
                     onClarification: (data: ClarificationEventData) => {
                         console.log(`❓ 澄清问题:`, data.questions);
-                        applyClarificationToMessage(aiId, data);
-                        setCurrentStatus(null);
+                        applyClarificationToMessage(runtimeKeyRef.current, aiId, data);
+                        patchThreadRuntime(runtimeKeyRef.current, { currentStatus: null });
                     },
                     onInterrupt: (data: InterruptData) => {
-                        setInterrupt(data);
-                        setIsLoading(false);
-                        stopRef.current = null;
-                        activeRunIdRef.current = null;
-                        isStreamingRef.current = false;
+                        syncThreadUnreadState(runtimeKeyRef.current, false);
+                        patchThreadRuntime(runtimeKeyRef.current, {
+                            interrupt: data,
+                            isLoading: false,
+                            currentStatus: null,
+                        });
+                        stopByThreadRef.current[runtimeKeyRef.current] = null;
+                        activeRunIdByThreadRef.current[runtimeKeyRef.current] = null;
+                        isStreamingByThreadRef.current[runtimeKeyRef.current] = false;
                     },
-                    // 处理知识库图片映射事件
                     onKbImages: (images: Record<string, string>) => {
                         console.log(`🖼️ 收到 kb_images 映射: ${Object.keys(images).length} 张图片`);
-                        setKbImages(prev => ({ ...prev, ...images }));
+                        updateThreadRuntime(runtimeKeyRef.current, (prev) => ({
+                            ...prev,
+                            kbImages: { ...prev.kbImages, ...images },
+                        }));
                     },
                 },
                 50,
@@ -783,37 +933,40 @@ export function useSSEStream(): StreamContextValue {
                 idempotencyKey,
             );
 
-            // 请求已发起后再清理选中态，确保 current_todo_id 已携带进请求
             if (typeof window !== 'undefined' && currentTodoId) {
                 sessionStorage.removeItem('selectedTodo');
                 window.dispatchEvent(new Event('todoDeselected'));
             }
 
-            stopRef.current = stopFn;
+            stopByThreadRef.current[requestThreadKey] = stopFn;
             promise.catch(() => undefined).finally(() => {
-                setIsLoading(false);
-                stopRef.current = null;
-                currentAiIdRef.current = null;
-                activeRunIdRef.current = null;
-                isStreamingRef.current = false;
+                const finalThreadKey = runtimeKeyRef.current;
+                patchThreadRuntime(finalThreadKey, { isLoading: false });
+                stopByThreadRef.current[finalThreadKey] = null;
+                currentAiIdByThreadRef.current[finalThreadKey] = null;
+                activeRunIdByThreadRef.current[finalThreadKey] = activeRunIdByThreadRef.current[finalThreadKey] ?? null;
+                isStreamingByThreadRef.current[finalThreadKey] = false;
             });
         } catch (e) {
-            setError(e);
-            setIsLoading(false);
+            patchThreadRuntime(requestThreadKey, { error: e, isLoading: false });
         }
     }, [
         threadId,
         enableThinking,
         selectedModel,
         extractText,
-        handleThinking,
-        addToolCallToMessage,
         setThreadId,
-        appendToAiMessage,
+        updateThreadMessages,
+        patchThreadRuntime,
+        rekeyThreadRuntime,
         handleStructuredResultEvent,
         applyFinalAnswerToMessage,
         applyClarificationToMessage,
-        completeStreamLifecycle,
+        finalizeStreamLifecycle,
+        updateThreadRuntime,
+        syncThreadUnreadState,
+        upsertThreadActiveRun,
+        upsertThread,
     ]);
 
     /**
@@ -822,83 +975,98 @@ export function useSSEStream(): StreamContextValue {
     const resume = useCallback(async (decision: DecisionType) => {
         if (!threadId || !interrupt) return;
 
-        setInterrupt(null);
-        setCurrentStatus(null);
-        setIsLoading(true);
+        const currentThreadKey = getThreadKey(threadId);
+        clearThreadUnread(currentThreadKey);
+        patchThreadRuntime(currentThreadKey, {
+            interrupt: null,
+            currentStatus: null,
+            isLoading: true,
+            error: undefined,
+        });
 
-        // 复用最后一条 AI 消息，避免重复创建
-        let aiId = currentAiIdRef.current;
+        let aiId = currentAiIdByThreadRef.current[currentThreadKey];
+        const runtime = threadRuntimeRef.current[currentThreadKey] ?? createEmptyThreadRuntime();
         if (!aiId) {
-            // 查找最后一条 AI 消息的 ID
-            const lastAiMsg = messages.filter(m => m.type === "ai").pop();
+            const lastAiMsg = runtime.messages.filter((m) => m.type === "ai").pop();
             if (lastAiMsg?.id) {
                 aiId = lastAiMsg.id;
             } else {
-                // 只有在没有任何 AI 消息时才创建新的
                 aiId = uuidv4();
-                setMessages((prev) => [...prev, { id: aiId, type: "ai", content: "" } as Message]);
+                updateThreadMessages(currentThreadKey, (prev) => [...prev, { id: aiId!, type: "ai", content: "" } as Message]);
             }
-            currentAiIdRef.current = aiId;
+            currentAiIdByThreadRef.current[currentThreadKey] = aiId;
         }
 
+        isStreamingByThreadRef.current[currentThreadKey] = true;
         const { stop: stopFn, promise } = startResumeStream(
             threadId,
             decision,
             {
                 onToken: (token: string) => {
-                    appendToAiMessage(aiId, token);
-                    setCurrentStatus(null);
+                    updateThreadMessages(currentThreadKey, (prev) => appendTokenToMessages(prev, aiId!, token));
+                    patchThreadRuntime(currentThreadKey, { currentStatus: null });
                 },
-                onToolStart: (name: string, input: Record<string, unknown>) => addToolCallToMessage(aiId, name, input),
+                onToolStart: (name: string, input: Record<string, unknown>) => {
+                    updateThreadMessages(currentThreadKey, (prev) => addToolCallToMessages(prev, aiId!, name, input));
+                },
                 onToolEnd: (name: string, output: unknown) => {
                     console.debug(`工具 ${name} 执行完成:`, getToolOutputPreview(output));
                 },
                 onResult: (data: ResultEventData, meta?: StreamResultMeta) => {
-                    handleStructuredResultEvent(aiId, data, true, meta);
+                    handleStructuredResultEvent(currentThreadKey, aiId!, data, true, meta);
                 },
                 onFinalAnswer: (data) => {
-                    applyFinalAnswerToMessage(aiId, data.content, data.meta);
-                    setCurrentStatus(null);
+                    applyFinalAnswerToMessage(currentThreadKey, aiId!, data.content, data.meta);
+                    patchThreadRuntime(currentThreadKey, { currentStatus: null });
                 },
                 onStatus: (statusData: StatusEventData) => {
                     const normalizedStatus = normalizeStatusData(statusData);
                     if (!normalizedStatus) return;
                     console.log(`📊 恢复流状态更新(${normalizedStatus.phase}): ${normalizedStatus.message}`);
-                    setCurrentStatus(normalizedStatus);
+                    patchThreadRuntime(currentThreadKey, { currentStatus: normalizedStatus });
                 },
                 onClarification: (data: ClarificationEventData) => {
                     console.log(`❓ 恢复流澄清问题:`, data.questions);
-                    applyClarificationToMessage(aiId, data);
-                    setCurrentStatus(null);
+                    applyClarificationToMessage(currentThreadKey, aiId!, data);
+                    patchThreadRuntime(currentThreadKey, { currentStatus: null });
                 },
                 onKbImages: (images: Record<string, string>) => {
                     console.log(`🖼️ 恢复流收到 kb_images 映射: ${Object.keys(images).length} 张图片`);
-                    setKbImages(prev => ({ ...prev, ...images }));
+                    updateThreadRuntime(currentThreadKey, (prev) => ({
+                        ...prev,
+                        kbImages: { ...prev.kbImages, ...images },
+                    }));
                 },
-                onDone: (_tid?: string, messageId?: number) => {
-                    completeStreamLifecycle(aiId, messageId);
+                onDone: (_tid?: string, messageId?: number, meta?: Record<string, unknown>) => {
+                    finalizeStreamLifecycle(currentThreadKey, aiId!, {
+                        messageId,
+                        markUnread: shouldMarkThreadUnreadAfterDone(meta),
+                    });
                 },
                 onError: (message: string) => {
-                    setError(new Error(message));
+                    syncThreadUnreadState(currentThreadKey, false);
+                    suppressUnreadOnInactiveRef.current[currentThreadKey] = true;
+                    patchThreadRuntime(currentThreadKey, { error: new Error(message), isLoading: false });
                     toast.error("恢复失败", { description: message });
                 },
                 onInterrupt: (data: InterruptData) => {
-                    setInterrupt(data);
-                    setIsLoading(false);
-                    stopRef.current = null;
-                    isStreamingRef.current = false;
+                    syncThreadUnreadState(currentThreadKey, true);
+                    patchThreadRuntime(currentThreadKey, { interrupt: data, isLoading: false });
+                    stopByThreadRef.current[currentThreadKey] = null;
+                    isStreamingByThreadRef.current[currentThreadKey] = false;
                 },
             },
             50,
         );
 
-        stopRef.current = stopFn;
+        stopByThreadRef.current[currentThreadKey] = stopFn;
         promise.catch(() => undefined).finally(() => {
-            setIsLoading(false);
-            stopRef.current = null;
-            currentAiIdRef.current = null;
+            patchThreadRuntime(currentThreadKey, { isLoading: false });
+            stopByThreadRef.current[currentThreadKey] = null;
+            currentAiIdByThreadRef.current[currentThreadKey] = null;
+            isStreamingByThreadRef.current[currentThreadKey] = false;
         });
-    }, [threadId, interrupt, messages, appendToAiMessage, addToolCallToMessage, handleStructuredResultEvent, applyFinalAnswerToMessage, applyClarificationToMessage, completeStreamLifecycle]);
+    }, [threadId, interrupt, clearThreadUnread, patchThreadRuntime, updateThreadMessages, handleStructuredResultEvent, applyFinalAnswerToMessage, applyClarificationToMessage, finalizeStreamLifecycle, syncThreadUnreadState, updateThreadRuntime]);
 
     const values: StateType = { messages, ui: [] };
 

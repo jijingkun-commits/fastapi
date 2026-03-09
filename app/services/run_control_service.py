@@ -19,6 +19,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.models.chat_run import ChatRun, ChatRunStatus
+from app.models.user import User
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,36 @@ class RunPermissionDeniedError(RunControlError):
     """无权限取消 run。"""
 
 
+class ActiveRunExistsError(RunControlError):
+    """同线程已存在 active run。"""
+
+    def __init__(self, *, thread_id: str, active_run_id: str):
+        self.thread_id = thread_id
+        self.active_run_id = active_run_id
+        super().__init__(f"active_run_exists: thread_id={thread_id}, run_id={active_run_id}")
+
+
+class ParallelLimitExceededError(RunControlError):
+    """单用户 active run 超限。"""
+
+    def __init__(self, *, active_count: int, limit: int):
+        self.active_count = active_count
+        self.limit = limit
+        super().__init__(f"parallel_limit_exceeded: active_count={active_count}, limit={limit}")
+
+
+class RunThreadMismatchError(RunControlError):
+    """run 与 thread_id 不匹配。"""
+
+    def __init__(self, *, run_id: str, expected_thread_id: str, actual_thread_id: str):
+        self.run_id = run_id
+        self.expected_thread_id = expected_thread_id
+        self.actual_thread_id = actual_thread_id
+        super().__init__(
+            f"thread_id mismatch: run_id={run_id}, expected={expected_thread_id}, actual={actual_thread_id}"
+        )
+
+
 @dataclass
 class RunSnapshot:
     """运行态快照。"""
@@ -58,6 +89,7 @@ class RunSnapshot:
     completed_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    last_activity_at: Optional[datetime] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -83,6 +115,16 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 class RunControlService:
     """运行时取消控制服务。"""
 
@@ -92,15 +134,20 @@ class RunControlService:
         enable_override: Optional[bool] = None,
         stopped_event_override: Optional[bool] = None,
         orphan_timeout_seconds: int = 600,
+        parallel_limit: int = 3,
+        activity_throttle_seconds: int = 2,
     ):
         self.enable_override = enable_override
         self.stopped_event_override = stopped_event_override
         self.orphan_timeout_seconds = orphan_timeout_seconds
+        self.parallel_limit = parallel_limit
+        self.activity_throttle_seconds = activity_throttle_seconds
 
         self._lock = threading.RLock()
         self._runs: Dict[str, RunSnapshot] = {}
         self._active_run_by_thread: Dict[tuple[str, Optional[int]], str] = {}
         self._stopped_event_emitted: set[str] = set()
+        self._last_activity_flush_at: Dict[str, datetime] = {}
 
     def is_enabled(self) -> bool:
         """当前是否启用 run 控制。"""
@@ -115,6 +162,18 @@ class RunControlService:
         if self.stopped_event_override is not None:
             return bool(self.stopped_event_override)
         return _env_flag("ENABLE_SSE_STOPPED_EVENT", default=False)
+
+    def is_active_runs_query_enabled(self) -> bool:
+        return _env_flag("ENABLE_ACTIVE_RUNS_QUERY", default=True)
+
+    def is_parallel_gate_enabled(self) -> bool:
+        return _env_flag("ENABLE_PER_USER_PARALLEL_GATE", default=True)
+
+    def is_thread_id_match_check_enabled(self) -> bool:
+        return _env_flag("ENABLE_THREAD_ID_MATCH_CHECK", default=True)
+
+    def get_parallel_limit(self) -> int:
+        return max(1, min(_env_int("MAX_PARALLEL_STREAMS_PER_USER", self.parallel_limit), 10))
 
     def _thread_key(self, thread_id: str, user_id: Optional[int]) -> tuple[str, Optional[int]]:
         return thread_id, user_id
@@ -136,6 +195,37 @@ class RunControlService:
                     self._active_run_by_thread.pop(thread_key, None)
         return snapshot
 
+    def _snapshot_from_row(self, row: ChatRun) -> RunSnapshot:
+        return RunSnapshot(
+            run_id=row.run_id,
+            thread_id=row.thread_id,
+            user_id=row.user_id,
+            status=row.status,
+            cancel_reason=row.cancel_reason,
+            cancel_mode=row.cancel_mode,
+            cancel_requested_at=row.cancel_requested_at,
+            stopped_at=row.stopped_at,
+            completed_at=row.completed_at,
+            failed_at=row.failed_at,
+            error_message=row.error_message,
+            last_activity_at=row.last_activity_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def _effective_activity_time(self, snapshot: RunSnapshot) -> datetime:
+        return snapshot.last_activity_at or snapshot.updated_at or snapshot.created_at
+
+    def _active_run_sort_key(self, snapshot: RunSnapshot) -> tuple[bool, datetime, datetime, str]:
+        activity_time = self._effective_activity_time(snapshot)
+        updated_at = snapshot.updated_at or snapshot.created_at
+        return (
+            snapshot.last_activity_at is not None,
+            activity_time,
+            updated_at,
+            snapshot.run_id,
+        )
+
     def _load_from_db(self, db: Optional[Session], run_id: str) -> Optional[RunSnapshot]:
         if db is None:
             return None
@@ -149,21 +239,7 @@ class RunControlService:
         if row is None:
             return None
 
-        snapshot = RunSnapshot(
-            run_id=row.run_id,
-            thread_id=row.thread_id,
-            user_id=row.user_id,
-            status=row.status,
-            cancel_reason=row.cancel_reason,
-            cancel_mode=row.cancel_mode,
-            cancel_requested_at=row.cancel_requested_at,
-            stopped_at=row.stopped_at,
-            completed_at=row.completed_at,
-            failed_at=row.failed_at,
-            error_message=row.error_message,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        snapshot = self._snapshot_from_row(row)
         self._sync_memory(snapshot)
         return snapshot
 
@@ -192,6 +268,7 @@ class RunControlService:
             row.completed_at = snapshot.completed_at
             row.failed_at = snapshot.failed_at
             row.error_message = snapshot.error_message
+            row.last_activity_at = snapshot.last_activity_at
             row.updated_at = snapshot.updated_at
 
             db.flush()
@@ -210,13 +287,36 @@ class RunControlService:
                 return None
             return self._copy(snapshot)
 
+    def _settle_hard_cancel_snapshot(
+        self,
+        snapshot: Optional[RunSnapshot],
+        *,
+        db: Optional[Session] = None,
+    ) -> Optional[RunSnapshot]:
+        if snapshot is None:
+            return None
+        if snapshot.status != ChatRunStatus.STOPPING.value or snapshot.cancel_mode != "hard":
+            return snapshot
+
+        updated = self._update_snapshot(
+            snapshot,
+            status=ChatRunStatus.STOPPED.value,
+            cancel_reason=snapshot.cancel_reason or "user_cancelled",
+            cancel_mode=snapshot.cancel_mode,
+            mark_activity=False,
+        )
+        self._sync_memory(updated)
+        self._persist_to_db(db, updated)
+        return self._copy(updated)
+
     def get_run(self, run_id: str, db: Optional[Session] = None) -> Optional[RunSnapshot]:
         """获取 run 快照。"""
 
-        snapshot = self._get_memory_run(run_id)
-        if snapshot is not None:
-            return snapshot
-        return self._load_from_db(db, run_id)
+        if db is not None:
+            snapshot = self._load_from_db(db, run_id)
+            if snapshot is not None:
+                return self._settle_hard_cancel_snapshot(snapshot, db=db)
+        return self._settle_hard_cancel_snapshot(self._get_memory_run(run_id), db=db)
 
     def get_latest_run(
         self,
@@ -227,6 +327,21 @@ class RunControlService:
     ) -> Optional[RunSnapshot]:
         """按线程获取最近一次 run。"""
 
+        if db is not None:
+            try:
+                query = db.query(ChatRun).filter(ChatRun.thread_id == thread_id)
+                if user_id is not None:
+                    query = query.filter(ChatRun.user_id == user_id)
+                row = query.order_by(ChatRun.created_at.desc()).first()
+            except Exception as exc:
+                logger.debug("查询最近 run 失败: thread_id=%s, error=%s", thread_id, exc)
+            else:
+                if row is not None:
+                    snapshot = self._settle_hard_cancel_snapshot(self._snapshot_from_row(row), db=db)
+                    if snapshot is not None:
+                        self._sync_memory(snapshot)
+                    return snapshot
+
         with self._lock:
             candidates = [
                 self._copy(run)
@@ -236,39 +351,48 @@ class RunControlService:
 
         if candidates:
             return max(candidates, key=lambda item: item.created_at)
+        return None
+
+    def _lock_user_scope(self, *, user_id: Optional[int], db: Optional[Session]) -> None:
+        if db is None or user_id is None:
+            return
+        try:
+            db.query(User).filter(User.id == user_id).with_for_update().first()
+        except Exception as exc:
+            logger.debug("用户级互斥锁获取失败，继续走无锁查询: user_id=%s, error=%s", user_id, exc)
+
+    def list_active_runs_by_user(
+        self,
+        *,
+        user_id: int,
+        db: Optional[Session] = None,
+    ) -> list[RunSnapshot]:
+        """按用户直接查询 active runs。"""
 
         if db is None:
-            return None
+            with self._lock:
+                active_runs = [
+                    self._settle_hard_cancel_snapshot(self._copy(run), db=db)
+                    for run in self._runs.values()
+                    if run.user_id == user_id and run.status in ACTIVE_STATUSES
+                ]
+        else:
+            rows = (
+                db.query(ChatRun)
+                .filter(ChatRun.user_id == user_id, ChatRun.status.in_(tuple(ACTIVE_STATUSES)))
+                .all()
+            )
+            active_runs = [self._settle_hard_cancel_snapshot(self._snapshot_from_row(row), db=db) for row in rows]
+            for snapshot in active_runs:
+                if snapshot is not None:
+                    self._sync_memory(snapshot)
 
-        try:
-            query = db.query(ChatRun).filter(ChatRun.thread_id == thread_id)
-            if user_id is not None:
-                query = query.filter(ChatRun.user_id == user_id)
-            row = query.order_by(ChatRun.created_at.desc()).first()
-        except Exception as exc:
-            logger.debug("查询最近 run 失败: thread_id=%s, error=%s", thread_id, exc)
-            return None
-
-        if row is None:
-            return None
-
-        snapshot = RunSnapshot(
-            run_id=row.run_id,
-            thread_id=row.thread_id,
-            user_id=row.user_id,
-            status=row.status,
-            cancel_reason=row.cancel_reason,
-            cancel_mode=row.cancel_mode,
-            cancel_requested_at=row.cancel_requested_at,
-            stopped_at=row.stopped_at,
-            completed_at=row.completed_at,
-            failed_at=row.failed_at,
-            error_message=row.error_message,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+        active_runs = [snapshot for snapshot in active_runs if snapshot is not None and snapshot.status in ACTIVE_STATUSES]
+        active_runs.sort(
+            key=self._active_run_sort_key,
+            reverse=True,
         )
-        self._sync_memory(snapshot)
-        return snapshot
+        return active_runs
 
     def get_active_run(
         self,
@@ -277,7 +401,23 @@ class RunControlService:
         user_id: Optional[int] = None,
         db: Optional[Session] = None,
     ) -> Optional[RunSnapshot]:
-        """按线程获取 active_run（running/stopping）。"""
+        """按线程获取 active run（running/stopping）。"""
+
+        if db is not None:
+            try:
+                query = db.query(ChatRun).filter(ChatRun.thread_id == thread_id, ChatRun.status.in_(tuple(ACTIVE_STATUSES)))
+                if user_id is not None:
+                    query = query.filter(ChatRun.user_id == user_id)
+                row = query.order_by(ChatRun.updated_at.desc(), ChatRun.run_id.desc()).first()
+            except Exception as exc:
+                logger.debug("查询 active run 失败，回退内存态: thread_id=%s, error=%s", thread_id, exc)
+            else:
+                if row is not None:
+                    snapshot = self._settle_hard_cancel_snapshot(self._snapshot_from_row(row), db=db)
+                    if snapshot is not None:
+                        self._sync_memory(snapshot)
+                    if snapshot is not None and snapshot.status in ACTIVE_STATUSES:
+                        return snapshot
 
         with self._lock:
             run_id = self._active_run_by_thread.get(self._thread_key(thread_id, user_id))
@@ -300,20 +440,36 @@ class RunControlService:
         run_id: Optional[str] = None,
         db: Optional[Session] = None,
     ) -> RunSnapshot:
-        """创建并注册 run；同线程旧 active_run 会被清理为 orphan。"""
+        """创建并注册 run；同线程 active 冲突与并发上限在此阻断。"""
 
         resolved_run_id = run_id or self._new_run_id()
         now = datetime.now()
 
+        self._lock_user_scope(user_id=user_id, db=db)
+
         active_run = self.get_active_run(thread_id=thread_id, user_id=user_id, db=db)
-        if active_run and active_run.run_id != resolved_run_id:
-            self.cleanup_orphan(active_run.run_id, db=db, reason="orphan_replaced")
+        if active_run is not None:
+            if active_run.run_id == resolved_run_id:
+                return active_run
+            raise ActiveRunExistsError(thread_id=thread_id, active_run_id=active_run.run_id)
+
+        if self.is_parallel_gate_enabled() and user_id is not None:
+            active_runs = self.list_active_runs_by_user(user_id=user_id, db=db)
+            active_count = len(active_runs)
+            limit = self.get_parallel_limit()
+            if active_count >= limit:
+                raise ParallelLimitExceededError(active_count=active_count, limit=limit)
+
+        existing = self.get_run(resolved_run_id, db=db)
+        if existing and existing.status in ACTIVE_STATUSES and existing.thread_id == thread_id and existing.user_id == user_id:
+            return existing
 
         snapshot = RunSnapshot(
             run_id=resolved_run_id,
             thread_id=thread_id,
             user_id=user_id,
             status=ChatRunStatus.RUNNING.value,
+            last_activity_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -322,6 +478,7 @@ class RunControlService:
 
         with self._lock:
             self._stopped_event_emitted.discard(resolved_run_id)
+            self._last_activity_flush_at[resolved_run_id] = now
 
         return self._copy(snapshot)
 
@@ -333,6 +490,7 @@ class RunControlService:
         cancel_reason: Optional[str] = None,
         cancel_mode: Optional[str] = None,
         error_message: Optional[str] = None,
+        mark_activity: bool = True,
     ) -> RunSnapshot:
         now = datetime.now()
         updated = replace(snapshot)
@@ -346,6 +504,8 @@ class RunControlService:
             updated.cancel_mode = cancel_mode
         if error_message is not None:
             updated.error_message = error_message
+        if mark_activity:
+            updated.last_activity_at = now
 
         if status == ChatRunStatus.STOPPING.value:
             updated.cancel_requested_at = now
@@ -366,6 +526,7 @@ class RunControlService:
         is_admin: bool = False,
         reason: str = "user_cancelled",
         cancel_mode: str = "soft",
+        thread_id: Optional[str] = None,
         db: Optional[Session] = None,
     ) -> CancelRunResult:
         """取消 run（幂等）。"""
@@ -391,17 +552,33 @@ class RunControlService:
         ):
             raise RunPermissionDeniedError(f"无权限取消 run: {run_id}")
 
+        if thread_id and snapshot.thread_id != thread_id:
+            raise RunThreadMismatchError(
+                run_id=run_id,
+                expected_thread_id=snapshot.thread_id,
+                actual_thread_id=thread_id,
+            )
+
         idempotent = False
         if snapshot.status == ChatRunStatus.RUNNING.value:
+            target_status = ChatRunStatus.STOPPED.value if cancel_mode == "hard" else ChatRunStatus.STOPPING.value
             snapshot = self._update_snapshot(
                 snapshot,
-                status=ChatRunStatus.STOPPING.value,
+                status=target_status,
                 cancel_reason=reason,
                 cancel_mode=cancel_mode,
             )
         else:
             idempotent = True
-            if not snapshot.cancel_reason and reason:
+            if snapshot.status == ChatRunStatus.STOPPING.value and cancel_mode == "hard":
+                snapshot = self._update_snapshot(
+                    snapshot,
+                    status=ChatRunStatus.STOPPED.value,
+                    cancel_reason=snapshot.cancel_reason or reason,
+                    cancel_mode=cancel_mode,
+                    mark_activity=False,
+                )
+            elif not snapshot.cancel_reason and reason:
                 snapshot = self._update_snapshot(snapshot, cancel_reason=reason, cancel_mode=cancel_mode)
 
         self._sync_memory(snapshot)
@@ -415,6 +592,38 @@ class RunControlService:
             idempotent=idempotent,
             reason=snapshot.cancel_reason,
         )
+
+    def mark_activity(
+        self,
+        run_id: Optional[str],
+        *,
+        db: Optional[Session] = None,
+        force: bool = False,
+        now: Optional[datetime] = None,
+    ) -> Optional[RunSnapshot]:
+        """记录 run 最近活动时间。"""
+
+        if not run_id:
+            return None
+
+        snapshot = self.get_run(run_id, db=db)
+        if snapshot is None:
+            return None
+
+        current = now or datetime.now()
+        with self._lock:
+            last_flush = self._last_activity_flush_at.get(run_id)
+        if not force and last_flush is not None and (current - last_flush).total_seconds() < self.activity_throttle_seconds:
+            return snapshot
+
+        updated = replace(snapshot)
+        updated.last_activity_at = current
+        updated.updated_at = current
+        self._sync_memory(updated)
+        self._persist_to_db(db, updated)
+        with self._lock:
+            self._last_activity_flush_at[run_id] = current
+        return self._copy(updated)
 
     def is_cancelled(self, run_id: Optional[str], db: Optional[Session] = None) -> bool:
         """是否处于取消态（stopping/stopped）。"""
@@ -586,6 +795,7 @@ class RunControlService:
             return
         with self._lock:
             self._stopped_event_emitted.discard(run_id)
+            self._last_activity_flush_at.pop(run_id, None)
 
     def reset(self) -> None:
         """重置内存态（测试辅助）。"""
@@ -594,6 +804,7 @@ class RunControlService:
             self._runs.clear()
             self._active_run_by_thread.clear()
             self._stopped_event_emitted.clear()
+            self._last_activity_flush_at.clear()
 
 
 run_control_service = RunControlService()

@@ -893,6 +893,19 @@ class ChatService:
         cancel_after_token_count = 0
         client_disconnected = False
         result_sequence_number = 0
+        visible_activity_recorded = False
+
+        def _mark_run_activity(*, force: bool) -> None:
+            if not run_control_enabled or not resolved_run_id:
+                return
+            with get_db_context() as db:
+                run_control_service.mark_activity(resolved_run_id, db=db, force=force)
+
+        def _record_visible_activity(*, force: bool) -> None:
+            nonlocal visible_activity_recorded
+            effective_force = force or not visible_activity_recorded
+            visible_activity_recorded = True
+            _mark_run_activity(force=effective_force)
 
         def _clear_cancelled_task_state() -> None:
             task = asyncio.current_task()
@@ -1020,6 +1033,7 @@ class ChatService:
                         content = event_data.get("content", "")
                         if content:
                             full_answer.append(content)
+                            _record_visible_activity(force=False)
                             if not client_disconnected:
                                 try:
                                     yield self._format_sse("token", {"content": content, "node": chunk.get("node", "")})
@@ -1032,6 +1046,8 @@ class ChatService:
                             thinking_content = thinking_text
                         else:
                             thinking_content += thinking_text
+                        if thinking_text:
+                            _record_visible_activity(force=False)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("thinking", {"content": thinking_text, "node": chunk.get("node", "")})
@@ -1045,6 +1061,7 @@ class ChatService:
                             full_answer.clear()
                             full_answer.append(content)
                         final_meta = _normalize_final_answer_meta(event_data.get("meta", {}))
+                        _record_visible_activity(force=True)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse(
@@ -1095,6 +1112,7 @@ class ChatService:
                             result_sequence_number,
                             result_payload.get("envelope"),
                         )
+                        _record_visible_activity(force=True)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("result", result_payload)
@@ -1109,6 +1127,7 @@ class ChatService:
                         if plan_payload is None:
                             continue
 
+                        _record_visible_activity(force=False)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("plan_ready", plan_payload)
@@ -1120,6 +1139,7 @@ class ChatService:
                             event_data,
                             node=chunk.get("node", ""),
                         )
+                        _record_visible_activity(force=False)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("coverage_check", coverage_payload)
@@ -1127,6 +1147,7 @@ class ChatService:
                                 _mark_client_disconnected("coverage_check")
 
                     elif event_type in ("status", "clarification", "confirmation", "tool_start", "tool_end", "handoff"):
+                        _record_visible_activity(force=False)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse(event_type, event_data)
@@ -1203,6 +1224,7 @@ class ChatService:
                                 thread_id=thread_id,
                                 interrupt_id=str(id(interrupt)),
                             )
+                            _record_visible_activity(force=True)
                             if not client_disconnected:
                                 try:
                                     yield self._format_sse("interrupt", interrupt_payload)
@@ -1620,6 +1642,19 @@ async def sse_resume_stream(
     cancel_after_token_count = 0
     cancel_reason = "user_cancelled"
     result_sequence_number = 0
+    visible_activity_recorded = False
+
+    def _mark_run_activity(*, force: bool) -> None:
+        if not resolved_run_id or not run_control_service.is_enabled():
+            return
+        with get_db_context() as db:
+            run_control_service.mark_activity(resolved_run_id, db=db, force=force)
+
+    def _record_visible_activity(*, force: bool) -> None:
+        nonlocal visible_activity_recorded
+        effective_force = force or not visible_activity_recorded
+        visible_activity_recorded = True
+        _mark_run_activity(force=effective_force)
 
     svc = ChatService()
     format_sse = svc._format_sse
@@ -1722,9 +1757,12 @@ async def sse_resume_stream(
                     content = event_data.get("content", "")
                     if content:
                         full_answer.append(content)
+                        _record_visible_activity(force=False)
                         yield format_sse("token", {"content": content, "node": chunk.get("node", "")})
 
                 elif event_type == "thinking":
+                    if event_data.get("content", ""):
+                        _record_visible_activity(force=False)
                     yield format_sse("thinking", {"content": event_data.get("content", ""), "node": chunk.get("node", "")})
 
                 elif event_type == "final_answer":
@@ -1734,6 +1772,7 @@ async def sse_resume_stream(
                         full_answer.clear()
                         full_answer.append(content)
                     final_meta = _normalize_final_answer_meta(event_data.get("meta", {}))
+                    _record_visible_activity(force=True)
                     yield format_sse(
                         "final_answer",
                         {
@@ -1776,6 +1815,7 @@ async def sse_resume_stream(
                         result_sequence_number,
                         result_payload.get("envelope"),
                     )
+                    _record_visible_activity(force=True)
                     yield format_sse("result", result_payload)
 
                 elif event_type == "plan_ready":
@@ -1786,6 +1826,7 @@ async def sse_resume_stream(
                     if plan_payload is None:
                         continue
 
+                    _record_visible_activity(force=False)
                     yield format_sse("plan_ready", plan_payload)
 
                 elif event_type == "coverage_check":
@@ -1793,9 +1834,11 @@ async def sse_resume_stream(
                         event_data,
                         node=chunk.get("node", ""),
                     )
+                    _record_visible_activity(force=False)
                     yield format_sse("coverage_check", coverage_payload)
 
                 elif event_type in ("status", "clarification", "confirmation"):
+                    _record_visible_activity(force=False)
                     yield format_sse(event_type, event_data)
 
                 else:
@@ -1835,6 +1878,7 @@ async def sse_resume_stream(
                             thread_id=thread_id,
                             interrupt_id=str(id(interrupt)),
                         )
+                        _record_visible_activity(force=True)
                         yield format_sse("interrupt", interrupt_payload)
                     return
 

@@ -16,6 +16,7 @@ import {
   SetStateAction,
 } from "react";
 import {
+  ActiveRunItem,
   ConversationThread,
   apiFetch,
 } from "@/lib/backend";
@@ -29,6 +30,9 @@ export interface Thread {
   created_at?: string;
   updated_at?: string;
 }
+
+export type ActiveRunMap = Record<string, ActiveRunItem>;
+export type ThreadUnreadReplyMap = Record<string, true>;
 
 interface ThreadContextType {
   /** 获取对话列表 */
@@ -47,6 +51,16 @@ interface ThreadContextType {
   updateThreadTitle: (threadId: string, title: string) => Promise<void>;
   /** 刷新对话列表 */
   refreshThreads: () => Promise<void>;
+  /** 本地插入或前置线程（用于新线程 init 后立即显示） */
+  upsertThread: (thread: Thread) => void;
+  /** 当前活跃运行快照 */
+  activeRuns: ActiveRunMap;
+  /** 设置当前活跃运行快照 */
+  setActiveRuns: Dispatch<SetStateAction<ActiveRunMap>>;
+  /** 当前页面内未读回复的线程 */
+  unreadReplies: ThreadUnreadReplyMap;
+  /** 设置当前页面内未读回复的线程 */
+  setUnreadReplies: Dispatch<SetStateAction<ThreadUnreadReplyMap>>;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -54,6 +68,8 @@ const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
+  const [activeRuns, setActiveRuns] = useState<ActiveRunMap>({});
+  const [unreadReplies, setUnreadReplies] = useState<ThreadUnreadReplyMap>({});
 
   /**
    * 获取对话列表
@@ -66,7 +82,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         return [];
       }
       const data: ConversationThread[] = await r.json();
-      // 转换为 Thread 类型
       return data.map((t) => ({
         thread_id: t.thread_id,
         title: t.title,
@@ -93,6 +108,25 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   }, [getThreads]);
 
   /**
+   * 本地插入或更新线程，用于新线程 init 后立即反映到侧边栏。
+   */
+  const upsertThread = useCallback((thread: Thread) => {
+    setThreads((prev) => {
+      const title = thread.title?.trim() || "新对话";
+      const existing = prev.find((item) => item.thread_id === thread.thread_id);
+      const nextThread: Thread = {
+        ...existing,
+        ...thread,
+        title,
+        created_at: thread.created_at ?? existing?.created_at,
+        updated_at: thread.updated_at ?? existing?.updated_at ?? new Date().toISOString(),
+      };
+      const next = [nextThread, ...prev.filter((item) => item.thread_id !== thread.thread_id)];
+      return next.slice(0, 50);
+    });
+  }, []);
+
+  /**
    * 删除对话
    */
   const deleteThread = useCallback(
@@ -103,8 +137,18 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       if (!r.ok) {
         throw new Error("删除对话失败");
       }
-      // 更新本地状态
       setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+      setActiveRuns((prev) => {
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
+      setUnreadReplies((prev) => {
+        if (!(threadId in prev)) return prev;
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
     },
     []
   );
@@ -122,7 +166,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       if (!r.ok) {
         throw new Error("更新标题失败");
       }
-      // 更新本地状态
       setThreads((prev) =>
         prev.map((t) => (t.thread_id === threadId ? { ...t, title } : t))
       );
@@ -139,6 +182,11 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     deleteThread,
     updateThreadTitle,
     refreshThreads,
+    upsertThread,
+    activeRuns,
+    setActiveRuns,
+    unreadReplies,
+    setUnreadReplies,
   };
 
   return (

@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -57,8 +57,10 @@ class ChatRun(Base):
         nullable=False,
         comment="更新时间",
     )
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="最近活动时间")
 
     __table_args__ = (
         Index("idx_chat_run_thread_status", "thread_id", "status"),
         Index("idx_chat_run_user_created", "user_id", "created_at"),
+        Index("idx_chat_run_user_status_updated", "user_id", "status", text("updated_at DESC")),
     )

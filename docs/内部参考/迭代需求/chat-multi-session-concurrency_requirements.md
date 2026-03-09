@@ -1,6 +1,6 @@
 # chat-multi-session-concurrency 需求文档
 
-> 更新时间：2026-03-08 13:40 +08:00  
+> 更新时间：2026-03-09 00:35 +08:00  
 > 上游设计：`docs/plans/2026-03-06-chat-multi-session-concurrency-design.md`  
 > 文档目标：定义 WHAT（需求合同、验收门禁、追溯矩阵），供 `chat-multi-session-concurrency_implementation_plan.md` 承接
 
@@ -11,8 +11,9 @@
 - 将聊天运行态从“全局单实例流”收敛为“按 `thread_id` 隔离的多会话并发运行态”。
 - 固定停止语义为“用户取消目标 run”，确保跨会话不误停。
 - 通过 `/chat/runs/active` 恢复刷新后的运行态，并在页面停留期间自动同步活跃会话状态。
+- 侧边栏左侧以注意力状态表达会话变化：active run 显示旋转小圆圈；后台线程产生未读新回复时显示蓝点；已读且不在运行时不显示任何圆圈；未读状态仅保留当前页面会话，不跨刷新持久化。
 - 将跨 worker 一致性真理源固定为 `t_chat_run`，不再依赖前端内存态或 worker 内存快照。
-- 固定 P0 查询/索引口径：`user_id + active statuses` 直查 `t_chat_run`，服务层按 `coalesce(last_activity_at, updated_at)` 排序。
+- 固定 P0 查询/索引口径：`user_id + active statuses` 直查 `t_chat_run`，服务层按 `last_activity_at 非空优先 -> effective_activity_time -> updated_at -> run_id` 排序。
 
 ### 1.2 范围
 
@@ -20,7 +21,7 @@
 - 前端交互与历史列表：`web/src/lib/backend.ts`、`web/src/components/chat/history/index.tsx`
 - 后端 API / Service：`app/api/v1/endpoints/chat_api.py`、`app/services/run_control_service.py`
 - 运行态模型与迁移：`app/models/chat_run.py`、`alembic/versions/*_add_last_activity_at_and_active_index_to_chat_run.py`
-- 自动化验证：`tests/api/test_chat_api.py`、`tests/unit/test_run_control_service.py`、`web/e2e/chat-multi-session-concurrency.spec.ts`
+- 自动化验证：`tests/api/test_chat_api.py`、`tests/unit/test_run_control_service.py`、`web/e2e/chat-multi-session-concurrency.spec.cjs`
 
 ### 1.3 非范围
 
@@ -55,7 +56,7 @@ requirements_contract:
     replay_canonical_field_set: true
   owner: "chat-runtime"
   approver: "jijingkun"
-  updated_at: "2026-03-08 13:40 +08:00"
+  updated_at: "2026-03-09 00:35 +08:00"
 ```
 
 ## 3. product_contract_matrix（PRD-Lite 承接）
@@ -126,8 +127,8 @@ fr_contract_matrix:
     business_goal_refs:
       - 刷新恢复时延P95<1s
       - 停留同步延迟P95<3s
-    user_value: 刷新后仍能看到当前用户全部 active run，并在页面停留期间自动同步状态
-    trigger: 页面冷启动，或 active_count>0 时周期轮询 `/chat/runs/active`
+    user_value: 刷新后仍能看到当前用户全部 active run，并在页面停留期间自动同步状态；侧边栏左侧状态列区分 `running/unread/none`，其中 `running` 显示旋转小圆圈，`unread` 显示蓝点，进入线程后清除未读标记；新线程在服务端返回 `thread_id` 后必须立即出现在历史栏
+    trigger: 页面冷启动，或 active_count>0 / 本地仍有 streaming 线程时周期轮询 `/chat/runs/active`
     input_contract:
       required_fields: [jwt_token]
       optional_fields: [poll_interval_seconds]
@@ -146,7 +147,7 @@ fr_contract_matrix:
     business_goal_refs:
       - 跨会话误停率=0
       - 停留同步延迟P95<3s
-    user_value: 用户的停止动作只能命中目标 run，且前端能立即得到最新状态回写
+    user_value: 用户的停止动作只能命中目标 run，且前端能立即得到最新状态回写；`hard cancel` 被接受后当前线程应立即退出运行态展示
     trigger: 用户点击 stop，客户端携带 `run_id + thread_id` 请求 cancel
     input_contract:
       required_fields: [run_id, thread_id]
@@ -154,9 +155,9 @@ fr_contract_matrix:
       source_of_truth: app/api/v1/endpoints/chat_api.py
     output_contract:
       required_fields: [accepted, idempotent, run_id, thread_id, status]
-      optional_fields: []
+      optional_fields: [reason]
       consumer: web/src/lib/backend.ts
-    failure_semantics: 固定仅允许 400/403/404；terminal/stopping 视为幂等成功，不返回 409
+    failure_semantics: 400 仅用于 thread_id_required/thread_id_mismatch；403/404 分别表示无权限与 run 不存在；terminal/stopping 视为幂等成功，不返回 409；`hard cancel` 成功返回的最新状态固定收口为 `stopped`
     observability_fields: [user_id, run_id, thread_id, status, cancel_reason, cancel_mode]
     rollback_anchor: ENABLE_THREAD_ID_MATCH_CHECK=true
     owner: backend-chat
@@ -227,7 +228,7 @@ fr_contract_matrix:
 ```yaml
 nfr_contract_matrix:
   - nfr_id: NFR-01
-    requirement: `/chat/runs/active` 成功轮询间隔固定为 2s；失败退避仅允许 5s 或 10s
+    requirement: `/chat/runs/active` 成功轮询间隔固定为 2s；失败退避仅允许 5s 或 10s；active 接口短暂空窗时若本地仍在 streaming，不得清除 running 指示
     owner: backend-chat
   - nfr_id: NFR-02
     requirement: stale hint 阈值固定为 60s；低于阈值不得展示黄灯提示
@@ -255,7 +256,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-01
     tc_id: MSC-CL-001
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/providers/__tests__/StreamContext.multi-session.test.tsx
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-001
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-001
@@ -263,7 +264,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-02
     tc_id: MSC-CL-008
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.active-runs-polling.test.ts
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-008
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-003
@@ -271,7 +272,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-03
     tc_id: MSC-CL-006
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/lib/__tests__/backend.cancel-run.test.ts
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-002
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-002
@@ -279,7 +280,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-04
     tc_id: MSC-CL-003
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs_contract -q
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-004
@@ -287,7 +288,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-05
     tc_id: MSC-CL-005
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k run_control_active_query_gate -q
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-002
@@ -295,7 +296,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-06
     tc_id: MSC-CL-009
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort -q
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-003
@@ -303,7 +304,7 @@ traceability_matrix:
     feature_id: F3-backend-test-closure
     task_id: T-07
     tc_id: MSC-CL-004
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k multi_session_contract_matrix -q
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-001
@@ -311,6 +312,6 @@ traceability_matrix:
     feature_id: F4-frontend-e2e
     task_id: T-08
     tc_id: MSC-CL-001
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.ts
+    acceptance_cmd_ref: cd /Users/jijingkun/.codex/worktrees/2848/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 ```

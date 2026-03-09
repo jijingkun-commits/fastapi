@@ -1,5 +1,10 @@
 # 聊天多会话并发（方案 B v2）重分析设计说明
 
+## 0. 文档状态
+- 本稿为 `2026-03-04` 的历史重分析记录。
+- 当前冻结真理源已收敛到 `docs/plans/2026-03-06-chat-multi-session-concurrency-design.md`。
+- 若与当前实现冲突，以 `2026-03-06` 冻结稿、API 文档与验证报告为准。
+
 ## 1. 需求澄清结论
 - 目标:
   - 在同一页面支持同一用户并行运行多个会话（不同 `thread_id` 的 run 可同时执行）。
@@ -37,7 +42,7 @@
 - 输出契约（字段级）：`/chat/runs/active` 返回字段与排序语义见 3.3.1、3.3.2。
 - 异常语义与降级策略：`400/403/404/409/429/503` 口径与前端提示见 3.3.3、3.4、3.5。
 - NFR 数字阈值：功能、性能、稳定性、恢复目标见 5。
-- 可观测性字段：`run_state_mismatch/cancel_without_thread_id/active_count` 指标与日志见 3.3.3、3.5.4。
+- 可观测性字段：`run_state_mismatch/cancel_stop_settle_lag/active_count` 指标与日志见 3.3.3、3.5.4。
 - 验证命令草案：最小验收命令见 7.1。
 - 回退锚点（默认开关 `true`）：`ENABLE_CHAT_MULTI_SESSION_CONCURRENCY` 等开关见 6。
 - 风险与反例（>=3）：并发竞争、内存泄漏、多 worker 一致性、跨会话误停、长时间无响应见 6.5。
@@ -144,7 +149,7 @@ interface RuntimeBucket {
   - `reason`：optional，默认 `user_cancelled`。
   - `cancel_mode`：optional，默认 `hard`。
 
-#### 3.4.2 后端校验逻辑（双重防护）
+#### 3.4.2 后端校验逻辑（按当前冻结稿收敛）
 `POST /api/v1/chat/runs/{run_id}/cancel` 执行前必须通过以下校验：
 
 1. **用户权限校验**（第一道防线）：
@@ -152,23 +157,24 @@ interface RuntimeBucket {
    - 不匹配则返回 `403 Forbidden`。
 
 2. **会话归属校验**（第二道防线）：
-   - 当请求携带 `thread_id` 时，验证 `run.thread_id == request.thread_id`。
-   - 不匹配则返回 `400 Bad Request: thread_id mismatch`。
-   - 未携带 `thread_id` 时按兼容模式处理：执行用户权限校验后继续，但记录 `cancel_without_thread_id` 指标。
+   - 请求体中的 `thread_id` 为 required。
+   - 验证 `run.thread_id == request.thread_id`。
+   - 缺失返回 `400 thread_id_required`；不匹配返回 `400 thread_id_mismatch`。
 
 3. **状态校验**：
-   - `running`：转为 `stopping`，返回 `accepted=true`。
-   - `stopping/stopped/completed/failed`：保持幂等返回（`accepted=true, idempotent=true`），不返回 `409`，与现有语义一致。
+   - 当前实现固定走 `cancel_mode=hard`。
+   - `running`：直接收口为 `stopped`，返回 `accepted=true, idempotent=false`。
+   - `stopping/stopped/completed/failed`：保持幂等返回（`accepted=true, idempotent=true`），不返回 `409`。
 
 #### 3.4.3 取消失败降级策略
-- 重试 1 次（间隔 500ms）。
-- 失败后前端 toast 提示："停止失败，请刷新页面后重试"。
+- 取消请求失败时前端 toast 提示："停止失败，任务可能仍在后台执行"。
+- 成功响应后前端立即退出当前线程本地运行态；若服务端仍返回 `stopping`，侧边栏也不得继续显示 spinner。
 - 后端记录错误日志（包含 `run_id/thread_id/user_id/error`）。
 
-#### 3.4.4 兼容迁移策略
-- 本轮保持“缺失 `thread_id` 可兼容、传入则强校验”的语义，不中断旧客户端。
-- `ENABLE_THREAD_ID_MATCH_CHECK=true`（默认开启）仅控制“传入 `thread_id` 时是否执行归属校验”。
-- 通过 `cancel_without_thread_id` 指标持续观测旧客户端占比，后续再评估是否升级为“缺失即 400”。
+#### 3.4.4 迁移口径（已冻结）
+- `thread_id` 缺失兼容语义已废弃，不再作为当前设计目标。
+- stop 的当前真理源语义为：`hard cancel -> stopped -> active list 移除 -> 并发槽可复用`。
+- `thread_id_required` 已冻结为当前必填契约，不再保留旧客户端兼容观测项。
 
 ### 3.5 并发上限与资源门禁
 
@@ -303,7 +309,7 @@ def create_run(self, user_id: int, thread_id: str, db: Session) -> ChatRun:
 | MSC-RA-009 | 跨会话停止隔离 | 尝试用会话 A 的 thread_id 停止会话 B 的 run_id | 后端单测（安全校验） |
 | MSC-RA-010 | 并发竞争门禁 | 两个标签页同时提交第 3 和第 4 个会话 | 后端集成测试（行锁） |
 | MSC-RA-011 | 多 worker 活跃列表一致性 | 任意 worker 返回的 active 列表一致且不漏 run | 后端集成测试（多进程） |
-| MSC-RA-012 | 缺失 thread_id 兼容观测 | 兼容模式可取消且记录 `cancel_without_thread_id` 指标 | API 测试 + 指标断言 |
+| MSC-RA-012 | hard cancel 收口 | cancel 成功后直接 `stopped`，不会长驻 `stopping` | API + 真实链路回归 |
 
 ### 7.1 最小验收命令草案
 - 后端单测：`pytest tests/unit/test_run_control_service.py -k "active_run or parallel or conflict"`
@@ -381,7 +387,7 @@ def create_run(self, user_id: int, thread_id: str, db: Session) -> ChatRun:
 - [ ] 添加开关 `ENABLE_PER_USER_PARALLEL_GATE`（默认 `true`）
 - [ ] 添加开关 `ENABLE_THREAD_ID_MATCH_CHECK`（默认 `true`）
 - [ ] 记录并发拒绝事件日志
-- [ ] 记录 `run_state_mismatch` 与 `cancel_without_thread_id` 指标
+- [ ] 记录 `run_state_mismatch` 与 `cancel_stop_settle_lag` 指标
 
 ### 12.3 测试覆盖（tests/ + web/e2e/）
 - [ ] MSC-RA-001: A/B 会话并发提交
@@ -395,7 +401,7 @@ def create_run(self, user_id: int, thread_id: str, db: Session) -> ChatRun:
 - [ ] MSC-RA-009: 跨会话停止隔离（安全校验）
 - [ ] MSC-RA-010: 并发竞争门禁（行锁）
 - [ ] MSC-RA-011: 多 worker 活跃列表一致性
-- [ ] MSC-RA-012: 缺失 `thread_id` 兼容观测
+- [ ] MSC-RA-012: hard cancel 收口与真实链路 stop 验证
 
 ### 12.4 文档同步
 - [ ] 更新 `docs/产品文档/聊天系统需求.md`（多会话并发能力）

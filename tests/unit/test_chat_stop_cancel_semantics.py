@@ -31,7 +31,7 @@ def test_cancel_run_returns_disabled_result_when_run_control_off() -> None:
     assert result.thread_id == ""
 
 
-def test_cancel_run_marks_running_to_stopping_with_hard_mode() -> None:
+def test_cancel_run_marks_running_to_stopped_with_hard_mode() -> None:
     svc = _build_service(enabled=True)
     created = svc.create_run(thread_id="thread-strong-stop", user_id=9)
 
@@ -45,8 +45,25 @@ def test_cancel_run_marks_running_to_stopping_with_hard_mode() -> None:
 
     assert result.accepted is True
     assert result.idempotent is False
-    assert result.status == ChatRunStatus.STOPPING.value
+    assert result.status == ChatRunStatus.STOPPED.value
     assert result.reason == "user_cancelled"
     assert snapshot is not None
+    assert snapshot.status == ChatRunStatus.STOPPED.value
     assert snapshot.cancel_mode == "hard"
     assert snapshot.cancel_reason == "user_cancelled"
+
+
+
+def test_hard_cancelled_run_drops_from_active_runs() -> None:
+    svc = _build_service(enabled=True)
+    created = svc.create_run(thread_id="thread-strong-stop-active", user_id=9)
+
+    svc.cancel_run(
+        run_id=created.run_id,
+        requester_user_id=9,
+        reason="user_cancelled",
+        cancel_mode="hard",
+    )
+
+    active_runs = svc.list_active_runs_by_user(user_id=9)
+    assert all(run.run_id != created.run_id for run in active_runs)
