@@ -7,7 +7,10 @@ import logging
 import re
 from typing import Any
 
-from app.ai.prompts.agent_prompts import MEMORY_INTENT_DECISION_PROMPT
+from app.ai.prompts.agent_prompts import (
+    MEMORY_INTENT_DECISION_PROMPT,
+    MEMORY_REFERENCE_RESOLUTION_PROMPT,
+)
 from app.services.memory_sensitive_guard_service import MemorySensitiveGuardService
 
 
@@ -29,16 +32,6 @@ _TEMPLATE_PATTERNS = (
     "我会记住你",
     "我已经记住",
 )
-_MEMORY_REQUIRED_FIELDS = (
-    "memory_kind",
-    "operation",
-    "slot_key",
-    "normalized_value",
-    "canonical_text",
-    "evidence_span",
-)
-
-
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -201,6 +194,63 @@ def _build_prompt(*, user_text: str, context: dict[str, Any] | None = None) -> s
     )
 
 
+def _build_reference_resolution_prompt(*, user_text: str, context: dict[str, Any] | None = None) -> str:
+    return MEMORY_REFERENCE_RESOLUTION_PROMPT.format(
+        user_text=str(user_text or "").strip(),
+        context_json=json.dumps(context or {}, ensure_ascii=False),
+    )
+
+
+def _invoke_contract_prompt(
+    *,
+    llm: Any,
+    prompt: str,
+    user_text: str,
+    confidence_threshold: float = 0.85,
+) -> dict[str, Any]:
+    normalized_user_text = str(user_text or "").strip()
+    if not normalized_user_text:
+        return _build_reject_decision("contract_missing_required")
+
+    threshold = _clamp_confidence(confidence_threshold, default=0.85)
+
+    try:
+        raw_output = llm.invoke(prompt)
+    except Exception as exc:
+        logger.warning("memory_intent_decide_llm_invoke_failed: %s", exc)
+        return _build_reject_decision("llm_invoke_failed")
+
+    try:
+        payload = _coerce_contract_payload(raw_output)
+    except Exception as exc:
+        logger.warning("memory_intent_decide_parse_failed: %s", exc)
+        return _build_reject_decision("contract_parse_failed")
+
+    decision = _normalize_decision_contract(
+        payload,
+        user_text=normalized_user_text,
+        confidence_threshold=threshold,
+    )
+    decision = apply_reverse_intent(decision)
+    decision = apply_sensitive_guard(decision, user_text=normalized_user_text)
+    return decision
+
+
+def _collect_reference_candidate_slot_keys(context: dict[str, Any] | None) -> set[str]:
+    slot_keys: set[str] = set()
+    for key in ("recent_memory_reference_candidates", "active_preference_candidates", "archived_preference_candidates", "recent_archived_preference_candidates"):
+        raw_candidates = (context or {}).get(key)
+        if not isinstance(raw_candidates, list):
+            continue
+        for item in raw_candidates:
+            if not isinstance(item, dict):
+                continue
+            slot_key = str(item.get("slot_key") or "").strip().lower()
+            if slot_key:
+                slot_keys.add(slot_key)
+    return slot_keys
+
+
 def _normalize_memory_item(
     item: dict[str, Any],
     *,
@@ -209,7 +259,14 @@ def _normalize_memory_item(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     normalized: dict[str, Any] = {}
 
-    for field in _MEMORY_REQUIRED_FIELDS:
+    required_fields = (
+        "memory_kind",
+        "operation",
+        "slot_key",
+        "canonical_text",
+        "evidence_span",
+    )
+    for field in required_fields:
         value = item.get(field)
         if value is None:
             return None, {
@@ -230,9 +287,18 @@ def _normalize_memory_item(
     memory_kind = str(normalized["memory_kind"]).strip().lower()
     operation = str(normalized["operation"]).strip().lower()
     slot_key = str(normalized["slot_key"]).strip().lower()
-    normalized_value = str(normalized["normalized_value"]).strip()
     canonical_text = str(normalized["canonical_text"]).strip()
     evidence_span = str(normalized["evidence_span"]).strip()
+    raw_normalized_value = item.get("normalized_value")
+    normalized_value = "" if raw_normalized_value is None else str(raw_normalized_value).strip()
+
+    if operation != "archive" and not normalized_value:
+        return None, {
+            "item_index": item_index,
+            "slot_key": slot_key,
+            "reason_code": "contract_missing_required",
+            "memory_kind": memory_kind,
+        }
 
     if memory_kind not in _VALID_MEMORY_KINDS:
         return None, {
@@ -340,6 +406,13 @@ def _normalize_decision_contract(
         "confidence": confidence,
         "memories": normalized_memories,
     }
+    if "reverse_intent" in payload:
+        normalized_contract["reverse_intent"] = _safe_bool(payload.get("reverse_intent"), default=False)
+    if "reverse_intent_enabled" in payload:
+        normalized_contract["reverse_intent_enabled"] = _safe_bool(
+            payload.get("reverse_intent_enabled"),
+            default=True,
+        )
     raw_audit = payload.get("audit")
     if isinstance(raw_audit, dict):
         audit_payload = {"detector": "llm_primary", **raw_audit}
@@ -377,11 +450,14 @@ def decide(
         logger.warning("memory_intent_decide_parse_failed: %s", exc)
         return _build_reject_decision("contract_parse_failed")
 
-    return _normalize_decision_contract(
+    decision = _normalize_decision_contract(
         payload,
         user_text=normalized_user_text,
         confidence_threshold=threshold,
     )
+    decision = apply_reverse_intent(decision)
+    decision = apply_sensitive_guard(decision, user_text=normalized_user_text)
+    return decision
 
 
 def apply_reverse_intent(
@@ -473,3 +549,55 @@ def apply_sensitive_guard(
     merged_audit["sensitive_hit"] = False
     result["audit"] = merged_audit
     return result
+
+
+def resolve_reference_archive(
+    *,
+    llm: Any,
+    user_text: str,
+    context: dict[str, Any] | None = None,
+    confidence_threshold: float = 0.85,
+) -> dict[str, Any]:
+    """根据候选记忆解析撤销/归档目标，输出最终 archive 合同。"""
+
+    candidate_slot_keys = _collect_reference_candidate_slot_keys(context)
+    if not candidate_slot_keys:
+        return _build_reject_decision("reverse_intent_target_unresolved")
+
+    prompt = _build_reference_resolution_prompt(user_text=user_text, context=context)
+    decision = _invoke_contract_prompt(
+        llm=llm,
+        prompt=prompt,
+        user_text=user_text,
+        confidence_threshold=confidence_threshold,
+    )
+    if str(decision.get("decision") or DECISION_REJECT) != DECISION_ACCEPT:
+        return decision
+
+    memories = decision.get("memories")
+    if not isinstance(memories, list) or len(memories) != 1:
+        return _build_reject_decision(
+            "reverse_intent_target_ambiguous",
+            confidence=decision.get("confidence", 0.0),
+        )
+
+    memory_item = memories[0]
+    if not isinstance(memory_item, dict):
+        return _build_reject_decision(
+            "contract_invalid_memory_item",
+            confidence=decision.get("confidence", 0.0),
+        )
+
+    slot_key = str(memory_item.get("slot_key") or "").strip().lower()
+    if slot_key not in candidate_slot_keys:
+        return _build_reject_decision(
+            "reverse_intent_slot_missing",
+            confidence=decision.get("confidence", 0.0),
+        )
+
+    memory_item["operation"] = "archive"
+    memory_item["normalized_value"] = ""
+    reason_code = str(decision.get("reason_code") or "").strip().lower()
+    if not reason_code or reason_code == "accepted":
+        decision["reason_code"] = "reference_archive_resolved"
+    return decision

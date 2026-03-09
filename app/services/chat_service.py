@@ -38,7 +38,7 @@ from app.core.utils import content_hash as _content_hash
 from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
 from app.db.session import get_db_context
 from app.repositories import chat_repo
-from app.services import memory_intent_llm_service
+from app.services import memory_intent_resolver_service, response_policy_service
 from app.services.document_memory_service import (
     flush_canonical_memory as flush_document_memory,
     recall as recall_document_memory,
@@ -163,35 +163,35 @@ def _get_document_memory_hybrid_min_score(fallback: float) -> float:
         return max(0.0, float(fallback))
 
 
-def _decide_memory_intent_contract(
+def _resolve_memory_intent_contract(
+    db: Any,
     *,
-    user_text: str,
-    context: dict[str, Any] | None,
+    user_id: int | None,
+    thread_id: str,
     source_message_id: int | None,
-) -> dict[str, Any]:
+    user_text: str,
+) -> dict[str, Any] | None:
     llm = get_scene_llm(scene_key=SCENE_KEY_INTENT_CLASSIFIER, internal=True)
-    decision = memory_intent_llm_service.decide(
+    resolved = memory_intent_resolver_service.resolve(
+        db,
         llm=llm,
         user_text=user_text,
-        context=context,
+        user_id=user_id,
+        thread_id=thread_id,
+        source_message_id=source_message_id,
     )
+    decision_contract = resolved.get("persistence_contract")
+    if isinstance(decision_contract, dict):
+        return decision_contract
 
-    audit_payload = decision.get("audit")
-    if isinstance(audit_payload, dict):
-        audit = dict(audit_payload)
-    else:
-        audit = {}
-
-    if not str(audit.get("decision_id") or "").strip():
-        if source_message_id is not None:
-            decision_id = f"decision-{int(source_message_id)}"
-        else:
-            decision_id = f"decision-{uuid4().hex}"
-        audit["decision_id"] = decision_id
-
-    audit.setdefault("detector", "llm_primary")
-    decision["audit"] = audit
-    return decision
+    logger.info(
+        "memory_intent resolver 未生成持久化合同: user_id=%s, source_message_id=%s, status=%s, reason_code=%s",
+        user_id,
+        source_message_id,
+        resolved.get("resolution_status"),
+        resolved.get("reason_code"),
+    )
+    return None
 
 
 def _persist_document_memory_context(
@@ -210,11 +210,11 @@ def _persist_document_memory_context(
     document_hybrid_min_score: float,
     document_vector_weight: float,
     document_text_weight: float,
-) -> str:
+) -> tuple[str, bool, dict[str, Any] | None]:
     """写入阶段记忆处理：同步 flush 或异步入队。"""
 
     if not document_memory_flush_enabled or not user_id or not source_message_id:
-        return document_memory_context
+        return document_memory_context, False, None
 
     if memory_intent_async_enabled:
         try:
@@ -240,17 +240,19 @@ def _persist_document_memory_context(
                 source_message_id,
                 memory_error,
             )
-        return document_memory_context
+        return document_memory_context, False, None
 
     try:
-        decision_contract = _decide_memory_intent_contract(
-            user_text=prompt,
-            context={
-                "source_thread_id": thread_id,
-                "source_message_id": source_message_id,
-            },
+        decision_contract = _resolve_memory_intent_contract(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
             source_message_id=source_message_id,
+            user_text=prompt,
         )
+        if not isinstance(decision_contract, dict):
+            return document_memory_context, False, None
+
         persisted_doc_count = flush_document_memory(
             db,
             user_id=user_id,
@@ -259,6 +261,11 @@ def _persist_document_memory_context(
             source="memory",
             decision_contract=decision_contract,
         )
+        response_guidance_contract = response_policy_service.build_memory_archive_guidance_contract(
+            decision_contract,
+            persisted_doc_count=persisted_doc_count,
+        )
+
         if persisted_doc_count:
             logger.info(
                 "memory_intent 判定并写入成功: user_id=%s, count=%d, decision_id=%s, reason_code=%s",
@@ -267,15 +274,18 @@ def _persist_document_memory_context(
                 ((decision_contract.get("audit") or {}).get("decision_id") if isinstance(decision_contract, dict) else None),
                 decision_contract.get("reason_code") if isinstance(decision_contract, dict) else None,
             )
-        elif isinstance(decision_contract, dict):
+        else:
             logger.info(
-                "memory_intent 判定拒绝: user_id=%s, decision_id=%s, reason_code=%s",
+                "memory_intent 判定未写入: user_id=%s, source_message_id=%s, decision_id=%s, reason_code=%s",
                 user_id,
+                source_message_id,
                 ((decision_contract.get("audit") or {}).get("decision_id") if isinstance(decision_contract, dict) else None),
-                decision_contract.get("reason_code"),
+                decision_contract.get("reason_code") if isinstance(decision_contract, dict) else None,
             )
+        latest_context = document_memory_context
+        context_updated = False
         if document_memory_recall_enabled and persisted_doc_count:
-            latest_document_context = recall_document_memory(
+            latest_context = recall_document_memory(
                 db,
                 user_id=user_id,
                 query_text=prompt,
@@ -285,12 +295,14 @@ def _persist_document_memory_context(
                 vector_weight=document_vector_weight,
                 text_weight=document_text_weight,
             )
-            if latest_document_context:
-                return latest_document_context
+            context_updated = True
+
+        if context_updated or response_guidance_contract is not None:
+            return latest_context, context_updated, response_guidance_contract
     except Exception as memory_error:
         logger.warning("写入文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
 
-    return document_memory_context
+    return document_memory_context, False, None
 
 
 def degrade_on_plugin_failure(error_text: str) -> Optional[str]:
@@ -804,6 +816,7 @@ class ChatService:
             except Exception as memory_error:
                 logger.warning("读取文档化记忆失败，已降级: user_id=%s, error=%s", user_id, memory_error)
         memory_context = document_memory_context
+        response_guidance_contract: dict[str, Any] | None = None
 
         human_message = create_human_message(final_prompt)
         input_messages = [human_message]
@@ -834,6 +847,7 @@ class ChatService:
         input_state = {
             "messages": input_messages,
             "memory_context": memory_context,
+            "response_guidance_contract": response_guidance_contract,
             "user_id": user_id,
             "thread_id": thread_id,
             "enable_thinking": enable_thinking,
@@ -895,7 +909,7 @@ class ChatService:
                 title=title,
             )
 
-            document_memory_context = _persist_document_memory_context(
+            document_memory_context, document_memory_context_updated, response_guidance_contract = _persist_document_memory_context(
                 db,
                 user_id=user_id,
                 prompt=prompt,
@@ -912,11 +926,13 @@ class ChatService:
                 document_text_weight=document_text_weight,
             )
 
-            if document_memory_context:
+            input_state["response_guidance_contract"] = response_guidance_contract
+
+            if document_memory_context_updated:
                 memory_context = document_memory_context
                 input_state["memory_context"] = memory_context
                 logger.info(
-                    "本轮写入后即时注入记忆上下文: user_id=%s, has_document=%s, has_preference=%s, document_hybrid=%s",
+                    "本轮写入后即时刷新记忆上下文: user_id=%s, has_document=%s, has_preference=%s, document_hybrid=%s",
                     user_id,
                     bool(document_memory_context),
                     False,

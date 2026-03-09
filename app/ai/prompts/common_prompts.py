@@ -32,6 +32,9 @@ route_to 规则:
 - data_analysis/file_processing → "data_expert"
 - todo_management → "todo_expert"
 
+特殊排除:
+- 讨论/删除/撤销长期记忆、用户偏好、刚才那条记忆，不属于 todo_management，应返回 route_to="supervisor"。
+
 只返回 JSON，不要其他内容。"""
 
 

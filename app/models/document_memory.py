@@ -23,7 +23,7 @@ class UserMemoryDocument(Base):
         String(32),
         nullable=False,
         default="daily",
-        comment="文档类型: long_term/daily/session",
+        comment="文档类型: 当前运行时主要为 preference/daily，预留 session 等扩展值",
     )
     doc_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="文档键")
     slot_key: Mapped[Optional[str]] = mapped_column(

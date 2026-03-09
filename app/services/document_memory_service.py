@@ -18,9 +18,6 @@ from app.services.memory_slot_governance_service import MemorySlotGovernanceServ
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_TRIGGER_PATTERN = re.compile(
-    r"(记住|牢记|以后都|之后都|长期|永久|偏好|习惯|请始终|一直)",
-)
 _DEFAULT_CHUNK_MAX_LINES = 16
 _DEFAULT_CHUNK_OVERLAP_LINES = 3
 _DEFAULT_MEMORY_SOURCE = "memory"
@@ -304,28 +301,6 @@ def _upsert_preference_document(
     )
 
 
-def _should_persist_memory(user_text: str) -> bool:
-    """判断是否触发文档记忆写入。"""
-
-    text = _normalize_text(user_text)
-    if not text:
-        return False
-    if _MEMORY_TRIGGER_PATTERN.search(text):
-        return True
-
-    # 允许用户通过“自我事实表达”形成长期记忆候选。
-    # 示例：“我是产品经理”“我住在上海”“我偏好先结论后分析”
-    lightweight_facts = (
-        "我是",
-        "我在",
-        "我住",
-        "我偏好",
-        "我习惯",
-        "我的目标",
-    )
-    return any(token in text for token in lightweight_facts)
-
-
 def _split_document_to_chunks(
     content_md: str,
     *,
@@ -578,6 +553,14 @@ def _build_preference_context(
                 "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
             ]
         )
+
+    guidance_lines.extend(
+        [
+            "能力说明：若用户要求删除/忘掉上述某条长期记忆，系统支持直接处理该删除请求。",
+            "回复要求：若目标已从当前上下文唯一确定，直接说明会处理这条记忆删除；不要让用户去 Memory 页面手工删除。",
+            "澄清要求：只有在目标仍不明确时，才继续追问用户要删哪一条记忆。",
+        ]
+    )
 
     for guidance in guidance_lines:
         next_len = current_len + len(guidance) + 1
@@ -933,11 +916,12 @@ def _validate_atomic_batch_memories(
             "memory_kind": memory_kind,
             "operation": operation,
             "slot_key": slot_key,
-            "normalized_value": normalized_value,
             "canonical_text": canonical_text,
             "evidence_span": evidence_span,
         }
         missing_required = any(not value for value in required_fields.values())
+        if operation != "archive" and not normalized_value:
+            missing_required = True
         if missing_required:
             item_errors.append(
                 _build_memory_item_error(
@@ -1169,33 +1153,6 @@ def _persist_canonical_document_no_commit(
         source=source,
     )
     return 1
-
-
-def flush(
-    db: Session,
-    *,
-    user_id: int,
-    user_text: str,
-    source_thread_id: str | None = None,
-    source_message_id: int | None = None,
-) -> int:
-    """将用户输入沉淀到文档记忆（日记层）。"""
-
-    if not user_id:
-        return 0
-
-    text = _normalize_text(user_text)
-    if not _should_persist_memory(text):
-        return 0
-
-    return flush_canonical_memory(
-        db,
-        user_id=user_id,
-        canonical_text=text,
-        doc_kind="daily",
-        source_thread_id=source_thread_id,
-        source_message_id=source_message_id,
-    )
 
 
 def flush_canonical_memory(

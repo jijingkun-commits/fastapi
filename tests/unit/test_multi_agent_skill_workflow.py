@@ -85,3 +85,62 @@ def test_preprocess_writes_skill_retrieval_fields(monkeypatch) -> None:  # noqa:
     assert updates["skill_candidates"][0]["skill_id"] == "data-loan"
     assert captured["user_id"] == 42
     assert any(event.get("type") == "status" for event in events)
+
+
+def test_preprocess_should_render_response_guidance_contract_into_system_context(monkeypatch) -> None:  # noqa: ANN001
+    """预处理节点应将结构化 response guidance contract 渲染进 system_context。"""
+
+    monkeypatch.setattr(multi_agent_graph, "get_stream_writer", lambda: (lambda _event: None))
+    monkeypatch.setattr("app.ai.message_utils.validate_messages", lambda messages, fix_reasoning=False: messages)
+
+    class _GuardrailRunner:
+        async def validate_input(self, content: str):
+            return True, content, None
+
+    monkeypatch.setattr("app.ai.guardrails.guardrail_runner", _GuardrailRunner())
+    monkeypatch.setattr(
+        SkillService,
+        "resolve_runtime_mode",
+        classmethod(lambda cls: cls.SKILL_RUNTIME_MODE_HYBRID),
+    )
+    monkeypatch.setattr(
+        SkillService,
+        "search_skills_debug",
+        classmethod(lambda cls, query, **kwargs: {
+            "query": query,
+            "mode": "hybrid",
+            "scope": kwargs.get("scope", "global"),
+            "skill_candidates": [],
+            "selected_skill_ids": [],
+            "context_preview": "",
+            "skill_injection_meta": {
+                "budget_chars": 2400,
+                "used_chars": 0,
+                "truncated": False,
+                "included_skill_ids": [],
+                "excluded_skill_ids": [],
+                "sections_used": 0,
+                "selected_count": 0,
+            },
+        }),
+    )
+
+    updates = asyncio.run(
+        multi_agent_graph._preprocess_multimodal(
+            {
+                "messages": [HumanMessage(content="继续")],
+                "enable_thinking": False,
+                "response_guidance_contract": {
+                    "kind": "memory_archive",
+                    "status": "persisted",
+                    "target_canonical_text": "用户要求删除已有记忆：用户是纪宇圩的爸爸",
+                    "target_slot_key": "user.profile.relationship.parent.of",
+                    "followup_behavior": "reuse_resolved_target",
+                },
+            }
+        )
+    )
+
+    assert "长期记忆删除已经写入成功" in updates["system_context"]
+    assert "user.profile.relationship.parent.of" in updates["system_context"]
+    assert "已唯一确认的删除链" in updates["system_context"]

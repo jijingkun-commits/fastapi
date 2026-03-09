@@ -312,3 +312,242 @@ def test_decide_should_reject_when_llm_invoke_failed() -> None:
 
     assert decision["decision"] == "reject"
     assert decision["reason_code"] == "llm_invoke_failed"
+
+
+def test_decide_should_accept_archive_item_without_normalized_value() -> None:
+    """archive 记忆项不应因 normalized_value 缺失而被拒绝。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "preference_delete_request",
+            "confidence": 0.93,
+            "memories": [
+                _build_accept_item(
+                    operation="archive",
+                    slot_key="user.preference.response_structure",
+                    normalized_value=None,
+                    canonical_text="用户不再偏好总分总结构回答",
+                    evidence_span="忘记我的总分总回复风格",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="忘记我的总分总回复风格")
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+def test_resolve_reference_archive_should_accept_candidate_slot() -> None:
+    """候选目标解析 accept 时，slot_key 必须命中候选并保留 archive 操作。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.95,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.jiaxing.bank.founded.2000",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：嘉兴银行成立于2000年",
+                    evidence_span="忘掉这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="忘掉这个记忆",
+        context={
+            "recent_memory_reference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.jiaxing.bank.founded.2000",
+                    "summary_md": "嘉兴银行成立于2000年",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "reference_archive_resolved"
+    assert decision["memories"][0]["slot_key"] == "user.profile.fact.jiaxing.bank.founded.2000"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+
+def test_resolve_reference_archive_should_reject_slot_outside_candidates() -> None:
+    """候选目标解析不得输出候选集之外的 slot_key。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.95,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.other.bank",
+                    normalized_value=None,
+                    canonical_text="用户要求删除其他记忆",
+                    evidence_span="忘掉这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="忘掉这个记忆",
+        context={
+            "recent_memory_reference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.jiaxing.bank.founded.2000",
+                    "summary_md": "嘉兴银行成立于2000年",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "reverse_intent_slot_missing"
+
+
+def test_resolve_reference_archive_should_accept_active_candidate_without_recent_match() -> None:
+    """仅有 active_preference_candidates 时，仍应允许命中候选 slot。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.94,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.wealth.management.products.types",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：理财产品分为自营和代销",
+                    evidence_span="帮我删除这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="这是记忆吧？帮我删除这个记忆",
+        context={
+            "active_preference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.wealth.management.products.types",
+                    "summary_md": "理财产品分为自营和代销",
+                }
+            ],
+            "recent_thread_messages": [
+                {
+                    "message_id": 5285,
+                    "role": "ai",
+                    "content": "理财产品一般分为两类：自营和代销。",
+                }
+            ],
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "reference_archive_resolved"
+    assert decision["memories"][0]["slot_key"] == "user.profile.fact.wealth.management.products.types"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+
+
+def test_resolve_reference_archive_should_accept_recent_archived_candidate_for_confirmation_turn() -> None:
+    """同线程最近已归档目标应作为确认轮的合法候选。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.94,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.relationship.to.person",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：用户是纪宇圩的爸爸",
+                    evidence_span="1",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="1",
+        context={
+            "recent_archived_preference_candidates": [
+                {
+                    "slot_key": "user.profile.relationship.to.person",
+                    "summary_md": "用户是纪宇圩的爸爸",
+                    "source_thread_id": "thread-confirm",
+                    "source_message_id": 5395,
+                    "match_latest_user_message": True,
+                }
+            ],
+            "latest_assistant_message": {"message_id": 5396, "role": "ai", "content": "系统繁忙，当前请求暂时无法处理，请稍后重试。"},
+            "latest_user_message_before_source": {"message_id": 5395, "role": "human", "content": "删除这个记忆"},
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["slot_key"] == "user.profile.relationship.to.person"
+
+def test_resolve_reference_archive_should_accept_archived_candidate_for_confirmation_turn() -> None:
+    """archived candidates 也应作为幂等确认删除的合法候选。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.93,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.relationship.parent.of",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：用户是纪宇圩的爸爸",
+                    evidence_span="1",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="1",
+        context={
+            "archived_preference_candidates": [
+                {
+                    "slot_key": "user.profile.relationship.parent.of",
+                    "summary_md": "用户是纪宇圩的爸爸",
+                }
+            ],
+            "latest_assistant_message": {"message_id": 5344, "role": "ai", "content": "我会处理并删除你是纪宇圩的爸爸这条长期记忆。"},
+            "latest_user_message_before_source": {"message_id": 5343, "role": "human", "content": "删除这个记忆"},
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["slot_key"] == "user.profile.relationship.parent.of"

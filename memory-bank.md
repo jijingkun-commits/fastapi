@@ -4,6 +4,9 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-09｜response guidance 收敛为结构化 contract（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
+- 2026-03-09｜document_memory_repo 列表契约改为默认窄返回（ACTIVE）→ `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`
+- 2026-03-08｜memory intent 删除解析收敛到 resolver（ACTIVE）→ `docs/plans/2026-03-08-memory-intent-resolver-contract-design.md`
 - 2026-03-07｜聊天控制面恢复/终止语义冻结（ACTIVE）→ `docs/API文档/接口文档.md`
 - 2026-03-07｜DB 驱动渐进式 Skill Loader Phase A 冻结（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-05｜规则分层落地（ACTIVE）→ `AGENTS.md`
@@ -154,3 +157,34 @@
 - 影响范围：`scripts/check_*` L1 门禁脚本、`.cursor/commands/*`、`.agents/skills/*`、工作流与治理文档
 - 回退/失效条件：若统一入口兼容性或验收矩阵失败，回退为“旧脚本主入口 + wrapper 反向代理”，并暂停删除阶段
 - 关联文档/代码：`docs/plans/2026-03-06-workflow-gate-retirement-design.md`、`docs/内部参考/工程减法体检报告_2026-03-06_v3.md`
+
+
+### 2026-03-08 memory intent 删除解析收敛到 resolver
+- 状态：ACTIVE
+- 决策主题：删除/撤销类记忆解析统一下沉到 `memory_intent_resolver_service`，`chat_service` 只保留编排职责
+- 背景与问题：上一轮为了修复“忘掉这个记忆”落库失败，把删除词表、指代修复和成功/失败话术补丁直接叠加到了 `chat_service`；但项目真实口径是“对话结束后异步记忆”，这导致语义判断、状态事实和回复策略错层耦合
+- 最终决策：`chat_service` 不再维护删除关键词词表；反向记忆是否成立、目标是否唯一定位、是否需要澄清，统一由 `memory_intent_resolver_service` 输出 contract；异步主链继续 enqueue-only；`archive` 允许空 `normalized_value` 的底层校验修复保留
+- 取舍理由：优先把语义判断放回正确层级，让异步 worker 与同步降级共享同一 resolver，而不是继续在聊天主链堆补丁
+- 影响范围：`app/services/chat_service.py`、`app/services/memory_intent_resolver_service.py`、`app/services/memory_intent_llm_service.py`、`app/ai/prompts/agent_prompts.py`、相关 unit tests
+- 回退/失效条件：若后续引入独立 memory intent worker handler/service，可把 resolver 继续上移为 worker 专属入口；若主链恢复同步记忆判定，也必须继续复用 resolver，不得把词表补丁放回 chat_service
+- 关联文档/代码：`docs/plans/2026-03-08-memory-intent-resolver-contract-design.md`
+
+### 2026-03-09 document_memory_repo 列表契约改为默认窄返回
+- 状态：ACTIVE
+- 决策主题：`document_memory_repo.list_documents()` 默认只返回通用文档列表字段，`source_thread_id/source_message_id` 改为调用方显式 opt-in
+- 背景与问题：为了支持 memory 删除确认链，当前分支一度把 `source_thread_id/source_message_id` 直接加入 `list_documents()` 默认返回；这会让 resolver 场景字段上升为全局 repo 契约，扩大影响面
+- 最终决策：`list_documents()` 新增 `include_source_refs=False`，默认保持窄返回；仅 `memory_intent_resolver_service` 的 archived 候选查询显式传入 `include_source_refs=True`
+- 取舍理由：优先保持 repo 通用接口稳定、最小；场景字段只有在确实需要时才暴露，避免“为了一个调用方永久拉宽所有调用方”的设计回退
+- 影响范围：`app/repositories/document_memory_repo.py`、`app/services/memory_intent_resolver_service.py`、相关 unit tests
+- 回退/失效条件：若后续有多个独立场景都稳定依赖 source refs，可再评估是否升级为专用列表 DTO 或独立 repo 接口；禁止直接恢复为默认全量返回
+- 关联文档/代码：`docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`、`app/repositories/document_memory_repo.py`、`app/services/memory_intent_resolver_service.py`
+
+### 2026-03-09 response guidance 收敛为结构化 contract
+- 状态：ACTIVE
+- 决策主题：memory 删除后的运行时回复约束不再由 `chat_service` 直接拼接文本，而是收敛为 `response_guidance_contract` 结构化字段
+- 背景与问题：上一轮虽然已把删除识别从 `chat_service` 拔到 resolver，但删除成功/幂等删除的提示文案仍由 service 直接拼接；这让状态事实与系统提示文本继续耦合在同一层
+- 最终决策：`chat_service` 只输出结构化 guidance contract（如 kind/status/target/followup_behavior）；contract 的构造与渲染统一收敛到 `response_policy_service`。`multi_intent/router_blocked` 的恢复提示也统一迁入该 service，`multi_agent_graph` 只负责调用并注入 `system_context`
+- 取舍理由：优先把“状态事实”“策略合同”“系统提示渲染/恢复提示”继续拆层，避免 graph/service 反复长出散落 helper，也为后续扩展到更完整的 responder/policy engine 留出稳定入口
+- 影响范围：`app/services/chat_service.py`、`app/services/response_policy_service.py`、`app/ai/state.py`、`app/ai/workflow/multi_agent_graph.py`、`tests/unit/test_multi_agent_streaming_helpers.py`、相关 unit tests
+- 回退/失效条件：若后续引入更完整的 response policy/responder 层，应继续以 `response_policy_service` 为迁移入口平滑演进；禁止再把文案模板直接塞回 `chat_service` 或 `multi_agent_graph`
+- 关联文档/代码：`docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`、`app/services/chat_service.py`、`app/services/response_policy_service.py`、`app/ai/workflow/multi_agent_graph.py`
