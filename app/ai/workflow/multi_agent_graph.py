@@ -23,6 +23,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command, Send, interrupt
 from langgraph.errors import GraphInterrupt
@@ -2768,6 +2769,63 @@ def _build_streaming_handoff_return(
     return ret
 
 
+def _resolve_loaded_skill_ids_for_handoff(state: Optional[Dict[str, Any]]) -> List[str]:
+    """从运行态或历史消息恢复 handoff 可见的已加载 skill 列表。"""
+    normalized_state = state if isinstance(state, dict) else {}
+    loaded_skill_registry = normalized_state.get("loaded_skill_registry") or {}
+    if loaded_skill_registry:
+        return [str(skill_id).strip() for skill_id in loaded_skill_registry if str(skill_id or "").strip()]
+
+    messages = list(normalized_state.get("messages") or [])
+    tool_message_skill_ids: List[str] = []
+    for message in messages:
+        if not isinstance(message, ToolMessage) or str(getattr(message, "name", "") or "").strip() != "load_skills":
+            continue
+        additional_kwargs = getattr(message, "additional_kwargs", None)
+        load_result = additional_kwargs.get("load_skills_result") if isinstance(additional_kwargs, dict) else None
+        if not isinstance(load_result, dict):
+            continue
+        for item in load_result.get("loaded_skills") or []:
+            if not isinstance(item, dict):
+                continue
+            skill_id = str(item.get("skill_id") or "").strip()
+            if skill_id and skill_id not in tool_message_skill_ids:
+                tool_message_skill_ids.append(skill_id)
+    if tool_message_skill_ids:
+        return tool_message_skill_ids
+
+    restored_registry = _restore_loaded_skill_registry_from_messages(messages)
+    return [str(skill_id).strip() for skill_id in restored_registry if str(skill_id or "").strip()]
+
+
+def _build_handoff_status_message(target_agent: str, state: Optional[Dict[str, Any]] = None) -> str:
+    """构造专家委派状态文案。"""
+    normalized_agent = str(target_agent or "").strip()
+    loaded_skill_ids = _resolve_loaded_skill_ids_for_handoff(state)
+    prefix = ""
+    if loaded_skill_ids:
+        preview = "、".join(loaded_skill_ids[:3])
+        if len(loaded_skill_ids) > 3:
+            preview = f"{preview} 等 {len(loaded_skill_ids)} 个"
+        prefix = f"已加载 {preview}，"
+    if normalized_agent == AgentType.DATA:
+        return f"{prefix}正在委派 data_expert。" if prefix else "已识别为数据查询，正在委派 data_expert。"
+    if normalized_agent == AgentType.TODO:
+        return f"{prefix}正在委派 todo_expert。" if prefix else "已识别为待办请求，正在委派 todo_expert。"
+    return f"{prefix}正在委派 {normalized_agent or 'expert'}。" if prefix else f"正在委派 {normalized_agent or 'expert'}。"
+
+
+def _build_handoff_event_payload(target_agent: str, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """构造 handoff 事件载荷。"""
+    normalized_agent = str(target_agent or "").strip() or "expert"
+    loaded_skill_ids = _resolve_loaded_skill_ids_for_handoff(state)
+    return {
+        "target_agent": normalized_agent,
+        "loaded_skill_ids": loaded_skill_ids,
+        "message": _build_handoff_status_message(normalized_agent, state),
+    }
+
+
 def _normalize_handoff_batch_for_supervisor(
     handoffs: Sequence[Dict[str, Any]],
     *,
@@ -3027,6 +3085,18 @@ def _apply_router_contract_guard(
 
     active_goals = _resolve_active_goals(state)
     dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+    if not dispatch_queue:
+        latest_user_text = _extract_latest_human_content(state.get("messages", []))
+        if latest_user_text:
+            active_goals = _build_decomposed_goals_for_query(latest_user_text)
+            dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+
+    normalized_handoffs = _inject_compiled_data_handoff_for_supervisor(
+        normalized_handoffs,
+        state=state,
+        active_goals=active_goals,
+    )
+
     if not dispatch_queue:
         blocked = [
             _build_router_blocked_entry(
@@ -4588,6 +4658,8 @@ def _dispatch_values_mode_chunk(
         )
 
         guard_state = dict(ctx.state)
+        guard_state.update({k: v for k, v in final_state.items() if k != "messages"})
+        guard_state["messages"] = list(final_state.get("messages") or ctx.state.get("messages") or [])
         final_state["decomposed_goals"] = list(active_goals)
         guard_state["decomposed_goals"] = list(active_goals)
 
@@ -4724,6 +4796,16 @@ def _dispatch_values_mode_chunk(
                     planned_goal_count,
                     enable_multi_intent_mode,
                 )
+                emit_status(
+                    ctx.writer,
+                    message=_build_handoff_status_message(target_agent, guard_state),
+                    node=ctx.node_name,
+                )
+                ctx.writer({
+                    "type": "handoff",
+                    "data": _build_handoff_event_payload(target_agent, guard_state),
+                    "node": ctx.node_name,
+                })
                 handoff_return = _build_streaming_handoff_return(
                     final_state=final_state,
                     delta_messages=delta_messages_for_scan,
@@ -5010,12 +5092,27 @@ def _resolve_tool_name(tool_obj: Any) -> str:
     return str(name or "").strip().lower()
 
 
-def _build_tool_entry(tool_obj: Any, groups: Optional[set[str]] = None) -> Dict[str, Any]:
+def _build_tool_entry(
+    tool_obj: Any,
+    groups: Optional[set[str]] = None,
+    *,
+    runtime_visibility: str = "always",
+    required_runtime_tools: Optional[set[str]] = None,
+) -> Dict[str, Any]:
     """构造工具候选条目。"""
+
+    normalized_visibility = str(runtime_visibility or "always").strip().lower() or "always"
+    tool_name = _resolve_tool_name(tool_obj)
+    normalized_required_runtime_tools = _normalize_policy_tokens(required_runtime_tools or [])
+    if normalized_visibility == "catalog_after_load" and not normalized_required_runtime_tools and tool_name:
+        normalized_required_runtime_tools = {tool_name}
+
     return {
         "tool": tool_obj,
-        "name": _resolve_tool_name(tool_obj),
+        "name": tool_name,
         "groups": {str(item).strip().lower() for item in (groups or set()) if str(item).strip()},
+        "runtime_visibility": normalized_visibility,
+        "required_runtime_tools": normalized_required_runtime_tools,
     }
 
 
@@ -5025,7 +5122,7 @@ def _normalize_policy_tokens(raw_value: Any) -> set[str]:
         return set()
     if isinstance(raw_value, str):
         candidates = [raw_value]
-    elif isinstance(raw_value, list):
+    elif isinstance(raw_value, (list, tuple, set)):
         candidates = raw_value
     else:
         return set()
@@ -5053,9 +5150,11 @@ def _match_policy_tokens(entry: Dict[str, Any], tokens: set[str]) -> bool:
     return bool(entry_tokens & tokens)
 
 
-def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name: str) -> list[Any]:
-    """按工具治理策略过滤工具候选集。"""
-    raw_tools = [entry["tool"] for entry in tool_entries]
+def _select_tool_entries_by_governance_policy(
+    tool_entries: list[Dict[str, Any]],
+    agent_name: str,
+) -> list[Dict[str, Any]]:
+    """按工具治理策略过滤工具候选条目，并保留条目元数据。"""
     fail_mode = "compat"
 
     try:
@@ -5064,7 +5163,7 @@ def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name
         settings = ConfigResolver.get_tool_governance_settings()
         fail_mode = str(settings.get("fail_mode") or "compat").strip().lower() or "compat"
         if not settings.get("enabled", False):
-            return raw_tools
+            return list(tool_entries)
 
         policy_layers = ConfigResolver.get_tool_policy_layers(agent_name)
         merged_policy = policy_layers.get("merged_policy")
@@ -5078,7 +5177,7 @@ def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name
         if allow_tokens:
             default_allow = False
 
-        selected: list[Any] = []
+        selected_entries: list[Dict[str, Any]] = []
         denied_names: list[str] = []
 
         for entry in tool_entries:
@@ -5087,7 +5186,7 @@ def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name
                 allowed = False
 
             if allowed:
-                selected.append(entry["tool"])
+                selected_entries.append(entry)
             else:
                 denied_names.append(entry.get("name", "unknown"))
 
@@ -5096,10 +5195,10 @@ def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name
             agent_name,
             sorted(allow_tokens),
             sorted(deny_tokens),
-            [entry.get("name", "unknown") for entry in tool_entries if entry["tool"] in selected],
+            [entry.get("name", "unknown") for entry in selected_entries],
             denied_names,
         )
-        return selected
+        return selected_entries
     except Exception as exc:
         logger.warning(
             "工具治理过滤失败，降级继续: agent=%s, fail_mode=%s, error=%s",
@@ -5109,7 +5208,12 @@ def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name
         )
         if fail_mode in {"deny", "minimal"}:
             return []
-        return raw_tools
+        return list(tool_entries)
+
+
+def _apply_tool_governance_policy(tool_entries: list[Dict[str, Any]], agent_name: str) -> list[Any]:
+    """按工具治理策略过滤工具候选集。"""
+    return [entry["tool"] for entry in _select_tool_entries_by_governance_policy(tool_entries, agent_name)]
 
 
 def _get_common_tool_entries() -> list[Dict[str, Any]]:
@@ -5143,6 +5247,310 @@ def _get_common_tools():
     return _apply_tool_governance_policy(_get_common_tool_entries(), agent_name="common")
 
 
+
+
+def _normalize_allowed_tool_registry(raw_value: Any) -> Dict[str, Dict[str, Any]]:
+    """标准化会话级领域工具授权状态。"""
+
+    if not isinstance(raw_value, dict):
+        return {}
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for raw_name, payload in raw_value.items():
+        tool_name = str(raw_name or '').strip().lower()
+        if not tool_name:
+            continue
+        payload_dict = payload if isinstance(payload, dict) else {}
+        normalized[tool_name] = {
+            'tool_name': tool_name,
+            'skill_ids': list(payload_dict.get('skill_ids') or []),
+            'versions': list(payload_dict.get('versions') or []),
+            'tool_groups': list(payload_dict.get('tool_groups') or []),
+        }
+    return normalized
+
+
+def _resolve_allowed_tool_names(state: Dict[str, Any]) -> List[str]:
+    """从当前 state 提取允许使用的领域工具名。"""
+
+    registry = _normalize_allowed_tool_registry(state.get('allowed_tool_registry') or {})
+    return sorted(registry.keys())
+
+
+def _restore_allowed_tool_registry_from_messages(
+    messages: Sequence[BaseMessage],
+) -> Dict[str, Dict[str, Any]]:
+    """优先从历史 AIMessage.additional_kwargs.skill_runtime 恢复领域工具授权。"""
+
+    for message in reversed(list(messages or [])):
+        skill_runtime = extract_skill_runtime_from_ai_message(message)
+        if not skill_runtime:
+            continue
+
+        allowed_tools = skill_runtime.get('allowed_tools') or []
+        if not isinstance(allowed_tools, list):
+            continue
+
+        restored: Dict[str, Dict[str, Any]] = {}
+        for item in allowed_tools:
+            tool_name = str(item or '').strip().lower()
+            if not tool_name:
+                continue
+            restored[tool_name] = {
+                'tool_name': tool_name,
+                'skill_ids': [],
+                'versions': [],
+                'tool_groups': [],
+            }
+        if restored:
+            return restored
+
+    return {}
+
+
+def _normalize_catalog_tool_contract(raw_value: Any) -> Dict[str, Any]:
+    """标准化 catalog descriptor 内的 tool_contract。"""
+
+    payload = raw_value if isinstance(raw_value, dict) else {}
+    required_tools = _normalize_policy_tokens(payload.get('required_tools'))
+    optional_tools = _normalize_policy_tokens(payload.get('optional_tools')) - required_tools
+    tool_groups = _normalize_policy_tokens(payload.get('tool_groups'))
+    expose_after_load_raw = payload.get('expose_after_load')
+    expose_after_load = True if expose_after_load_raw is None else bool(expose_after_load_raw)
+    return {
+        'required_tools': required_tools,
+        'optional_tools': optional_tools,
+        'tool_groups': tool_groups,
+        'expose_after_load': expose_after_load,
+    }
+
+
+def _build_catalog_load_gate_index(state: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """从 skill_catalog_manifest 派生“需先 load 才暴露”的运行时工具索引。"""
+
+    normalized_state = dict(state or {})
+    manifest = normalized_state.get('skill_catalog_manifest') or []
+    if not isinstance(manifest, list):
+        return {}
+
+    gate_index: Dict[str, List[str]] = {}
+    for item in manifest:
+        if not isinstance(item, dict):
+            continue
+        skill_id = str(item.get('skill_id') or '').strip()
+        if not skill_id:
+            continue
+        tool_contract = _normalize_catalog_tool_contract(item.get('tool_contract'))
+        if not tool_contract['expose_after_load']:
+            continue
+        contract_tools = tool_contract['required_tools'] | tool_contract['optional_tools']
+        for tool_name in contract_tools:
+            skill_ids = gate_index.setdefault(tool_name, [])
+            if skill_id not in skill_ids:
+                skill_ids.append(skill_id)
+    return gate_index
+
+
+def _resolve_entry_required_runtime_tools(entry: Dict[str, Any]) -> set[str]:
+    """解析条目的运行时授权工具集合。"""
+
+    required_tools = _normalize_policy_tokens(entry.get('required_runtime_tools'))
+    if required_tools:
+        return required_tools
+
+    visibility = str(entry.get('runtime_visibility') or 'always').strip().lower() or 'always'
+    tool_name = str(entry.get('name') or '').strip().lower()
+    if visibility == 'catalog_after_load' and tool_name:
+        return {tool_name}
+    return set()
+
+
+def _resolve_handoff_target_agent_from_entry(entry: Dict[str, Any]) -> str:
+    """从 handoff 工具条目解析目标 agent 名称。"""
+
+    tool_name = str(entry.get("name") or "").strip().lower()
+    if tool_name.startswith("assign_to_"):
+        return tool_name.removeprefix("assign_to_")
+    return ""
+
+
+
+def _is_handoff_entry_goal_visible(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> bool:
+    """按当前活动目标约束 handoff 工具可见性。"""
+
+    target_agent = _resolve_handoff_target_agent_from_entry(entry)
+    if not target_agent:
+        return True
+
+    normalized_state = dict(state or {})
+    active_goals = _resolve_active_goals(normalized_state)
+    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+    if not dispatch_queue:
+        latest_user_text = _extract_latest_human_content(normalized_state.get("messages", []))
+        if latest_user_text:
+            dispatch_queue = _build_router_dispatch_goal_queue(_build_decomposed_goals_for_query(latest_user_text))
+        else:
+            return True
+
+    if not dispatch_queue:
+        return False
+
+    allowed_agents = {
+        agent
+        for goal in dispatch_queue
+        for agent in _normalize_goal_allowed_agents(goal.get("allowed_agents"), str(goal.get("kind") or ""))
+    }
+    return target_agent in allowed_agents
+
+
+
+def _is_tool_entry_runtime_visible(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> bool:
+    """判断某个工具条目在当前会话是否可见/可执行。"""
+
+    normalized_state = dict(state or {})
+    visibility = str(entry.get("runtime_visibility") or "always").strip().lower() or "always"
+    required_tools = _resolve_entry_required_runtime_tools(entry)
+
+    if visibility == "after_load":
+        if not required_tools:
+            return False
+
+        allowed_tools = set(_resolve_allowed_tool_names(normalized_state))
+        if not required_tools.issubset(allowed_tools):
+            return False
+    elif visibility == "catalog_after_load":
+        gated_tool_index = _build_catalog_load_gate_index(normalized_state)
+        gated_required_tools = {tool_name for tool_name in required_tools if tool_name in gated_tool_index}
+        if gated_required_tools:
+            allowed_tools = set(_resolve_allowed_tool_names(normalized_state))
+            if not gated_required_tools.issubset(allowed_tools):
+                return False
+
+    return _is_handoff_entry_goal_visible(entry, normalized_state)
+
+
+def _build_runtime_tool_denied_message(entry: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> str:
+    """构造运行态越权工具调用提示。"""
+
+    tool_name = str(entry.get("name") or "该工具").strip() or "该工具"
+    required_tools = _resolve_entry_required_runtime_tools(entry)
+    gate_index = _build_catalog_load_gate_index(state)
+    required_skill_ids = sorted({
+        skill_id
+        for runtime_tool in required_tools
+        for skill_id in gate_index.get(runtime_tool, [])
+    })
+    if len(required_skill_ids) == 1:
+        return f"{tool_name} 尚未授权：请先调用 load_skills 加载 {required_skill_ids[0]} skill。"
+    return f"{tool_name} 尚未授权：请先调用 load_skills 加载对应 skill。"
+
+
+def _build_tool_entry_index(tool_entries: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """按工具名构建候选条目索引。"""
+
+    return {
+        str(entry.get("name") or "").strip().lower(): entry
+        for entry in tool_entries
+        if str(entry.get("name") or "").strip()
+    }
+
+
+def _build_runtime_tool_call_wrapper(
+    tool_entries: list[Dict[str, Any]],
+    *,
+    agent_name: str,
+):
+    """构造统一的运行态工具执行拦截器。"""
+
+    entry_index = _build_tool_entry_index(tool_entries)
+
+    def _extract_request_state(request: Any) -> Dict[str, Any]:
+        runtime = getattr(request, "runtime", None)
+        runtime_state = getattr(runtime, "state", None)
+        if isinstance(runtime_state, dict):
+            return runtime_state
+        request_state = getattr(request, "state", None)
+        if isinstance(request_state, dict):
+            return request_state
+        return {}
+
+    def _maybe_block(request: Any) -> Optional[ToolMessage]:
+        call = getattr(request, "tool_call", None) or {}
+        tool_name = str(call.get("name") or "").strip().lower()
+        entry = entry_index.get(tool_name)
+        if not entry:
+            return None
+
+        state = _extract_request_state(request)
+        if _is_tool_entry_runtime_visible(entry, state):
+            return None
+
+        denied_message = _build_runtime_tool_denied_message(entry, state)
+        logger.info(
+            "运行态工具执行被拦截: agent=%s, tool=%s, allowed_tools=%s",
+            agent_name,
+            tool_name,
+            _resolve_allowed_tool_names(state),
+        )
+        return ToolMessage(
+            content=denied_message,
+            tool_call_id=str(call.get("id") or tool_name or "tool_call"),
+            name=tool_name or None,
+        )
+
+    def _wrap(request: Any, execute: Any):
+        blocked_message = _maybe_block(request)
+        if blocked_message is not None:
+            return blocked_message
+        return execute(request)
+
+    async def _awrap(request: Any, execute: Any):
+        blocked_message = _maybe_block(request)
+        if blocked_message is not None:
+            return blocked_message
+        return await execute(request)
+
+    return _wrap, _awrap
+
+
+def _apply_runtime_tool_visibility_policy(
+    tool_entries: list[Dict[str, Any]],
+    state: Optional[Dict[str, Any]],
+    *,
+    agent_name: str,
+) -> list[Dict[str, Any]]:
+    """按会话 skill 授权裁剪当前轮对模型可见的工具集合。"""
+
+    normalized_state = dict(state or {})
+
+    try:
+        from app.services.skill_service import SkillService
+
+        runtime_mode = SkillService.resolve_runtime_mode()
+        if runtime_mode != SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
+            return list(tool_entries)
+    except Exception as exc:
+        logger.warning("运行态工具可见性判定失败，降级保留原工具: agent=%s, error=%s", agent_name, exc)
+        return list(tool_entries)
+
+    allowed_tools = set(_resolve_allowed_tool_names(normalized_state))
+    selected_entries: list[Dict[str, Any]] = []
+    hidden_names: list[str] = []
+
+    for entry in tool_entries:
+        if not _is_tool_entry_runtime_visible(entry, normalized_state):
+            hidden_names.append(entry.get("name", "unknown"))
+            continue
+        selected_entries.append(entry)
+
+    logger.info(
+        "运行态工具可见性生效: agent=%s, allowed_tools=%s, visible=%s, hidden=%s",
+        agent_name,
+        sorted(allowed_tools),
+        [entry.get("name", "unknown") for entry in selected_entries],
+        hidden_names,
+    )
+    return selected_entries
 
 
 def _restore_loaded_skill_registry_from_messages(
@@ -5236,6 +5644,7 @@ def _build_skill_runtime_state_payload(
         catalog_version=catalog_version,
         visible_skill_count=visible_skill_count,
         loaded_skills=loaded_skills,
+        allowed_tools=_resolve_allowed_tool_names(state),
         replay_source=resolved_replay_source,
     )
 
@@ -5285,9 +5694,14 @@ def _create_load_skills_tool():
             loaded_skill_registry=runtime_state.get("loaded_skill_registry") or {},
             source_turn_id=runtime_state.get("turn_id"),
         )
+        next_loaded_skill_registry = load_result.get("loaded_skill_registry") or runtime_state.get("loaded_skill_registry") or {}
+        next_allowed_tool_registry = load_result.get("allowed_tool_registry") or runtime_state.get("allowed_tool_registry") or {}
+        next_loaded_skill_context = load_result.get("loaded_skill_context") or runtime_state.get("loaded_skill_context")
         merged_state = {
             **runtime_state,
-            "loaded_skill_registry": load_result.get("loaded_skill_registry") or {},
+            "loaded_skill_registry": next_loaded_skill_registry,
+            "allowed_tool_registry": next_allowed_tool_registry,
+            "loaded_skill_context": next_loaded_skill_context,
             "catalog_version": load_result.get("catalog_version") or runtime_state.get("catalog_version"),
             "visible_skill_count": load_result.get("visible_skill_count", runtime_state.get("visible_skill_count", 0)),
         }
@@ -5307,8 +5721,9 @@ def _create_load_skills_tool():
 
         return Command(
             update={
-                "loaded_skill_registry": load_result.get("loaded_skill_registry") or {},
-                "loaded_skill_context": load_result.get("loaded_skill_context"),
+                "loaded_skill_registry": next_loaded_skill_registry,
+                "allowed_tool_registry": next_allowed_tool_registry,
+                "loaded_skill_context": next_loaded_skill_context,
                 "messages": [
                     ToolMessage(
                         content=json.dumps(tool_payload, ensure_ascii=False),
@@ -5321,40 +5736,47 @@ def _create_load_skills_tool():
         )
 
     return load_skills
-def _get_supervisor_tools():
-    """获取 Supervisor 直接使用的简单工具。
-    
-    包含：
-    - 知识库检索 (knowledge_search)
-    - 联网搜索 (tavily_search)
-    - 绘图 (fig_inter)
-    - 图片分析和文件读取（共享工具）
-    
-    注意：sql_inter 已移除，数据查询统一由 data_expert 处理，
-    避免 Supervisor 直接执行 SQL 导致权限失败和无效重试。
-    """
+
+
+def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
+    """构建 Supervisor 简单工具候选条目。"""
+
     entries = _get_common_tool_entries()
-    
-    # 绘图工具（sql_inter 已移至 data_expert 专用）
+    progressive_mode = False
+
+    try:
+        from app.services.skill_service import SkillService
+
+        progressive_mode = SkillService.resolve_runtime_mode() == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE
+    except Exception as exc:
+        logger.warning("Supervisor 运行模式解析失败，按非 progressive 继续: %s", exc)
+
     try:
         from app.ai.tools.chatTools import fig_inter
+
         entries.append(_build_tool_entry(fig_inter, {"group:chart"}))
         logger.debug("Supervisor 工具: 已加载 fig_inter")
-    except Exception as e:
-        logger.warning("Supervisor 绘图工具加载失败: %s", e)
-    
-    # 知识库搜索工具
+    except Exception as exc:
+        logger.warning("Supervisor 绘图工具加载失败: %s", exc)
+
     try:
         from app.ai.tools.ragflow_tool import knowledge_search, is_ragflow_configured
+
         if is_ragflow_configured():
-            entries.append(_build_tool_entry(knowledge_search, {"group:knowledge"}))
+            entries.append(
+                _build_tool_entry(
+                    knowledge_search,
+                    {"group:knowledge"},
+                    runtime_visibility="catalog_after_load" if progressive_mode else "always",
+                )
+            )
             logger.debug("Supervisor 工具: 已加载 knowledge_search")
-    except Exception as e:
-        logger.warning("Supervisor 知识库工具加载失败: %s", e)
-    
-    # 联网搜索工具 (TavilySearch)
+    except Exception as exc:
+        logger.warning("Supervisor 知识库工具加载失败: %s", exc)
+
     try:
         from app.ai.tools.chatTools import search_tool
+
         if search_tool is not None:
             entries.append(_build_tool_entry(search_tool, {"group:web"}))
             logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索")
@@ -5362,19 +5784,73 @@ def _get_supervisor_tools():
             logger.info(
                 "联网搜索未加入 Supervisor: search_tool 未加载（请检查 TAVILY_API_KEY 或安装 langchain-tavily）"
             )
-    except Exception as e:
-        logger.warning("Supervisor 联网搜索工具加载失败: %s", e)
+    except Exception as exc:
+        logger.warning("Supervisor 联网搜索工具加载失败: %s", exc)
 
+    try:
+        if progressive_mode:
+            entries.append(_build_tool_entry(_create_load_skills_tool(), {"group:skill", "runtime:progressive"}))
+            logger.debug("Supervisor 工具: 已加载 progressive load_skills")
+    except Exception as exc:
+        logger.warning("Supervisor load_skills 工具加载失败: %s", exc)
+
+    return entries
+
+
+def _get_runtime_visible_supervisor_tools(
+    state: Optional[Dict[str, Any]] = None,
+    *,
+    tool_entries: Optional[list[Dict[str, Any]]] = None,
+) -> list[Any]:
+    """获取当前轮对 Supervisor 模型可见的简单工具。"""
+
+    entries = list(tool_entries) if tool_entries is not None else _get_supervisor_tool_entries()
+    runtime_visible_entries = _apply_runtime_tool_visibility_policy(entries, state, agent_name="supervisor")
+    return _apply_tool_governance_policy(runtime_visible_entries, agent_name="supervisor")
+
+
+def _get_supervisor_handoff_tool_entries() -> list[Dict[str, Any]]:
+    """获取 Supervisor 的专家委派工具条目。"""
+
+    progressive_mode = False
     try:
         from app.services.skill_service import SkillService
 
-        if SkillService.resolve_runtime_mode() == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
-            entries.append(_build_tool_entry(_create_load_skills_tool(), {"group:skill", "runtime:progressive"}))
-            logger.debug("Supervisor 工具: 已加载 progressive load_skills")
-    except Exception as e:
-        logger.warning("Supervisor load_skills 工具加载失败: %s", e)
+        progressive_mode = SkillService.resolve_runtime_mode() == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE
+    except Exception as exc:
+        logger.warning("Supervisor handoff 运行模式解析失败，按非 progressive 继续: %s", exc)
 
-    return _apply_tool_governance_policy(entries, agent_name="supervisor")
+    entries: list[Dict[str, Any]] = []
+    for agent_type, desc in AGENT_DESCRIPTIONS.items():
+        tool_obj = _create_task_handoff_tool(agent_type, desc)
+        entries.append(
+            _build_tool_entry(
+                tool_obj,
+                {"group:handoff", f"handoff:{agent_type}"},
+                runtime_visibility="catalog_after_load" if progressive_mode else "always",
+            )
+        )
+
+    return entries
+
+
+def _get_runtime_visible_supervisor_handoff_tools(
+    state: Optional[Dict[str, Any]] = None,
+    *,
+    tool_entries: Optional[list[Dict[str, Any]]] = None,
+) -> list[Any]:
+    """获取当前轮对 Supervisor 模型可见的专家委派工具。"""
+
+    entries = list(tool_entries) if tool_entries is not None else _get_supervisor_handoff_tool_entries()
+    runtime_visible_entries = _apply_runtime_tool_visibility_policy(entries, state, agent_name="supervisor")
+    return _apply_tool_governance_policy(runtime_visible_entries, agent_name="supervisor")
+
+
+
+def _get_supervisor_tools():
+    """获取 Supervisor 可执行的简单工具全集。"""
+
+    return _apply_tool_governance_policy(_get_supervisor_tool_entries(), agent_name="supervisor")
 
 
 def _build_decomposed_goals_for_query(user_query: str) -> list[Dict[str, Any]]:
@@ -5772,6 +6248,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     updates["skill_catalog_context"] = None
     updates["catalog_version"] = "-"
     updates["visible_skill_count"] = 0
+    updates["allowed_tool_registry"] = _normalize_allowed_tool_registry(state.get("allowed_tool_registry") or {})
 
     try:
         from app.services.skill_service import SkillService
@@ -5803,6 +6280,17 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                     node="preprocess",
                 )
 
+        current_allowed_tool_registry = _normalize_allowed_tool_registry(state.get("allowed_tool_registry") or {})
+        if not current_allowed_tool_registry:
+            restored_allowed_tools = _restore_allowed_tool_registry_from_messages(messages)
+            if restored_allowed_tools:
+                current_allowed_tool_registry = restored_allowed_tools
+        if loaded_skill_registry and not current_allowed_tool_registry:
+            current_allowed_tool_registry = _normalize_allowed_tool_registry(
+                SkillService.build_allowed_tool_registry_from_loaded_registry(loaded_skill_registry)
+            )
+        updates["allowed_tool_registry"] = current_allowed_tool_registry
+
         if runtime_mode == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE:
             catalog_payload = SkillService.build_skill_catalog_manifest(user_id=state.get("user_id"))
             manifest = list(catalog_payload.get("manifest") or [])
@@ -5826,7 +6314,7 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             )
             emit_status(
                 writer,
-                message=f"已预装 {visible_skill_count} 个可见技能目录，尚未加载具体技能。",
+                message=f"已预装 {visible_skill_count} 个技能目录，可按需加载。",
                 node="preprocess",
             )
         elif content:
@@ -5950,22 +6438,45 @@ async def create_multi_agent_graph(
         model_id=model_id,
     )
 
-    # 1. 创建 Handoff 工具（使用常量定义）
-    handoff_tools = [
-        _create_task_handoff_tool(agent_type, desc)
-        for agent_type, desc in AGENT_DESCRIPTIONS.items()
-        if agent_type != AgentType.DATA
-    ]
-    
-    # 2. 获取 Supervisor 的简单工具（可以直接调用）
-    supervisor_simple_tools = _get_supervisor_tools()
+    # 1. 创建 Handoff 工具（执行全集 + 运行时可见子集）
+    handoff_tool_entries = _get_supervisor_handoff_tool_entries()
+    handoff_tools = _apply_tool_governance_policy(handoff_tool_entries, agent_name="supervisor")
+
+    # 2. 获取 Supervisor 的简单工具（执行全集 + 运行时可见子集）
+    supervisor_simple_tool_entries = _get_supervisor_tool_entries()
+    supervisor_simple_tools = _apply_tool_governance_policy(supervisor_simple_tool_entries, agent_name="supervisor")
     decompose_goals_tool = _create_decompose_goals_tool(llm)
-    
-    # 3. 创建 Supervisor Agent（handoff 工具 + 简单工具）
-    # 使用 create_react_agent，支持工具返回 Command 对象
-    supervisor_agent = create_react_agent(
-        llm,
+    supervisor_wrap_tool_call, supervisor_awrap_tool_call = _build_runtime_tool_call_wrapper(
+        handoff_tool_entries + supervisor_simple_tool_entries,
+        agent_name="supervisor",
+    )
+    supervisor_tool_node = ToolNode(
         handoff_tools + [decompose_goals_tool] + supervisor_simple_tools,
+        wrap_tool_call=supervisor_wrap_tool_call,
+        awrap_tool_call=supervisor_awrap_tool_call,
+    )
+
+    def _resolve_supervisor_model(state: MultiAgentState, _runtime):
+        visible_handoff_tools = _get_runtime_visible_supervisor_handoff_tools(
+            state=state,
+            tool_entries=handoff_tool_entries,
+        )
+        visible_simple_tools = _get_runtime_visible_supervisor_tools(
+            state=state,
+            tool_entries=supervisor_simple_tool_entries,
+        )
+        bound_tools = visible_handoff_tools + [decompose_goals_tool] + visible_simple_tools
+        logger.debug(
+            "Supervisor 运行时工具绑定: %s",
+            [_resolve_tool_name(tool_obj) for tool_obj in bound_tools],
+        )
+        return llm.bind_tools(bound_tools)
+
+    # 3. 创建 Supervisor Agent（handoff 工具 + 简单工具）
+    # 模型侧按会话态动态裁剪可见工具，执行侧也统一经过 runtime gating 拦截
+    supervisor_agent = create_react_agent(
+        _resolve_supervisor_model,
+        supervisor_tool_node,
         prompt=SUPERVISOR_PROMPT,
         name="supervisor",
     )
@@ -6087,6 +6598,7 @@ async def create_multi_agent_graph(
             "skill_catalog_context": None,
             "catalog_version": None,
             "visible_skill_count": 0,
+            "allowed_tool_registry": {},
             "turn_id": None,
 
             # === 交付导向状态 ===

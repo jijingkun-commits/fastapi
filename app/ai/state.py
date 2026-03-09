@@ -29,10 +29,10 @@ AGENT_DESCRIPTIONS = {
 
 **不需要委派的简单任务**（你可以直接处理）：
 - 简单绘图 → 直接用 fig_inter
-- 知识库搜索 → 直接用 knowledge_search
+- 知识库搜索 → 先 load_skills 对应 skill，再用已授权工具
 
 **必须委派的任务**：
-- 所有 SQL 查询 → 必须委派给 data_expert
+- 所有 SQL 查询 → 先 load_skills 加载数据相关 skill，再委派给 data_expert
 """,
     AgentType.TODO: """将待办事项管理任务分配给待办助手。
 
@@ -141,6 +141,7 @@ class MultiAgentState(BaseAgentState, total=False):
     skill_catalog_context: str    # 由 catalog manifest 渲染的首轮上下文
     loaded_skill_registry: Dict[str, Dict[str, Any]]  # 会话级已加载 Skill 唯一状态源
     loaded_skill_context: str     # 由 loaded_skill_registry 派生的正文上下文
+    allowed_tool_registry: Dict[str, Dict[str, Any]]  # 由已加载 Skill 派生的领域工具授权状态
     catalog_version: str          # 当前轮 catalog 稳定版本号
     visible_skill_count: int      # 当前轮可见 Skill 数量
     

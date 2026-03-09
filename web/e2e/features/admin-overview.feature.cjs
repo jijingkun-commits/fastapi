@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded } = require('../helpers/auth-helper');
+const { loginAndGoto } = require('../helpers/auth-helper');
 
 /**
  * 管理后台总览驾驶舱主流程覆盖。
@@ -221,12 +221,10 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                 });
             });
 
-            await loginIfNeeded(page);
         });
 
-        await test.step('When: 进入 /admin 总览页', async () => {
-            await page.goto('/admin');
-            await page.waitForLoadState('domcontentloaded');
+        await test.step('Given/When: 管理员进入 /admin 总览页', async () => {
+            await loginAndGoto(page, '/admin');
         });
 
         await test.step('Then: 首屏可见 8 块驾驶舱信息卡', async () => {

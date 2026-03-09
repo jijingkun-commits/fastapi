@@ -102,6 +102,7 @@ class SkillMetadataUpdateRequest(BaseModel):
     catalog_order: Optional[int] = Field(default=None, ge=0, le=10000)
     catalog_description: Optional[str] = Field(default=None, max_length=240)
     when_to_use: Optional[str] = Field(default=None, max_length=160)
+    tool_contract: Optional[Dict[str, Any]] = None
 
 
 class SkillVersionItem(BaseModel):
@@ -116,6 +117,7 @@ class SkillVersionItem(BaseModel):
     auto_enabled: bool
     priority: int
     scope: str
+    tool_contract: Dict[str, Any] = Field(default_factory=dict)
     published_at: Optional[str]
     updated_at: Optional[str]
 
@@ -491,6 +493,9 @@ def update_skill_metadata(
 
     if "when_to_use" in updates:
         updates["when_to_use"] = updates["when_to_use"].strip()
+
+    if "tool_contract" in updates and not isinstance(updates["tool_contract"], dict):
+        raise HTTPException(status_code=400, detail="tool_contract 必须是对象")
 
     if "trigger_phrases" in updates:
         updates["trigger_phrases"] = [

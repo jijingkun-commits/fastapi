@@ -545,3 +545,38 @@ def test_regenerate_single_skill_endpoint_should_return_409_on_missing_version_r
 
     assert response.status_code == 409
     assert "缺少可写版本记录" in response.json()["detail"]
+
+
+def test_metadata_endpoint_should_forward_tool_contract(skill_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    """metadata 更新应允许写入 version 级 tool_contract。"""
+
+    captured: dict = {}
+
+    def _fake_update(cls, db, skill_id: str, updates):  # noqa: ANN001
+        captured["db"] = db
+        captured["skill_id"] = skill_id
+        captured["updates"] = updates
+        return {
+            "skill_id": skill_id,
+            "updated": True,
+            "updated_fields": list(updates.keys()),
+        }
+
+    monkeypatch.setattr(SkillService, "update_skill_catalog_metadata", classmethod(_fake_update))
+
+    response = skill_admin_client.patch(
+        "/api/v1/skill-admin/skills/knowledge-search/meta",
+        json={
+            "tool_contract": {
+                "required_tools": ["knowledge_search"],
+                "optional_tools": [],
+                "tool_groups": ["knowledge"],
+                "expose_after_load": True,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updated"] is True
+    assert captured["skill_id"] == "knowledge-search"
+    assert captured["updates"]["tool_contract"]["required_tools"] == ["knowledge_search"]

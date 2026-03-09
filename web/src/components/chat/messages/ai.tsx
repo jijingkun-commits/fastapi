@@ -369,30 +369,9 @@ export function AssistantMessage({
     );
   }
 
-  // 获取当前处理状态
-  const currentStatus = thread.currentStatus;
-  const statusMessage = currentStatus?.message?.trim() ?? "";
-  const shouldAnimateStatus = currentStatus?.phase !== "done";
-
   if (isLoading) {
     return (
       <div className="chat-content-shell mx-auto flex flex-col gap-2">
-        {statusMessage && (
-          <div
-            className={cn(
-              "flex items-center gap-2 text-xs text-gray-500",
-              shouldAnimateStatus && "animate-pulse",
-            )}
-          >
-            <span
-              className={cn(
-                "inline-block h-1.5 w-1.5 rounded-full bg-blue-500",
-                shouldAnimateStatus && "animate-ping",
-              )}
-            />
-            {statusMessage}
-          </div>
-        )}
         {hasToolCalls && <ToolCalls toolCalls={message.tool_calls} isComplete={!isLoading} />}
         <MarkdownText className="markdown-content-readable">
           {displayContent}

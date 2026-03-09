@@ -19,13 +19,13 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded, sendMessageAndWait } = require('./helpers/auth-helper');
+const { loginAndOpenThread, sendMessageAndWait } = require('./helpers/auth-helper');
 
 const LONG_TIMEOUT = 60000; // 60秒超时，适合复杂对话
 
 // 辅助函数: 确保已登录
-async function ensureLoggedIn(page) {
-    await loginIfNeeded(page);
+async function ensureLoggedIn(page, label) {
+    await loginAndOpenThread(page, label);
 }
 
 async function hasConfirmationCard(page, timeout = 1500) {
@@ -34,13 +34,8 @@ async function hasConfirmationCard(page, timeout = 1500) {
 }
 
 // 辅助函数: 发送消息并等待回复
-async function sendMessage(page, message, waitTime = 1500) {
+async function sendMessage(page, message) {
     await sendMessageAndWait(page, message, LONG_TIMEOUT, true);
-
-    // 额外等待，确保最后一段流式文本渲染完成
-    if (waitTime > 0) {
-        await page.waitForTimeout(waitTime);
-    }
 }
 
 // 辅助函数: 获取最新的 AI 回复内容
@@ -65,8 +60,8 @@ function logRound(round, description, passed) {
 
 test.describe('待办 Agent 复杂多轮对话压力测试', () => {
 
-    test.beforeEach(async ({ page }) => {
-        await ensureLoggedIn(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await ensureLoggedIn(page, testInfo.title);
     });
 
     test('完整 10 轮压力测试场景', async ({ page }) => {
@@ -247,8 +242,8 @@ AI 中台倒是不那么急，但领导下周可能要听汇报。
 
 test.describe('单独功能验证测试', () => {
 
-    test.beforeEach(async ({ page }) => {
-        await ensureLoggedIn(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await ensureLoggedIn(page, testInfo.title);
     });
 
     test('能力1: 多轮信息收集与状态保持', async ({ page }) => {
@@ -328,7 +323,6 @@ test.describe('单独功能验证测试', () => {
 
         // 先创建一个任务
         await sendMessage(page, '明天下午2点开会');
-        await page.waitForTimeout(2000);
 
         // 创建冲突任务
         await sendMessage(page, '明天下午2点还有个客户拜访');
@@ -345,7 +339,6 @@ test.describe('单独功能验证测试', () => {
         console.log('\n🧪 测试: 上下文切换');
 
         await sendMessage(page, '明天的会议准备下');
-        await page.waitForTimeout(2000);
 
         // 使用"对了"切换话题
         await sendMessage(page, '对了，下周还有个培训要准备课件');
@@ -364,7 +357,6 @@ test.describe('单独功能验证测试', () => {
         console.log('\n🧪 测试: 待办延后/变更');
 
         await sendMessage(page, '帮我创建一个任务：明天交报告');
-        await page.waitForTimeout(2000);
 
         await sendMessage(page, '那个报告推迟到下周一');
         const response = await getLatestAIMessage(page);
@@ -401,7 +393,6 @@ test.describe('单独功能验证测试', () => {
 
         // 先创建几个待办
         await sendMessage(page, '帮我创建这些待办：1. 明天开会 2. 后天交报告 3. 下周培训');
-        await page.waitForTimeout(3000);
 
         // 请求汇总
         await sendMessage(page, '按优先级给我一个待办清单');
@@ -421,8 +412,8 @@ test.describe('单独功能验证测试', () => {
 
 test.describe('边界场景测试', () => {
 
-    test.beforeEach(async ({ page }) => {
-        await ensureLoggedIn(page);
+    test.beforeEach(async ({ page }, testInfo) => {
+        await ensureLoggedIn(page, testInfo.title);
     });
 
     test('边界1: 超长任务描述', async ({ page }) => {
@@ -446,10 +437,8 @@ test.describe('边界场景测试', () => {
         console.log('\n🧪 测试: 多次修改同一任务');
 
         await sendMessage(page, '创建任务：明天开会');
-        await page.waitForTimeout(2000);
 
         await sendMessage(page, '改成后天');
-        await page.waitForTimeout(2000);
 
         await sendMessage(page, '还是改成大后天下午2点吧');
         const response = await getLatestAIMessage(page);

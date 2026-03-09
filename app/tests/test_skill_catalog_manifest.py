@@ -135,3 +135,44 @@ def test_preprocess_writes_skill_catalog_context_in_progressive_mode(monkeypatch
     assert updates["skill_context"] is None
     assert updates["skill_injection_meta"]["runtime_mode"] == SkillService.SKILL_RUNTIME_MODE_PROGRESSIVE
     assert any(event.get("type") == "status" for event in events)
+
+
+
+def test_build_skill_catalog_manifest_carries_tool_contract(monkeypatch) -> None:
+    """catalog manifest 应携带 version 级 tool_contract，供 runtime 统一消费。"""
+
+    rows = [
+        SimpleNamespace(
+            skill_id="knowledge-search",
+            name="Knowledge Search",
+            description="知识检索",
+            content="# Knowledge Search\n正文",
+            catalog_path="knowledge/search",
+            catalog_order=10,
+            effective_version="v1",
+            when_to_use="当你需要查询知识库时",
+            catalog_description="知识库检索",
+            tool_contract={
+                "required_tools": ["knowledge_search"],
+                "optional_tools": [],
+                "tool_groups": ["knowledge"],
+                "expose_after_load": True,
+            },
+            scope="global",
+            binding_status=None,
+            is_enabled=True,
+            priority=10,
+        )
+    ]
+
+    monkeypatch.setattr("app.services.skill_service.get_db_context", lambda: nullcontext(object()))
+    monkeypatch.setattr(
+        SkillService,
+        "_list_definition_runtime_rows",
+        classmethod(lambda cls, db, user_id=None, require_content=True: rows),
+    )
+
+    payload = SkillService.build_skill_catalog_manifest(user_id=42)
+
+    assert payload["manifest"][0]["tool_contract"]["required_tools"] == ["knowledge_search"]
+    assert payload["catalog_version"]

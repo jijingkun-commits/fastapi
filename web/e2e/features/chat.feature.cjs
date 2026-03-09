@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded, ensureChatReady } = require('../helpers/auth-helper');
+const { loginAndOpenThread, ensureChatReady, waitForAIResponse } = require('../helpers/auth-helper');
 
 /**
  * 需求文档: docs/产品文档/聊天系统需求.md
@@ -7,12 +7,12 @@ const { loginIfNeeded, ensureChatReady } = require('../helpers/auth-helper');
  * @test-case TC-CHAT-01
  */
 test.describe('用户故事: 聊天系统', () => {
-    test('US-CHAT-01: 发送消息后获得流式响应', async ({ page }) => {
+    test('US-CHAT-01: 发送消息后获得流式响应', async ({ page }, testInfo) => {
         test.setTimeout(90000);
         const message = `你好，简短回复我 ${Date.now()}`;
 
         await test.step('Given: 用户已登录并进入聊天界面', async () => {
-            await loginIfNeeded(page);
+            await loginAndOpenThread(page, testInfo.title);
             await ensureChatReady(page);
         });
 
@@ -23,6 +23,7 @@ test.describe('用户故事: 聊天系统', () => {
         });
 
         await test.step('Then: AI 返回可见响应内容', async () => {
+            await waitForAIResponse(page, 90000, true);
             const aiMessages = page.locator('[data-testid="ai-message"]');
             await expect(aiMessages.last()).toBeVisible({ timeout: 20000 });
             const content = await aiMessages.last().innerText();

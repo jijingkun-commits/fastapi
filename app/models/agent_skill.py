@@ -122,6 +122,7 @@ class AgentSkillVersion(Base):
     conflicts_with = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="冲突技能")
     catalog_description = Column(Text, comment="目录展示文案")
     when_to_use = Column(Text, comment="何时使用该技能")
+    tool_contract = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="version 级工具授权契约")
 
     published_at = Column(TIMESTAMP, comment="发布时间")
     created_at = Column(TIMESTAMP, server_default=func.now())

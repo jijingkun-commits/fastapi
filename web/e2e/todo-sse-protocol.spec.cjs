@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
-const { loginIfNeeded, waitForChatReady, waitForAIResponse } = require('./helpers/auth-helper');
+const { loginAndOpenThread, waitForChatReady, waitForAIResponse } = require('./helpers/auth-helper');
 
 /**
  * 解析 SSE 文本里的 done 事件 payload 列表
@@ -89,18 +89,10 @@ async function sendMessageAndCaptureStream(page, message, options = {}) {
 }
 
 test.describe('待办助手 SSE 协议回归', () => {
-    test.use({ storageState: '.auth/user.json' });
     test.describe.configure({ mode: 'serial' });
 
-    test.beforeEach(async ({ page }) => {
-        await loginIfNeeded(page);
-        await waitForChatReady(page, 60000);
-
-        const newThreadButton = page.getByRole('button', { name: 'New thread' }).first();
-        if (await newThreadButton.isVisible().catch(() => false)) {
-            await newThreadButton.click();
-            await waitForChatReady(page, 30000);
-        }
+    test.beforeEach(async ({ page }, testInfo) => {
+        await loginAndOpenThread(page, testInfo.title, {}, 60000);
     });
 
     test('TC-EDGE-08: 跨轮对话不复现历史待办卡片，且 done 不含 additional_kwargs', async ({ page }) => {

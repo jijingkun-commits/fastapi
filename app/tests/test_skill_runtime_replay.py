@@ -56,7 +56,7 @@ def _patch_preprocess_basics(monkeypatch):
 
 
 def test_preprocess_rehydrates_loaded_skill_state_from_ai_message(monkeypatch) -> None:
-    """回放时应优先读取历史 AIMessage.skill_runtime 恢复 loaded_skill_registry。"""
+    """回放时应优先读取历史 AIMessage.skill_runtime 恢复 loaded_skill_registry/allowed_tool_registry。"""
 
     _patch_preprocess_basics(monkeypatch)
     monkeypatch.setattr(
@@ -64,11 +64,25 @@ def test_preprocess_rehydrates_loaded_skill_state_from_ai_message(monkeypatch) -
         "build_loaded_skill_context_from_registry",
         classmethod(
             lambda cls, registry: {
-                "loaded_skill_context": "以下技能正文已加载到当前会话，可直接复用：\n\n### SQL Author | skill_id=sql.query.author | version=v2026.03.07\n# SQL Author\n正文",
-                "loaded_skills": [{"skill_id": "sql.query.author", "version": "v2026.03.07", "truncated": False}],
+                "loaded_skill_context": "以下技能正文已加载到当前会话，可直接复用：\n\n### SQL Author | skill_id=knowledge-search | version=v1\n# Knowledge Search\n正文",
+                "loaded_skills": [{"skill_id": "knowledge-search", "version": "v1", "truncated": False}],
                 "missing_skills": [],
             }
         ),
+    )
+    monkeypatch.setattr(
+        SkillService,
+        "build_allowed_tool_registry_from_loaded_registry",
+        classmethod(
+            lambda cls, registry: {
+                "knowledge_search": {
+                    "tool_name": "knowledge_search",
+                    "skill_ids": ["knowledge-search"],
+                    "versions": ["v1"],
+                }
+            }
+        ),
+        raising=False,
     )
 
     previous_ai = AIMessage(
@@ -79,8 +93,9 @@ def test_preprocess_rehydrates_loaded_skill_state_from_ai_message(monkeypatch) -
                 "catalog_version": "cat-001",
                 "visible_skill_count": 1,
                 "loaded_skills": [
-                    {"skill_id": "sql.query.author", "version": "v2026.03.07", "truncated": False}
+                    {"skill_id": "knowledge-search", "version": "v1", "truncated": False}
                 ],
+                "allowed_tools": ["knowledge_search"],
                 "replay_source": "live",
             }
         },
@@ -96,12 +111,13 @@ def test_preprocess_rehydrates_loaded_skill_state_from_ai_message(monkeypatch) -
         )
     )
 
-    assert updates["loaded_skill_registry"]["sql.query.author"]["version"] == "v2026.03.07"
+    assert updates["loaded_skill_registry"]["knowledge-search"]["version"] == "v1"
     assert updates["loaded_skill_context"].startswith("以下技能正文已加载到当前会话")
+    assert updates["allowed_tool_registry"]["knowledge_search"]["tool_name"] == "knowledge_search"
 
 
-def test_create_ai_message_with_skill_runtime_marks_rehydrated(monkeypatch) -> None:
-    """当当前轮未再次触发 load_skills 时，AI 输出应标记 replay_source=rehydrated。"""
+def test_create_ai_message_with_skill_runtime_marks_rehydrated_and_allowed_tools(monkeypatch) -> None:
+    """当当前轮未再次触发 load_skills 时，AI 输出应标记 replay_source=rehydrated，并保留 allowed_tools。"""
 
     monkeypatch.setattr(
         SkillService,
@@ -114,19 +130,27 @@ def test_create_ai_message_with_skill_runtime_marks_rehydrated(monkeypatch) -> N
         {
             "messages": [HumanMessage(content="继续")],
             "loaded_skill_registry": {
-                "sql.query.author": {
-                    "skill_id": "sql.query.author",
-                    "version": "v2026.03.07",
+                "knowledge-search": {
+                    "skill_id": "knowledge-search",
+                    "version": "v1",
                     "truncated": False,
                 }
             },
+            "allowed_tool_registry": {
+                "knowledge_search": {
+                    "tool_name": "knowledge_search",
+                    "skill_ids": ["knowledge-search"],
+                    "versions": ["v1"],
+                }
+            },
             "loaded_skill_context": "以下技能正文已加载到当前会话，可直接复用：...",
-            "skill_catalog_manifest": [{"skill_id": "sql.query.author", "effective_version": "v2026.03.07"}],
+            "skill_catalog_manifest": [{"skill_id": "knowledge-search", "effective_version": "v1"}],
             "catalog_version": "cat-001",
             "visible_skill_count": 1,
         },
     )
 
     skill_runtime = message.additional_kwargs["skill_runtime"]
-    assert skill_runtime["loaded_skills"][0]["skill_id"] == "sql.query.author"
+    assert skill_runtime["loaded_skills"][0]["skill_id"] == "knowledge-search"
+    assert skill_runtime["allowed_tools"] == ["knowledge_search"]
     assert skill_runtime["replay_source"] == "rehydrated"
