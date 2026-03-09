@@ -735,7 +735,20 @@ llm = get_scene_llm(
 → get_llm(model_id=...) 构建最终客户端
 ```
 
+### 记忆意图合同链路（2026-03-09）
 
+当前聊天主链路中的记忆写入不再由 `chat_service` 直接使用关键词词表判断，而是统一走：
+
+`chat_service -> memory_intent_resolver_service -> decision_contract -> response_policy_service / document_memory_service`
+
+关键约束：
+
+1. `chat_service` 只负责保存 human 消息、选择同步/异步分支、注入 `memory_context` 与 `response_guidance_contract`。  
+2. 语义解析统一下沉到 `memory_intent_resolver_service`，删除/撤销类输入也必须先生成结构化 contract。  
+3. 回复策略统一由 `response_policy_service` 渲染，避免数据库状态与回复文案漂移。  
+4. `multi_agent_graph` 只消费结构化的 `response_guidance_contract` 与恢复提示，不再内置记忆删除语义词表。
+
+这条链路的直接收益是：记忆识别、数据库状态、系统提示与流式输出口径保持单一真相源，减少 `chat_service` 与 graph 双侧补丁扩散。
 
 ---
 

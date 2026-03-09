@@ -12,6 +12,17 @@ class _Message:
     content: object
 
 
+class _ModelDumpMessage:
+    def __init__(self, content: object):
+        self.content = content
+
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "content": self.content,
+            "type": "ai",
+        }
+
+
 class _FakeLLM:
     def __init__(self, response: object, *, should_raise: bool = False):
         self._response = response
@@ -25,31 +36,40 @@ class _FakeLLM:
         return self._response
 
 
-def test_decide_should_accept_valid_contract_and_fill_optional_defaults() -> None:
-    """合法合同应保留核心字段并补齐非核心默认值。"""
+def _build_accept_item(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "memory_kind": "response_preference",
+        "operation": "upsert",
+        "slot_key": "user.preference.response_style",
+        "normalized_value": "conclusion_first",
+        "canonical_text": "用户偏好先结论后分析",
+        "evidence_span": "先给结论再分析",
+        "durability": 0.9,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_decide_should_accept_decision_contract_with_memories_array() -> None:
+    """合法合同应输出 accepted DecisionContract。"""
 
     llm = _FakeLLM(
         {
-            "level": "permanent",
-            "category": "user_preference",
-            "slot_key": "user.preference.coffee",
-            "canonical_text": "用户偏好美式咖啡",
+            "decision": "accept",
+            "reason_code": "accepted",
             "confidence": 0.93,
+            "memories": [_build_accept_item()],
+            "audit": {"detector": "llm_primary"},
         }
     )
 
-    decision = llm_service.decide(llm=llm, user_text="记住我喜欢美式咖啡")
+    decision = llm_service.decide(llm=llm, user_text="以后都先给结论再分析")
 
-    assert decision["level"] == "permanent"
-    assert decision["category"] == "user_preference"
-    assert decision["slot_key"] == "user.preference.coffee"
-    assert decision["canonical_text"] == "用户偏好美式咖啡"
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "accepted"
     assert decision["confidence"] == 0.93
-    assert decision["durability_score"] == 0.0
-    assert decision["operation"] == "upsert"
-    assert decision["source_span"] == ""
-    assert decision["reverse_intent"] is False
-    assert decision["audit_reason"] == "accepted"
+    assert len(decision["memories"]) == 1
+    assert decision["memories"][0]["slot_key"] == "user.preference.response_style"
 
 
 def test_decide_should_parse_markdown_json_block() -> None:
@@ -59,123 +79,475 @@ def test_decide_should_parse_markdown_json_block() -> None:
         _Message(
             content=(
                 "```json\n"
-                "{\"level\":\"daily\",\"category\":\"profile_fact\","
-                "\"slot_key\":\"user.profile.city\","
-                "\"canonical_text\":\"用户常驻上海\",\"confidence\":0.9}\n"
+                "{"
+                '"decision":"accept",'
+                '"reason_code":"accepted",'
+                '"confidence":0.91,'
+                '"memories":[{'
+                '"memory_kind":"assistant_persona",'
+                '"operation":"upsert",'
+                '"slot_key":"assistant.persona.style",'
+                '"normalized_value":"friendly",'
+                '"canonical_text":"助手人设为友好亲切",'
+                '"evidence_span":"你就叫小哈",'
+                '"durability":0.8'
+                "}]"
+                "}\n"
                 "```"
             )
         )
     )
 
-    decision = llm_service.decide(llm=llm, user_text="我现在常住上海")
+    decision = llm_service.decide(llm=llm, user_text="以后你叫小哈")
 
-    assert decision["level"] == "daily"
-    assert decision["category"] == "profile_fact"
-    assert decision["slot_key"] == "user.profile.city"
-    assert decision["audit_reason"] == "accepted"
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["memory_kind"] == "assistant_persona"
 
 
-def test_decide_should_downgrade_to_none_when_required_field_missing() -> None:
-    """核心字段缺失时应降级为 none 并输出审计原因。"""
+def test_decide_should_parse_content_when_message_has_model_dump() -> None:
+    """AIMessage 风格对象应优先解析 content，不得误判缺字段。"""
+
+    llm = _FakeLLM(
+        _ModelDumpMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": (
+                        '{"decision":"accept","reason_code":"accepted",'
+                        '"confidence":0.9,"memories":[{"memory_kind":"response_preference",'
+                        '"operation":"upsert","slot_key":"user.preference.response_style",'
+                        '"normalized_value":"detailed","canonical_text":"用户偏好表述详细",'
+                        '"evidence_span":"更详细地交流"}]}'
+                    ),
+                }
+            ]
+        )
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="以后用更详细的表述方式交流")
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "accepted"
+    assert decision["memories"][0]["slot_key"] == "user.preference.response_style"
+
+
+def test_decide_should_reject_when_required_field_missing() -> None:
+    """顶层字段缺失时应拒绝并返回 reason_code。"""
 
     llm = _FakeLLM(
         {
-            "level": "permanent",
-            "category": "user_preference",
-            "slot_key": "user.preference.coffee",
-            "confidence": 0.92,
+            "decision": "accept",
+            "confidence": 0.93,
+            "memories": [_build_accept_item()],
         }
     )
 
-    decision = llm_service.decide(llm=llm, user_text="记住我喜欢美式")
+    decision = llm_service.decide(llm=llm, user_text="以后都先给结论")
 
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "contract_missing_required"
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "contract_missing_required"
 
 
-def test_decide_should_downgrade_to_none_when_enum_invalid() -> None:
-    """level/category 枚举非法时应降级为 none。"""
+def test_decide_identity_semantic_should_accept_without_trigger() -> None:
+    """无触发词身份表达也应由模型直判接受。"""
 
     llm = _FakeLLM(
         {
-            "level": "forever",
-            "category": "user_preference",
-            "slot_key": "user.preference.coffee",
-            "canonical_text": "用户偏好美式咖啡",
+            "decision": "accept",
+            "reason_code": "accepted",
             "confidence": 0.95,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="user_identity",
+                    slot_key="user.identity.display_name",
+                    normalized_value="jjk",
+                    canonical_text="用户名字是jjk",
+                    evidence_span="我叫jjk",
+                )
+            ],
         }
     )
 
-    decision = llm_service.decide(llm=llm, user_text="记住我喜欢美式")
+    decision = llm_service.decide(llm=llm, user_text="我叫jjk")
 
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "contract_invalid_enum"
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["memory_kind"] == "user_identity"
+    assert decision["memories"][0]["slot_key"] == "user.identity.display_name"
 
 
-def test_decide_should_downgrade_to_none_when_confidence_below_threshold() -> None:
-    """低于阈值时应降级为 none。"""
+def test_decide_multi_memory_items_should_return_array() -> None:
+    """多记忆句应返回 memories[] 数组，不得压缩成单项。"""
 
     llm = _FakeLLM(
         {
-            "level": "permanent",
-            "category": "user_preference",
-            "slot_key": "user.preference.coffee",
-            "canonical_text": "用户偏好美式咖啡",
-            "confidence": 0.64,
+            "decision": "accept",
+            "reason_code": "accepted",
+            "confidence": 0.96,
+            "memories": [
+                _build_accept_item(
+                    slot_key="user.preference.response_structure",
+                    normalized_value="conclusion_first",
+                    canonical_text="用户偏好先结论后分析",
+                    evidence_span="先给结论",
+                ),
+                _build_accept_item(
+                    slot_key="user.preference.response_length",
+                    normalized_value="short",
+                    canonical_text="用户偏好回答简短",
+                    evidence_span="回答简短一点",
+                ),
+            ],
         }
     )
 
-    decision = llm_service.decide(llm=llm, user_text="记住我喜欢美式")
+    decision = llm_service.decide(llm=llm, user_text="以后先给结论，回答简短一点")
 
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "low_confidence"
-
-
-def test_decide_should_downgrade_to_none_when_canonical_text_is_template() -> None:
-    """无信息模板句应被质量门禁拦截。"""
-
-    llm = _FakeLLM(
-        {
-            "level": "daily",
-            "category": "interaction_policy",
-            "slot_key": "interaction.policy.reply_style",
-            "canonical_text": "我记住了你喜欢这种方式",
-            "confidence": 0.9,
-        }
-    )
-
-    decision = llm_service.decide(llm=llm, user_text="以后说话简短一点")
-
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "canonical_text_quality_failed"
+    assert decision["decision"] == "accept"
+    assert isinstance(decision["memories"], list)
+    assert len(decision["memories"]) == 2
 
 
-def test_decide_should_downgrade_to_none_when_canonical_text_replays_user_text() -> None:
-    """canonical_text 机械复述原句时应按 none 丢弃。"""
+def test_decide_style_semantic_should_normalize() -> None:
+    """风格偏好应输出稳定 slot 与 normalized_value。"""
 
     llm = _FakeLLM(
         {
-            "level": "daily",
-            "category": "profile_fact",
-            "slot_key": "user.profile.location",
-            "canonical_text": "我现在住在上海",
+            "decision": "accept",
+            "reason_code": "accepted",
             "confidence": 0.92,
+            "memories": [
+                _build_accept_item(
+                    slot_key="user.preference.response_style",
+                    normalized_value="less_official",
+                    canonical_text="用户希望语气少一些官方感",
+                    evidence_span="别太官方",
+                )
+            ],
         }
     )
 
-    decision = llm_service.decide(llm=llm, user_text="我现在住在上海")
+    decision = llm_service.decide(llm=llm, user_text="以后回答狠一点，别太官方")
 
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "canonical_text_quality_failed"
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["slot_key"] == "user.preference.response_style"
+    assert decision["memories"][0]["normalized_value"] == "less_official"
 
 
-def test_decide_should_downgrade_to_none_when_llm_invoke_failed() -> None:
-    """模型调用异常应可容错并降级为 none。"""
+def test_decide_multi_preference_sentence_should_emit_two_memories() -> None:
+    """同一句多偏好应拆成两个 memory item。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "accepted",
+            "confidence": 0.94,
+            "memories": [
+                _build_accept_item(
+                    slot_key="user.preference.response_structure",
+                    normalized_value="conclusion_first",
+                    canonical_text="用户偏好先给结论",
+                    evidence_span="先给结论",
+                ),
+                _build_accept_item(
+                    slot_key="user.preference.response_length",
+                    normalized_value="short",
+                    canonical_text="用户偏好回答简短",
+                    evidence_span="简短一点",
+                ),
+            ],
+        }
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="以后先给结论，回答简短一点")
+
+    assert decision["decision"] == "accept"
+    assert {item["slot_key"] for item in decision["memories"]} == {
+        "user.preference.response_structure",
+        "user.preference.response_length",
+    }
+
+
+def test_decide_translation_should_not_persist() -> None:
+    """翻译/引用任务应拒绝入库。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "reject",
+            "reason_code": "task_intent_translation_or_quote",
+            "confidence": 0.97,
+            "memories": [],
+        }
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="翻译一下：我叫jjk")
+
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "task_intent_translation_or_quote"
+
+
+def test_decide_should_reject_when_confidence_below_threshold() -> None:
+    """低于阈值时应拒绝。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "accepted",
+            "confidence": 0.64,
+            "memories": [_build_accept_item()],
+        }
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="以后都先给结论")
+
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "low_confidence"
+
+
+def test_decide_should_reject_when_llm_invoke_failed() -> None:
+    """模型调用异常应容错拒绝。"""
 
     llm = _FakeLLM(response={}, should_raise=True)
 
-    decision = llm_service.decide(llm=llm, user_text="记住我喜欢美式")
+    decision = llm_service.decide(llm=llm, user_text="以后都先给结论")
 
-    assert decision["level"] == "none"
-    assert decision["audit_reason"] == "llm_invoke_failed"
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "llm_invoke_failed"
 
+
+def test_decide_should_accept_archive_item_without_normalized_value() -> None:
+    """archive 记忆项不应因 normalized_value 缺失而被拒绝。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "preference_delete_request",
+            "confidence": 0.93,
+            "memories": [
+                _build_accept_item(
+                    operation="archive",
+                    slot_key="user.preference.response_structure",
+                    normalized_value=None,
+                    canonical_text="用户不再偏好总分总结构回答",
+                    evidence_span="忘记我的总分总回复风格",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.decide(llm=llm, user_text="忘记我的总分总回复风格")
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+def test_resolve_reference_archive_should_accept_candidate_slot() -> None:
+    """候选目标解析 accept 时，slot_key 必须命中候选并保留 archive 操作。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.95,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.jiaxing.bank.founded.2000",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：嘉兴银行成立于2000年",
+                    evidence_span="忘掉这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="忘掉这个记忆",
+        context={
+            "recent_memory_reference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.jiaxing.bank.founded.2000",
+                    "summary_md": "嘉兴银行成立于2000年",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "reference_archive_resolved"
+    assert decision["memories"][0]["slot_key"] == "user.profile.fact.jiaxing.bank.founded.2000"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+
+def test_resolve_reference_archive_should_reject_slot_outside_candidates() -> None:
+    """候选目标解析不得输出候选集之外的 slot_key。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.95,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.other.bank",
+                    normalized_value=None,
+                    canonical_text="用户要求删除其他记忆",
+                    evidence_span="忘掉这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="忘掉这个记忆",
+        context={
+            "recent_memory_reference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.jiaxing.bank.founded.2000",
+                    "summary_md": "嘉兴银行成立于2000年",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "reject"
+    assert decision["reason_code"] == "reverse_intent_slot_missing"
+
+
+def test_resolve_reference_archive_should_accept_active_candidate_without_recent_match() -> None:
+    """仅有 active_preference_candidates 时，仍应允许命中候选 slot。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.94,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.fact.wealth.management.products.types",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：理财产品分为自营和代销",
+                    evidence_span="帮我删除这个记忆",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="这是记忆吧？帮我删除这个记忆",
+        context={
+            "active_preference_candidates": [
+                {
+                    "slot_key": "user.profile.fact.wealth.management.products.types",
+                    "summary_md": "理财产品分为自营和代销",
+                }
+            ],
+            "recent_thread_messages": [
+                {
+                    "message_id": 5285,
+                    "role": "ai",
+                    "content": "理财产品一般分为两类：自营和代销。",
+                }
+            ],
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["reason_code"] == "reference_archive_resolved"
+    assert decision["memories"][0]["slot_key"] == "user.profile.fact.wealth.management.products.types"
+    assert decision["memories"][0]["operation"] == "archive"
+    assert decision["memories"][0]["normalized_value"] == ""
+
+
+
+
+def test_resolve_reference_archive_should_accept_recent_archived_candidate_for_confirmation_turn() -> None:
+    """同线程最近已归档目标应作为确认轮的合法候选。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.94,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.relationship.to.person",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：用户是纪宇圩的爸爸",
+                    evidence_span="1",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="1",
+        context={
+            "recent_archived_preference_candidates": [
+                {
+                    "slot_key": "user.profile.relationship.to.person",
+                    "summary_md": "用户是纪宇圩的爸爸",
+                    "source_thread_id": "thread-confirm",
+                    "source_message_id": 5395,
+                    "match_latest_user_message": True,
+                }
+            ],
+            "latest_assistant_message": {"message_id": 5396, "role": "ai", "content": "系统繁忙，当前请求暂时无法处理，请稍后重试。"},
+            "latest_user_message_before_source": {"message_id": 5395, "role": "human", "content": "删除这个记忆"},
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["slot_key"] == "user.profile.relationship.to.person"
+
+def test_resolve_reference_archive_should_accept_archived_candidate_for_confirmation_turn() -> None:
+    """archived candidates 也应作为幂等确认删除的合法候选。"""
+
+    llm = _FakeLLM(
+        {
+            "decision": "accept",
+            "reason_code": "reference_archive_resolved",
+            "confidence": 0.93,
+            "memories": [
+                _build_accept_item(
+                    memory_kind="profile_fact",
+                    operation="archive",
+                    slot_key="user.profile.relationship.parent.of",
+                    normalized_value=None,
+                    canonical_text="用户要求删除已有记忆：用户是纪宇圩的爸爸",
+                    evidence_span="1",
+                )
+            ],
+        }
+    )
+
+    decision = llm_service.resolve_reference_archive(
+        llm=llm,
+        user_text="1",
+        context={
+            "archived_preference_candidates": [
+                {
+                    "slot_key": "user.profile.relationship.parent.of",
+                    "summary_md": "用户是纪宇圩的爸爸",
+                }
+            ],
+            "latest_assistant_message": {"message_id": 5344, "role": "ai", "content": "我会处理并删除你是纪宇圩的爸爸这条长期记忆。"},
+            "latest_user_message_before_source": {"message_id": 5343, "role": "human", "content": "删除这个记忆"},
+        },
+    )
+
+    assert decision["decision"] == "accept"
+    assert decision["memories"][0]["slot_key"] == "user.profile.relationship.parent.of"

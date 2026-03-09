@@ -23,21 +23,71 @@ PLANNER_INTENT_PLAN_PROMPT_TEMPLATE = (
 # 用户记忆意图合同判定提示词（轻量模型）。
 MEMORY_INTENT_DECISION_PROMPT = (
     "你是用户记忆沉淀判定器，仅输出严格 JSON 对象，不要输出解释。\n"
-    "任务：根据用户输入判断是否生成长期/日常记忆。\n"
-    "核心字段（必填）：level, category, slot_key, canonical_text, confidence。\n"
-    "扩展字段（可选）：durability_score, operation, reason, source_span, reverse_intent。\n"
+    "任务：根据用户输入判断是否生成长期偏好记忆，或归档已有偏好记忆。\n"
+    "顶层字段（必填）：decision, reason_code, confidence, memories。\n"
+    "顶层字段（可选）：audit, reverse_intent, reverse_intent_enabled。\n"
+    "memories 为数组；每个 item 必填：memory_kind, operation, slot_key, canonical_text, evidence_span。\n"
+    "其中 normalized_value 在 upsert 时必填；archive 时可为空字符串。\n"
+    "item 可选字段：durability。\n"
     "枚举约束：\n"
-    "- level 只能是 permanent、daily、none。\n"
-    "- category 只能是 ai_persona、user_preference、important_knowledge、profile_fact、interaction_policy。\n"
-    "- operation 默认 upsert。\n"
+    "- decision 只能是 accept 或 reject。\n"
+    "- memory_kind 只能是 user_identity、response_preference、assistant_persona、profile_fact。\n"
+    "- operation 只能是 upsert 或 archive。\n"
+    "反向记忆约束：\n"
+    "- 若用户要求撤销、归档或不再沿用某条长期记忆，应输出 operation=archive。\n"
+    "- 若上下文包含 active_preference_candidates，archive 的 slot_key 必须从候选中选择，禁止自造 slot_key。\n"
+    "- 若用户通过指代、省略或承接上文引用前文记忆，应结合 recent_thread_messages、latest_assistant_message、latest_user_message_before_source、active_preference_candidates、archived_preference_candidates 与 recent_memory_reference_candidates（若有）理解目标；无法唯一定位时直接 reject。\n"
+    "- 回复结构/格式/总分总/先结论后分析/段落结构/要点列表 等偏好，统一归入 user.preference.response_structure。\n"
+    "- 若 latest_assistant_message 刚刚明确复述了一条记忆内容，而用户随后使用指代式撤销表达，应优先把该指代映射到这条最近复述的记忆。\n"
+    "- 若当前输入只是短确认回复、编号选择或沿用上一轮已唯一确认目标的承接回复，但 latest_assistant_message 已唯一确认删除目标，则仍应输出 archive accept，不要因输入过短而机械拒绝。\n"
+    "- 对于目标清晰的归档请求，应给出 >=0.90 的 confidence；只有无法定位目标时才 reject。\n"
     "质量约束：\n"
+    "- 语义识别必须由模型完成，禁止依赖固定触发词或代码词表。\n"
     "- canonical_text 必须是可检索短句，不能机械复述原句。\n"
-    "- 若不应沉淀记忆，输出 level=none，其他核心字段仍需给出占位值。\n"
+    "- 若应拒绝，输出 decision=reject 且 memories=[]，并给出明确 reason_code。\n"
+    "输出示例 1（新增偏好）："
+    "{{\"decision\":\"accept\",\"reason_code\":\"accepted\",\"confidence\":0.93,"
+    "\"memories\":[{{\"memory_kind\":\"user_identity\",\"operation\":\"upsert\","
+    "\"slot_key\":\"user.identity.display_name\",\"normalized_value\":\"jjk\","
+    "\"canonical_text\":\"用户名字是jjk\",\"evidence_span\":\"我叫jjk\",\"durability\":0.95}}],"
+    "\"audit\":{{\"detector\":\"llm_primary\"}}}}\n"
+    "输出示例 2（撤销既有偏好）："
+    "{{\"decision\":\"accept\",\"reason_code\":\"preference_delete_request\",\"confidence\":0.94,"
+    "\"memories\":[{{\"memory_kind\":\"response_preference\",\"operation\":\"archive\","
+    "\"slot_key\":\"user.preference.response_structure\",\"normalized_value\":\"\","
+    "\"canonical_text\":\"用户要求撤销某条既有回复偏好\",\"evidence_span\":\"<用户原文中的撤销表达>\"}}],"
+    "\"audit\":{{\"detector\":\"llm_primary\"}}}}"
+    "\n用户输入：{user_text}\n"
+    "上下文：{context_json}"
+)
+
+# 记忆引用目标解析提示词（用于 resolver 的第二阶段候选定位）。
+MEMORY_REFERENCE_RESOLUTION_PROMPT = (
+    "你是用户记忆引用解析器，仅输出严格 JSON 对象，不要输出解释。\n"
+    "任务：结合用户输入、最近线程消息与候选记忆（包括 active_preference_candidates、archived_preference_candidates 与 recent_memory_reference_candidates），判断用户是否在撤销/归档某条已存在记忆；若是，则输出唯一 archive 合同。\n"
+    "顶层字段（必填）：decision, reason_code, confidence, memories。\n"
+    "顶层字段（可选）：audit。\n"
+    "memories 为数组；若 decision=accept，则必须且只能返回 1 个 item。\n"
+    "每个 item 必填：memory_kind, operation, slot_key, canonical_text, evidence_span。\n"
+    "archive 时 normalized_value 可为空字符串。\n"
+    "规则：\n"
+    "- 只能在确认用户是在撤销既有记忆时输出 accept；否则输出 reject。\n"
+    "- accept 时 slot_key 必须来自上下文候选，不允许自造。\n"
+    "- 若候选不止一项且无法唯一定位，应输出 decision=reject, reason_code=reverse_intent_target_ambiguous。\n"
+    "- 若用户像是在撤销记忆，但无法与候选建立稳定映射，应输出 decision=reject, reason_code=reverse_intent_target_unresolved。\n"
+    "- 若 latest_assistant_message 刚刚明确指出一条记忆内容，且用户随后使用指代式删除表达，应优先按该最近 assistant 记忆陈述理解目标。\n"
+    "- 若当前用户输入只是短确认回复、编号选择或沿用上一轮已唯一确认目标的承接回复，但 latest_assistant_message 已唯一点名删除目标，应继续沿用该目标，不要退回 unresolved/low_confidence。\n"
+    "- 若 latest_user_message_before_source 本身就是上一轮删除请求，且 recent_archived_preference_candidates 中存在与该用户消息同源的唯一目标，即使 latest_assistant_message 只是系统繁忙/降级回复，也应继续沿用该目标。\n"
+    "- recent_archived_preference_candidates 表示同线程最近刚归档成功的结构化目标，优先级高于普通 archived_preference_candidates。\n"
+    "- 若候选目标当前已在 archived_preference_candidates 中，通常表示这条记忆已经删过；此时若用户仍在确认同一目标，可继续输出该目标的 archive 合同，用于幂等确认。\n"
+    "- 若用户根本不是在撤销/归档已有记忆，应输出 decision=reject, reason_code=not_reverse_intent。\n"
+    "- 语义判断必须由模型完成，禁止依赖固定触发词。\n"
     "输出示例："
-    "{{\"level\":\"permanent\",\"category\":\"user_preference\","
-    "\"slot_key\":\"user.preference.coffee\",\"canonical_text\":\"用户偏好美式咖啡\","
-    "\"confidence\":0.92,\"durability_score\":0.0,\"operation\":\"upsert\","
-    "\"reason\":\"\",\"source_span\":\"\",\"reverse_intent\":false}}"
+    "{{\"decision\":\"accept\",\"reason_code\":\"reference_archive_resolved\",\"confidence\":0.95,"
+    "\"memories\":[{{\"memory_kind\":\"profile_fact\",\"operation\":\"archive\","
+    "\"slot_key\":\"user.profile.fact.jiaxing.bank.founded.2000\",\"normalized_value\":\"\","
+    "\"canonical_text\":\"用户要求删除已有记忆：某条已识别事实\",\"evidence_span\":\"<用户原文中的删除指代>\"}}],"
+    "\"audit\":{{\"detector\":\"llm_primary\"}}}}"
     "\n用户输入：{user_text}\n"
     "上下文：{context_json}"
 )
@@ -50,6 +100,8 @@ SUPERVISOR_PROMPT = """你是一个智能助手，负责理解用户意图并执
 1. 若系统上下文已注入 AI 人设（例如“AI人设: 小哈”），默认按该人设进行自称。
 2. 若系统上下文未注入 AI 人设，使用“智能助手”的中性称呼，不要自行硬编码名字。
 3. 除非用户明确要求删除记忆，不要回复“无法跨会话记住称呼”。
+4. 若系统上下文已给出可删除的长期记忆引用，说明系统具备原生记忆删除能力；禁止回答“我不能直接删/请去 Memory 页面手工删除”。
+5. 若删除目标已从当前上下文唯一确定，应直接说明“我会处理这条记忆删除”，而不是让用户重复粘贴 memory:// 引用。
 
 ## 决策树
 
@@ -84,12 +136,16 @@ SUPERVISOR_PROMPT = """你是一个智能助手，负责理解用户意图并执
     ├─ 复杂数据分析？（文件处理 + 数据清洗 + 统计 + 可视化）
     │       └─ 是 → 委派给 data_expert（调用 assign_to_data_expert）
     │
+    ├─ 用户在讨论长期记忆/偏好？（如确认某条记忆、撤销/删除刚才那条长期记忆、讨论 memory 引用）
+    │       └─ 是 → 保持在 supervisor/general.reply 处理，不要委派 todo_expert
+    │                 系统具备原生记忆删除能力；若目标明确，直接说明会处理删除，不要让用户去 Memory 页面手工删除
+    │
     ├─ 待办事项管理？（创建/查询/更新/完成/删除待办）
     │       └─ 是 → 委派给 todo_expert（调用 assign_to_todo_expert）
     │
-    ├─ 待办确认/补充？（用户简短回复可能是对待办操作的确认）
+    ├─ 待办确认/补充？（用户简短回复可能是在沿用上一轮待办操作）
     │       │
-    │       └─ 如果上一条 AI 消息包含待办相关内容（如"待办"、"确认"、"创建"等）
+    │       └─ 如果上一条 AI 消息明确在补齐待办参数、请求确认待办操作或展示待办结果
     │               └─ 是 → 委派给 todo_expert
     │
     └─ 意图不明确？（结合上下文仍无法判断用户需求）
@@ -117,7 +173,9 @@ SUPERVISOR_PROMPT = """你是一个智能助手，负责理解用户意图并执
 ## 重要：待办确认/补充信息识别
 
 当用户发送简短回复或补充信息时，需要检查对话历史：
-- 如果上一条 AI 消息涉及待办事项（包含"待办"、"确认"、"创建"等关键词），则委派给 todo_expert
+- 若用户是在讨论长期记忆/偏好删除/撤销，即便上一条 AI 消息带有确认型措辞，也不要委派给 todo_expert
+- 若上一条 AI 消息已经唯一确认要删除的记忆目标，而用户本轮只是短确认回复、编号选择或沿用上一轮目标的承接回复，应继续按记忆删除链处理，不要退化成手工 UI 删除说明
+- 如果上一条 AI 消息涉及待办事项，且当前用户补充仍然围绕待办操作，则委派给 todo_expert
 - **关键**：在 task_description 中必须包含**完整的对话上下文**，包括：
   1. 用户最初的待办请求（如"我明天要去上海"）
   2. AI 之前提取的待办信息（如标题、时间、地点等）

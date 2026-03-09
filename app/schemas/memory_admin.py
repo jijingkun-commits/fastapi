@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,12 @@ class MemoryListItem(BaseModel):
     scope: str = Field(description="作用域")
     scope_ref: Optional[str] = Field(default=None, description="作用域引用")
     status: str = Field(description="记忆状态")
+    decision_id: Optional[str] = Field(default=None, description="判定 ID")
+    reason_code: Optional[str] = Field(default=None, description="判定原因码")
+    confidence: Optional[float] = Field(default=None, description="判定置信度")
+    memories_count: int = Field(default=0, description="本次判定记忆项数量")
+    rejected_items_count: int = Field(default=0, description="原子批拒绝项数量")
+    item_errors: list[dict[str, Any]] = Field(default_factory=list, description="原子批 item 级错误")
     revision: int = Field(description="修订版本")
     chunk_total: int = Field(default=0, description="分块总数")
     ready_chunks: int = Field(default=0, description="向量就绪分块数")
@@ -52,6 +58,12 @@ class MemoryDetailResponse(BaseModel):
     scope: str = Field(description="作用域")
     scope_ref: Optional[str] = Field(default=None, description="作用域引用")
     status: str = Field(description="记忆状态")
+    decision_id: Optional[str] = Field(default=None, description="判定 ID")
+    reason_code: Optional[str] = Field(default=None, description="判定原因码")
+    confidence: Optional[float] = Field(default=None, description="判定置信度")
+    memories_count: int = Field(default=0, description="本次判定记忆项数量")
+    rejected_items_count: int = Field(default=0, description="原子批拒绝项数量")
+    item_errors: list[dict[str, Any]] = Field(default_factory=list, description="原子批 item 级错误")
     revision: int = Field(description="修订版本")
     source_thread_id: Optional[str] = Field(default=None, description="来源线程 ID")
     source_message_id: Optional[int] = Field(default=None, description="来源消息 ID")

@@ -803,8 +803,13 @@ def list_documents(
     updated_to: datetime | None = None,
     page: int = 1,
     page_size: int = 20,
+    include_source_refs: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    """分页查询记忆文档列表（含分块状态聚合）。"""
+    """分页查询记忆文档列表（含分块状态聚合）。
+
+    默认返回通用文档视图；仅当调用方显式声明 `include_source_refs=True`
+    时，才透出 `source_thread_id/source_message_id` 这类场景化源引用字段。
+    """
 
     safe_page = max(1, int(page))
     safe_page_size = max(1, int(page_size))
@@ -888,26 +893,36 @@ def list_documents(
 
     items: list[dict[str, Any]] = []
     for document, chunk_total, ready_chunks, failed_chunks in rows:
-        items.append(
-            {
-                "memory_id": int(document.id),
-                "user_id": int(document.user_id),
-                "doc_kind": str(document.doc_kind),
-                "doc_key": str(document.doc_key),
-                "title": document.title,
-                "summary_md": document.summary_md,
-                "source": str(document.source),
-                "scope": str(document.scope),
-                "scope_ref": document.scope_ref,
-                "status": str(document.status),
-                "revision": int(document.revision or 1),
-                "chunk_total": int(chunk_total or 0),
-                "ready_chunks": int(ready_chunks or 0),
-                "failed_chunks": int(failed_chunks or 0),
-                "create_time": document.create_time,
-                "update_time": document.update_time,
-            }
-        )
+        item = {
+            "memory_id": int(document.id),
+            "user_id": int(document.user_id),
+            "doc_kind": str(document.doc_kind),
+            "doc_key": str(document.doc_key),
+            "slot_key": document.slot_key,
+            "title": document.title,
+            "content_md": document.content_md,
+            "summary_md": document.summary_md,
+            "source": str(document.source),
+            "scope": str(document.scope),
+            "scope_ref": document.scope_ref,
+            "status": str(document.status),
+            "operation": str(document.operation or "upsert"),
+            "revision": int(document.revision or 1),
+            "chunk_total": int(chunk_total or 0),
+            "ready_chunks": int(ready_chunks or 0),
+            "failed_chunks": int(failed_chunks or 0),
+            "last_event_time": document.last_event_time,
+            "create_time": document.create_time,
+            "update_time": document.update_time,
+        }
+        if include_source_refs:
+            item.update(
+                {
+                    "source_thread_id": document.source_thread_id,
+                    "source_message_id": document.source_message_id,
+                }
+            )
+        items.append(item)
     return items, total
 
 
@@ -966,6 +981,7 @@ def get_document_detail(
         "user_id": int(document.user_id),
         "doc_kind": str(document.doc_kind),
         "doc_key": str(document.doc_key),
+        "slot_key": document.slot_key,
         "title": document.title,
         "content_md": document.content_md,
         "summary_md": document.summary_md,
@@ -973,9 +989,11 @@ def get_document_detail(
         "scope": str(document.scope),
         "scope_ref": document.scope_ref,
         "status": str(document.status),
+        "operation": str(document.operation or "upsert"),
         "revision": int(document.revision or 1),
         "source_thread_id": document.source_thread_id,
         "source_message_id": document.source_message_id,
+        "last_event_time": document.last_event_time,
         "chunk_total": int(chunk_total or 0),
         "ready_chunks": int(ready_chunks or 0),
         "failed_chunks": int(failed_chunks or 0),

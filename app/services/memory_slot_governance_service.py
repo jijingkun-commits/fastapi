@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import hashlib
 import re
 from datetime import datetime
@@ -17,13 +18,26 @@ _SLOT_KEY_ALIASES: dict[str, str] = {
     "ai.persona": "assistant.persona.style",
     "assistant.style": "assistant.persona.style",
     "assistant.character": "assistant.persona.style",
+    "assistant.persona": "assistant.persona.style",
     "user.preference": "user.preference.general",
+    "response.preference": "user.preference.general",
+    "response.verbosity": "user.preference.response_detail_level",
+    "response.detail": "user.preference.response_detail_level",
+    "response.length": "user.preference.response_length",
+    "response.structure": "user.preference.response_structure",
+    "response.format.structure": "user.preference.response_structure",
+    "domain.fact.jiaxing_bank.founded_year": "knowledge.important.jiaxing_bank_founded_year",
+    "domain.fact.wealth_management.product_categories": "knowledge.important.wealth_management_product_categories",
+    "domain.fact.jiaxing.bank.founded.year": "knowledge.important.jiaxing_bank_founded_year",
+    "domain.fact.wealth.management.product.categories": "knowledge.important.wealth_management_product_categories",
+    "user.identity": "user.identity.display_name",
     "user.profile": "user.profile.general",
     "interaction.policy": "interaction.policy.general",
     "knowledge.important": "knowledge.important.general",
 }
 _SLOT_KEY_PREFIXES: tuple[str, ...] = (
     "assistant.persona.",
+    "user.identity.",
     "user.preference.",
     "knowledge.important.",
     "user.profile.",
@@ -61,6 +75,12 @@ class MemorySlotGovernanceService:
         normalized = normalized.replace("_", ".")
         normalized = re.sub(r"[^a-z0-9.\-]", "", normalized)
         normalized = re.sub(r"\.{2,}", ".", normalized).strip(".")
+        if normalized.startswith("domain.fact."):
+            normalized = f"knowledge.important.{normalized[len('domain.fact.') :]}"
+        elif normalized.startswith("domain.facts."):
+            normalized = f"knowledge.important.{normalized[len('domain.facts.') :]}"
+        elif normalized.startswith("user.claims."):
+            normalized = f"knowledge.important.{normalized[len('user.claims.') :]}"
         normalized = _SLOT_KEY_ALIASES.get(normalized, normalized)
         if not normalized:
             return ""
@@ -94,6 +114,15 @@ class MemorySlotGovernanceService:
         *,
         slot_key: str,
         canonical_text: str,
+        memory_kind: str | None,
+        normalized_value: str | None,
+        evidence_span: str | None,
+        decision_id: str | None,
+        confidence: float | None,
+        reason_code: str | None,
+        memories_count: int | None,
+        rejected_items_count: int | None,
+        item_errors: list[dict[str, Any]] | None,
         operation: str,
         event_time: datetime,
         source_thread_id: str | None,
@@ -107,6 +136,24 @@ class MemorySlotGovernanceService:
             f"- canonical_text: {canonical_text}",
             f"- event_time: {event_time.isoformat()}",
         ]
+        if memory_kind:
+            lines.append(f"- memory_kind: {memory_kind}")
+        if normalized_value:
+            lines.append(f"- normalized_value: {normalized_value}")
+        if evidence_span:
+            lines.append(f"- evidence_span: {evidence_span}")
+        if decision_id:
+            lines.append(f"- decision_id: {decision_id}")
+        if reason_code:
+            lines.append(f"- reason_code: {reason_code}")
+        if confidence is not None:
+            lines.append(f"- confidence: {float(confidence):.4f}")
+        if memories_count is not None:
+            lines.append(f"- memories_count: {int(memories_count)}")
+        if rejected_items_count is not None:
+            lines.append(f"- rejected_items_count: {int(rejected_items_count)}")
+        if item_errors is not None:
+            lines.append(f"- item_errors_json: {json.dumps(item_errors, ensure_ascii=False)}")
         if source_thread_id:
             lines.append(f"- source_thread_id: {source_thread_id}")
         if source_message_id is not None:
@@ -147,6 +194,15 @@ class MemorySlotGovernanceService:
         source: str = "memory",
         scope: str = "private",
         scope_ref: str | None = None,
+        memory_kind: str | None = None,
+        normalized_value: str | None = None,
+        evidence_span: str | None = None,
+        decision_id: str | None = None,
+        confidence: float | None = None,
+        reason_code: str | None = None,
+        memories_count: int | None = None,
+        rejected_items_count: int | None = None,
+        item_errors: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """执行槽位治理写入：归一化、冲突覆盖、归档审计。"""
 
@@ -218,6 +274,15 @@ class MemorySlotGovernanceService:
         content_md = self._build_slot_content(
             slot_key=normalized_slot_key,
             canonical_text=str(canonical_text or "").strip(),
+            memory_kind=str(memory_kind or "").strip().lower() or None,
+            normalized_value=str(normalized_value or "").strip() or None,
+            evidence_span=str(evidence_span or "").strip() or None,
+            decision_id=str(decision_id or "").strip() or None,
+            confidence=confidence,
+            reason_code=str(reason_code or "").strip() or None,
+            memories_count=memories_count,
+            rejected_items_count=rejected_items_count,
+            item_errors=item_errors,
             operation="upsert",
             event_time=incoming_event_time,
             source_thread_id=source_thread_id,

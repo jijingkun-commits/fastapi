@@ -26,6 +26,7 @@ from app.ai.workflow.multi_agent_graph import (
     _build_direct_lookup_findings,
     _build_streaming_delta_return,
     _create_streaming_agent_wrapper,
+    _dispatch_custom_mode_chunk,
     _dispatch_messages_mode_chunk,
     _dispatch_values_mode_chunk,
     _execute_streaming_wrapper,
@@ -420,6 +421,60 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
     assert collected_content == ["这是回答"]
     assert token_events == [("这是回答", "supervisor")]
     assert thinking_events == [("这是思考", "supervisor")]
+
+
+def test_dispatch_custom_clarification_should_prevent_values_duplicate_replay() -> None:
+    """custom clarification 已透传时，values 模式不应再次补发同一文本。"""
+    custom_events = []
+    token_events = []
+    collected_content: list[str] = []
+    ctx = _make_ctx(
+        writer=custom_events.append,
+        node_name="todo_expert",
+        state={"messages": [HumanMessage(content="继续")], "thread_id": "thread-1"},
+        collected_content=collected_content,
+    )
+
+    _dispatch_custom_mode_chunk(
+        {
+            "type": "clarification",
+            "data": {
+                "questions": ["请补充时间"],
+                "message": "请补充时间",
+            },
+            "node": "clarify_node",
+        },
+        ctx,
+    )
+
+    final_state = {
+        "messages": [AIMessage(content="请补充时间", id="clarify-ai-1")],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser,          patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert handoff_return is None
+    assert updated_count == 1
+    assert custom_events == [
+        {
+            "type": "clarification",
+            "data": {"questions": ["请补充时间"], "message": "请补充时间"},
+            "node": "clarify_node",
+        }
+    ]
+    assert collected_content == ["请补充时间"]
+    assert token_events == []
 
 
 def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:

@@ -88,6 +88,24 @@ python scripts/data/import_skills.py             # 已退役：本地 Skill 导�
 python scripts/db/schema_sync.py                 # 元数据同步
 ```
 
+### 记忆链路排查
+
+```bash
+# 按用户名 + 槽位键诊断
+$(bash scripts/repo_python.sh) scripts/debug/check_memory_flow.py \
+  --username jjk \
+  --slot-key user.profile.fact.favorite.color
+
+# 按线程 + 关键字诊断
+$(bash scripts/repo_python.sh) scripts/debug/check_memory_flow.py \
+  --username jjk \
+  --thread-id b7d622bf-350d-4dc6-bd3b-7f8b314ef58b \
+  --thread-id 65829c70-0f9e-4d22-8cb9-8232a3a16660 \
+  --keyword 蓝色
+```
+
+脚本会统一输出 `t_chat_message`、`t_user_memory_document`、`t_user_memory_chunk`、`t_user_memory_intent_job`、`t_user_memory` 的只读诊断结果，并给出“当前是否 active / 是否 archived / 可能走了哪条持久化路径”的推导结论。
+
 ### 日常维护
 
 ```bash

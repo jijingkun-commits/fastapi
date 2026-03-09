@@ -100,6 +100,19 @@ class RuntimeRecoveryState(TypedDict, total=False):
     plugin_lifecycle_status: str       # 插件状态（disabled/healthy/unhealthy）
 
 
+class ResponseGuidanceContract(TypedDict, total=False):
+    """运行时回复约束合同。
+
+    当前先收敛 memory archive 场景；后续若有更多场景，继续以 kind 扩展。
+    """
+
+    kind: Literal["memory_archive"]
+    status: Literal["persisted", "already_absent"]
+    target_slot_key: str
+    target_canonical_text: str
+    followup_behavior: Literal["reuse_resolved_target"]
+
+
 class MultiAgentState(BaseAgentState, total=False):
     """多智能体 Supervisor 状态定义。
     
@@ -134,6 +147,7 @@ class MultiAgentState(BaseAgentState, total=False):
     # 系统上下文
     system_context: str           # 系统级上下文信息（当前时间、用户信息等）
     memory_context: str           # 记忆注入上下文（本轮动态构造，不持久化入消息序列）
+    response_guidance_contract: ResponseGuidanceContract  # 运行时结构化回复合同（不持久化，仅用于约束当前轮回复）
 
     # 运行时恢复（P5 稳态增强）
     runtime_recovery_state: RuntimeRecoveryState

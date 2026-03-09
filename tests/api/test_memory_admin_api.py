@@ -75,6 +75,12 @@ def test_memories_list_should_return_items(memory_admin_client: TestClient, monk
                     "scope": "private",
                     "scope_ref": "thread-1",
                     "status": "active",
+                    "decision_id": "decision-11",
+                    "reason_code": "accepted",
+                    "confidence": 0.93,
+                    "memories_count": 2,
+                    "rejected_items_count": 0,
+                    "item_errors": [],
                     "revision": 2,
                     "chunk_total": 3,
                     "ready_chunks": 2,
@@ -106,6 +112,9 @@ def test_memories_list_should_return_items(memory_admin_client: TestClient, monk
     assert payload["total"] == 1
     assert payload["page"] == 2
     assert payload["items"][0]["memory_id"] == 11
+    assert payload["items"][0]["decision_id"] == "decision-11"
+    assert payload["items"][0]["confidence"] == pytest.approx(0.93)
+    assert payload["items"][0]["reason_code"] == "accepted"
     assert captured["user_id"] == 1001
     assert captured["page"] == 2
     assert captured["page_size"] == 10
@@ -130,6 +139,18 @@ def test_memory_detail_should_return_payload(memory_admin_client: TestClient, mo
             "scope": "private",
             "scope_ref": "thread-1",
             "status": "active",
+            "decision_id": "decision-11",
+            "reason_code": "memory_batch_atomic_reject",
+            "confidence": 0.88,
+            "memories_count": 2,
+            "rejected_items_count": 1,
+            "item_errors": [
+                {
+                    "item_index": 1,
+                    "slot_key": "custom.invalid.slot",
+                    "reason_code": "slot_taxonomy_invalid",
+                }
+            ],
             "revision": 2,
             "source_thread_id": "thread-1",
             "source_message_id": 101,
@@ -150,6 +171,10 @@ def test_memory_detail_should_return_payload(memory_admin_client: TestClient, mo
     payload = response.json()
     assert payload["memory_id"] == 11
     assert payload["content_md"].startswith("# 记忆日记")
+    assert payload["decision_id"] == "decision-11"
+    assert payload["reason_code"] == "memory_batch_atomic_reject"
+    assert payload["rejected_items_count"] == 1
+    assert payload["item_errors"][0]["reason_code"] == "slot_taxonomy_invalid"
 
 
 def test_memory_detail_should_return_404_when_not_found(memory_admin_client: TestClient, monkeypatch) -> None:  # noqa: ANN001

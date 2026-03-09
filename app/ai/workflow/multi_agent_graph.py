@@ -73,6 +73,7 @@ from app.ai.runtime.recovery_policy import (
     is_runtime_recovery_enabled as runtime_recovery_enabled,
 )
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
+from app.services import response_policy_service
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
     validate_active_goals_contract,
@@ -237,7 +238,6 @@ DATA_STRONG_HINTS = (
     "余额",
 )
 
-DELIVERY_RECOVERY_MARKER = "【交付补齐提示】"
 
 TURN_ACT_HINTS = {
     "NEW_QUERY",
@@ -2798,32 +2798,6 @@ def _apply_router_contract_guard(
     return accepted, blocked, pending_goals
 
 
-def _build_router_blocked_system_context(
-    *,
-    state: MultiAgentState,
-    pending_goals: Sequence[Dict[str, Any]],
-) -> str:
-    """构造 Router 门禁阻塞后的补齐提示上下文。"""
-    missing_goals = [
-        {
-            "goal_id": str(goal.get("goal_id") or ""),
-            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
-            "reason": "router_contract_blocked",
-        }
-        for goal in pending_goals
-    ]
-    if not missing_goals:
-        return str(state.get("system_context") or "")
-
-    active_plan = _build_active_goal_plan(state, source="router_guard")
-
-    return _build_multi_intent_recovery_system_context(
-        str(state.get("system_context") or ""),
-        active_plan,
-        missing_goals,
-    )
-
-
 def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bool:
     """决定是否抑制专家节点文本直出（复合任务改为最终统一汇总）。"""
     if node_name == "data_expert":
@@ -3044,7 +3018,7 @@ def _evaluate_handoff_progress(state: MultiAgentState) -> Dict[str, Any]:
             "deliverables": deliverables,
             "coverage_report": coverage_preview,
             "delivery_meta": delivery_meta,
-            "system_context": _build_multi_intent_recovery_system_context(
+            "system_context": response_policy_service.build_multi_intent_recovery_system_context(
                 str(state.get("system_context") or ""),
                 active_goal_plan,
                 missing_goals,
@@ -3566,6 +3540,50 @@ def _dispatch_messages_mode_chunk(
     )
 
 
+def _collect_custom_mode_text_segments(chunk: Any) -> list[str]:
+    """提取 custom 事件中的用户可见文本，用于跨模式去重。"""
+    if not isinstance(chunk, dict):
+        return []
+
+    data = chunk.get("data")
+    if not isinstance(data, dict):
+        return []
+
+    texts: list[str] = []
+    for key in ("message", "content"):
+        value = data.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if normalized:
+            texts.append(normalized)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for text in texts:
+        if text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
+
+def _remember_custom_mode_text(chunk: Any, ctx: StreamingContext) -> None:
+    """custom 文本透传后同步登记，避免 values 模式重复补发。"""
+    if not ctx.collected_content:
+        collected_text = ""
+    else:
+        collected_text = "".join(ctx.collected_content)
+
+    for text in _collect_custom_mode_text_segments(chunk):
+        if text in collected_text:
+            continue
+        ctx.collected_content.append(text)
+        collected_text += text
+
+
+
 def _dispatch_custom_mode_chunk(
     chunk: Any,
     ctx: StreamingContext,
@@ -3581,6 +3599,7 @@ def _dispatch_custom_mode_chunk(
         return
     logger.debug("[%s] 透传 custom 事件: type=%s", ctx.node_name, chunk.get("type"))
     ctx.writer(chunk)
+    _remember_custom_mode_text(chunk, ctx)
 
 
 def _dispatch_values_mode_chunk(
@@ -3708,8 +3727,9 @@ def _dispatch_values_mode_chunk(
             if not guarded_batch and blocked_handoffs:
                 pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in pending_goals]
                 if pending_titles:
-                    final_state["system_context"] = _build_router_blocked_system_context(
-                        state=guard_state,
+                    final_state["system_context"] = response_policy_service.build_router_blocked_system_context(
+                        base_context=str(guard_state.get("system_context") or ""),
+                        active_plan=_build_active_goal_plan(guard_state, source="router_guard"),
                         pending_goals=pending_goals,
                     )
                     final_state["delivery_meta"] = {
@@ -4763,6 +4783,11 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
     if memory_context:
         context_parts.append(memory_context)
 
+    response_guidance_contract = state.get("response_guidance_contract")
+    rendered_response_guidance = response_policy_service.render_response_guidance_contract(response_guidance_contract)
+    if rendered_response_guidance:
+        context_parts.append(rendered_response_guidance)
+
     updates["system_context"] = "\n".join(context_parts)
     
     # ========== 4. Skill Runtime 预装载 ==========
@@ -5249,7 +5274,7 @@ async def create_multi_agent_graph(
                 "evaluation_route": "supervisor",
                 "pending_handoff": None,
                 "handoff_queue": [],
-                "system_context": _build_multi_intent_recovery_system_context(
+                "system_context": response_policy_service.build_multi_intent_recovery_system_context(
                     str(state.get("system_context") or ""),
                     active_goal_plan,
                     missing_goals,

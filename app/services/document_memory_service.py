@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import hashlib
 import logging
 import re
@@ -12,13 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.ai.utils.embedding_util import get_embedding
 from app.repositories import document_memory_repo, user_memory_repo
+from app.services.memory_slot_governance_service import MemorySlotGovernanceService
 
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_TRIGGER_PATTERN = re.compile(
-    r"(记住|牢记|以后都|之后都|长期|永久|偏好|习惯|请始终|一直)",
-)
 _DEFAULT_CHUNK_MAX_LINES = 16
 _DEFAULT_CHUNK_OVERLAP_LINES = 3
 _DEFAULT_MEMORY_SOURCE = "memory"
@@ -29,6 +28,15 @@ _DEFAULT_TEXT_WEIGHT = 0.30
 _DEFAULT_MIN_SCORE = 0.05
 _DEFAULT_PREFERENCE_DOC_KIND = "preference"
 _DEFAULT_PREFERENCE_SCOPE = "global"
+_DECISION_ACCEPT = "accept"
+_DECISION_REJECT = "reject"
+_VALID_MEMORY_KINDS = {
+    "user_identity",
+    "response_preference",
+    "assistant_persona",
+    "profile_fact",
+}
+_VALID_OPERATIONS = {"upsert", "archive"}
 _PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY = "memory.user_preference_bootstrap_template"
 _PREFERENCE_BOOTSTRAP_TEMPLATE_DEFAULT = {"assistant.persona": "小嘉"}
 _PREFERENCE_BOOTSTRAP_SOURCE_THREAD_ID = "system.user_bootstrap"
@@ -46,6 +54,13 @@ def _normalize_text(text: str) -> str:
     if not text:
         return ""
     return "\n".join(line.rstrip() for line in str(text).strip().splitlines()).strip()
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _hash_text(text: str) -> str:
@@ -87,6 +102,15 @@ def _build_slot_canonical_content(
     *,
     slot_key: str,
     canonical_text: str,
+    memory_kind: str | None,
+    normalized_value: str | None,
+    evidence_span: str | None,
+    decision_id: str | None,
+    confidence: float | None,
+    reason_code: str | None,
+    memories_count: int | None,
+    rejected_items_count: int | None,
+    item_errors: list[dict[str, Any]] | None,
     operation: str,
     event_time: datetime | None,
     source_thread_id: str | None,
@@ -102,6 +126,24 @@ def _build_slot_canonical_content(
         f"- canonical_text: {canonical_text}",
         f"- operation: {str(operation or 'upsert').strip() or 'upsert'}",
     ]
+    if memory_kind:
+        lines.append(f"- memory_kind: {memory_kind}")
+    if normalized_value:
+        lines.append(f"- normalized_value: {normalized_value}")
+    if evidence_span:
+        lines.append(f"- evidence_span: {evidence_span}")
+    if decision_id:
+        lines.append(f"- decision_id: {decision_id}")
+    if reason_code:
+        lines.append(f"- reason_code: {reason_code}")
+    if confidence is not None:
+        lines.append(f"- confidence: {float(confidence):.4f}")
+    if memories_count is not None:
+        lines.append(f"- memories_count: {int(memories_count)}")
+    if rejected_items_count is not None:
+        lines.append(f"- rejected_items_count: {int(rejected_items_count)}")
+    if item_errors is not None:
+        lines.append(f"- item_errors_json: {json.dumps(item_errors, ensure_ascii=False)}")
     if event_time:
         lines.append(f"- event_time: {event_time.isoformat()}")
     if source_thread_id:
@@ -257,28 +299,6 @@ def _upsert_preference_document(
         chunks=chunks,
         source=_DEFAULT_MEMORY_SOURCE,
     )
-
-
-def _should_persist_memory(user_text: str) -> bool:
-    """判断是否触发文档记忆写入。"""
-
-    text = _normalize_text(user_text)
-    if not text:
-        return False
-    if _MEMORY_TRIGGER_PATTERN.search(text):
-        return True
-
-    # 允许用户通过“自我事实表达”形成长期记忆候选。
-    # 示例：“我是产品经理”“我住在上海”“我偏好先结论后分析”
-    lightweight_facts = (
-        "我是",
-        "我在",
-        "我住",
-        "我偏好",
-        "我习惯",
-        "我的目标",
-    )
-    return any(token in text for token in lightweight_facts)
 
 
 def _split_document_to_chunks(
@@ -469,40 +489,85 @@ def _build_preference_context(
     if not documents:
         return ""
 
-    header = "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）："
-    lines = [header]
-    budget = max(120, int(max_chars))
-    current_len = len(header)
-    has_assistant_persona = False
-
+    parsed_documents: list[tuple[str, str, str]] = []
     for item in documents:
         summary = str(item.get("summary_md") or "").strip()
         doc_key = str(item.get("doc_key") or "").strip()
         if not summary or not doc_key:
             continue
-
         display_key = doc_key.split(":", 1)[-1] if ":" in doc_key else doc_key
-        if display_key == "assistant.persona":
+        parsed_documents.append((summary, doc_key, display_key))
+
+    if not parsed_documents:
+        return ""
+
+    has_structured_assistant_persona = any(
+        display_key.startswith("assistant.persona.")
+        for _, _, display_key in parsed_documents
+    )
+
+    header = "以下是用户稳定偏好（跨会话生效，若与本轮明确指令冲突则以本轮为准）："
+    lines = [header]
+    budget = max(120, int(max_chars))
+    current_len = len(header)
+    has_assistant_persona = False
+    has_response_structure_preference = False
+    response_structure_summary = ""
+    rendered_keys: set[str] = set()
+
+    for summary, doc_key, display_key in parsed_documents:
+        if has_structured_assistant_persona and display_key == "assistant.persona":
+            continue
+        if display_key in rendered_keys:
+            continue
+
+        if display_key == "assistant.persona" or display_key.startswith("assistant.persona."):
             has_assistant_persona = True
+        if display_key in {"user.preference.response.structure", "user.preference.response_structure"}:
+            has_response_structure_preference = True
+            response_structure_summary = summary
+
         citation = f"memory://user/{user_id}/{_DEFAULT_PREFERENCE_DOC_KIND}/{doc_key}#L1-L5"
         line = f"- {display_key}: {summary}\n  引用: {citation}"
         next_len = current_len + len(line) + 1
         if next_len > budget:
             break
         lines.append(line)
+        rendered_keys.add(display_key)
         current_len = next_len
 
-    if has_assistant_persona:
-        guidance_lines = (
-            "执行要求：当用户未另行指定时，按 AI 人设进行自称。",
-            "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
+    guidance_lines: list[str] = []
+    if has_response_structure_preference:
+        guidance_lines.extend(
+            [
+                "格式要求：若本轮无冲突指令，回答应遵循 user.preference.response.structure 偏好。",
+                f"当前结构偏好：{response_structure_summary or '总-分-总'}。",
+                "输出模板：先“总”（先给结论），再“分”（分点展开依据/细节），最后“总”（总结与下一步）。",
+            ]
         )
-        for guidance in guidance_lines:
-            next_len = current_len + len(guidance) + 1
-            if next_len > budget:
-                break
-            lines.append(guidance)
-            current_len = next_len
+
+    if has_assistant_persona:
+        guidance_lines.extend(
+            [
+                "执行要求：当用户未另行指定时，按 AI 人设进行自称。",
+                "说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。",
+            ]
+        )
+
+    guidance_lines.extend(
+        [
+            "能力说明：若用户要求删除/忘掉上述某条长期记忆，系统支持直接处理该删除请求。",
+            "回复要求：若目标已从当前上下文唯一确定，直接说明会处理这条记忆删除；不要让用户去 Memory 页面手工删除。",
+            "澄清要求：只有在目标仍不明确时，才继续追问用户要删哪一条记忆。",
+        ]
+    )
+
+    for guidance in guidance_lines:
+        next_len = current_len + len(guidance) + 1
+        if next_len > budget:
+            break
+        lines.append(guidance)
+        current_len = next_len
 
     return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -747,54 +812,209 @@ def migrate_legacy_preference_kv(
     return migrated
 
 
-def flush(
-    db: Session,
+def _build_memory_item_error(
     *,
-    user_id: int,
-    user_text: str,
-    source_thread_id: str | None = None,
-    source_message_id: int | None = None,
-) -> int:
-    """将用户输入沉淀到文档记忆（日记层）。"""
-
-    if not user_id:
-        return 0
-
-    text = _normalize_text(user_text)
-    if not _should_persist_memory(text):
-        return 0
-
-    return flush_canonical_memory(
-        db,
-        user_id=user_id,
-        canonical_text=text,
-        doc_kind="daily",
-        source_thread_id=source_thread_id,
-        source_message_id=source_message_id,
-    )
+    item_index: int,
+    slot_key: str,
+    reason_code: str,
+    memory_kind: str | None = None,
+    normalized_value: str | None = None,
+    canonical_text: str | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {
+        "item_index": int(item_index),
+        "slot_key": str(slot_key or "").strip(),
+        "reason_code": str(reason_code or "memory_item_invalid"),
+    }
+    if memory_kind is not None:
+        error["memory_kind"] = str(memory_kind or "").strip().lower()
+    if normalized_value is not None:
+        error["normalized_value"] = str(normalized_value or "").strip()
+    if canonical_text is not None:
+        error["canonical_text"] = str(canonical_text or "").strip()
+    return error
 
 
-def flush_canonical_memory(
+def _normalize_decision_contract_payload(
+    decision_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(decision_contract or {})
+    decision = str(payload.get("decision") or _DECISION_REJECT).strip().lower()
+    reason_code = str(payload.get("reason_code") or "contract_missing_required").strip()
+    confidence = _safe_float(payload.get("confidence"), default=0.0)
+    if confidence < 0.0:
+        confidence = 0.0
+    if confidence > 1.0:
+        confidence = 1.0
+
+    raw_memories = payload.get("memories")
+    if isinstance(raw_memories, list):
+        memories = [item for item in raw_memories if isinstance(item, dict)]
+    elif isinstance(raw_memories, dict):
+        memories = [raw_memories]
+    else:
+        memories = []
+
+    audit_payload = payload.get("audit")
+    if isinstance(audit_payload, dict):
+        audit = dict(audit_payload)
+    else:
+        audit = {}
+
+    return {
+        "decision": decision,
+        "reason_code": reason_code,
+        "confidence": confidence,
+        "memories": memories,
+        "audit": audit,
+    }
+
+
+def _build_atomic_reject_contract(
+    *,
+    reason_code: str,
+    confidence: float,
+    detector: str,
+    item_errors: list[dict[str, Any]] | None = None,
+    decision_id: str | None = None,
+) -> dict[str, Any]:
+    errors = list(item_errors or [])
+    audit_payload: dict[str, Any] = {
+        "detector": detector,
+        "rejected_items_count": len(errors),
+        "item_errors": errors,
+    }
+    normalized_decision_id = str(decision_id or "").strip()
+    if normalized_decision_id:
+        audit_payload["decision_id"] = normalized_decision_id
+    return {
+        "decision": _DECISION_REJECT,
+        "reason_code": str(reason_code),
+        "confidence": max(0.0, min(float(confidence), 1.0)),
+        "memories": [],
+        "audit": audit_payload,
+    }
+
+
+def _validate_atomic_batch_memories(
+    memories: list[dict[str, Any]],
+    *,
+    slot_governance: MemorySlotGovernanceService,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_memories: list[dict[str, Any]] = []
+    item_errors: list[dict[str, Any]] = []
+
+    for index, raw_item in enumerate(memories):
+        memory_kind = str(raw_item.get("memory_kind") or "").strip().lower()
+        operation = str(raw_item.get("operation") or "").strip().lower()
+        slot_key = str(raw_item.get("slot_key") or "").strip().lower()
+        normalized_value = str(raw_item.get("normalized_value") or "").strip()
+        canonical_text = str(raw_item.get("canonical_text") or "").strip()
+        evidence_span = str(raw_item.get("evidence_span") or "").strip()
+
+        required_fields = {
+            "memory_kind": memory_kind,
+            "operation": operation,
+            "slot_key": slot_key,
+            "canonical_text": canonical_text,
+            "evidence_span": evidence_span,
+        }
+        missing_required = any(not value for value in required_fields.values())
+        if operation != "archive" and not normalized_value:
+            missing_required = True
+        if missing_required:
+            item_errors.append(
+                _build_memory_item_error(
+                    item_index=index,
+                    slot_key=slot_key,
+                    reason_code="contract_missing_required",
+                    memory_kind=memory_kind,
+                    normalized_value=normalized_value,
+                    canonical_text=canonical_text,
+                )
+            )
+            continue
+
+        if memory_kind not in _VALID_MEMORY_KINDS:
+            item_errors.append(
+                _build_memory_item_error(
+                    item_index=index,
+                    slot_key=slot_key,
+                    reason_code="contract_invalid_memory_kind",
+                    memory_kind=memory_kind,
+                    normalized_value=normalized_value,
+                    canonical_text=canonical_text,
+                )
+            )
+            continue
+
+        if operation not in _VALID_OPERATIONS:
+            item_errors.append(
+                _build_memory_item_error(
+                    item_index=index,
+                    slot_key=slot_key,
+                    reason_code="contract_invalid_operation",
+                    memory_kind=memory_kind,
+                    normalized_value=normalized_value,
+                    canonical_text=canonical_text,
+                )
+            )
+            continue
+
+        normalized_slot_key = slot_governance.normalize_slot_key(slot_key)
+        if not normalized_slot_key:
+            item_errors.append(
+                _build_memory_item_error(
+                    item_index=index,
+                    slot_key=slot_key,
+                    reason_code="slot_taxonomy_invalid",
+                    memory_kind=memory_kind,
+                    normalized_value=normalized_value,
+                    canonical_text=canonical_text,
+                )
+            )
+            continue
+
+        normalized_item: dict[str, Any] = {
+            "memory_kind": memory_kind,
+            "operation": operation,
+            "slot_key": normalized_slot_key,
+            "normalized_value": normalized_value,
+            "canonical_text": canonical_text,
+            "evidence_span": evidence_span,
+        }
+        if raw_item.get("durability") is not None:
+            normalized_item["durability"] = max(0.0, min(_safe_float(raw_item.get("durability"), 0.0), 1.0))
+        normalized_memories.append(normalized_item)
+
+    return normalized_memories, item_errors
+
+
+def _persist_canonical_document_no_commit(
     db: Session,
     *,
     user_id: int,
     canonical_text: str,
-    doc_kind: str = "daily",
-    doc_key: str | None = None,
-    slot_key: str | None = None,
-    source_thread_id: str | None = None,
-    source_message_id: int | None = None,
-    source: str = _DEFAULT_MEMORY_SOURCE,
-    scope: str = "private",
-    scope_ref: str | None = None,
-    operation: str = "upsert",
-    event_time: datetime | None = None,
+    doc_kind: str,
+    doc_key: str | None,
+    slot_key: str | None,
+    source_thread_id: str | None,
+    source_message_id: int | None,
+    source: str,
+    scope: str,
+    scope_ref: str | None,
+    operation: str,
+    event_time: datetime | None,
+    memory_kind: str | None = None,
+    normalized_value: str | None = None,
+    evidence_span: str | None = None,
+    decision_id: str | None = None,
+    confidence: float | None = None,
+    reason_code: str | None = None,
+    memories_count: int | None = None,
+    rejected_items_count: int | None = None,
+    item_errors: list[dict[str, Any]] | None = None,
 ) -> int:
-    """将 canonical_text 落库到 document/chunk 两表。"""
-
-    if not user_id:
-        return 0
-
     normalized_text = _normalize_text(canonical_text)
     if not normalized_text:
         return 0
@@ -822,78 +1042,257 @@ def flush_canonical_memory(
     if resolved_slot_key is None and normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND:
         resolved_slot_key = resolved_doc_key
 
+    normalized_operation = str(operation or "upsert").strip().lower() or "upsert"
+    if normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND and normalized_operation == "archive":
+        archived_slot_key = resolved_slot_key or resolved_doc_key
+        if not archived_slot_key:
+            logger.warning(
+                "flush_canonical_memory archive 缺少 slot_key: user_id=%s, doc_kind=%s",
+                user_id,
+                normalized_doc_kind,
+            )
+            return 0
+
+        current = document_memory_repo.get_active_slot(
+            db,
+            user_id=user_id,
+            slot_key=archived_slot_key,
+            doc_kind=normalized_doc_kind,
+            source=source,
+            for_update=True,
+        )
+        if current is None:
+            logger.info(
+                "flush_canonical_memory archive 命中空槽位，跳过: user_id=%s, slot_key=%s",
+                user_id,
+                archived_slot_key,
+            )
+            return 0
+
+        archived = document_memory_repo.archive_slot(
+            db,
+            doc_id=int(current.id),
+            user_id=user_id,
+            event_time=resolved_event_time,
+            operation="archive",
+        )
+        return 1 if archived.get("found") else 0
+
     resolved_scope_ref = scope_ref
-    resolved_title: str
-    content_md: str
-    summary_md: str
-
-    try:
-        if normalized_doc_kind == "daily":
-            resolved_title = f"记忆日记 {resolved_doc_key}"
-            existing = document_memory_repo.get_active_document(
-                db,
-                user_id=user_id,
-                doc_kind=normalized_doc_kind,
-                doc_key=resolved_doc_key,
-            )
-            entry = _build_daily_entry(
-                user_text=normalized_text,
-                source_thread_id=source_thread_id,
-                source_message_id=source_message_id,
-            )
-            if existing and existing.content_md:
-                content_md = f"{existing.content_md.rstrip()}\n\n{entry}".strip()
-            else:
-                content_md = f"# {resolved_title}\n\n{entry}".strip()
-            summary_md = _build_daily_summary(normalized_text)
-            if resolved_scope_ref is None:
-                resolved_scope_ref = source_thread_id
-        else:
-            resolved_title = (
-                f"槽位记忆 {resolved_slot_key or resolved_doc_key}"
-                if normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND
-                else f"记忆文档 {resolved_doc_key}"
-            )
-            content_md = _build_slot_canonical_content(
-                slot_key=resolved_slot_key or resolved_doc_key,
-                canonical_text=normalized_text,
-                operation=operation,
-                event_time=resolved_event_time,
-                source_thread_id=source_thread_id,
-                source_message_id=source_message_id,
-            )
-            summary_md = normalized_text[:200]
-
-        content_hash = _hash_text(content_md)
-        document = document_memory_repo.upsert_document(
+    if normalized_doc_kind == "daily":
+        resolved_title = f"记忆日记 {resolved_doc_key}"
+        existing = document_memory_repo.get_active_document(
             db,
             user_id=user_id,
             doc_kind=normalized_doc_kind,
             doc_key=resolved_doc_key,
-            slot_key=resolved_slot_key,
-            title=resolved_title,
-            content_md=content_md,
-            summary_md=summary_md,
-            source=source,
-            scope=scope,
-            scope_ref=resolved_scope_ref,
-            content_hash=content_hash,
+        )
+        entry = _build_daily_entry(
+            user_text=normalized_text,
             source_thread_id=source_thread_id,
             source_message_id=source_message_id,
-            operation=operation,
-            last_event_time=resolved_event_time,
         )
+        if existing and existing.content_md:
+            content_md = f"{existing.content_md.rstrip()}\n\n{entry}".strip()
+        else:
+            content_md = f"# {resolved_title}\n\n{entry}".strip()
+        summary_md = _build_daily_summary(normalized_text)
+        if resolved_scope_ref is None:
+            resolved_scope_ref = source_thread_id
+    else:
+        resolved_title = (
+            f"槽位记忆 {resolved_slot_key or resolved_doc_key}"
+            if normalized_doc_kind == _DEFAULT_PREFERENCE_DOC_KIND
+            else f"记忆文档 {resolved_doc_key}"
+        )
+        content_md = _build_slot_canonical_content(
+            slot_key=resolved_slot_key or resolved_doc_key,
+            canonical_text=normalized_text,
+            memory_kind=memory_kind,
+            normalized_value=normalized_value,
+            evidence_span=evidence_span,
+            decision_id=decision_id,
+            confidence=confidence,
+            reason_code=reason_code,
+            memories_count=memories_count,
+            rejected_items_count=rejected_items_count,
+            item_errors=item_errors,
+            operation=operation,
+            event_time=resolved_event_time,
+            source_thread_id=source_thread_id,
+            source_message_id=source_message_id,
+        )
+        summary_md = normalized_text[:200]
 
-        chunks = _split_document_to_chunks(content_md)
-        document_memory_repo.replace_document_chunks(
+    content_hash = _hash_text(content_md)
+    document = document_memory_repo.upsert_document(
+        db,
+        user_id=user_id,
+        doc_kind=normalized_doc_kind,
+        doc_key=resolved_doc_key,
+        slot_key=resolved_slot_key,
+        title=resolved_title,
+        content_md=content_md,
+        summary_md=summary_md,
+        source=source,
+        scope=scope,
+        scope_ref=resolved_scope_ref,
+        content_hash=content_hash,
+        source_thread_id=source_thread_id,
+        source_message_id=source_message_id,
+        operation=operation,
+        last_event_time=resolved_event_time,
+    )
+
+    chunks = _split_document_to_chunks(content_md)
+    document_memory_repo.replace_document_chunks(
+        db,
+        user_id=user_id,
+        doc_id=document.id,
+        chunks=chunks,
+        source=source,
+    )
+    return 1
+
+
+def flush_canonical_memory(
+    db: Session,
+    *,
+    user_id: int,
+    canonical_text: str = "",
+    doc_kind: str = "daily",
+    doc_key: str | None = None,
+    slot_key: str | None = None,
+    source_thread_id: str | None = None,
+    source_message_id: int | None = None,
+    source: str = _DEFAULT_MEMORY_SOURCE,
+    scope: str = "private",
+    scope_ref: str | None = None,
+    operation: str = "upsert",
+    event_time: datetime | None = None,
+    decision_contract: dict[str, Any] | None = None,
+) -> int:
+    """将 canonical_text 落库到 document/chunk 两表。"""
+
+    if not user_id:
+        return 0
+
+    if decision_contract is not None:
+        normalized_contract = _normalize_decision_contract_payload(decision_contract)
+        detector = str((normalized_contract.get("audit") or {}).get("detector") or "llm_primary")
+
+        if normalized_contract["decision"] != _DECISION_ACCEPT:
+            decision_contract.clear()
+            decision_contract.update(normalized_contract)
+            return 0
+
+        audit_payload = normalized_contract.get("audit") or {}
+        decision_id = str(audit_payload.get("decision_id") or "").strip()
+        if not decision_id:
+            if source_message_id is not None:
+                decision_id = f"decision-{int(source_message_id)}"
+            else:
+                decision_id = f"decision-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+
+        slot_governance = MemorySlotGovernanceService(repo=document_memory_repo)
+        normalized_memories, item_errors = _validate_atomic_batch_memories(
+            normalized_contract["memories"],
+            slot_governance=slot_governance,
+        )
+        if item_errors:
+            rejected_contract = _build_atomic_reject_contract(
+                reason_code="memory_batch_atomic_reject",
+                confidence=normalized_contract["confidence"],
+                detector=detector,
+                item_errors=item_errors,
+                decision_id=decision_id,
+            )
+            decision_contract.clear()
+            decision_contract.update(rejected_contract)
+            return 0
+
+        persisted_count = 0
+        resolved_event_time = event_time or datetime.now()
+        try:
+            for item in normalized_memories:
+                persisted_count += _persist_canonical_document_no_commit(
+                    db,
+                    user_id=user_id,
+                    canonical_text=str(item["canonical_text"]),
+                    doc_kind=_DEFAULT_PREFERENCE_DOC_KIND,
+                    doc_key=str(item["slot_key"]),
+                    slot_key=str(item["slot_key"]),
+                    source_thread_id=source_thread_id,
+                    source_message_id=source_message_id,
+                    source=source,
+                    scope=scope,
+                    scope_ref=scope_ref,
+                    operation=str(item["operation"]),
+                    event_time=resolved_event_time,
+                    memory_kind=str(item["memory_kind"]),
+                    normalized_value=str(item["normalized_value"]),
+                    evidence_span=str(item["evidence_span"]),
+                    decision_id=decision_id,
+                    confidence=float(normalized_contract["confidence"]),
+                    reason_code=str(normalized_contract["reason_code"]),
+                    memories_count=len(normalized_memories),
+                    rejected_items_count=0,
+                    item_errors=[],
+                )
+            if persisted_count > 0:
+                db.commit()
+            normalized_contract["audit"] = {
+                **audit_payload,
+                "detector": detector,
+                "decision_id": decision_id,
+                "memories_count": len(normalized_memories),
+                "rejected_items_count": 0,
+                "item_errors": [],
+            }
+            decision_contract.clear()
+            decision_contract.update(normalized_contract)
+            return persisted_count
+        except Exception:
+            rollback = getattr(db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            logger.exception("atomic_batch 写入失败: user_id=%s", user_id)
+            rejected_contract = _build_atomic_reject_contract(
+                reason_code="memory_batch_atomic_reject",
+                confidence=normalized_contract["confidence"],
+                detector=detector,
+                item_errors=[
+                    _build_memory_item_error(
+                        item_index=-1,
+                        slot_key="",
+                        reason_code="batch_write_failed",
+                    )
+                ],
+                decision_id=decision_id,
+            )
+            decision_contract.clear()
+            decision_contract.update(rejected_contract)
+            return 0
+
+    try:
+        persisted = _persist_canonical_document_no_commit(
             db,
             user_id=user_id,
-            doc_id=document.id,
-            chunks=chunks,
+            canonical_text=canonical_text,
+            doc_kind=doc_kind,
+            doc_key=doc_key,
+            slot_key=slot_key,
+            source_thread_id=source_thread_id,
+            source_message_id=source_message_id,
             source=source,
+            scope=scope,
+            scope_ref=scope_ref,
+            operation=operation,
+            event_time=event_time,
         )
-        db.commit()
-        return 1
+        if persisted > 0:
+            db.commit()
+        return persisted
     except Exception:
         rollback = getattr(db, "rollback", None)
         if callable(rollback):
