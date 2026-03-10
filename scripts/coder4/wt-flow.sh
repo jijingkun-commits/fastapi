@@ -146,6 +146,88 @@ _current_branch_task_key_hint() {
   echo ""
 }
 
+_current_branch_name() {
+  git rev-parse --abbrev-ref HEAD 2>/dev/null || true
+}
+
+_is_mainline_branch() {
+  local branch
+  branch="$(_trim_spaces "${1:-}")"
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 1
+  [[ "$branch" == "master" || "$branch" == "main" ]]
+}
+
+_is_card_session_branch() {
+  local branch="${1:-}"
+  [[ "$branch" =~ ^feature/[^/]+/[^/]+/[^/]+$ ]]
+}
+
+_detect_repo_base_branch() {
+  local branch remote_head
+  for branch in master main; do
+    if git show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null; then
+      echo "$branch"
+      return 0
+    fi
+  done
+
+  remote_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [[ -n "$remote_head" && "$remote_head" == origin/* ]]; then
+    echo "${remote_head#origin/}"
+    return 0
+  fi
+
+  echo "master"
+}
+
+_is_valid_base_ref() {
+  local candidate="${1:-}"
+  [[ -n "$candidate" ]] || return 1
+  git rev-parse --verify "${candidate}^{commit}" >/dev/null 2>&1
+}
+
+_resolve_integration_branch() {
+  local state_file="${1:-}" explicit_base="${2:-}"
+  local candidate current_branch
+
+  candidate="$(_trim_spaces "$explicit_base")"
+  if [[ -z "$candidate" && -n "${WT_FLOW_BASE_BRANCH:-}" ]]; then
+    candidate="$(_trim_spaces "${WT_FLOW_BASE_BRANCH}")"
+  fi
+  if [[ -z "$candidate" && -f "$state_file" ]]; then
+    candidate="$(_trim_spaces "$(jq -r '.integration_branch // ""' "$state_file" 2>/dev/null || echo "")")"
+  fi
+
+  if [[ -z "$candidate" ]]; then
+    current_branch="$(_current_branch_name)"
+    if [[ -n "$current_branch" && "$current_branch" != "HEAD" ]] \
+      && ! _is_mainline_branch "$current_branch" \
+      && ! _is_card_session_branch "$current_branch"; then
+      candidate="$current_branch"
+    else
+      candidate="$(_detect_repo_base_branch)"
+    fi
+  fi
+
+  _is_valid_base_ref "$candidate" || _die "WT_FLOW_BASE_BRANCH_INVALID: 无法解析基线分支/提交 ${candidate}"
+  echo "$candidate"
+}
+
+_persist_integration_branch() {
+  local state_file="$1" integration_branch="$2"
+  [[ -f "$state_file" && -n "$integration_branch" ]] || return 0
+
+  local current_branch
+  current_branch="$(_trim_spaces "$(jq -r '.integration_branch // ""' "$state_file" 2>/dev/null || echo "")")"
+  if [[ "$current_branch" == "$integration_branch" ]]; then
+    return 0
+  fi
+
+  _update_json_file "$state_file" \
+    --arg integration_branch "$integration_branch" \
+    '.integration_branch = $integration_branch'
+}
+
 _active_task_file() {
   local explicit_file="${WT_FLOW_ACTIVE_TASK_FILE:-$ACTIVE_TASK_FILE}"
   if [[ -n "$explicit_file" && -f "$explicit_file" ]]; then
@@ -896,11 +978,13 @@ _mark_card_done_after_merge() {
 
 cmd_create() {
   local slug="${1:?用法: wt-flow.sh create <branch-slug> [base-branch]}"
-  local base="${2:-master}"
+  local requested_base="${2:-}"
 
   _ensure_clean
 
-  local task_key sanitized_task_key branch wt_path session_id
+  local task_key sanitized_task_key branch wt_path session_id state_file base
+  state_file="$(_task_state_file "$(_default_state_dir)")"
+  base="$(_resolve_integration_branch "$state_file" "$requested_base")"
   task_key="$(_active_task_key)"
   sanitized_task_key="$(_sanitize_task_key_segment "$task_key")"
   [[ -n "$sanitized_task_key" ]] || _die "缺少 task_key，无法创建会话隔离 worktree"
@@ -1017,15 +1101,20 @@ cmd_next() {
   fi
 
   _log "NEXT: ${next_card}"
-  cmd_create "$next_card"
+  local integration_branch
+  integration_branch="$(_resolve_integration_branch "$state_file")"
+  _persist_integration_branch "$state_file" "$integration_branch"
+  cmd_create "$next_card" "$integration_branch"
 
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   _update_json_file "$state_file" \
     --arg card "$next_card" \
     --arg now "$now" \
+    --arg integration_branch "$integration_branch" \
     '
     .current_card = $card
+    | .integration_branch = $integration_branch
     | .card_status = ((.card_status // {}) + {($card): "in_progress"})
     | .card_status_map = ((.card_status_map // {}) + {($card): "inprogress"})
     | .last_action = "next"
@@ -1033,7 +1122,6 @@ cmd_next() {
     | .last_updated = $now
     '
 }
-
 # --- 命令: merge ---
 
 cmd_merge() {
@@ -1181,8 +1269,8 @@ cmd_status() {
 
 cmd_guard() {
   local current_branch
-  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  if [[ "$current_branch" == "master" || "$current_branch" == "main" ]]; then
+  current_branch="$(_current_branch_name)"
+  if _is_mainline_branch "$current_branch"; then
     return 1
   fi
   return 0

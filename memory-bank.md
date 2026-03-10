@@ -4,6 +4,18 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
+
+### 2026-03-10 CardRun 分支感知基线收口到 task state
+- 状态：ACTIVE
+- 决策主题：`/jjk-cardrun -> wt-flow` 在非 `main/master` 分支上运行时，卡片 worktree 的集成目标必须首轮继承当前父分支，并写入 `task-runner-state.json.integration_branch`
+- 背景与问题：当前 `wt-flow create/next` 默认把 `base_branch` 固定为 `master`，导致 `cardrun` 即使在 feature 分支上启动，后续卡片仍会基于 `master` 创建并最终误收口到 `master`
+- 最终决策：首轮创建卡片时优先复用任务态 `integration_branch`，缺失时继承当前非 `main/master` 父分支，再回落到仓库主线；单卡 session 继续保存 `base_branch`，`merge` 只读该值，不由 `wtimp` 重算
+- 取舍理由：集成目标属于任务运行态，而不是 `wtimp` 的局部上下文；把 owner 放回 `wt-flow/task state` 比在执行层猜当前分支更稳定，也避免恢复执行时目标漂移
+- 影响范围：`scripts/coder4/wt-flow.sh`、`tests/unit/test_coder4_wt_flow_verified_state.py`、`/jjk-cardrun` 与 `/jjk-wtimp` 命令文档、开发工作流文档
+- 回退/失效条件：若未来明确规定 `cardrun` 只能在 `main/master` 主线运行，且禁止 feature 分支收口，则可删除 `integration_branch` 逻辑并回退为固定主线；在此之前保持 branch-aware 语义
+- 关联文档/代码：`docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`、`docs/plans/2026-03-10-cardrun-branch-aware-base.md`
+
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 ### 2026-03-09 记忆异步队列由 FastAPI lifespan 常驻 worker 消费
 - 状态：ACTIVE

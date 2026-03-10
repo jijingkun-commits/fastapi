@@ -32,7 +32,7 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 2. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览，仅供人工阅读）
 3. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
 4. `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
-5. `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`（首次执行可由调度器自动创建）
+5. `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`（首次执行可由调度器自动创建；可持久化 `integration_branch`）
 
 硬约束：
 
@@ -91,6 +91,7 @@ python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-
 2. `once|loop`：
    - 优先续跑已有 `in_progress/in_review/verified` 卡；
    - 否则执行 `bash scripts/wt-flow.sh next` 激活下一张可执行卡。
+   - `next/create` 必须先解析并固定本任务的 `integration_branch`：优先复用 `task-runner-state.json.integration_branch`，否则继承当前非 `main/master` 父分支；若仍无法解析，再回落到仓库主线分支。
 3. 若返回 `ALL_DONE`：输出 `CARDRUN_ALL_DONE` 并结束。
 
 ### 3) 主控调度子代理
@@ -122,7 +123,8 @@ bash scripts/wt-flow.sh merge
 6. `merge` 时若目标分支相对基线 `ahead=0`，必须阻断：`MERGE_NO_COMMITS`（禁止“无提交也标记完成”）。
 7. 门禁/编排类卡片若无文件改动，允许空提交进入 `merge`，但必须有 `commit_sha` 与原因证据。
 8. `cardrun` 是唯一 merge 主路径；`wtimp` 在 `executor_mode=cardrun_dispatch` 下不得重复执行 merge。
-9. DB 风险卡片在 `evidence_satisfied=true` 前禁止进入 merge。
+9. `merge` 目标分支以当前 card session 的 `base_branch` 为准；该值只能由 `wt-flow next/create` 决定并持久化，禁止在 `wtimp` 内重算。
+10. DB 风险卡片在 `evidence_satisfied=true` 前禁止进入 merge。
 
 ### 5) 循环推进（仅 loop）
 

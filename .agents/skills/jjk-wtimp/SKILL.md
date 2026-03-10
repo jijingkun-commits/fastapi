@@ -97,7 +97,7 @@ git worktree list
 1. `executor_mode=standalone`：根据主题生成 slug（`YYYYMMDD-<topic-slug>`）。
 2. `executor_mode=standalone`：执行 `bash scripts/wt-flow.sh create <slug>`。
 3. `executor_mode=standalone`：记录输出的 `worktree_path` 与 `feature/<slug>` 分支。
-4. `executor_mode=cardrun_dispatch`：复用 cardrun 已创建的 worktree 上下文，禁止再次 create。
+4. `executor_mode=cardrun_dispatch`：复用 cardrun 已创建、且已绑定 `integration_branch/base_branch` 的 card worktree 上下文，禁止再次 create。
 
 ### 2) 切换并校验 worktree 上下文
 
@@ -122,7 +122,7 @@ git worktree list
 
 1. 在 worktree 内按 `implementation_plan.task_to_pr_mapping` 与 `execution_contract.commit_policy` 完成提交。
 2. `executor_mode=standalone`：执行 `bash scripts/wt-flow.sh merge`（可选 `--no-cleanup`）。
-3. `executor_mode=cardrun_dispatch`：禁止 merge，由 cardrun done_gate 主路径统一收口。
+3. `executor_mode=cardrun_dispatch`：禁止 merge，由 cardrun done_gate 主路径统一收口；最终收口目标只认 session `base_branch`。
 4. 若冲突或脚本中断，保留 worktree 并输出下一步处理建议。
 
 ### 6) 交付产物（强制）

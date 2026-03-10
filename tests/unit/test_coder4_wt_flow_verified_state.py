@@ -687,3 +687,96 @@ def test_wt_flow_status_reports_active_state_root_and_stale_candidates(tmp_path:
     assert f"TASK_STATE_ROOT={task_state_root}" in result.stdout
     assert "STALE_STATE_CANDIDATES=PP-20260306-ENGINEERING-LEAN-GOV" in result.stdout
     assert "没有活跃的 worktree 会话" in result.stdout
+
+
+def _create_branch_with_marker(tmp_path: Path, branch_name: str, marker_name: str, marker_content: str) -> None:
+    subprocess.run(["git", "checkout", "-b", branch_name], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / marker_name).write_text(marker_content, encoding="utf-8")
+    subprocess.run(["git", "add", marker_name], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", f"add {marker_name}"], cwd=tmp_path, check=True, capture_output=True)
+
+
+
+def test_wt_flow_next_inherits_parent_feature_branch_as_integration_branch(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "",
+            "card_status_map": {"C01": "todo", "C02": "todo"},
+        },
+    )
+
+    parent_branch = "feature/cardrun-parent"
+    _create_branch_with_marker(tmp_path, parent_branch, "PARENT_BRANCH.txt", "from parent branch\n")
+
+    result = subprocess.run(
+        ["bash", str(script_path), "next", f"--state-dir={task_state_root.parent}"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    session_files = list(task_state_root.glob("active-session-*.json"))
+    assert len(session_files) == 1
+    session_payload = json.loads(session_files[0].read_text(encoding="utf-8"))
+    assert session_payload["base_branch"] == parent_branch
+
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state_payload["integration_branch"] == parent_branch
+
+    worktree_path = Path(session_payload["worktree"])
+    assert (worktree_path / "PARENT_BRANCH.txt").exists()
+
+
+
+def test_wt_flow_next_reuses_task_integration_branch_across_runs(tmp_path: Path):
+    script_path, active_task_path, task_state_root, state_file = _prepare_task_fixture(
+        tmp_path,
+        state_payload={
+            "schema_version": "1.0.0",
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "card_order": ["C01", "C02"],
+            "current_card": "C01",
+            "integration_branch": "feature/cardrun-parent",
+            "card_status_map": {"C01": "done", "C02": "todo"},
+        },
+    )
+
+    parent_branch = "feature/cardrun-parent"
+    _create_branch_with_marker(tmp_path, parent_branch, "PERSISTED_PARENT.txt", "persisted parent branch\n")
+    subprocess.run(["git", "checkout", "master"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = subprocess.run(
+        ["bash", str(script_path), "next", f"--state-dir={task_state_root.parent}"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "WT_FLOW_ACTIVE_TASK_FILE": str(active_task_path),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    session_files = list(task_state_root.glob("active-session-*.json"))
+    assert len(session_files) == 1
+    session_payload = json.loads(session_files[0].read_text(encoding="utf-8"))
+    assert session_payload["base_branch"] == parent_branch
+
+    state_payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state_payload["integration_branch"] == parent_branch
+
+    worktree_path = Path(session_payload["worktree"])
+    assert (worktree_path / "PERSISTED_PARENT.txt").exists()
