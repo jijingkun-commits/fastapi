@@ -1469,3 +1469,51 @@ def test_prepare_streaming_inference_state_should_isolate_data_expert_subquery()
     assert "嘉兴的天气" not in human_messages[0].content
     assert "贷款余额前10名" in human_messages[0].content
     assert human_messages[0].name == "__internal_data_handoff__"
+
+
+def test_maybe_compile_supervisor_data_handoff_after_stream_emits_partial_preview() -> None:
+    """Supervisor 自动补编 data handoff 时，应先回流已完成子问题正文。"""
+    emitted_events = []
+    ctx = _make_ctx(
+        writer=emitted_events.append,
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="1、查贷款余额前10\n2、查嘉兴天气")],
+            "decomposed_goals": [
+                {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True, "allowed_agents": ["data_expert"]},
+                {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True, "allowed_agents": []},
+            ],
+            "turn_id": "turn-1",
+        },
+        collected_content=[],
+    )
+    final_state = {
+        "messages": [
+            HumanMessage(content="1、查贷款余额前10\n2、查嘉兴天气"),
+            AIMessage(content="嘉兴天气：\n- 明天：多云，3~11℃"),
+        ]
+    }
+
+    accepted_batch = [
+        {
+            "target_agent": "data_expert",
+            "goal_id": "GOAL-01",
+            "task_description": "查询贷款余额前10名客户",
+            "route_decision": {"target_agent": "data_expert"},
+            "frame": {"query_text": "查询2025年6月30日贷款余额前10名的客户"},
+        }
+    ]
+
+    with patch("app.ai.workflow.multi_agent_graph._inject_compiled_data_handoff_for_supervisor", return_value=accepted_batch), \
+         patch("app.ai.workflow.multi_agent_graph._apply_router_contract_guard", return_value=(accepted_batch, [], [])), \
+         patch("app.ai.workflow.multi_agent_graph._should_enable_multi_intent_mode", return_value=True):
+        handoff_return = _maybe_compile_supervisor_data_handoff_after_stream(
+            final_state,
+            initial_input_count=1,
+            ctx=ctx,
+        )
+
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["direct_answer_markdown"] == "嘉兴天气：\n- 明天：多云，3~11℃"
+    assert [event["type"] for event in emitted_events] == ["status", "token"]
+    assert emitted_events[1]["data"]["content"] == "嘉兴天气：\n- 明天：多云，3~11℃"

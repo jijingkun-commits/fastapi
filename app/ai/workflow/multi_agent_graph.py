@@ -46,6 +46,7 @@ from app.ai.events import (
     emit_tool_end,
     emit_result,
     emit_kb_images,
+    emit_plan_ready,
     emit_task_started,
     emit_task_finished,
     emit_coverage_check,
@@ -3422,6 +3423,65 @@ def _normalize_weather_label(raw_label: str) -> str:
     return label
 
 
+def _localize_weather_english_text(text: str) -> str:
+    """将英文天气摘要收敛为更适合中文用户阅读的短句。"""
+    localized = str(text or "").strip()
+    if not localized:
+        return ""
+
+    replacements = (
+        (r"\bMostly dry\b", "大部时段无明显降水"),
+        (r"\bSome drizzle\b", "有零星小雨"),
+        (r"\bLight rain\b", "小雨"),
+        (r"\bModerate rain\b", "中雨"),
+        (r"\bHeavy rain\b", "大雨"),
+        (r"\bVery mild\b", "体感温和"),
+        (r"\bWind will be generally light\b", "风力较小"),
+        (r"\bWind will be light\b", "风力较小"),
+        (r"\bPartly cloudy\b", "局部多云"),
+        (r"\bMostly cloudy\b", "大部多云"),
+        (r"\bCloudy\b", "多云"),
+        (r"\bSunny\b", "晴朗"),
+    )
+    for pattern, replacement in replacements:
+        localized = re.sub(pattern, replacement, localized, flags=re.IGNORECASE)
+
+    localized = re.sub(r"\btotal\s*(\d+(?:\.\d+)?)mm\b", r"累计约\1mm", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bheaviest during [A-Za-z]{3} night\b", "夜间更明显", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bmostly falling on [A-Za-z]{3} morning\b", "主要出现在上午", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bmostly falling on [A-Za-z]{3} night\b", "主要出现在夜间", localized, flags=re.IGNORECASE)
+    localized = localized.replace('|', ' ')
+    localized = localized.replace(". ", "；").replace(".", "")
+    localized = re.sub(r"\s+", " ", localized).strip(" ：:；;,，")
+    return localized
+
+
+def _score_weather_display_markdown(markdown: str) -> int:
+    """给天气展示文案打分，优先更像人话、信息更完整的候选。"""
+    text = str(markdown or '').strip()
+    if not text:
+        return -10_000
+
+    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    english_words = len(re.findall(r"\b[a-zA-Z]{3,}\b", text))
+    temp_hits = len(re.findall(r"\d+\s*[°℃]", text))
+    line_hits = sum(1 for line in text.splitlines() if line.strip().startswith('- '))
+    score = chinese_chars + temp_hits * 30 + line_hits * 8
+    score -= english_words * 6
+    score -= text.count('|') * 20
+    if '摘要：' in text:
+        score -= 120
+
+    noise_hints = (
+        '公司地址', '联系电话', '首页', '下载', '资讯', '15天预报', '风景名胜区', '正月', '联系电话', '融新科技中心', '当前时间', '预警信号', '排行榜', '全国天气网'
+    )
+    for hint in noise_hints:
+        if hint in text:
+            score -= 80
+
+    return score
+
+
 def _extract_weather_segments_from_text(text: str) -> list[dict[str, str]]:
     """从天气网页正文中提取日期段。"""
     normalized = html.unescape(str(text or ""))
@@ -3477,6 +3537,43 @@ def _extract_weather_segments_from_text(text: str) -> list[dict[str, str]]:
                 'extra': extra_text,
             }
         )
+
+    if segments:
+        return segments[:5]
+
+    chinese_labels = ('今天', '明天', '后天', '周一', '周二', '周三', '周四', '周五', '周六', '周日', '周天')
+    weather_by_label: dict[str, str] = {}
+    high_by_label: dict[str, tuple[str, str]] = {}
+    low_by_label: dict[str, str] = {}
+
+    chinese_weather_pattern = re.compile(
+        r'(今天|明天|后天|周[一二三四五六日天])[^。；]*?'
+        r'(晴转多云|晴转小雨|晴转阴|多云转晴|多云转阴|多云转小雨|小雨转多云|小雨转阴|阴转多云|阴转小雨|雷阵雨|阵雨|小雨|中雨|大雨|暴雨|雨夹雪|小雪|中雪|大雪|晴到多云|多云到晴|多云|晴|阴)'
+    )
+    for label, weather in chinese_weather_pattern.findall(normalized):
+        weather_by_label.setdefault(label, weather)
+
+    high_temp_pattern = re.compile(r'(今天|明天|后天|周[一二三四五六日天])(?:白天)?最高温度\s*(\d+)\s*[～~\-]\s*(\d+)\s*[°℃]')
+    for label, low, high in high_temp_pattern.findall(normalized):
+        high_by_label[label] = (low, high)
+
+    low_temp_pattern = re.compile(r'(今天|明天|后天|周[一二三四五六日天])(?:早晨)?最低温度\s*(\d+)\s*[°℃]')
+    for label, low in low_temp_pattern.findall(normalized):
+        low_by_label[label] = low
+
+    for label in chinese_labels:
+        weather = weather_by_label.get(label, '')
+        temperature = ''
+        high_range = high_by_label.get(label)
+        low_temp = low_by_label.get(label)
+        if high_range and low_temp:
+            temperature = f'{low_temp}℃~{high_range[1]}℃'
+        elif high_range:
+            temperature = f'{high_range[0]}℃~{high_range[1]}℃'
+        elif low_temp:
+            temperature = f'{low_temp}℃'
+        if any((weather, temperature)):
+            segments.append({'label': label, 'weather': weather, 'temperature': temperature, 'extra': ''})
 
     if segments:
         return segments[:5]
@@ -3537,8 +3634,8 @@ def _extract_weather_segments_from_text(text: str) -> list[dict[str, str]]:
             if cleaned_sentence:
                 cleaned_sentences.append(cleaned_sentence)
 
-        weather = cleaned_sentences[0] if cleaned_sentences else ''
-        extra = '；'.join(cleaned_sentences[1:3])
+        weather = _localize_weather_english_text(cleaned_sentences[0]) if cleaned_sentences else ''
+        extra = '；'.join(_localize_weather_english_text(sentence) for sentence in cleaned_sentences[1:3] if sentence)
         if not any((weather, temperature, extra)):
             continue
         segments.append(
@@ -3635,6 +3732,7 @@ def _extract_tavily_display_markdown(tool_content: str) -> str:
         reverse=True,
     )
 
+    weather_candidates: list[str] = []
     fallback_blocks: list[str] = []
     for item in ranked_results[:3]:
         if not isinstance(item, dict):
@@ -3654,16 +3752,17 @@ def _extract_tavily_display_markdown(tool_content: str) -> str:
                     continue
                 lines.append(f"- {segment.get('label') or '近期'}：{'，'.join(detail_parts)}")
             if len(lines) > 1:
-                return "\n".join(lines)
+                weather_candidates.append("\n".join(lines))
+                continue
 
         cleaned_content = _sanitize_tavily_text(content)
         cleaned_title = _sanitize_tavily_text(title)
         weather_like_result = _score_tavily_weather_result(item) > 0
         if weather_like_result:
             city = _extract_weather_city_name(title, content)
-            summary_text = cleaned_content or cleaned_title
+            summary_text = _localize_weather_english_text(cleaned_content or cleaned_title)
             if summary_text:
-                fallback_blocks.append(f"{city}天气：\n- 摘要：{summary_text}")
+                weather_candidates.append(f"{city}天气：\n- 摘要：{summary_text}")
                 continue
 
         if cleaned_content and cleaned_title:
@@ -3674,6 +3773,9 @@ def _extract_tavily_display_markdown(tool_content: str) -> str:
             continue
         if cleaned_title:
             fallback_blocks.append(cleaned_title)
+
+    if weather_candidates:
+        return max(weather_candidates, key=_score_weather_display_markdown)
 
     return fallback_blocks[0] if fallback_blocks else ""
 
@@ -4632,6 +4734,18 @@ def _maybe_compile_supervisor_data_handoff_after_stream(
     )
     if direct_answer_markdown:
         first_handoff["direct_answer_markdown"] = direct_answer_markdown
+
+    partial_preview = direct_answer_markdown or _build_external_lookup_display_markdown_from_findings(direct_findings)
+    preview_summary = _normalize_tool_summary_text(partial_preview, limit=220)
+    emitted_snapshot = _normalize_tool_summary_text("".join(ctx.collected_content), limit=600)
+    if enable_multi_intent_mode and callable(ctx.writer) and preview_summary and preview_summary not in emitted_snapshot:
+        emit_status(
+            ctx.writer,
+            message="已完成可直答子问题，先返回当前结果，剩余问题继续处理中...",
+            node=ctx.node_name,
+        )
+        emit_token(ctx.writer, partial_preview, node=ctx.node_name)
+        ctx.collected_content.append(partial_preview)
 
     logger.info(
         "[%s] supervisor流结束后自动编译 data handoff: accepted=%d, direct_findings=%d, planned_goals=%d, multi_intent=%s",
@@ -6143,6 +6257,10 @@ def _resolve_decomposed_goals_for_query(
     """生成 decompose_goals 产物：优先模型规划，失败时回退规则拆解。"""
     normalized_query = str(user_query or "").strip()
     fallback_goals = _build_decomposed_goals_for_query(normalized_query)
+
+    if _has_explicit_multi_goal_markers(normalized_query) and _count_must_answer_goals(fallback_goals) >= 2:
+        return fallback_goals, "explicit_multi_goal_fast_path"
+
     state_seed = _build_decompose_goals_state_seed(
         user_query=normalized_query,
         runtime_state=runtime_state,
@@ -6387,6 +6505,83 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         context_parts.append(rendered_response_guidance)
 
     updates["system_context"] = "\n".join(context_parts)
+
+    normalized_user_query = _normalize_text_content(content)
+    if isinstance(last_msg, HumanMessage) and normalized_user_query:
+        fast_lane_goals, fast_lane_source = _resolve_decomposed_goals_for_query(
+            normalized_user_query,
+            runtime_state=state,
+        )
+        fast_lane_goal_buckets = {
+            _goal_kind_bucket(str(goal.get("kind") or ""))
+            for goal in list(fast_lane_goals or [])
+            if bool(goal.get("must_answer", True))
+        }
+        if fast_lane_source == "explicit_multi_goal_fast_path" and "data" in fast_lane_goal_buckets:
+            updates["decomposed_goals"] = list(fast_lane_goals)
+            emit_plan_ready(
+                writer,
+                _build_active_goal_plan(state, runtime_goals=fast_lane_goals, source=fast_lane_source),
+                node="preprocess",
+            )
+
+            compiled_data_handoff = next(
+                (
+                    _build_compiled_data_goal_handoff(state={**state, **updates}, goal=goal)
+                    for goal in fast_lane_goals
+                    if _goal_kind_bucket(str(goal.get("kind") or "")) == "data"
+                ),
+                None,
+            )
+            if compiled_data_handoff:
+                updates["pending_handoff"] = compiled_data_handoff
+                updates["handoff_queue"] = []
+                updates["completed_handoffs"] = []
+                updates["handoff_execution_trace"] = []
+                updates["multi_intent_mode"] = bool(len(fast_lane_goals) >= 2)
+
+            if "external" in fast_lane_goal_buckets:
+                external_query = next(
+                    (
+                        segment
+                        for segment in _split_user_query_for_goal_compile(normalized_user_query)
+                        if _infer_primary_goal_bucket_from_query_text(segment) == "external"
+                    ),
+                    normalized_user_query,
+                )
+                try:
+                    from app.ai.tools.chatTools import search_tool
+
+                    if search_tool is not None:
+                        emit_tool_start(writer, "tavily_search", {"query": external_query}, node="preprocess")
+                        if hasattr(search_tool, "ainvoke"):
+                            search_result = await search_tool.ainvoke({"query": external_query})
+                        else:
+                            search_result = await asyncio.to_thread(search_tool.invoke, {"query": external_query})
+
+                        tool_content = search_result if isinstance(search_result, str) else json.dumps(search_result, ensure_ascii=False)
+                        preprocess_messages = list(updates.get("messages") or [])
+                        preprocess_messages.append(
+                            ToolMessage(
+                                content=tool_content,
+                                tool_call_id="preprocess-fast-lane-external",
+                                name="tavily_search",
+                            )
+                        )
+                        updates["messages"] = preprocess_messages
+
+                        external_preview = _extract_tavily_display_markdown(tool_content)
+                        if external_preview:
+                            emit_status(
+                                writer,
+                                message="已完成可直答子问题，先返回当前结果，剩余问题继续处理中...",
+                                node="preprocess",
+                            )
+                            emit_token(writer, external_preview, node="preprocess")
+                    else:
+                        logger.info("预处理 fast lane 跳过外部预取：search_tool 未配置")
+                except Exception as exc:
+                    logger.warning("预处理 fast lane 外部预取失败，已回退主链: %s", exc)
     
     # ========== 4. Skill Runtime 预装载 ==========
     # progressive_loader: 预装 catalog；hybrid_rag: 保留旧检索链路作为显式切换路径
@@ -7097,7 +7292,23 @@ async def create_multi_agent_graph(
     
     # 添加边
     workflow.add_edge(START, "preprocess")
-    workflow.add_edge("preprocess", "supervisor")
+
+    def preprocess_should_continue(state: MultiAgentState) -> Literal["supervisor", "data_expert", "todo_expert"]:
+        pending_handoff = state.get("pending_handoff")
+        target_agent = str((pending_handoff or {}).get("target_agent") or "").strip()
+        if target_agent in WORKFLOW_AGENT_NODE_BY_TYPE and bool(state.get("multi_intent_mode")):
+            return WORKFLOW_AGENT_NODE_BY_TYPE[target_agent]  # type: ignore[return-value]
+        return "supervisor"
+
+    workflow.add_conditional_edges(
+        "preprocess",
+        preprocess_should_continue,
+        {
+            "supervisor": "supervisor",
+            "data_expert": "data_expert",
+            "todo_expert": "todo_expert",
+        },
+    )
     
     # 专家执行完 -> 评估节点
     workflow.add_edge("data_expert", "evaluate")

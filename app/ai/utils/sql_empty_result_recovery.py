@@ -76,6 +76,18 @@ def has_rows_for_table(table_name: str, data_dt: Optional[str]) -> bool:
     return row is not None
 
 
+def probe_sql_has_rows(sql: str) -> bool:
+    """对完整 SQL 做轻量 probe，避免空结果场景再跑一次完整重试。"""
+    normalized_sql = str(sql or "").strip().rstrip(";")
+    if not normalized_sql:
+        return False
+
+    probe_sql = f"SELECT 1 FROM ({normalized_sql}) AS __empty_probe LIMIT 1"
+    with analytics_engine.connect() as conn:
+        row = conn.execute(text(probe_sql)).first()
+    return row is not None
+
+
 def _normalize_rewrite_rule(rule: RewriteRule) -> Tuple[str, str, str, Dict[str, str]]:
     """标准化重写规则，兼容旧三元组配置。"""
     if len(rule) == 3:
