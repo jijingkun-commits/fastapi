@@ -7,6 +7,8 @@ import asyncio
 import os
 import sys
 
+import pytest
+
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -14,18 +16,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+@pytest.mark.asyncio
 async def test_simple_agent():
     """使用简单的 agent 测试工具调用结构。"""
-    from langchain.agents import create_tool_calling_agent
-    from langchain_core.prompts import ChatPromptTemplate
+    if os.getenv("RUN_LIVE_TOOL_CALL_TESTS") != "1":
+        pytest.skip("默认跳过联机 tool call 探针；如需执行请设置 RUN_LIVE_TOOL_CALL_TESTS=1")
     from langchain_core.tools import tool
     from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
-    from langgraph.prebuilt import create_react_agent
+    from langchain.agents import create_agent
     
     # 导入 LLM
-    from app.ai.llm_util import get_llm
+    from app.ai.llm_util import get_scene_llm
+    from app.ai.scene_registry import SCENE_KEY_KNOWLEDGE_AGENT_FACTORY
     
-    llm = get_llm(force_thinking=False)
+    llm = get_scene_llm(scene_key=SCENE_KEY_KNOWLEDGE_AGENT_FACTORY, force_thinking=False)
     
     # 创建测试工具
     @tool
@@ -34,10 +38,10 @@ async def test_simple_agent():
         return f"搜索结果: {query}"
     
     # 创建简单 agent
-    agent = create_react_agent(
+    agent = create_agent(
         model=llm,
         tools=[test_search],
-        prompt="你是一个助手，使用工具回答问题。"
+        system_prompt="你是一个助手，使用工具回答问题。"
     )
     
     test_input = {

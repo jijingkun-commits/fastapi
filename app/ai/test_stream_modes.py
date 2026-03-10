@@ -7,9 +7,11 @@
 import asyncio
 import os
 
+import pytest
+
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
 
@@ -34,11 +36,12 @@ def weather_search(city: str, date: str = "今天") -> str:
     return f"{city} {date} 天气晴朗，温度 15-22 度"
 
 
+@pytest.mark.asyncio
 async def test_stream_modes():
     """测试不同 stream_mode 下 tool_calls 的数据结构。"""
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("MODEL_API_KEY")
     if not api_key:
-        raise ValueError("未配置 DEEPSEEK_API_KEY 或 MODEL_API_KEY，无法运行测试脚本")
+        pytest.skip("未配置 DEEPSEEK_API_KEY 或 MODEL_API_KEY，跳过实时 streaming 验证")
 
     base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
     if not base_url.endswith("/v1"):
@@ -54,7 +57,7 @@ async def test_stream_modes():
     print("✅ 使用 DeepSeek Chat")
     
     # 创建 Agent
-    agent = create_react_agent(
+    agent = create_agent(
         model=llm,
         tools=[knowledge_search, weather_search],
     )

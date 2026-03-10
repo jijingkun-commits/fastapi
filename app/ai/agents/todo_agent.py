@@ -30,7 +30,7 @@ def create_todo_agent(
         use_graph: 是否使用 LangGraph（默认 True）
         
     Returns:
-        编译后的 Agent 实例（LangGraph）或 create_agent 实例
+        编译后的 Graph Agent 实例或预构建 create_agent 实例
     """
     if use_graph:
         # 使用 LangGraph 实现
@@ -38,7 +38,7 @@ def create_todo_agent(
         from app.ai.workflow.todo_graph import create_todo_graph
         return create_todo_graph(model, enable_thinking, model_id)
     
-    # 以下是原有的 create_agent 实现（向后兼容）
+    # 以下是预构建 Agent 路径，保留给非 Graph 场景使用
     if model is None:
         model = get_scene_llm(
             scene_key=SCENE_KEY_TODO_AGENT_FACTORY,
