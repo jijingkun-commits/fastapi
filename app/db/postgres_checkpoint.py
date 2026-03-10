@@ -86,6 +86,27 @@ async def get_checkpointer() -> AsyncPostgresSaver:
     return _checkpointer
 
 
+async def delete_thread_checkpoint(thread_id: str) -> dict[str, bool | str]:
+    """删除指定 thread_id 的全部 LangGraph checkpoint 状态。"""
+    normalized_thread_id = str(thread_id or "").strip()
+    if not normalized_thread_id:
+        raise ValueError("thread_id 不能为空")
+
+    checkpointer = await get_checkpointer()
+    try:
+        config = {"configurable": {"thread_id": normalized_thread_id}}
+        checkpoint_found = await checkpointer.aget_tuple(config) is not None
+        await checkpointer.adelete_thread(normalized_thread_id)
+        logger.info(
+            "已删除 thread checkpoint: thread_id=%s, checkpoint_found=%s",
+            normalized_thread_id,
+            checkpoint_found,
+        )
+        return {"thread_id": normalized_thread_id, "checkpoint_found": checkpoint_found}
+    finally:
+        await close_checkpointer()
+
+
 async def close_checkpointer():
     """关闭 Checkpointer 连接。"""
     global _checkpointer, _connection_pool, _setup_done

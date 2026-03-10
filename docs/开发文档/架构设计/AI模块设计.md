@@ -228,6 +228,8 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 **当前方案**（postprocess 清理）是最务实的选择：改动小、效果等价、未来可平滑迁移。
 
 > 更多背景：参考 LangGraph [Discussion #3192](https://github.com/langchain-ai/langgraph/discussions/3192)
+>
+> 补充约束（2026-03-10）：`messages` 进入 checkpoint 前，必须先经过消息契约层清洗；对 `type=text/output_text/refusal` 且缺少可读正文的 assistant block 直接丢弃，避免把空壳块持久化到跨轮状态。
 
 ### 应用级运行时 owner 收口（2026-03-10）
 
