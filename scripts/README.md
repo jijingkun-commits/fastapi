@@ -94,6 +94,10 @@ python scripts/db/schema_sync.py                 # 元数据同步
 ### 记忆链路排查
 
 ```bash
+# 删除单个 thread 的 LangGraph checkpoint（不删聊天消息表）
+$(bash scripts/repo_python.sh) scripts/debug/delete_thread_checkpoint.py \
+  --thread-id visual-evidence-1773109675
+
 # 按用户名 + 槽位键诊断
 $(bash scripts/repo_python.sh) scripts/debug/check_memory_flow.py \
   --username jjk \

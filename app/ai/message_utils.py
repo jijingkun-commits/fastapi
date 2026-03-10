@@ -7,8 +7,58 @@ from typing import Sequence
 
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage
 
+from app.core.message_content import normalize_message_content
+
 
 logger = logging.getLogger(__name__)
+
+
+_TEXT_BLOCK_TYPES = {"text", "output_text", "refusal"}
+
+
+def _has_readable_text_payload(block: dict) -> bool:
+    """判断 text-like block 是否真的携带可读正文。"""
+    for key in ("text", "content", "data", "message"):
+        value = block.get(key)
+        if normalize_message_content(value).strip():
+            return True
+    return False
+
+
+def _sanitize_ai_message_content(message: AIMessage) -> AIMessage | None:
+    """清理 assistant 历史消息中的空壳文本块。"""
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return message
+
+    sanitized: list = []
+    removed_count = 0
+    for block in content:
+        if isinstance(block, dict) and str(block.get("type", "")).lower() in _TEXT_BLOCK_TYPES:
+            if not _has_readable_text_payload(block):
+                removed_count += 1
+                continue
+        sanitized.append(block)
+
+    if removed_count == 0:
+        return message
+
+    logger.warning(
+        "移除空 assistant 内容块: message_id=%s, removed=%d",
+        getattr(message, "id", None),
+        removed_count,
+    )
+
+    if sanitized:
+        message.content = sanitized
+        return message
+
+    if getattr(message, "tool_calls", None):
+        message.content = ""
+        return message
+
+    logger.warning("移除无有效内容的 assistant 历史消息: message_id=%s", getattr(message, "id", None))
+    return None
 
 
 def validate_messages(messages: Sequence[BaseMessage], fix_reasoning: bool = False) -> list[BaseMessage]:
@@ -26,10 +76,20 @@ def validate_messages(messages: Sequence[BaseMessage], fix_reasoning: bool = Fal
 
     if not messages:
         return list(messages)
-    
+
+    sanitized_messages = []
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            sanitized = _sanitize_ai_message_content(msg)
+            if sanitized is None:
+                continue
+            sanitized_messages.append(sanitized)
+        else:
+            sanitized_messages.append(msg)
+
     validated = []
     i = 0
-    messages = list(messages)  # 确保可索引
+    messages = list(sanitized_messages)  # 确保可索引
     
     while i < len(messages):
         msg = messages[i]

@@ -4,9 +4,20 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-10｜Assistant 空壳文本块在消息契约层清洗，禁止进入 checkpoint（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
+
+### 2026-03-10 Assistant 空壳文本块在消息契约层清洗
+- 状态：ACTIVE
+- 决策主题：assistant 历史消息中 `type=text/output_text/refusal` 但无可读正文的空壳 block 必须在消息契约层被丢弃，不允许进入 LangGraph checkpoint
+- 背景与问题：`langchain-openai` 的 Responses 流式边界场景可能生成仅含 `id/index` 的空壳 text block；若直接写入 `state.messages`，后续复用同一 `thread_id` 时会在 payload 构造阶段触发 `KeyError: 'text'`
+- 最终决策：将 assistant content 清洗收口到 `app/ai/message_utils.py.validate_messages()`；编排层只调用该契约层，不再分散添加本地特判
+- 取舍理由：坏块治理属于消息结构合法性问题，不属于业务编排职责；在底层统一清洗比在 `multi_agent_graph`、`chat_service` 等入口重复兜底更简洁、更稳定
+- 影响范围：`app/ai/message_utils.py`、`app/ai/workflow/multi_agent_graph.py` 调用链、所有复用 LangGraph checkpoint 的多轮对话线程
+- 回退/失效条件：若上游 `langchain-openai` 后续彻底修复该边界行为，且仓内确认不再产生空壳 assistant block，可评估删除此兼容清洗；在此之前保持启用
+- 关联文档/代码：`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`、`venv/lib/python3.11/site-packages/langchain_openai/chat_models/base.py`
 
 ### 2026-03-10 CardRun 分支感知基线收口到 task state
 - 状态：ACTIVE
