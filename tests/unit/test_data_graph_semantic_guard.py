@@ -394,6 +394,48 @@ class TestDataGraphSemanticGuard(unittest.TestCase):
         self.assertIn("GROUP BY o.org_no, o.org_val", sql)
         self.assertNotIn("GROUP BY legal_org_cd", sql)
 
+    def test_metric_resolve_preserves_topn_contract_when_continuation_summary_drops_topn_phrase(self):
+        metric_template = (
+            "SELECT SUM(prin_bal) AS 贷款余额 "
+            "FROM fdmdata.f_mid_loan_k_tb "
+            "WHERE ccy_cd = 'CNY' AND data_dt = '${data_dt}'"
+        )
+        metric_candidates = [
+            {
+                "metric_id": "LOAN_001",
+                "metric_name": "贷款余额",
+                "query_template": metric_template,
+                "similarity": 1.0,
+            }
+        ]
+
+        with patch("app.ai.workflow.data_graph._search_metrics_exact_name", return_value=metric_candidates):
+            resolved = metric_resolve(
+                {
+                    "query_context": {
+                        "original_question": "查询贷款余额，时间范围2025-06-30，按客户聚合",
+                        "query_shape": "top_n",
+                        "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+                    },
+                    "session_frame": {
+                        "metric": "贷款余额",
+                        "time_range": "2025-06-30",
+                        "dimensions": ["客户"],
+                        "query_shape": "top_n",
+                        "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+                    },
+                    "matched_metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["客户"],
+                }
+            )
+
+        sql = str(resolved.get("generated_sql") or "")
+        self.assertEqual(resolved.get("sql_source"), "metric")
+        self.assertIn("GROUP BY ecif_cust_no", sql)
+        self.assertIn("ORDER BY 贷款余额 DESC", sql)
+        self.assertIn("LIMIT 10", sql)
+
     def test_derive_metric_sql_returns_none_when_dimension_unmapped(self):
         template = (
             "SELECT SUM(prin_bal) AS 贷款余额 "

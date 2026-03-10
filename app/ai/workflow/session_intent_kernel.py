@@ -61,6 +61,8 @@ def normalize_session_frame(frame: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "org_level": _normalize_text(raw.get("org_level")),
         "chart_type": _normalize_text(raw.get("chart_type")),
         "filters": _normalize_text_list(raw.get("filters")),
+        "query_shape": _normalize_text(raw.get("query_shape")),
+        "ranking": dict(raw.get("ranking")) if isinstance(raw.get("ranking"), dict) else {},
         "todo_action": _normalize_text(raw.get("todo_action") or raw.get("action")),
         "todo_target_id": _normalize_text(raw.get("todo_target_id") or raw.get("todo_id")),
         "todo_fields": dict(raw.get("todo_fields")) if isinstance(raw.get("todo_fields"), dict) else {},

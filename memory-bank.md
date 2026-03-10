@@ -4,6 +4,7 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 ### 2026-03-09 记忆异步队列由 FastAPI lifespan 常驻 worker 消费
 - 状态：ACTIVE
 - 决策主题：`memory.intent_async_enabled` 开启时，记忆意图队列必须由 FastAPI `lifespan` 启动的常驻 worker 负责消费，禁止只入队不接消费者
@@ -423,11 +424,21 @@
 - 状态：ACTIVE
 - 决策主题：聊天前端统一采用 CJK 主字体、阅读型 typography 与共享会话内容列宽契约
 - 背景与问题：原方案以 `Inter` 作为全局主字体，中文主要依赖系统 fallback，导致英文与中文气质割裂；同时 AI 正文、用户气泡、状态行与底部输入框分别挂在不同宽度层，出现“会话元素脱离统一内容列”的布局割裂。
-- 最终决策：根布局统一注入 `Noto Sans SC`，全局样式收口字体与排版 token，并让 AI 正文、用户气泡、状态行、加载占位、操作栏与 `ChatInput` 共同消费同一内容列宽 token；图表/SQL/工具结果继续保留较宽展示宽度。
+- 最终决策：根布局统一注入 `Noto Sans SC`，全局样式收口字体与排版 token，并让 AI 正文、用户气泡、状态行、加载占位、操作栏与 `ChatInput` 共同消费同一内容列宽 token；图表/SQL/工具结果继续保留较宽展示宽度；Markdown 段落/列表/表格间距统一由 `markdown-styles.css` 负责，`MarkdownText` 组件只保留语义与行为渲染。
 - 取舍理由：未上线阶段优先消除字体入口分散与内容列宽双源配置的结构性问题，用一次收敛换取后续内容产品一致性。
 - 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/human.tsx`、`web/src/components/chat/messages/ai.tsx`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、会话消息渲染链路。
 - 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，或针对图表工作台引入独立内容栅格，可在保留单一 token 入口的前提下按场景拆分。
 - 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`
+### 2026-03-10 问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成
+- 状态：ACTIVE
+- 决策主题：`data.query` 的 `query_shape/ranking` 必须成为问数 SQL 生成的稳定真值源，禁止在 handoff 后退化为“只看重建摘要文本”
+- 背景与问题：TopN 查询在 `pending_handoff.frame` 已带 `query_shape=top_n/ranking.limit=10`，但 `analyze_data_intent` 会把补充轮问题重建成“查询贷款余额，时间范围…，按客户聚合”，`metric_resolve` 再次只按自然语言判断形态，导致 `ORDER BY/LIMIT 10` 丢失，最终被 SQL 安全层补成默认 `LIMIT 1000`
+- 最终决策：新增独立 query contract 归一层；`build_data_query_handoff_frame`、`session_frame`、`query_context` 统一携带 `query_shape/ranking`；`metric_resolve/_derive_metric_sql/_is_sql_semantically_compatible` 直接消费结构化 contract；重建问题文本仅用于展示与日志，不再承担 TopN 真理源
+- 取舍理由：与其在 SQL 安全层或展示层做“前10”特判，不如把结构化 contract 真正贯通到执行层；这样既修当前 bug，也避免未来补充轮/多意图 handoff 再次丢槽
+- 影响范围：`app/ai/workflow/data_query_contract.py`、`app/ai/workflow/data_graph.py`、`app/ai/workflow/session_intent_kernel.py`、`tests/unit/test_data_graph_semantic_guard.py`、`tests/unit/test_data_graph_clarify_guard.py`
+- 回退/失效条件：若未来问数 SQL 生成完全切换到更强的 schema-driven planner，可由新的 contract owner 接管；在此之前不得回退为“重新拼自然语言再猜 TopN”
+- 关联文档/代码：`docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/workflow/data_query_contract.py`
+
 ### 2026-03-08 编排层禁止硬编码语义关键词词表
 - 状态：ACTIVE
 - 决策主题：把“自然语言语义识别不得下沉到编排层”冻结为仓级治理门禁

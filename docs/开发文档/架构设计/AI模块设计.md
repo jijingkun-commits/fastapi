@@ -2028,6 +2028,7 @@ Data Agent 采用两层漏斗模型处理用户查询：
 13. **session_frame 回收兜底（2026-02-18）**：在 MultiAgent 父图状态裁剪导致 `matched_metric/time_range/dimensions/viz_type/query_context` 丢失时，`analyze_data_intent` 会优先从 `session_frame` 回收同义槽位，保障“生成图表/分行”等补充轮延续上一轮已确认上下文。  
 14. **Tool Observation 归一（2026-03-09）**：Supervisor / summarize 消费第三方搜索工具输出时，必须先经过 observation normalizer，将 HTML 属性、站点导航、标题锚点等网页噪声剔除后再写入 `handoff_execution_trace` 或最终答复；Tavily 无结果/错误文本不得直接透传给用户。  
 15. **Coverage 失败/缺失收口（2026-03-09）**：`data.query` 交付物只有在存在结构化 `data` 或结构化 message 时才视为 `success`；若仅返回失败/澄清文本，则标记为 `failed` 并携带 `payload.failure_message`；若既无结构化结果也无失败摘要，则标记为 `missing`，由统一汇总阶段继续补齐。  
+16. **TopN 合同前推到 SQL 生成（2026-03-10）**：`pending_handoff.frame.query_shape/ranking` 不再只作为路由校验字段存在，而是与 `session_frame/query_context` 一起成为 SQL 生成真值源；`metric_resolve/_derive_metric_sql` 优先消费结构化合同，重建自然语言问题只用于展示与日志，不得再单独决定 TopN 语义。  
 
 #### 相关状态字段（DataAgentState）
 
@@ -2103,7 +2104,7 @@ graph TD
 
 当前统一内部状态：
 
-- `session_frame`: 当前任务统一帧（含 metric/time/dimensions/org_level/chart_type/todo_action/todo_fields）。
+- `session_frame`: 当前任务统一帧（含 metric/time/dimensions/org_level/chart_type/query_shape/ranking/todo_action/todo_fields）。
 - `turn_act`: 当前轮行为分类。
 - `clarify_fsm_state`: `idle | asked_metric | asked_time | asked_org | asked_target | asked_action | done`。
 - `clarify_round`: 当前任务澄清轮次。
@@ -2187,6 +2188,7 @@ graph TD
 
 1. **会话意图内核落地**：新增 `app/ai/workflow/session_intent_kernel.py`，统一提供 `TurnActClassifier`、`SessionFrameReducer`、`Clarification FSM` 基础能力。
 2. **Handoff 协议收敛**：`data.query` 已切到 `goal compiler -> frame + turn_act_hint` 单轨合同；`task_description` 仅保留给 todo 类 handoff。
+3. **TopN contract 不丢槽**：`frame.query_shape/ranking` 会继续进入 `session_frame/query_context`，并由 SQL 生成直接消费；即使补充轮把问题摘要重写成“查询贷款余额，时间范围...”，也不得丢失 `TopN` 限定。
 3. **Supervisor 透传结构化上下文**：`multi_agent_graph` handoff 工具可携带 `frame/turn_act_hint`，减少专家侧纯文本解析损耗。
 4. **问数 Agent 接入 V2 内核**：`data_graph.analyze_data_intent` 已接入 `turn_act + session_frame + frame_source_map + clarify_fsm_state + clarify_round`，并将 handoff frame 纳入基线判定。
 5. **待办 Agent 接入与收敛**：`todo_graph.analyze_intent` 已接入同一内核，并清理重复定义，统一补充轮合并与澄清状态推进。

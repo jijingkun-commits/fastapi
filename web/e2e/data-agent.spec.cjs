@@ -44,6 +44,7 @@ test.describe('Data Agent E2E Flow', () => {
         test.setTimeout(150000);
 
         await sendMessageAndWait(page, '查询2025-06-30贷款余额前10名客户', 120000, false);
+        await expect(page.getByText(/共\s*10\s*条/).last()).toBeVisible({ timeout: 30000 });
         await sendMessageAndWait(page, '以柱状图方式展示', 120000, false);
 
         await expect(page.locator('[data-testid="sql-result-chart"]').last()).toBeVisible({ timeout: 30000 });

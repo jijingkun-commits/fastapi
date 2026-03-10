@@ -458,6 +458,40 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
 
 
 
+    def test_handoff_topn_contract_should_survive_supplement_summary_rewrite(self):
+        """即使补充轮摘要把 query_text 改写，TopN contract 也不能丢。"""
+        llm_payload = {
+            "intent": "metric_query",
+            "metric_name": "贷款余额",
+            "time_range": "2025-06-30",
+            "filters": [],
+            "dimensions": ["客户"],
+            "chart_type": "",
+            "clarification_needed": "",
+        }
+
+        result = self._invoke(
+            "查询2025年6月30日贷款余额前10名的客户",
+            llm_payload,
+            pending_handoff={
+                "target_agent": "data_expert",
+                "turn_act_hint": "SUPPLEMENT",
+                "frame": {
+                    "query_text": "查询2025年6月30日贷款余额前10名的客户",
+                    "metric": "贷款余额",
+                    "time_range": "2025-06-30",
+                    "dimensions": ["客户"],
+                    "query_shape": "top_n",
+                    "ranking": {"limit": 10, "sort_by": "贷款余额", "sort_order": "desc"},
+                },
+            },
+        )
+
+        self.assertEqual(result.get("query_context", {}).get("query_shape"), "top_n")
+        self.assertEqual(result.get("query_context", {}).get("ranking", {}).get("limit"), 10)
+        self.assertIn("前10", result.get("query_context", {}).get("original_question", ""))
+        self.assertEqual(result.get("session_frame", {}).get("query_shape"), "top_n")
+
     def test_handoff_query_text_should_override_mixed_user_query_for_new_data_subtask(self):
         """多意图子任务下，handoff.query_text 应覆盖整句复合问题作为 data 分析主输入。"""
         llm_payload = {

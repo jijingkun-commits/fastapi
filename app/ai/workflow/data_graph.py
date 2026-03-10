@@ -43,6 +43,11 @@ from app.ai.workflow.session_intent_kernel import (
     reduce_session_frame,
     advance_clarify_fsm_state,
 )
+from app.ai.workflow.data_query_contract import (
+    build_query_contract,
+    detect_query_shape as _detect_query_shape,
+    extract_top_n as _extract_top_n,
+)
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.protocol import (
     build_streaming_result_payload_from_fields,
@@ -174,33 +179,6 @@ _FALLBACK_RESULT_LOOKUP_ENRICHMENT_RULES: Tuple[ResultLookupEnrichmentRule, ...]
 def _normalize_dimension_name(name: str) -> str:
     """规范化维度名称。"""
     return re.sub(r"\s+", "", str(name or "")).lower()
-
-
-def _extract_top_n(question: str, default_n: int = 10) -> int:
-    """从问题中提取 TopN，未命中时返回默认值。"""
-    normalized = re.sub(r"\s+", "", question or "")
-    m = re.search(r"前(\d+)", normalized)
-    if not m:
-        m = re.search(r"top(\d+)", normalized, re.IGNORECASE)
-    if not m:
-        return default_n
-
-    try:
-        return max(1, min(int(m.group(1)), 100))
-    except Exception:
-        return default_n
-
-
-def _detect_query_shape(question: str, dimensions: Optional[List[str]] = None) -> str:
-    """识别查询形态：total / dimension / top_n。"""
-    if _is_topn_intent(question):
-        return "top_n"
-
-    dims = dimensions if isinstance(dimensions, list) else []
-    if any(str(dim).strip() for dim in dims):
-        return "dimension"
-
-    return "total"
 
 
 def _resolve_dimension_fields(dimensions: Optional[List[str]]) -> List[str]:
@@ -442,9 +420,19 @@ def _build_metric_sql_from_plan(
     plan: MetricTemplatePlan,
     question: str,
     dimensions: Optional[List[str]] = None,
+    query_shape: str = "",
+    ranking: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """根据模板计划和查询语义组装 SQL。"""
-    shape = _detect_query_shape(question, dimensions)
+    query_contract = build_query_contract(
+        question,
+        dimensions=dimensions,
+        metric=plan.measure_alias,
+        query_shape=query_shape,
+        ranking=ranking,
+    )
+    shape = str(query_contract.get("query_shape") or "")
+    ranking_contract = dict(query_contract.get("ranking") or {})
     dimension_candidates = _resolve_dimension_fields(dimensions)
 
     if shape in ("dimension", "top_n") and not dimension_candidates:
@@ -485,8 +473,11 @@ def _build_metric_sql_from_plan(
         sql += f" GROUP BY {', '.join(group_by_fields)}"
 
     if shape == "top_n":
-        top_n = _extract_top_n(question, default_n=10)
-        sql += f" ORDER BY {plan.measure_alias} DESC LIMIT {top_n}"
+        top_n = int(ranking_contract.get("limit") or 10)
+        sort_order = str(ranking_contract.get("sort_order") or "desc").strip().lower() or "desc"
+        if sort_order not in {"asc", "desc"}:
+            sort_order = "desc"
+        sql += f" ORDER BY {plan.measure_alias} {sort_order.upper()} LIMIT {top_n}"
 
     return sql
 
@@ -496,6 +487,8 @@ def _derive_metric_sql(
     time_range: Optional[str],
     question: str,
     dimensions: Optional[List[str]],
+    query_shape: str = "",
+    ranking: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """基于指标模板派生 SQL（总量/维度/TopN）。"""
     sql_template = _replace_data_dt(query_template, time_range)
@@ -503,7 +496,13 @@ def _derive_metric_sql(
     if not plan:
         return sql_template
 
-    derived = _build_metric_sql_from_plan(plan, question, dimensions)
+    derived = _build_metric_sql_from_plan(
+        plan,
+        question,
+        dimensions,
+        query_shape=query_shape,
+        ranking=ranking,
+    )
     if derived:
         return derived
 
@@ -1072,12 +1071,21 @@ def _is_sql_semantically_compatible(
     sql: str,
     question: str,
     dimensions: Optional[List[str]] = None,
+    query_shape: str = "",
+    ranking: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """判断候选 SQL 是否满足当前问题语义。"""
     if not sql:
         return False
 
-    if not _requires_detail_query(question, dimensions):
+    query_contract = build_query_contract(
+        question,
+        dimensions=dimensions,
+        query_shape=query_shape,
+        ranking=ranking,
+    )
+    effective_query_shape = str(query_contract.get("query_shape") or "")
+    if not _requires_detail_query(question, dimensions) and effective_query_shape not in {"dimension", "top_n"}:
         return True
 
     lowered = f" {sql.lower()} "
@@ -1091,7 +1099,7 @@ def _is_sql_semantically_compatible(
         return False
 
     # TopN/排名问题要求具备 ORDER BY + LIMIT
-    if _is_topn_intent(question):
+    if effective_query_shape == "top_n":
         if " order by " not in lowered or " limit " not in lowered:
             return False
 
@@ -1411,13 +1419,6 @@ def build_data_query_handoff_frame(
     frame = dict(base_frame) if isinstance(base_frame, dict) else {}
     parsed = _extract_context_from_text(normalized_query) if normalized_query else {}
 
-    def _positive_int(value: Any) -> int:
-        try:
-            parsed_value = int(value)
-        except (TypeError, ValueError):
-            return 0
-        return parsed_value if parsed_value > 0 else 0
-
     metric = _pick_first_non_empty_str(
         frame.get("metric"),
         frame.get("metric_name"),
@@ -1458,24 +1459,21 @@ def build_data_query_handoff_frame(
     if filters:
         frame["filters"] = filters
 
-    if normalized_query:
-        query_shape = _pick_first_non_empty_str(
-            frame.get("query_shape"),
-            _detect_query_shape(normalized_query, dimensions),
-        )
-        if query_shape:
-            frame["query_shape"] = query_shape
-
-        if query_shape == "top_n":
-            ranking = dict(frame.get("ranking") or {}) if isinstance(frame.get("ranking"), dict) else {}
-            limit = _positive_int(ranking.get("limit")) or _extract_top_n(normalized_query, default_n=10)
-            sort_by = str(ranking.get("sort_by") or metric or "").strip()
-            sort_order = str(ranking.get("sort_order") or "desc").strip().lower() or "desc"
-            frame["ranking"] = {
-                "limit": limit,
-                "sort_by": sort_by,
-                "sort_order": sort_order,
-            }
+    query_contract = build_query_contract(
+        normalized_query,
+        dimensions=dimensions,
+        metric=metric,
+        query_shape=frame.get("query_shape"),
+        ranking=frame.get("ranking"),
+    )
+    if query_contract.get("query_shape"):
+        frame["query_shape"] = query_contract["query_shape"]
+    else:
+        frame.pop("query_shape", None)
+    if query_contract.get("ranking"):
+        frame["ranking"] = query_contract["ranking"]
+    else:
+        frame.pop("ranking", None)
 
     return frame
 
@@ -1774,6 +1772,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     session_filters = _ensure_text_list(session_frame.get("filters"))
     session_chart_type = _pick_first_non_empty_str(session_frame.get("chart_type"))
     session_org_level = _pick_first_non_empty_str(session_frame.get("org_level"))
+    session_query_shape = _pick_first_non_empty_str(session_frame.get("query_shape"))
+    session_ranking = dict(session_frame.get("ranking") or {}) if isinstance(session_frame.get("ranking"), dict) else {}
 
     existing_metric = _pick_first_non_empty_str(state.get("matched_metric"), session_metric)
     existing_time = _pick_first_non_empty_str(state.get("time_range"), session_time)
@@ -1788,6 +1788,12 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     existing_viz_type = _pick_first_non_empty_str(state.get("viz_type"), session_chart_type)
     existing_org_level = _pick_first_non_empty_str(query_context.get("org_level"), session_org_level)
     existing_query_question = str(query_context.get("original_question") or "").strip()
+    existing_query_shape = _pick_first_non_empty_str(query_context.get("query_shape"), session_query_shape)
+    existing_ranking = (
+        dict(query_context.get("ranking") or {})
+        if isinstance(query_context.get("ranking"), dict)
+        else dict(session_ranking)
+    )
 
     handoff_context = _extract_handoff_context(state)
     handoff_query_text = str(handoff_context.get("query_text") or "").strip()
@@ -1953,6 +1959,14 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             current_context.get("chart_type"),
         )
         current_org_level = _pick_first_non_empty_str(current_context.get("org_level"))
+        current_query_contract = build_query_contract(
+            normalized_last_message,
+            dimensions=current_dims,
+            metric=current_metric,
+            fallback_total=False,
+        )
+        current_query_shape = str(current_query_contract.get("query_shape") or "")
+        current_ranking = dict(current_query_contract.get("ranking") or {})
 
         # 会话帧归并：当前轮 > handoff > 历史 state
         current_frame = {
@@ -1962,6 +1976,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             "filters": current_filters,
             "chart_type": current_chart_type,
             "org_level": current_org_level,
+            "query_shape": current_query_shape,
+            "ranking": current_ranking,
         }
         handoff_frame = {
             "metric": handoff_metric,
@@ -1970,6 +1986,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             "filters": handoff_filters,
             "chart_type": handoff_chart_type,
             "org_level": handoff_org_level,
+            "query_shape": handoff_context.get("query_shape"),
+            "ranking": handoff_context.get("ranking"),
         }
         state_frame = {
             "metric": existing_metric,
@@ -1978,6 +1996,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             "filters": existing_filters,
             "chart_type": existing_viz_type,
             "org_level": existing_org_level,
+            "query_shape": existing_query_shape,
+            "ranking": existing_ranking,
         }
 
         merged_frame, frame_source_map = reduce_session_frame(
@@ -1991,6 +2011,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         merged_filters = _ensure_text_list(merged_frame.get("filters"))
         merged_chart_type = str(merged_frame.get("chart_type") or "").strip()
         merged_org_level = str(merged_frame.get("org_level") or "").strip()
+        merged_query_shape = str(merged_frame.get("query_shape") or "").strip().lower()
+        merged_ranking = dict(merged_frame.get("ranking") or {}) if isinstance(merged_frame.get("ranking"), dict) else {}
 
         # 新问题保护：识别到指标切换且非补充模式时，避免继承旧上下文
         baseline_metric_for_switch = _pick_first_non_empty_str(existing_metric, handoff_metric)
@@ -2008,6 +2030,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             merged_filters = current_filters
             merged_chart_type = current_chart_type
             merged_org_level = current_org_level
+            merged_query_shape = current_query_shape
+            merged_ranking = current_ranking
             frame_source_map.update(
                 {
                     "metric": "current",
@@ -2016,6 +2040,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                     "filters": "current",
                     "chart_type": "current",
                     "org_level": "current",
+                    "query_shape": "current",
+                    "ranking": "current",
                 }
             )
             logger.info(
@@ -2105,6 +2131,15 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             parts_desc.append(f"时间范围{merged_time}")
         if merged_dims:
             parts_desc.append(f"按{'、'.join(merged_dims)}聚合")
+        if merged_query_shape == "top_n" and isinstance(merged_ranking, dict):
+            top_n = int(merged_ranking.get("limit") or 0)
+            if top_n > 0:
+                sort_by = str(merged_ranking.get("sort_by") or merged_metric or "指标").strip() or "指标"
+                sort_order = str(merged_ranking.get("sort_order") or "desc").strip().lower() or "desc"
+                if sort_order == "asc":
+                    parts_desc.append(f"按{sort_by}升序前{top_n}条")
+                else:
+                    parts_desc.append(f"按{sort_by}前{top_n}名")
         if merged_org_level and org_dimension_requested and merged_org_level not in merged_dims:
             parts_desc.append(f"机构层级{merged_org_level}")
         if merged_chart_type:
@@ -2137,6 +2172,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             "filters": merged_filters,
             "chart_type": merged_chart_type,
             "org_level": merged_org_level,
+            "query_shape": merged_query_shape,
+            "ranking": merged_ranking,
         }
 
         logger.info(
@@ -2178,6 +2215,8 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "last_user_message": normalized_last_message,
                 "analysis": analysis,
                 "org_level": merged_org_level or None,
+                "query_shape": merged_query_shape or None,
+                "ranking": merged_ranking,
                 "continuation_mode": continuation_mode,
                 "continuation_reason": continuation_reason,
                 "turn_act": turn_act,
@@ -2243,6 +2282,16 @@ def metric_resolve(state: DataAgentState) -> Dict:
     dimensions = state.get("dimensions")
     if not isinstance(dimensions, list):
         dimensions = []
+    session_frame = state.get("session_frame") if isinstance(state.get("session_frame"), dict) else {}
+    query_contract = build_query_contract(
+        question,
+        dimensions=dimensions,
+        metric=str(matched_metric or ""),
+        query_shape=(query_context.get("query_shape") or session_frame.get("query_shape") or ""),
+        ranking=(query_context.get("ranking") if isinstance(query_context.get("ranking"), dict) else session_frame.get("ranking")),
+    )
+    query_shape = str(query_contract.get("query_shape") or "")
+    ranking = dict(query_contract.get("ranking") or {})
     
     if not question and not matched_metric:
         return {"sql_source": "vanna"}
@@ -2261,14 +2310,14 @@ def metric_resolve(state: DataAgentState) -> Dict:
                         )
                         continue
 
-                    sql = _derive_metric_sql(query_template, time_range, question, dimensions)
+                    sql = _derive_metric_sql(query_template, time_range, question, dimensions, query_shape=query_shape, ranking=ranking)
                     if not sql:
                         logger.info(
                             "指标精确模板无法派生当前语义，跳过: %s (%s)",
                             best.get("metric_id"), best.get("metric_name")
                         )
                         continue
-                    if not _is_sql_semantically_compatible(sql, question, dimensions):
+                    if not _is_sql_semantically_compatible(sql, question, dimensions, query_shape=query_shape, ranking=ranking):
                         logger.info(
                             "指标精确模板语义不匹配，跳过: %s (%s)",
                             best.get("metric_id"), best.get("metric_name")
@@ -2312,14 +2361,14 @@ def metric_resolve(state: DataAgentState) -> Dict:
                 )
                 continue
 
-            sql = _derive_metric_sql(query_template, time_range, question, dimensions)
+            sql = _derive_metric_sql(query_template, time_range, question, dimensions, query_shape=query_shape, ranking=ranking)
             if not sql:
                 logger.info(
                     "指标向量模板无法派生当前语义，跳过: %s (%s), 相似度=%.3f",
                     best.get("metric_id"), best.get("metric_name"), similarity
                 )
                 continue
-            if not _is_sql_semantically_compatible(sql, question, dimensions):
+            if not _is_sql_semantically_compatible(sql, question, dimensions, query_shape=query_shape, ranking=ranking):
                 logger.info(
                     "指标向量模板语义不匹配，跳过: %s (%s), 相似度=%.3f",
                     best.get("metric_id"), best.get("metric_name"), similarity
@@ -2549,6 +2598,15 @@ def training_sql_resolve(state: DataAgentState) -> Dict:
     dimensions = state.get("dimensions")
     if not isinstance(dimensions, list):
         dimensions = []
+    session_frame = state.get("session_frame") if isinstance(state.get("session_frame"), dict) else {}
+    query_contract = build_query_contract(
+        question,
+        dimensions=dimensions,
+        query_shape=(query_context.get("query_shape") or session_frame.get("query_shape") or ""),
+        ranking=(query_context.get("ranking") if isinstance(query_context.get("ranking"), dict) else session_frame.get("ranking")),
+    )
+    query_shape = str(query_contract.get("query_shape") or "")
+    ranking = dict(query_contract.get("ranking") or {})
     
     # 清除上一级的降级标志，防止循环
     base_result = {"fallback_target": None}
@@ -2576,7 +2634,7 @@ def training_sql_resolve(state: DataAgentState) -> Dict:
 
             # 替换日期参数
             sql = _replace_data_dt(training_sql, time_range)
-            if not _is_sql_semantically_compatible(sql, question, dimensions):
+            if not _is_sql_semantically_compatible(sql, question, dimensions, query_shape=query_shape, ranking=ranking):
                 logger.info(
                     "训练集 SQL 语义不匹配，跳过: sim=%.3f, 样本问题='%s'",
                     similarity, best.get("question", "")[:50]
