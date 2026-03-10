@@ -373,6 +373,10 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | `_postprocess` | 无 | 仅负责持久化与清理 |
 | `ChatService done` | `done`（仅生命周期） | 严禁携带结构化数据 |
 
+- 2026-03-10 起，Supervisor 与知识库检索这类“预构建 Agent 入口”统一使用 `langchain.agents.create_agent`；不再在生产路径保留 `langgraph.prebuilt.create_react_agent`。
+- 本轮只收口预构建 Agent API，不改 `create_todo_graph` / `create_data_graph` 等 Graph factory 的运行形态，避免把 LangGraph v1 迁移扩散成整图重写。
+- `interrupt / resume / replay` 与 `agent.astream(..., stream_mode=["messages", "values", "custom"])` 相关契约保持不变，迁移层只改 Agent 构建入口，不改运行时状态归属。
+
 #### Supervisor 上下文预算治理（2026-02）
 
 - `streaming_wrapper` 在进入 `trim_messages` 前，先对超长 `ToolMessage` 做推理态压缩（仅压缩送模内容，原始消息仍保留在 checkpoint / 对话表）。

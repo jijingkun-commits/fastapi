@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command, Send, interrupt
 from langgraph.errors import GraphInterrupt
@@ -5962,11 +5962,11 @@ async def create_multi_agent_graph(
     decompose_goals_tool = _create_decompose_goals_tool(llm)
     
     # 3. 创建 Supervisor Agent（handoff 工具 + 简单工具）
-    # 使用 create_react_agent，支持工具返回 Command 对象
-    supervisor_agent = create_react_agent(
-        llm,
-        handoff_tools + [decompose_goals_tool] + supervisor_simple_tools,
-        prompt=SUPERVISOR_PROMPT,
+    # 使用 LangChain 官方 create_agent，继续支持工具返回 Command 对象
+    supervisor_agent = create_agent(
+        model=llm,
+        tools=handoff_tools + [decompose_goals_tool] + supervisor_simple_tools,
+        system_prompt=SUPERVISOR_PROMPT,
         name="supervisor",
     )
     

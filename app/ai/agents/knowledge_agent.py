@@ -4,7 +4,7 @@
 """
 import logging
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 
 from app.ai.llm_util import get_scene_llm
@@ -23,7 +23,7 @@ def create_knowledge_agent(
 ) -> CompiledStateGraph:
     """创建知识库 Agent 实例。
     
-    使用 LangGraph 预构建的 create_react_agent 创建知识库检索 Agent。
+    使用 LangChain 官方 create_agent 创建知识库检索 Agent。
     
     Args:
         model: 可选，指定 LLM 实例。如果为 None，则自动创建
@@ -52,11 +52,11 @@ def create_knowledge_agent(
     except ImportError as e:
         logger.error("RAGFlow 工具导入失败: %s", e)
     
-    # 使用 LangGraph 预构建的 create_react_agent
-    agent = create_react_agent(
+    # 使用 LangChain 官方 create_agent
+    agent = create_agent(
         model=model,
         tools=tools,
-        prompt=KNOWLEDGE_AGENT_SYSTEM_PROMPT,
+        system_prompt=KNOWLEDGE_AGENT_SYSTEM_PROMPT,
         name="knowledge_agent",
     )
     
