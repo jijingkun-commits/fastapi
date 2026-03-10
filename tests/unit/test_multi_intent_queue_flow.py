@@ -6,7 +6,6 @@ from app.ai.contracts.delivery_contract_validators import validate_coverage_repo
 from app.ai.state import AgentType
 from app.ai.workflow.multi_agent_graph import (
     _build_delivery_artifacts,
-    _build_coverage_clarification_questions,
     _build_multi_intent_summary_content,
     _compute_coverage_report,
     _evaluate_handoff_progress,
@@ -601,8 +600,8 @@ def test_build_multi_intent_summary_content_should_avoid_external_label_chain_an
     assert "Mostly dry" in summary
 
 
-def test_render_coverage_blocked_message_should_use_single_question_style() -> None:
-    """coverage 门禁阻断文案应输出明确补齐目标与确认提问。"""
+def test_render_coverage_blocked_message_should_not_prompt_user_to_continue() -> None:
+    """coverage 缺口属于内部补齐失败，不应再要求用户回复“继续”。"""
     active_goals = [
         {"goal_id": "GOAL-01", "order": 1, "kind": "todo.query", "title": "待办事项", "must_answer": True},
         {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
@@ -615,12 +614,31 @@ def test_render_coverage_blocked_message_should_use_single_question_style() -> N
     }
 
     message = _render_coverage_blocked_message(active_goals, coverage_report)
-    questions = _build_coverage_clarification_questions(coverage_report)
 
-    assert "为了保证回答完整" in message
     assert "- 外部信息" in message
-    assert "请确认是否继续补齐" in message
-    assert questions == ["是否继续补齐：外部信息？"]
+    assert "继续补齐" not in message
+    assert "你回复“继续”即可" not in message
+    assert "请稍后重试" in message
+
+
+def test_render_final_answer_should_not_invite_user_to_continue_when_missing_goals() -> None:
+    """partial gap 收口时可以提示重试，但不应邀请用户继续内部补齐。"""
+    active_goals = [
+        {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True},
+    ]
+    coverage_report = {
+        "pass": False,
+        "missing_goals": [
+            {"goal_id": "GOAL-01", "title": "数据查询", "reason": "missing_deliverable"},
+        ],
+        "goal_results": {},
+    }
+
+    answer = _render_final_answer(active_goals, coverage_report)
+
+    assert "数据查询：暂未完成，缺少可用结果。" in answer
+    assert "如果你愿意，我可以继续补齐" not in answer
+    assert "请稍后重试" in answer
 
 
 def test_build_delivery_artifacts_should_prefer_direct_answer_markdown_over_tool_fallback() -> None:

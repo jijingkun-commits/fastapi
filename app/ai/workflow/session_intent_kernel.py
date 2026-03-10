@@ -127,6 +127,126 @@ def _match_policy_pattern(compact_text: str, patterns: list[str]) -> Optional[st
     return None
 
 
+def _compact_text(text: Any) -> str:
+    return re.sub(r"\s+", "", _normalize_text(text))
+
+
+def _extract_chart_type_hint(text: str) -> str:
+    compact = _compact_text(text)
+    if not compact:
+        return ""
+
+    chart_type_match = re.search(r"(柱状图|柱形图|条形图|饼图|折线图)", compact)
+    if chart_type_match:
+        detected = chart_type_match.group(1)
+        if detected in {"柱形图", "条形图"}:
+            return "柱状图"
+        return detected
+
+    if re.search(r"(图|可视化|画图|出图)", compact) and len(compact) <= 12:
+        return "图表"
+
+    return ""
+
+
+def _extract_time_range_hint(text: str) -> str:
+    compact = _compact_text(text)
+    if not compact:
+        return ""
+
+    absolute_match = re.search(
+        r"((?:19|20)\d{2}(?:[-/.年]\d{1,2}){1,2}(?:日)?)",
+        compact,
+    )
+    if absolute_match:
+        return absolute_match.group(1)
+
+    relative_match = re.search(
+        r"(今(?:天|日)|昨天|昨日|本周|上周|本月|上月|本季度|上季度|今年|去年|(?:近|最近|过去)\d+(?:天|周|月|季度|年))",
+        compact,
+    )
+    if relative_match:
+        return relative_match.group(1)
+
+    return ""
+
+
+def _extract_dimension_hints(text: str) -> list[str]:
+    compact = _compact_text(text)
+    if not compact or "总体" in compact or "汇总" in compact:
+        return []
+
+    dimensions: list[str] = []
+    if "机构" in compact:
+        dimensions.append("机构")
+    if "客户" in compact:
+        dimensions.append("客户")
+    if any(token in compact for token in ("日期", "按天", "按月", "趋势")):
+        dimensions.append("日期")
+    if "分行" in compact:
+        dimensions.append("分行")
+    if "支行" in compact:
+        dimensions.append("支行")
+    return _normalize_text_list(dimensions)
+
+
+def _extract_org_level_hint(text: str) -> str:
+    compact = _compact_text(text)
+    if "支行" in compact:
+        return "支行"
+    if "分行" in compact:
+        return "分行"
+    if "总行" in compact:
+        return "总行"
+    return ""
+
+
+def _extract_filter_hints(text: str) -> list[str]:
+    compact = _compact_text(text)
+    if not compact:
+        return []
+
+    if any(token in compact for token in ("仅看", "只看", "筛选", "过滤", "排除", "限定")):
+        return [compact]
+    return []
+
+
+def infer_session_frame_from_text(text: str) -> Dict[str, Any]:
+    """从短文本中提取补充回合判定所需的轻量结构化 frame。"""
+    compact = _compact_text(text)
+    if not compact:
+        return normalize_session_frame(None)
+
+    return normalize_session_frame(
+        {
+            "time_range": _extract_time_range_hint(compact),
+            "dimensions": _extract_dimension_hints(compact),
+            "org_level": _extract_org_level_hint(compact),
+            "chart_type": _extract_chart_type_hint(compact),
+            "filters": _extract_filter_hints(compact),
+        }
+    )
+
+
+def classify_turn_act_from_text(
+    text: str,
+    *,
+    has_prior_context: bool,
+    baseline_frame: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """基于轻量文本解析结果判定回合行为，并返回当前 frame。"""
+    current_frame = infer_session_frame_from_text(text)
+    turn_act, reason = classify_turn_act(
+        text,
+        has_prior_context=has_prior_context,
+        baseline_frame=baseline_frame,
+        current_frame=current_frame,
+        policy=policy,
+    )
+    return turn_act, reason, current_frame
+
+
 def classify_turn_act(
     text: str,
     *,
@@ -139,7 +259,7 @@ def classify_turn_act(
 
     返回：(turn_act, reason)
     """
-    compact = re.sub(r"\s+", "", _normalize_text(text))
+    compact = _compact_text(text)
     if not compact:
         return TURN_ACT_UNKNOWN, "empty_input"
 

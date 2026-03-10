@@ -16,7 +16,7 @@ import { getContentString, replaceImagePlaceholders } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { cn } from "@/lib/utils";
-import { ToolCalls, ToolResult } from "./tool-calls";
+import { ToolCalls, ToolResult, isUserVisibleToolName } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import TodoListCard from "@/components/todo/TodoListCard";
@@ -357,7 +357,7 @@ export function AssistantMessage({
 
   // 如果是工具结果消息，渲染 ToolResult 组件
   if (isToolResult) {
-    if (hideToolCalls) {
+    if (hideToolCalls || !isUserVisibleToolName((message as ToolMessage)?.name)) {
       return null;
     }
     return (

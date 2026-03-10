@@ -50,7 +50,6 @@ from app.ai.events import (
     emit_task_finished,
     emit_coverage_check,
     emit_final_answer,
-    emit_clarification,
 )
 from app.ai.protocol import (
     AgentOutputParser,
@@ -76,6 +75,7 @@ from app.ai.runtime.recovery_policy import (
 )
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 from app.services import response_policy_service
+from app.ai.workflow.session_intent_kernel import TURN_ACT_SUPPLEMENT, classify_turn_act_from_text
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
     validate_active_goals_contract,
@@ -763,6 +763,32 @@ def _resolve_active_goals(
         return _normalize_active_goals([goal for goal in decomposed if isinstance(goal, dict)])
 
     return []
+
+
+def _should_backfill_runtime_goals_for_handoff(
+    active_goals: Sequence[Dict[str, Any]],
+    handoffs: Sequence[Dict[str, Any]],
+) -> bool:
+    """单目标直派场景下，判定是否需要先回填 runtime goals。"""
+    normalized_handoffs = [dict(item) for item in handoffs if isinstance(item, dict)]
+    if len(normalized_handoffs) != 1:
+        return False
+
+    target_agent = str(normalized_handoffs[0].get("target_agent") or "").strip()
+    if target_agent not in {AgentType.DATA, AgentType.TODO}:
+        return False
+
+    normalized_goals = _normalize_active_goals(active_goals)
+    if not normalized_goals:
+        return True
+    if _count_must_answer_goals(normalized_goals) != 1:
+        return False
+
+    current_goal = normalized_goals[0]
+    goal_kind = str(current_goal.get("kind") or "general.reply")
+    goal_bucket = _goal_kind_bucket(goal_kind)
+    allowed_agents = _normalize_goal_allowed_agents(current_goal.get("allowed_agents"), goal_kind)
+    return goal_bucket == "general" and target_agent not in allowed_agents
 
 
 def _build_active_goal_plan(
@@ -2236,6 +2262,33 @@ def _render_goal_answer(goal: Dict[str, Any], deliverable: Optional[Dict[str, An
     return f"{title}：{summary}"
 
 
+def _collect_missing_goal_titles(
+    active_goals: Sequence[Dict[str, Any]],
+    coverage_report: Dict[str, Any],
+) -> list[str]:
+    """收集 coverage 缺口对应的用户可见目标标题。"""
+    goals = sorted(
+        _coerce_active_goals_input(active_goals),
+        key=lambda item: int(item.get("order") or 0),
+    )
+    missing_goals = list(coverage_report.get("missing_goals") or [])
+    missing_ids = {str(item.get("goal_id") or "") for item in missing_goals}
+
+    pending_titles: list[str] = []
+    for goal in goals:
+        goal_id = str(goal.get("goal_id") or "")
+        if goal_id in missing_ids:
+            pending_titles.append(str(goal.get("title") or goal.get("kind") or "未命名目标"))
+
+    if pending_titles:
+        return pending_titles
+
+    return [
+        str(item.get("title") or item.get("goal_id") or "未命名目标")
+        for item in missing_goals
+    ]
+
+
 def _render_final_answer(
     active_goals: Sequence[Dict[str, Any]],
     coverage_report: Dict[str, Any],
@@ -2258,10 +2311,11 @@ def _render_final_answer(
         for extra_line in answer_lines[1:]:
             lines.append(f"    {extra_line}" if extra_line else "")
 
-    missing_goals = list(coverage_report.get("missing_goals") or [])
-    if missing_goals:
-        missing_titles = "、".join(str(item.get("title") or item.get("goal_id") or "未命名目标") for item in missing_goals)
-        lines.append(f"当前仍缺少：{missing_titles}。如果你愿意，我可以继续补齐。")
+    missing_titles = _collect_missing_goal_titles(goals, coverage_report)
+    if missing_titles:
+        lines.append(
+            f"未完成部分：{'、'.join(missing_titles)}。本轮先返回已确认结果，剩余部分请稍后重试。"
+        )
     else:
         lines.append("以上问题已全部覆盖。")
 
@@ -2273,45 +2327,15 @@ def _render_coverage_blocked_message(
     coverage_report: Dict[str, Any],
 ) -> str:
     """渲染 coverage 未通过时的用户可见阻塞说明。"""
-    goals = sorted(
-        _coerce_active_goals_input(active_goals),
-        key=lambda item: int(item.get("order") or 0),
-    )
-    missing_goals = list(coverage_report.get("missing_goals") or [])
-    missing_ids = {str(item.get("goal_id") or "") for item in missing_goals}
-
-    pending_titles: list[str] = []
-    for goal in goals:
-        goal_id = str(goal.get("goal_id") or "")
-        if goal_id in missing_ids:
-            pending_titles.append(str(goal.get("title") or goal.get("kind") or "未命名目标"))
-
-    if not pending_titles:
-        pending_titles = [
-            str(item.get("title") or item.get("goal_id") or "未命名目标")
-            for item in missing_goals
-        ]
-
+    pending_titles = _collect_missing_goal_titles(active_goals, coverage_report)
     if pending_titles:
-        lines = ["为了保证回答完整，我还需要补齐以下目标："]
+        lines = ["本轮还有以下部分暂未取得可用结果："]
         lines.extend([f"- {title}" for title in pending_titles])
         lines.append("")
-        lines.append("请确认是否继续补齐？你回复“继续”即可。")
+        lines.append("这属于系统内部补齐未完成，不需要你额外回复。请稍后重试。")
         return "\n".join(lines)
 
-    return "当前答复仍不完整。请确认是否继续补齐？你回复“继续”即可。"
-
-
-def _build_coverage_clarification_questions(coverage_report: Dict[str, Any]) -> list[str]:
-    """根据 coverage 缺口构造澄清问题列表。"""
-    missing_goals = list(coverage_report.get("missing_goals") or [])
-    missing_titles = [
-        str(item.get("title") or item.get("goal_id") or "未命名目标")
-        for item in missing_goals
-    ]
-    if missing_titles:
-        return [f"是否继续补齐：{'、'.join(missing_titles)}？"]
-    return ["是否继续补齐当前未完成目标？"]
+    return "本轮仍有内容暂未完成，不需要你额外回复。请稍后重试。"
 
 
 def _resolve_handoff_display_text(handoff: Dict[str, Any], *, limit: int = 240) -> str:
@@ -4648,6 +4672,8 @@ def _dispatch_values_mode_chunk(
             )
             final_state["decomposed_goals"] = list(decompose_plan.get("goals") or [])
 
+        handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
+
         runtime_goals = final_state.get("decomposed_goals")
         if not isinstance(runtime_goals, list):
             runtime_goals = ctx.state.get("decomposed_goals")
@@ -4657,13 +4683,21 @@ def _dispatch_values_mode_chunk(
             runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
         )
 
+        if handoff_batch and _should_backfill_runtime_goals_for_handoff(active_goals, handoff_batch):
+            backfilled_goals, _source = _resolve_decomposed_goals_for_query(
+                _resolve_semantic_user_query(ctx.state),
+                runtime_state=ctx.state,
+            )
+            if backfilled_goals:
+                active_goals = _normalize_active_goals(backfilled_goals)
+                final_state["decomposed_goals"] = list(active_goals)
+
         guard_state = dict(ctx.state)
         guard_state.update({k: v for k, v in final_state.items() if k != "messages"})
         guard_state["messages"] = list(final_state.get("messages") or ctx.state.get("messages") or [])
         final_state["decomposed_goals"] = list(active_goals)
         guard_state["decomposed_goals"] = list(active_goals)
 
-        handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
         if handoff_batch:
             normalized_batch = _normalize_handoff_batch_for_supervisor(
                 handoff_batch,
@@ -6010,6 +6044,96 @@ def _build_decompose_goals_state_seed(
     }
 
 
+def _should_reconcile_single_goal(
+    primary_goals: Sequence[Dict[str, Any]],
+    fallback_goals: Sequence[Dict[str, Any]],
+) -> bool:
+    """单目标场景下，若模型给出 general 而规则兜底更具体，则执行纠偏。"""
+    normalized_primary = _normalize_active_goals(primary_goals)
+    normalized_fallback = _normalize_active_goals(fallback_goals)
+    if _count_must_answer_goals(normalized_primary) != 1:
+        return False
+    if _count_must_answer_goals(normalized_fallback) != 1:
+        return False
+
+    primary_bucket = _goal_kind_bucket(str(normalized_primary[0].get("kind") or "general.reply"))
+    fallback_bucket = _goal_kind_bucket(str(normalized_fallback[0].get("kind") or "general.reply"))
+    return primary_bucket == "general" and fallback_bucket != "general"
+
+
+def _history_has_recent_data_query_context(messages: Sequence[BaseMessage]) -> bool:
+    """判断最近用户可见历史是否已形成 data.query 上下文。"""
+    latest_user_query = _extract_latest_human_content(messages)
+    if not latest_user_query:
+        return False
+
+    prior_goals = _normalize_active_goals(_build_decomposed_goals_for_query(latest_user_query))
+    return any(
+        bool(goal.get("must_answer", True)) and _goal_kind_bucket(str(goal.get("kind") or "general.reply")) == "data"
+        for goal in prior_goals
+    )
+
+
+def _has_structured_data_supplement_signal(frame: Optional[Dict[str, Any]]) -> bool:
+    """补充回合需带有结构化图表/维度/时间/筛选信号，避免确认短句误扩。"""
+    if not isinstance(frame, dict):
+        return False
+    return any(
+        [
+            str(frame.get("chart_type") or "").strip(),
+            str(frame.get("org_level") or "").strip(),
+            str(frame.get("time_range") or "").strip(),
+            bool(frame.get("dimensions")),
+            bool(frame.get("filters")),
+        ]
+    )
+
+
+def _build_single_data_query_goal() -> list[Dict[str, Any]]:
+    """构造单一 data.query 纠偏目标。"""
+    return _normalize_active_goals(
+        [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "data.query",
+                "title": "数据查询",
+                "must_answer": True,
+            }
+        ]
+    )
+
+
+def _should_reconcile_data_supplement_goal(
+    user_query: str,
+    *,
+    primary_goals: Sequence[Dict[str, Any]],
+    fallback_goals: Sequence[Dict[str, Any]],
+    history_messages: Sequence[BaseMessage],
+) -> bool:
+    """补图/补维度/补时间等短回合若承接上一轮问数，应纠偏回 data.query。"""
+    normalized_primary = _normalize_active_goals(primary_goals)
+    normalized_fallback = _normalize_active_goals(fallback_goals)
+    if _count_must_answer_goals(normalized_primary) != 1:
+        return False
+    if _count_must_answer_goals(normalized_fallback) != 1:
+        return False
+
+    primary_bucket = _goal_kind_bucket(str(normalized_primary[0].get("kind") or "general.reply"))
+    fallback_bucket = _goal_kind_bucket(str(normalized_fallback[0].get("kind") or "general.reply"))
+    if primary_bucket != "general" or fallback_bucket != "general":
+        return False
+
+    if not _history_has_recent_data_query_context(history_messages):
+        return False
+
+    turn_act, _reason, current_frame = classify_turn_act_from_text(
+        user_query,
+        has_prior_context=True,
+    )
+    return turn_act == TURN_ACT_SUPPLEMENT and _has_structured_data_supplement_signal(current_frame)
+
+
 def _resolve_decomposed_goals_for_query(
     user_query: str,
     *,
@@ -6019,14 +6143,22 @@ def _resolve_decomposed_goals_for_query(
     """生成 decompose_goals 产物：优先模型规划，失败时回退规则拆解。"""
     normalized_query = str(user_query or "").strip()
     fallback_goals = _build_decomposed_goals_for_query(normalized_query)
-
-    if llm is None:
-        return fallback_goals, "supervisor_rule_based"
-
     state_seed = _build_decompose_goals_state_seed(
         user_query=normalized_query,
         runtime_state=runtime_state,
     )
+    history_messages = [message for message in list(state_seed.get("messages") or []) if isinstance(message, BaseMessage)]
+
+    if llm is None:
+        if _should_reconcile_data_supplement_goal(
+            normalized_query,
+            primary_goals=fallback_goals,
+            fallback_goals=fallback_goals,
+            history_messages=history_messages,
+        ):
+            return _build_single_data_query_goal(), "supervisor_rule_based+supplement_data_reconcile"
+        return fallback_goals, "supervisor_rule_based"
+
     planner_settings = _resolve_intent_planner_settings(state_seed)
     planner_mode = _normalize_intent_mode(planner_settings.get("intent_mode"), default="model_primary")
 
@@ -6038,6 +6170,13 @@ def _resolve_decomposed_goals_for_query(
         )
     except Exception as exc:
         logger.warning("decompose_goals_model_failed_fallback_to_rule: %s", exc)
+        if _should_reconcile_data_supplement_goal(
+            normalized_query,
+            primary_goals=fallback_goals,
+            fallback_goals=fallback_goals,
+            history_messages=history_messages,
+        ):
+            return _build_single_data_query_goal(), "supervisor_rule_based+supplement_data_reconcile"
         return fallback_goals, "supervisor_rule_based"
 
     plan_goals = [
@@ -6051,6 +6190,17 @@ def _resolve_decomposed_goals_for_query(
     if _has_explicit_multi_goal_markers(normalized_query) and _count_must_answer_goals(normalized_plan_goals) < 2:
         reconciled_goals = _merge_goal_candidates(normalized_plan_goals, fallback_goals)
         return reconciled_goals, f"{source}+rule_reconcile"
+
+    if _should_reconcile_single_goal(normalized_plan_goals, fallback_goals):
+        return _normalize_active_goals(fallback_goals), f"{source}+single_goal_reconcile"
+
+    if _should_reconcile_data_supplement_goal(
+        normalized_query,
+        primary_goals=normalized_plan_goals,
+        fallback_goals=fallback_goals,
+        history_messages=history_messages,
+    ):
+        return _build_single_data_query_goal(), f"{source}+supplement_data_reconcile"
 
     return normalized_plan_goals, source
 
@@ -6768,12 +6918,6 @@ async def create_multi_agent_graph(
 
         if route == "postprocess":
             blocked_answer = _render_coverage_blocked_message(active_goals, coverage_report)
-            emit_clarification(
-                writer,
-                questions=_build_coverage_clarification_questions(coverage_report),
-                message=blocked_answer,
-                node="coverage_gate",
-            )
             return {
                 "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
                 "decomposed_goals": list(active_goals),
@@ -6815,12 +6959,6 @@ async def create_multi_agent_graph(
             blocked_answer = _render_coverage_blocked_message(active_goals, coverage_report)
             writer = get_stream_writer()
             emit_status(writer, message="覆盖门禁未通过，已阻止最终结论输出。", node="final_composer")
-            emit_clarification(
-                writer,
-                questions=_build_coverage_clarification_questions(coverage_report),
-                message=blocked_answer,
-                node="final_composer",
-            )
             return {
                 "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
                 "decomposed_goals": list(active_goals),

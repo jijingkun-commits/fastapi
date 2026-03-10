@@ -425,60 +425,6 @@ def test_dispatch_messages_mode_chunk_emits_token_and_thinking() -> None:
     assert thinking_events == [("这是思考", "supervisor")]
 
 
-def test_dispatch_custom_clarification_should_prevent_values_duplicate_replay() -> None:
-    """custom clarification 已透传时，values 模式不应再次补发同一文本。"""
-    custom_events = []
-    token_events = []
-    collected_content: list[str] = []
-    ctx = _make_ctx(
-        writer=custom_events.append,
-        node_name="todo_expert",
-        state={"messages": [HumanMessage(content="继续")], "thread_id": "thread-1"},
-        collected_content=collected_content,
-    )
-
-    _dispatch_custom_mode_chunk(
-        {
-            "type": "clarification",
-            "data": {
-                "questions": ["请补充时间"],
-                "message": "请补充时间",
-            },
-            "node": "clarify_node",
-        },
-        ctx,
-    )
-
-    final_state = {
-        "messages": [AIMessage(content="请补充时间", id="clarify-ai-1")],
-        "thread_id": "thread-1",
-    }
-
-    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser,          patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
-        mock_parser.should_filter_content.return_value = False
-        mock_parser.parse_kb_images.return_value = {}
-        mock_parser.extract_all_handoffs_from_messages.return_value = []
-
-        updated_count, handoff_return = _dispatch_values_mode_chunk(
-            final_state=final_state,
-            initial_input_count=0,
-            input_message_count=0,
-            ctx=ctx,
-        )
-
-    assert handoff_return is None
-    assert updated_count == 1
-    assert custom_events == [
-        {
-            "type": "clarification",
-            "data": {"questions": ["请补充时间"], "message": "请补充时间"},
-            "node": "clarify_node",
-        }
-    ]
-    assert collected_content == ["请补充时间"]
-    assert token_events == []
-
-
 def test_dispatch_values_mode_chunk_emits_values_text_message() -> None:
     """values dispatcher 应处理新增 AI 消息并补发文本。"""
     emitted_ids: set[str] = set()
@@ -596,80 +542,10 @@ def test_dispatch_values_mode_chunk_emits_kb_images_from_tool_delta() -> None:
     assert kb_image_events == [({"img-1": "https://example.com/kb.png"}, "todo_expert")]
 
 
-def test_compile_data_goal_query_text_should_strip_external_clause_from_composite_query() -> None:
-    """goal title 泛化时，应从复合问题中提取 data 子任务文本。"""
-    query_text = _compile_data_goal_query_text(
-        user_query="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气",
-        goal={"kind": "data.query", "title": "数据查询"},
-    )
-
-    assert "贷款余额前10名" in query_text
-    assert "嘉兴天气" not in query_text
-
-
-
-def test_compile_supervisor_data_handoff_after_stream_should_preserve_direct_lookup_window() -> None:
-    """compiler 应在 supervisor 流结束后接管，避免打断同轮直接工具调用。"""
-    ctx = _make_ctx(
-        node_name="supervisor",
-        state={
-            "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气")],
-            "thread_id": "thread-1",
-            "decomposed_goals": [
-                {
-                    "goal_id": "GOAL-01",
-                    "order": 1,
-                    "kind": "data.query",
-                    "title": "数据查询",
-                    "must_answer": True,
-                    "allowed_agents": ["data_expert"],
-                },
-                {
-                    "goal_id": "GOAL-02",
-                    "order": 2,
-                    "kind": "external.lookup",
-                    "title": "外部信息",
-                    "must_answer": True,
-                    "allowed_agents": [],
-                },
-            ],
-        },
-    )
-
-    final_state = {
-        "messages": [
-            ToolMessage(
-                content='{"results":[{"title":"嘉兴市天气预报_天气查询- 墨迹天气","content":"嘉兴市， 浙江省， 中国 今天 多云 多云 7° / 10° 北风 3级"}]}',
-                tool_call_id="tc-weather",
-                name="tavily_search",
-            ),
-            AIMessage(content="嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"),
-        ],
-        "thread_id": "thread-1",
-    }
-
-    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
-        mock_parser.extract_all_handoffs_from_messages.return_value = []
-        mock_parser.should_filter_content.return_value = False
-
-        handoff_return = _maybe_compile_supervisor_data_handoff_after_stream(
-            final_state,
-            initial_input_count=0,
-            ctx=ctx,
-        )
-
-    assert handoff_return is not None
-    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
-    assert handoff_return["pending_handoff"]["frame"]["query_text"].startswith("查询2025年6月30日贷款余额前10名的客户")
-    assert "嘉兴天气" not in handoff_return["pending_handoff"]["frame"]["query_text"]
-    assert handoff_return["pending_handoff"]["route_decision"]["dispatch_reason"] == "compiled_data_goal_frame"
-    assert handoff_return["pending_handoff"]["direct_answer_markdown"] == "嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"
-    assert handoff_return["multi_intent_mode"] is True
-
-
 def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> None:
     """supervisor values 模式应保留 handoff 顺序并构造队列。"""
     ctx = _make_ctx(
+        writer=lambda _event: None,
         node_name="supervisor",
         state={
             "messages": [HumanMessage(content="复合任务")],
@@ -705,6 +581,7 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
             {
                 "action": "handoff",
                 "target_agent": "data_expert",
+                "task_description": "查询网银功能",
                 "frame": {"query_text": "查询网银功能"},
             },
             {
@@ -727,6 +604,7 @@ def test_dispatch_values_mode_chunk_builds_handoff_queue_for_multi_intent() -> N
     assert handoff_return is not None
     assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
     assert handoff_return["handoff_queue"][0]["target_agent"] == "todo_expert"
+    assert handoff_return["handoff_queue"][0]["goal_id"] == "GOAL-02"
     assert handoff_return["multi_intent_mode"] is True
 
 
@@ -818,6 +696,66 @@ def test_dispatch_values_mode_chunk_filters_disallowed_handoff_by_contract() -> 
     assert handoff_return["router_result_v2"]["route_decisions"][0]["target_agent"] == "todo_expert"
 
 
+def test_dispatch_values_mode_chunk_reconciles_runtime_goals_for_single_data_handoff(monkeypatch) -> None:
+    """单目标直派 data_expert 时，dispatcher 应先冻结 data.query goals，再进入 router guard。"""
+    ctx = _make_ctx(
+        writer=lambda _event: None,
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="查询2025年6月30日各机构的贷款余额分布")],
+            "thread_id": "thread-1",
+        },
+    )
+
+    final_state = {
+        "messages": [ToolMessage(content="handoff-json", tool_call_id="tc-1", name="assign_to_data_expert")],
+        "thread_id": "thread-1",
+    }
+
+    monkeypatch.setattr(
+        "app.ai.workflow.multi_agent_graph._resolve_decomposed_goals_for_query",
+        lambda user_query, **_kwargs: (
+            [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                }
+            ],
+            "model_primary+single_goal_reconcile",
+        ),
+    )
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "data_expert",
+                "task_description": "查询贷款余额分布",
+                "frame": {"query_text": "查询贷款余额分布"},
+            }
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["pending_handoff"]["goal_id"] == "GOAL-01"
+    assert final_state["decomposed_goals"][0]["kind"] == "data.query"
+    assert final_state["decomposed_goals"][0]["allowed_agents"] == ["data_expert"]
+
+
 def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> None:
     """当 handoff 全部被门禁拦截时，应保留补齐上下文并等待下一轮重试。"""
     ctx = _make_ctx(
@@ -874,6 +812,7 @@ def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> N
 def test_dispatch_values_mode_chunk_marks_multi_intent_for_direct_lookup_plus_single_handoff() -> None:
     """supervisor 仅 1 个 handoff + 直连检索结果时也应进入 multi_intent_mode。"""
     ctx = _make_ctx(
+        writer=lambda _event: None,
         node_name="supervisor",
         state={
             "messages": [HumanMessage(content="查待办并看天气")],
@@ -944,27 +883,6 @@ def test_build_direct_lookup_findings_ignores_tavily_error_output() -> None:
     assert findings == []
 
 
-def test_build_direct_lookup_findings_sanitizes_tavily_raw_markup_noise() -> None:
-    """Tavily 原始文本含网页噪声时，不应直接透传 HTML/站点碎片。"""
-    messages = [
-        ToolMessage(
-            content='嘉兴天气: " alt="" style="height:0.4rem;line-height:0.4rem;"> # 嘉兴天气 精细化预报 7天天气预报 2.3mm 3.3m/s 17:00 10.1℃；【嘉兴天气预报】 嘉兴天气预报7天_全国天气网: # 全国天气网 首页 国内天气 空气质量',
-            tool_call_id="tc-raw",
-            name="tavily_search",
-        )
-    ]
-
-    findings = _build_direct_lookup_findings(messages)
-
-    assert findings
-    summary = findings[0]["summary"]
-    assert "alt=" not in summary
-    assert "style=" not in summary
-    assert "#" not in summary
-    assert "首页" not in summary
-    assert "嘉兴天气" in summary
-
-
 def test_extract_supervisor_tool_observations_ignores_tavily_error_output() -> None:
     """handoff frame 不应携带 Tavily 错误文本。"""
     messages = [
@@ -984,6 +902,7 @@ def test_extract_supervisor_tool_observations_ignores_tavily_error_output() -> N
 def test_dispatch_values_mode_chunk_uses_decomposed_goals_to_enable_multi_intent_mode() -> None:
     """当 decomposed_goals 含多个必答目标时，单 handoff 也应进入 multi_intent_mode。"""
     ctx = _make_ctx(
+        writer=lambda _event: None,
         node_name="supervisor",
         state={
             "messages": [HumanMessage(content="先查待办，再看天气")],
@@ -1120,17 +1039,19 @@ async def test_run_streaming_dispatch_loop_filters_invalid_custom_chunks() -> No
         )
 
     assert handoff_return is None
-    assert final_state["messages"] == []
-    assert final_state["decomposed_goals"] == [
-        {
-            "goal_id": "GOAL-01",
-            "order": 1,
-            "kind": "general.reply",
-            "title": "问题回复",
-            "must_answer": True,
-            "allowed_agents": [],
-        }
-    ]
+    assert final_state == {
+        "messages": [],
+        "decomposed_goals": [
+            {
+                "goal_id": "GOAL-01",
+                "order": 1,
+                "kind": "general.reply",
+                "title": "问题回复",
+                "must_answer": True,
+                "allowed_agents": [],
+            }
+        ],
+    }
     assert custom_events == [{"type": "status", "data": {"stage": "ok"}, "node": "supervisor"}]
 
 
@@ -1374,6 +1295,151 @@ def test_config_resolver_tool_policy_layers_merge_global_and_agent(monkeypatch) 
         "meta": {"source": "global", "priority": 2, "agent": "supervisor"},
     }
     assert layers["agent_policy_key"] == TOOL_POLICY_CONTRACT.agent_policy_key("supervisor")
+
+
+def test_dispatch_custom_clarification_should_prevent_values_duplicate_replay() -> None:
+    """custom clarification 已透传时，values 模式不应再次补发同一文本。"""
+    custom_events = []
+    token_events = []
+    collected_content: list[str] = []
+    ctx = _make_ctx(
+        writer=custom_events.append,
+        node_name="todo_expert",
+        state={"messages": [HumanMessage(content="继续")], "thread_id": "thread-1"},
+        collected_content=collected_content,
+    )
+
+    _dispatch_custom_mode_chunk(
+        {
+            "type": "clarification",
+            "data": {
+                "questions": ["请补充时间"],
+                "message": "请补充时间",
+            },
+            "node": "clarify_node",
+        },
+        ctx,
+    )
+
+    final_state = {
+        "messages": [AIMessage(content="请补充时间", id="clarify-ai-1")],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser,          patch("app.ai.workflow.multi_agent_graph.emit_token", side_effect=lambda _w, content, node: token_events.append((content, node))):
+        mock_parser.should_filter_content.return_value = False
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert handoff_return is None
+    assert updated_count == 1
+    assert custom_events == [
+        {
+            "type": "clarification",
+            "data": {"questions": ["请补充时间"], "message": "请补充时间"},
+            "node": "clarify_node",
+        }
+    ]
+    assert collected_content == ["请补充时间"]
+    assert token_events == []
+
+
+def test_compile_data_goal_query_text_should_strip_external_clause_from_composite_query() -> None:
+    """goal title 泛化时，应从复合问题中提取 data 子任务文本。"""
+    query_text = _compile_data_goal_query_text(
+        user_query="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气",
+        goal={"kind": "data.query", "title": "数据查询"},
+    )
+
+    assert "贷款余额前10名" in query_text
+    assert "嘉兴天气" not in query_text
+
+
+def test_compile_supervisor_data_handoff_after_stream_should_preserve_direct_lookup_window() -> None:
+    """compiler 应在 supervisor 流结束后接管，避免打断同轮直接工具调用。"""
+    ctx = _make_ctx(
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="查询2025年6月30日贷款余额前10名的客户 另外，在查一下嘉兴天气")],
+            "thread_id": "thread-1",
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                },
+                {
+                    "goal_id": "GOAL-02",
+                    "order": 2,
+                    "kind": "external.lookup",
+                    "title": "外部信息",
+                    "must_answer": True,
+                    "allowed_agents": [],
+                },
+            ],
+        },
+    )
+
+    final_state = {
+        "messages": [
+            ToolMessage(
+                content='{"results":[{"title":"嘉兴市天气预报_天气查询- 墨迹天气","content":"嘉兴市， 浙江省， 中国 今天 多云 多云 7° / 10° 北风 3级"}]}',
+                tool_call_id="tc-weather",
+                name="tavily_search",
+            ),
+            AIMessage(content="嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"),
+        ],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = []
+        mock_parser.should_filter_content.return_value = False
+
+        handoff_return = _maybe_compile_supervisor_data_handoff_after_stream(
+            final_state,
+            initial_input_count=0,
+            ctx=ctx,
+        )
+
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["pending_handoff"]["frame"]["query_text"].startswith("查询2025年6月30日贷款余额前10名的客户")
+    assert "嘉兴天气" not in handoff_return["pending_handoff"]["frame"]["query_text"]
+    assert handoff_return["pending_handoff"]["route_decision"]["dispatch_reason"] == "compiled_data_goal_frame"
+    assert handoff_return["pending_handoff"]["direct_answer_markdown"] == "嘉兴天气：\n- 今天：多云，7° / 10°，北风 3级"
+    assert handoff_return["multi_intent_mode"] is True
+
+
+def test_build_direct_lookup_findings_sanitizes_tavily_raw_markup_noise() -> None:
+    """Tavily 原始文本含网页噪声时，不应直接透传 HTML/站点碎片。"""
+    messages = [
+        ToolMessage(
+            content='嘉兴天气: " alt="" style="height:0.4rem;line-height:0.4rem;"> # 嘉兴天气 精细化预报 7天天气预报 2.3mm 3.3m/s 17:00 10.1℃；【嘉兴天气预报】 嘉兴天气预报7天_全国天气网: # 全国天气网 首页 国内天气 空气质量',
+            tool_call_id="tc-raw",
+            name="tavily_search",
+        )
+    ]
+
+    findings = _build_direct_lookup_findings(messages)
+
+    assert findings
+    summary = findings[0]["summary"]
+    assert "alt=" not in summary
+    assert "style=" not in summary
+    assert "#" not in summary
+    assert "首页" not in summary
+    assert "嘉兴天气" in summary
 
 
 def test_prepare_streaming_inference_state_should_isolate_data_expert_subquery() -> None:
