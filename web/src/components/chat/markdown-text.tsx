@@ -7,16 +7,9 @@ import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { FC, memo, useState } from "react";
-import {
-  CheckIcon,
-  CopyIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  BrainIcon,
-} from "lucide-react";
-import { SyntaxHighlighter } from "@/components/chat/syntax-highlighter";
+import { ChevronDownIcon, ChevronRightIcon, BrainIcon } from "lucide-react";
+import { CodeBlock } from "@/components/chat/code-block";
 
-import { TooltipIconButton } from "@/components/chat/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import { ImageLightbox } from "@/components/ui/image-viewer";
 
@@ -155,54 +148,6 @@ function fixMarkdownTable(text: string): string {
   return fixed;
 }
 
-interface CodeHeaderProps {
-  language?: string;
-  code: string;
-}
-
-const useCopyToClipboard = ({
-  copiedDuration = 3000,
-}: {
-  copiedDuration?: number;
-} = {}) => {
-  const [isCopied, setIsCopied] = useState<boolean>(false);
-
-  const copyToClipboard = (value: string) => {
-    if (!value) return;
-
-    navigator.clipboard.writeText(value).then(() => {
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), copiedDuration);
-    });
-  };
-
-  return { isCopied, copyToClipboard };
-};
-
-const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
-  const { isCopied, copyToClipboard } = useCopyToClipboard();
-  const onCopy = () => {
-    if (!code || isCopied) return;
-    copyToClipboard(code);
-  };
-
-  return (
-    <div className="markdown-code-block__header">
-      <span className="markdown-code-block__language lowercase [&>span]:text-xs">
-        {language}
-      </span>
-      <TooltipIconButton
-        tooltip="复制"
-        onClick={onCopy}
-        className="markdown-code-block__copy"
-      >
-        {!isCopied && <CopyIcon />}
-        {isCopied && <CheckIcon />}
-      </TooltipIconButton>
-    </div>
-  );
-};
-
 /**
  * 图片组件：缩略图 + 点击放大（Lightbox）
  * 与 MultimodalPreview 保持一致的交互体验
@@ -255,52 +200,100 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({
 
 const defaultComponents: Partial<Components> = {
   h1: ({ className, ...props }: { className?: string }) => (
-    <h1 className={className} {...props} />
+    <h1
+      className={className}
+      {...props}
+    />
   ),
   h2: ({ className, ...props }: { className?: string }) => (
-    <h2 className={className} {...props} />
+    <h2
+      className={className}
+      {...props}
+    />
   ),
   h3: ({ className, ...props }: { className?: string }) => (
-    <h3 className={className} {...props} />
+    <h3
+      className={className}
+      {...props}
+    />
   ),
   h4: ({ className, ...props }: { className?: string }) => (
-    <h4 className={className} {...props} />
+    <h4
+      className={className}
+      {...props}
+    />
   ),
   h5: ({ className, ...props }: { className?: string }) => (
-    <h5 className={className} {...props} />
+    <h5
+      className={className}
+      {...props}
+    />
   ),
   h6: ({ className, ...props }: { className?: string }) => (
-    <h6 className={className} {...props} />
+    <h6
+      className={className}
+      {...props}
+    />
   ),
   p: ({ className, ...props }: { className?: string }) => (
-    <p className={className} {...props} />
+    <p
+      className={className}
+      {...props}
+    />
   ),
   a: ({ className, ...props }: { className?: string }) => (
-    <a className={className} {...props} />
+    <a
+      className={className}
+      {...props}
+    />
   ),
   blockquote: ({ className, ...props }: { className?: string }) => (
-    <blockquote className={className} {...props} />
+    <blockquote
+      className={className}
+      {...props}
+    />
   ),
   ul: ({ className, ...props }: { className?: string }) => (
-    <ul className={className} {...props} />
+    <ul
+      className={className}
+      {...props}
+    />
   ),
   ol: ({ className, ...props }: { className?: string }) => (
-    <ol className={className} {...props} />
+    <ol
+      className={className}
+      {...props}
+    />
   ),
   hr: ({ className, ...props }: { className?: string }) => (
-    <hr className={className} {...props} />
+    <hr
+      className={className}
+      {...props}
+    />
   ),
   table: ({ className, ...props }: { className?: string }) => (
-    <table className={className} {...props} />
+    <table
+      className={className}
+      {...props}
+    />
   ),
   th: ({ className, ...props }: { className?: string }) => (
-    <th className={className} {...props} />
+    <th
+      className={className}
+      {...props}
+    />
   ),
   td: ({ className, ...props }: { className?: string }) => (
-    <td className={className} {...props} />
+    <td
+      className={className}
+      {...props}
+    />
   ),
   tr: ({ className, ...props }: { className?: string }) => (
-    <tr className={className} {...props} />
+    <tr
+      className={className}
+      {...props}
+    />
   ),
   img: ({
     src,
@@ -351,12 +344,7 @@ const defaultComponents: Partial<Components> = {
       {...props}
     />
   ),
-  pre: ({ className, ...props }: { className?: string }) => (
-    <div
-      className={cn("markdown-code-block max-w-4xl", className)}
-      {...props}
-    />
-  ),
+  pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   code: ({
     className,
     children,
@@ -372,23 +360,20 @@ const defaultComponents: Partial<Components> = {
       const code = String(children).replace(/\n$/, "");
 
       return (
-        <>
-          <CodeHeader
-            language={language}
-            code={code}
-          />
-          <SyntaxHighlighter
-            language={language}
-            className={cn("markdown-code-block__body", className)}
-          >
-            {code}
-          </SyntaxHighlighter>
-        </>
+        <CodeBlock
+          language={language}
+          code={code}
+          className="my-[1.3rem] max-w-4xl"
+          bodyClassName={className}
+        />
       );
     }
 
     return (
-      <code className={className} {...props}>
+      <code
+        className={className}
+        {...props}
+      >
         {children}
       </code>
     );
