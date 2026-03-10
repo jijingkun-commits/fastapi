@@ -246,6 +246,124 @@ def test_json_object_primary_unrecoverable_validation_still_fallback() -> None:
 
 
 
+
+
+def test_resolve_decomposed_goals_reconciles_single_strong_data_goal(monkeypatch) -> None:
+    """单目标银行问数若模型退化为 general.reply，应被规则层纠偏回 data.query。"""
+
+    def _fake_build_plan(_state, *, llm, mode):
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "查询2025年6月30日各机构的贷款余额分布",
+        llm=object(),
+    )
+
+    assert source == "model_primary+single_goal_reconcile"
+    assert [goal["kind"] for goal in goals] == ["data.query"]
+    assert goals[0]["title"] == "数据查询"
+
+
+def test_resolve_decomposed_goals_reconciles_chart_supplement_with_prior_data_context(monkeypatch) -> None:
+    """补图回合若模型退化为 general.reply，应继承上一轮 data.query 上下文。"""
+
+    def _fake_build_plan(_state, *, llm, mode):
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                }
+            ],
+        }
+
+    history_messages = [
+        HumanMessage(content="查询2025-06-30贷款余额前10名客户"),
+        AIMessage(content="查询完成，共返回 10 条记录。"),
+    ]
+
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+    monkeypatch.setattr(
+        graph,
+        "_load_recent_persisted_user_visible_messages",
+        lambda **_kwargs: history_messages,
+    )
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "以柱状图方式展示",
+        llm=object(),
+        runtime_state={"thread_id": "thread-1"},
+    )
+
+    assert source == "model_primary+supplement_data_reconcile"
+    assert [goal["kind"] for goal in goals] == ["data.query"]
+    assert goals[0]["title"] == "数据查询"
+
+
+def test_resolve_decomposed_goals_keeps_confirm_reply_out_of_data_reconcile(monkeypatch) -> None:
+    """确认短句即使带有上一轮问数上下文，也不应误扩为 data.query。"""
+
+    def _fake_build_plan(_state, *, llm, mode):
+        assert llm is not None
+        assert mode == "model_primary"
+        return {
+            "source": "model_primary",
+            "goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "general.reply",
+                    "title": "问题回复",
+                    "must_answer": True,
+                }
+            ],
+        }
+
+    history_messages = [
+        HumanMessage(content="查询2025-06-30贷款余额前10名客户"),
+        AIMessage(content="查询完成，共返回 10 条记录。"),
+    ]
+
+    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+    monkeypatch.setattr(
+        graph,
+        "_load_recent_persisted_user_visible_messages",
+        lambda **_kwargs: history_messages,
+    )
+
+    goals, source = graph._resolve_decomposed_goals_for_query(
+        "好的",
+        llm=object(),
+        runtime_state={"thread_id": "thread-1"},
+    )
+
+    assert source == "model_primary"
+    assert [goal["kind"] for goal in goals] == ["general.reply"]
+
 def test_resolve_decomposed_goals_uses_persisted_user_visible_window(monkeypatch) -> None:
     """decompose_goals 规划输入应为 user_query + 已落库 user/assistant 视图。"""
     history_messages = [

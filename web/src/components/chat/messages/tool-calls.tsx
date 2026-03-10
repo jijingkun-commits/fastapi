@@ -4,6 +4,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { MarkdownText } from "../markdown-text";
 
+const ORCHESTRATION_TOOL_NAMES = new Set([
+  "assign_to_data_expert",
+  "assign_to_todo_expert",
+  "decompose_goals",
+  "load_skills",
+]);
+
+export function isUserVisibleToolName(name?: string | null): boolean {
+  const normalized = String(name ?? "").trim();
+  if (normalized.length === 0) return false;
+  return !ORCHESTRATION_TOOL_NAMES.has(normalized);
+}
+
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
 }
@@ -17,11 +30,12 @@ export function ToolCalls({
 }) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
-  if (!toolCalls || toolCalls.length === 0) return null;
+  const visibleToolCalls = (toolCalls ?? []).filter((tc) => isUserVisibleToolName(tc.name));
+  if (visibleToolCalls.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1">
-      {toolCalls.map((tc, idx) => {
+      {visibleToolCalls.map((tc, idx) => {
         const args = tc.args as Record<string, any>;
         const hasArgs = Object.keys(args).length > 0;
         const isExpanded = expanded[idx] ?? false;
@@ -84,6 +98,10 @@ export function ToolCalls({
 
 export function ToolResult({ message }: { message: ToolMessage }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  if (!isUserVisibleToolName(message.name)) {
+    return null;
+  }
 
   let parsedContent: any;
   let isJsonContent = false;

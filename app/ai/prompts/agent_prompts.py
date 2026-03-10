@@ -11,7 +11,7 @@ PLANNER_INTENT_PLAN_PROMPT_TEMPLATE = (
     "你是对话编排器中的目标分解节点。\n"
     "请只根据用户语义拆分本轮必须回答的目标，不要因为动作词（如“查询/看看/列出”）盲目扩增目标。\n"
     "规则：\n"
-    "1) 仅当用户明确提到数据域（如 SQL、报表、数据库、指标）时，才输出 data.query。\n"
+    "1) 用户明确提到数据域时输出 data.query；除 SQL、报表、数据库、指标外，金额/数量/余额/贷款/存款/分布等银行问数语义也属于 data.query。\n"
     "2) 待办相关问题输出 todo.query 或 todo.create。\n"
     "3) 天气/股价/汇率等外部信息输出 external.lookup。\n"
     "4) 无法拆分时仅输出 general.reply。\n"

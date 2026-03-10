@@ -31,6 +31,7 @@
 - 2026-03-08｜Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链（ACTIVE）→ `docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 - 2026-03-08｜聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token（ACTIVE）→ `docs/plans/2026-03-08-chat-typography-cjk-design.md`
 - 2026-03-08｜编排层禁止硬编码语义关键词词表（ACTIVE）→ `AGENTS.md`
+- 2026-03-09｜补充回合语义识别收敛到 session_intent_kernel，decompose_goals 只做 data.query 纠偏（ACTIVE）→ `app/ai/workflow/session_intent_kernel.py`
 ## 记录模板
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
@@ -49,6 +50,16 @@
 - 历史记录按月归档至 `docs/内部参考/决策归档/`，本文件保留近期生效与关键里程碑。
 
 ## 决策记录
+
+### 2026-03-09 补充回合语义识别收敛到 intent 层
+- 状态：ACTIVE
+- 决策主题：图表/维度/时间/筛选类补充回合统一由 `session_intent_kernel` 输出结构化信号，`decompose_goals` 仅基于该信号和 persisted visible window 做 `data.query` 纠偏
+- 背景与问题：同线程第二轮输入“以柱状图方式展示”时，planner 可能退化成 `general.reply`，并把内部 coverage 缺口暴露成“问题回复未完成”
+- 最终决策：新增轻量文本 frame 提取与 `classify_turn_act_from_text(...)`，在 `multi_agent_graph._resolve_decomposed_goals_for_query(...)` 中仅对“上一轮存在问数上下文 + 当前轮存在结构化补充信号 + planner/rule 同时退化为 general.reply”执行单点纠偏
+- 取舍理由：把语义识别继续留在编排层会违反“编排层禁止硬编码语义词表”；下沉到 intent 层后，规划层职责更单一，也能避免把“好的”之类确认短句误扩成 `data.query`
+- 影响范围：`app/ai/workflow/session_intent_kernel.py`、`app/ai/workflow/multi_agent_graph.py`、`tests/unit/test_intent_plan_model_primary.py`、问数需求/测试文档
+- 回退/失效条件：若未来 planner prompt 已稳定消费会话窗口并能可靠输出补充回合目标，可保留 intent 层解析作为兜底；若出现跨域补充误判，需以更细粒度 contract 替代当前轻量 frame
+- 关联文档/代码：`app/ai/workflow/session_intent_kernel.py`、`app/ai/workflow/multi_agent_graph.py`、`docs/产品文档/问数助手需求.md`、`docs/开发文档/测试管理/问数引擎测试案例.md`
 
 ### 2026-03-08 治理前置命令显式化
 - 状态：ACTIVE
@@ -330,3 +341,13 @@
 - 回退/失效条件：若未来编排层被完全替换为统一的 schema-driven contract adapter，且语义规则可由中心化 policy 自动校验，可将静态测试迁移到新的治理入口；在此之前保持仓级 fail-fast
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`tests/unit/test_semantic_keyword_boundary_gate.py`
 
+
+### 2026-03-08 运行态补齐缺口不再进入用户交互
+- 状态：ACTIVE
+- 决策主题：Coverage 缺口与编排型工具调用统一收回内部运行态，不再暴露为用户确认动作或原始工具名
+- 背景与问题：单目标问数在模型主判定退化为 `general.reply` 时，coverage gate 会把内部补齐缺口转成“请回复继续”，前端同时直出 `assign_to_data_expert` 等内部工具名，导致用户看到编排状态而不是产品语义
+- 最终决策：保持模型主判定优先，但在“模型=通用单目标、规则=专家型单目标”时执行单目标强语义纠偏；coverage gate 与 final composer 不再发送补齐类 clarification；前端过滤编排型工具面板
+- 取舍理由：项目未上线，优先让运行态边界清晰、用户契约稳定，而不是继续叠加兼容提示或引导用户配合内部补齐流程
+- 影响范围：`app/ai/workflow/multi_agent_graph.py`、`app/ai/prompts/agent_prompts.py`、`web/src/components/chat/messages/{ai,tool-calls}.tsx`、相关回归测试与需求/设计文档
+- 回退/失效条件：若未来引入独立的“面向用户任务进度卡”并有稳定契约，可重新开放部分编排观测；在此之前禁止原始工具名和 coverage 缺口提问直出
+- 关联文档/代码：`docs/plans/2026-03-08-multi-agent-coverage-gap-visible-contract-design.md`

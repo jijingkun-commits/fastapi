@@ -39,7 +39,20 @@ const VegaLiteChart = dynamic(
   { ssr: false },
 ) as ComponentType<VegaLiteProps>;
 
-/** 格式化数值：大数字转亿/万 */
+const FRIENDLY_FIELD_LABELS: Record<string, string> = {
+  org_name: "机构名称",
+  org_no: "机构代码",
+  org_code: "机构代码",
+  dept_name: "部门名称",
+  dept_code: "部门代码",
+  branch_name: "机构名称",
+  branch_code: "机构代码",
+  cust_name: "客户名称",
+  cust_no: "客户编号",
+  customer_name: "客户名称",
+  customer_no: "客户编号",
+};
+
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "-";
   if (typeof value === "number") {
@@ -147,17 +160,78 @@ function inferXType(chart: SqlResultChartData): "temporal" | "nominal" {
   return dateLikeCount >= Math.ceil(samples.length * 0.6) ? "temporal" : "nominal";
 }
 
+function isTechnicalFieldLabel(label: string | undefined, key: string): boolean {
+  const normalized = String(label || "").trim();
+  if (!normalized) {
+    return true;
+  }
+  if (normalized === key) {
+    return true;
+  }
+  return /^[a-z0-9_]+$/i.test(normalized);
+}
+
+function resolveFriendlyAxisLabel(
+  label: string | undefined,
+  key: string,
+  role: "dimension" | "measure",
+): string {
+  if (!isTechnicalFieldLabel(label, key)) {
+    return String(label).trim();
+  }
+
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const mapped = FRIENDLY_FIELD_LABELS[normalizedKey];
+  if (mapped) {
+    return mapped;
+  }
+
+  if (role === "measure") {
+    return "指标值";
+  }
+
+  if (normalizedKey.includes("date") || normalizedKey.endsWith("_dt") || normalizedKey.includes("time")) {
+    return "时间";
+  }
+  if (normalizedKey.endsWith("_name")) {
+    return "名称";
+  }
+  if (normalizedKey.endsWith("_no") || normalizedKey.endsWith("_code")) {
+    return "编码";
+  }
+  return "维度";
+}
+
+function buildBarMarkSize(count: number): number | undefined {
+  if (count <= 2) return 120;
+  if (count <= 4) return 72;
+  if (count <= 8) return 44;
+  return undefined;
+}
+
+function getRenderableChartValues(
+  chart: SqlResultChartData,
+): Array<Record<string, string | number>> | null {
+  if (chart.data.length <= 1) {
+    return null;
+  }
+
+  const values = normalizeChartValues(chart);
+  return values.length > 1 ? values : null;
+}
+
 function buildVegaSpec(
   chart: SqlResultChartData,
   values: Array<Record<string, string | number>>,
+  xLabel: string,
+  yLabel: string,
 ): TopLevelSpec {
   const xType = inferXType(chart);
-  const xLabel = chart.x_label || chart.x_key;
-  const yLabel = chart.y_label || chart.y_key;
   const seriesName = chart.series_name || yLabel;
+  const showValueLabels = chart.type === "bar" && values.length <= 12;
 
   const baseSpec = {
-    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+    $schema: "https://vega.github.io/schema/vega-lite/v6.json",
     title: chart.title,
     width: "container",
     height: 300,
@@ -185,15 +259,15 @@ function buildVegaSpec(
   const yAxisLabelExpr = "abs(datum.value) >= 100000000 ? format(datum.value/100000000, ',.2f') + ' 亿' : abs(datum.value) >= 10000 ? format(datum.value/10000, ',.2f') + ' 万' : format(datum.value, ',.2f')";
   const xAxis = chart.type === "bar" && xType === "nominal"
     ? {
-        labelAngle: -32,
-        labelAlign: "right" as const,
-        labelBaseline: "middle" as const,
+        labelAngle: values.length <= 4 ? 0 : -32,
+        labelAlign: values.length <= 4 ? "center" as const : "right" as const,
+        labelBaseline: values.length <= 4 ? "top" as const : "middle" as const,
         labelPadding: 8,
-        labelLimit: 120,
+        labelLimit: values.length <= 4 ? 180 : 140,
         labelOverlap: "greedy" as const,
         titlePadding: 14,
         labelExpr:
-          "length(toString(datum.label)) > 8 ? slice(toString(datum.label), 0, 8) + '…' : toString(datum.label)",
+          "length(toString(datum.label)) > 10 ? slice(toString(datum.label), 0, 10) + '…' : toString(datum.label)",
       }
     : undefined;
 
@@ -239,11 +313,44 @@ function buildVegaSpec(
     };
   }
 
-  return {
-    ...baseSpec,
-    mark: { type: "bar", cornerRadiusTopLeft: 4, cornerRadiusTopRight: 4 },
+  const barLayer = {
+    mark: {
+      type: "bar" as const,
+      cornerRadiusTopLeft: 4,
+      cornerRadiusTopRight: 4,
+      size: buildBarMarkSize(values.length),
+    },
     encoding: commonEncoding,
   };
+
+  if (!showValueLabels) {
+    return {
+      ...baseSpec,
+      ...barLayer,
+    } as TopLevelSpec;
+  }
+
+  return {
+    ...baseSpec,
+    layer: [
+      barLayer,
+      {
+        mark: {
+          type: "text" as const,
+          align: "center",
+          baseline: "bottom",
+          dy: -6,
+          fontSize: 11,
+          color: "#4b5563",
+        },
+        encoding: {
+          x: commonEncoding.x,
+          y: commonEncoding.y,
+          text: { field: "__formatted_y", type: "nominal" },
+        },
+      },
+    ],
+  } as TopLevelSpec;
 }
 
 export function SqlResultChart({ chart }: SqlResultChartProps) {
@@ -251,8 +358,21 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
   const chartViewRef = useRef<VegaChartView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const containerWidthRef = useRef(0);
-  const normalizedValues = useMemo(() => normalizeChartValues(chart), [chart]);
-  const spec = useMemo(() => buildVegaSpec(chart, normalizedValues), [chart, normalizedValues]);
+  const renderModel = useMemo(() => {
+    const values = getRenderableChartValues(chart);
+    if (!values) {
+      return null;
+    }
+
+    const xLabel = resolveFriendlyAxisLabel(chart.x_label, chart.x_key, "dimension");
+    const yLabel = resolveFriendlyAxisLabel(chart.y_label, chart.y_key, "measure");
+
+    return {
+      spec: buildVegaSpec(chart, values, xLabel, yLabel),
+      xLabel,
+      yLabel,
+    };
+  }, [chart]);
 
   const refreshChartLayout = useCallback(() => {
     requestAnimationFrame(() => {
@@ -272,7 +392,7 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || typeof ResizeObserver === "undefined") {
+    if (!container || !renderModel || typeof ResizeObserver === "undefined") {
       return;
     }
 
@@ -293,18 +413,10 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
 
     observer.observe(container);
     return () => observer.disconnect();
-  }, [refreshChartLayout, spec]);
+  }, [refreshChartLayout, renderModel]);
 
-  if (!chart || !Array.isArray(chart.data) || chart.data.length === 0) {
+  if (!renderModel) {
     return null;
-  }
-
-  if (normalizedValues.length === 0) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
-        图表未渲染：未识别到可用数值列，请查看下方表格数据。
-      </div>
-    );
   }
 
   return (
@@ -315,7 +427,7 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
     >
       <VegaLiteChart
         className="w-full"
-        spec={spec}
+        spec={renderModel.spec}
         options={{ actions: false, renderer: "svg" }}
         onEmbed={(result) => {
           chartViewRef.current = result.view;
@@ -333,8 +445,8 @@ export function SqlResultChart({ chart }: SqlResultChartProps) {
         </div>
       )}
       <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
-        <span>X 轴：{chart.x_label || chart.x_key}</span>
-        <span>Y 轴：{chart.y_label || chart.y_key}</span>
+        <span>X 轴：{renderModel.xLabel}</span>
+        <span>Y 轴：{renderModel.yLabel}</span>
       </div>
     </div>
   );

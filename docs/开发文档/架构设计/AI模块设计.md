@@ -2188,3 +2188,31 @@ graph TD
 - `app/ai/state.py`
 - `app/ai/workflow/todo_graph.py`
 - `app/ai/prompts/todo_prompts.py`
+
+
+---
+
+## 运行态缺口可见性收敛（2026-03-08）
+
+### 结论
+
+1. `coverage_gate` 与 `final_composer` 只负责完整性判定与结果收口，不再发 `clarification` 询问用户是否继续补齐。
+2. 单目标规划若模型给出 `general.reply`，而规则兜底已能稳定识别为专家型目标（如 `data.query`），则在运行态执行**单目标强语义纠偏**。
+3. 用户视图中的工具面板只展示用户可理解的工具；编排型工具调用与结果默认隐藏。
+
+### 规则说明
+
+| 场景 | 旧行为 | 新行为 |
+|---|---|---|
+| 单目标银行问数被模型判成 `general.reply` | 直接保留 `问题回复` 进入运行态 | 若规则兜底为单目标专家型目标，则提升为更具体目标 |
+| coverage 缺口 | `emit_clarification` + “回复继续即可” | 仅输出结果性说明，不再要求用户确认 |
+| 编排型工具展示 | 前端直出 `assign_to_* / decompose_goals / load_skills` | 作为内部运行态信息过滤，不进入用户面板 |
+
+### 责任边界
+
+- **planner / reconcile**：决定运行态目标语义，避免过宽泛目标污染后续门禁。
+- **coverage gate**：只判断是否已覆盖，不承担用户交互责任。
+- **clarify 节点**：仅处理真实缺参、真实用户补充信息。
+- **presenter/UI**：只渲染脱敏后的用户可见 contract。
+
+- **single-handoff 补口**：当 supervisor 未显式调用 `decompose_goals` 但已产生 handoff 时，必须在 values dispatcher 中补冻结 `decomposed_goals`，确保 router guard / coverage 与 planner 使用同一份活动目标。

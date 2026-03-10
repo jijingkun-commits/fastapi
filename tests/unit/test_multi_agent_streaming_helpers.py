@@ -690,6 +690,65 @@ def test_dispatch_values_mode_chunk_filters_disallowed_handoff_by_contract() -> 
     assert handoff_return["router_result_v2"]["route_decisions"][0]["target_agent"] == "todo_expert"
 
 
+def test_dispatch_values_mode_chunk_reconciles_runtime_goals_for_single_data_handoff(monkeypatch) -> None:
+    """单目标直派 data_expert 时，dispatcher 应先冻结 data.query goals，再进入 router guard。"""
+    ctx = _make_ctx(
+        writer=lambda _event: None,
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="查询2025年6月30日各机构的贷款余额分布")],
+            "thread_id": "thread-1",
+        },
+    )
+
+    final_state = {
+        "messages": [ToolMessage(content="handoff-json", tool_call_id="tc-1", name="assign_to_data_expert")],
+        "thread_id": "thread-1",
+    }
+
+    monkeypatch.setattr(
+        "app.ai.workflow.multi_agent_graph._resolve_decomposed_goals_for_query",
+        lambda user_query, **_kwargs: (
+            [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                }
+            ],
+            "model_primary+single_goal_reconcile",
+        ),
+    )
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "data_expert",
+                "task_description": "查询贷款余额分布",
+            }
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["pending_handoff"]["goal_id"] == "GOAL-01"
+    assert final_state["decomposed_goals"][0]["kind"] == "data.query"
+    assert final_state["decomposed_goals"][0]["allowed_agents"] == ["data_expert"]
+
+
 def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> None:
     """当 handoff 全部被门禁拦截时，应保留补齐上下文并等待下一轮重试。"""
     ctx = _make_ctx(
