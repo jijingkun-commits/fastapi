@@ -60,7 +60,7 @@ def test_resolve_decomposed_goals_prefers_model_primary(monkeypatch) -> None:
     monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
 
     goals, source = graph._resolve_decomposed_goals_for_query(
-        "1、查贷款余额前10\n2、查嘉兴天气",
+        "贷款余额前10名客户和嘉兴天气",
         llm=object(),
     )
 
@@ -68,16 +68,11 @@ def test_resolve_decomposed_goals_prefers_model_primary(monkeypatch) -> None:
     assert [goal["kind"] for goal in goals] == ["data.query", "external.lookup"]
 
 
-def test_resolve_decomposed_goals_reconcile_explicit_multi_goal(monkeypatch) -> None:
-    """显式多目标表达下，若模型漏拆目标，应自动触发规则补齐。"""
+def test_resolve_decomposed_goals_prefers_fast_path_for_explicit_multi_goal(monkeypatch) -> None:
+    """编号/分行等显式复合问题应直接走规则 fast path，避免再调用 planner。"""
 
-    def _fake_build_plan(_state, *, llm, mode):
-        return {
-            "source": "model_primary",
-            "goals": [
-                {"goal_id": "GOAL-01", "order": 1, "kind": "data.query", "title": "数据查询", "must_answer": True},
-            ],
-        }
+    def _raise_if_called(*_args, **_kwargs):
+        raise AssertionError("_build_planner_intent_plan should not be called in explicit fast path")
 
     def _fake_rule_goals(_query: str):
         return [
@@ -85,8 +80,7 @@ def test_resolve_decomposed_goals_reconcile_explicit_multi_goal(monkeypatch) -> 
             {"goal_id": "GOAL-02", "order": 2, "kind": "external.lookup", "title": "外部信息", "must_answer": True},
         ]
 
-    monkeypatch.setattr(graph, "_resolve_intent_planner_settings", lambda _state: {"intent_mode": "model_primary"})
-    monkeypatch.setattr(graph, "_build_planner_intent_plan", _fake_build_plan)
+    monkeypatch.setattr(graph, "_build_planner_intent_plan", _raise_if_called)
     monkeypatch.setattr(graph, "_build_decomposed_goals_for_query", _fake_rule_goals)
 
     goals, source = graph._resolve_decomposed_goals_for_query(
@@ -94,7 +88,7 @@ def test_resolve_decomposed_goals_reconcile_explicit_multi_goal(monkeypatch) -> 
         llm=object(),
     )
 
-    assert source == "model_primary+rule_reconcile"
+    assert source == "explicit_multi_goal_fast_path"
     assert [goal["kind"] for goal in goals] == ["data.query", "external.lookup"]
 
 

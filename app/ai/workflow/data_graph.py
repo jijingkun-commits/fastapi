@@ -58,6 +58,7 @@ from app.ai.utils.schema_router import route_schema
 from app.ai.utils.sql_parser import extract_tables_from_sql
 from app.ai.utils.sql_empty_result_recovery import (
     is_effectively_empty_result,
+    probe_sql_has_rows,
     rewrite_sql_for_empty_result,
     rewrite_sql_for_column_compatibility,
 )
@@ -4147,17 +4148,20 @@ def sql_execute(state: DataAgentState) -> Dict:
         if is_effectively_empty_result(df.to_dict(orient="records")):
             rewritten_sql, reason = rewrite_sql_for_empty_result(sql)
             if reason and rewritten_sql != sql:
-                logger.info("空结果 SQL 自愈重写触发: %s", reason)
-                emit_status(writer, f"检测到空结果，正在自动重试：{reason}", node="sql_execute")
-                df_retry = vanna.run_sql(rewritten_sql)
-                if not is_effectively_empty_result(df_retry.to_dict(orient="records")):
-                    sql = rewritten_sql
-                    df = df_retry
-                    if rewrite_note:
-                        rewrite_note = f"{rewrite_note}；{reason}"
-                    else:
-                        rewrite_note = reason
-                    logger.info("空结果 SQL 自愈重写成功")
+                if probe_sql_has_rows(rewritten_sql):
+                    logger.info("空结果 SQL 自愈重写触发: %s", reason)
+                    emit_status(writer, f"检测到空结果，正在自动重试：{reason}", node="sql_execute")
+                    df_retry = vanna.run_sql(rewritten_sql)
+                    if not is_effectively_empty_result(df_retry.to_dict(orient="records")):
+                        sql = rewritten_sql
+                        df = df_retry
+                        if rewrite_note:
+                            rewrite_note = f"{rewrite_note}；{reason}"
+                        else:
+                            rewrite_note = reason
+                        logger.info("空结果 SQL 自愈重写成功")
+                else:
+                    logger.info("空结果 SQL 自愈重写跳过：候选 SQL probe 仍为空 (%s)", reason)
         
         # 转换为可序列化格式
         result_data = df.to_dict(orient="records")

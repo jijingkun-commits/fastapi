@@ -506,7 +506,7 @@ def test_build_delivery_artifacts_should_parse_weather_table_rows_from_1543_cont
 
 
 def test_build_delivery_artifacts_should_parse_weather_forecast_dot_com_content() -> None:
-    """weather-forecast.com 这类英文天气页，也应规整成多行天气段。"""
+    """weather-forecast.com 这类英文天气页，也应规整成中文天气段。"""
     state = {
         "messages": [
             HumanMessage(content="查询嘉兴天气"),
@@ -527,7 +527,10 @@ def test_build_delivery_artifacts_should_parse_weather_forecast_dot_com_content(
     assert "今日（1-3天）" in display_markdown
     assert "3°C~12°C" in display_markdown
     assert "4-7天" in display_markdown
-    assert "Mostly dry" in display_markdown
+    assert "大部时段无明显降水" in display_markdown
+    assert "体感温和" in display_markdown
+    assert "风力较小" in display_markdown
+    assert "Mostly dry" not in display_markdown
 
 
 
@@ -553,6 +556,57 @@ def test_build_delivery_artifacts_should_scan_all_weather_results_before_fallbac
     assert "今天" in display_markdown
     assert "明天" in display_markdown
     assert "台风路径" not in display_markdown
+
+
+def test_build_delivery_artifacts_should_skip_misleading_weather_segments_and_continue_ranking() -> None:
+    """首条天气页若只解析出无意义片段，应继续选择后续有效天气结果。"""
+    state = {
+        "messages": [
+            HumanMessage(content="查询嘉兴天气"),
+            ToolMessage(
+                content='{"results":[{"url":"https://tianqi.moji.com/tommorrow/china/zhejiang/jiaxing","title":"明天嘉兴市天气_明日天气预报","content":"首页 天气 下载 资讯 关于墨迹. 多云~~转~~晴 **08:03更新**. 2026年03月09日 丙午[马]年 正月廿一. ## 四川省凉山彝族自治州盐源县泸沽湖镇亚泸路泸沽湖风景名胜区. ## 安徽省黄山市休宁县溪口镇詹家山. ## 15天预报. ## 明天适合穿. 公司地址：北京市朝阳区来广营东路融新科技中心C座15层 联系电话：400-880-0599."},{"url":"https://www.jxqx.net/","title":"嘉兴天气网-移动版","content":"今天傍晚到夜里晴到多云；明天晴到多云；后天多云。 今天傍晚东北到东风3～5级，夜里到明天偏东风3～4级。 明天白天最高温度12～13℃，. 明天早晨最低温度5℃，. 明天最低地面温度3℃"}]}' ,
+                tool_call_id="t-weather-rank-fallback",
+                name="tavily_search",
+            ),
+        ],
+        "handoff_execution_trace": [],
+    }
+
+    deliverables = _build_delivery_artifacts(state)
+    external_deliverable = next(item for item in deliverables if item.get("kind") == "external.lookup")
+    display_markdown = external_deliverable["payload"]["display_markdown"]
+
+    assert display_markdown.startswith("嘉兴")
+    assert "明天" in display_markdown
+    assert any(temp in display_markdown for temp in ("12～13℃", "12-13℃", "5℃~13℃"))
+    assert ". #" not in display_markdown
+    assert "公司地址" not in display_markdown
+
+
+def test_build_delivery_artifacts_should_prefer_human_readable_chinese_weather_result() -> None:
+    """同批 Tavily 结果里若已有更干净的中文天气站，应优先选它而不是英文碎片。"""
+    state = {
+        "messages": [
+            HumanMessage(content="嘉兴明天的天气怎么样？"),
+            ToolMessage(
+                content='{"results":[{"url":"https://tianqi.moji.com/tommorrow/china/zhejiang/jiaxing","title":"明天嘉兴市天气_明日天气预报","content":"首页 天气 下载 资讯 关于墨迹. 多云~~转~~晴 **08:03更新**. 2026年03月09日 丙午[马]年 正月廿一. ## 四川省凉山彝族自治州盐源县泸沽湖镇亚泸路泸沽湖风景名胜区. ## 安徽省黄山市休宁县溪口镇詹家山. ## 15天预报. ## 明天适合穿. 公司地址：北京市朝阳区来广营东路融新科技中心C座15层 联系电话：400-880-0599."},{"url":"https://www.jxqx.net/","title":"嘉兴天气网-移动版","content":"今天傍晚到夜里晴到多云；明天晴到多云；后天多云。 今天傍晚东北到东风3～5级，夜里到明天偏东风3～4级。 明天白天最高温度12～13℃，. 明天早晨最低温度5℃，. 明天最低地面温度3℃"},{"url":"https://zh.weather-forecast.com/locations/Jiaxing/forecasts/latest","title":"嘉兴天气预报","content":"| 嘉兴 今日天气(1–3 天数) Some drizzle, heaviest during Wed night. | 嘉兴 天气 (4–7 天数) Mostly dry. | 10 日 嘉兴 天气(7–10 天数) Light rain (total 8mm), mostly falling on Thu morning."}]}' ,
+                tool_call_id="t-weather-human-readable",
+                name="tavily_search",
+            ),
+        ],
+        "handoff_execution_trace": [],
+    }
+
+    deliverables = _build_delivery_artifacts(state)
+    external_deliverable = next(item for item in deliverables if item.get("kind") == "external.lookup")
+    display_markdown = external_deliverable["payload"]["display_markdown"]
+
+    assert display_markdown.startswith("嘉兴")
+    assert any(temp in display_markdown for temp in ("12～13℃", "12-13℃", "5℃~13℃"))
+    assert "Some drizzle" not in display_markdown
+    assert "Mostly dry" not in display_markdown
+    assert "|" not in display_markdown
+    assert "公司地址" not in display_markdown
 
 
 def test_build_delivery_artifacts_should_wrap_weather_summary_fallback_as_weather_block() -> None:
@@ -597,7 +651,8 @@ def test_build_multi_intent_summary_content_should_avoid_external_label_chain_an
     assert "天气/实时信息：" not in first_line
     assert "##" not in summary
     assert "嘉兴" in summary
-    assert "Mostly dry" in summary
+    assert "大部时段无明显降水" in summary
+    assert "体感温和" in summary
 
 
 def test_render_coverage_blocked_message_should_not_prompt_user_to_continue() -> None:

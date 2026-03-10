@@ -379,3 +379,49 @@ def test_interpret_result_display_limit():
     many_rows = [{"id": idx} for idx in range(150)]
     text_many = module._interpret_result("测试问题", "SELECT id FROM t", many_rows)
     assert text_many == "查询完成，共返回 150 条记录（已展示前 100 条）。"
+
+
+def test_sql_execute_skips_full_retry_when_rewritten_sql_probe_is_empty(monkeypatch):
+    """重写候选 SQL 的精确 probe 仍为空时，不应再执行第二次完整重试。"""
+    module = importlib.import_module("app.ai.workflow.data_graph")
+
+    queries = []
+    events = []
+
+    class _TrackingVanna:
+        def run_sql(self, sql: str):
+            queries.append(sql)
+            return _DummyDataFrame([], ["贷款余额"])
+
+    monkeypatch.setattr(module, "get_stream_writer", lambda: events.append)
+    monkeypatch.setattr(module, "emit_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "emit_error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_vanna", lambda: _TrackingVanna())
+    monkeypatch.setattr(module, "_enrich_result_rows_if_needed", lambda result_data, cols: (result_data, cols))
+    monkeypatch.setattr(module, "_load_column_display_name_map", lambda cols, sql: {})
+    monkeypatch.setattr(module, "_load_column_data_type_map", lambda cols, sql: {})
+    monkeypatch.setattr(module, "_build_column_display_names", lambda cols, _: cols)
+    monkeypatch.setattr(module, "_build_display_sql", lambda sql, _: sql)
+    monkeypatch.setattr(module, "_interpret_result", lambda question, sql, result: "查询完成，但没有找到符合条件的数据。")
+    monkeypatch.setattr(module, "is_effectively_empty_result", lambda data: not data)
+    monkeypatch.setattr(
+        module,
+        "rewrite_sql_for_empty_result",
+        lambda sql: (sql.replace("f_mid_loan_tb", "f_mid_loan_k_tb"), "f_mid_loan_tb 无数据，改用 f_mid_loan_k_tb"),
+    )
+    monkeypatch.setattr(module, "probe_sql_has_rows", lambda sql: False, raising=False)
+
+    state = {
+        "generated_sql": "SELECT loan_bal AS 贷款余额 FROM fdmdata.f_mid_loan_tb WHERE data_dt = '2025-06-30' LIMIT 10",
+        "query_context": {"original_question": "查询2025年6月30日贷款余额前10名的客户"},
+        "data_intent": "query",
+        "sql_source": "metric",
+        "iterations": 1,
+    }
+
+    output = module.sql_execute(state)
+
+    assert len(queries) == 1
+    assert queries[0].count("f_mid_loan_tb") == 1
+    assert all("检测到空结果，正在自动重试" not in event.get("data", {}).get("message", "") for event in events)
+    assert output.get("fallback_target") == "training"

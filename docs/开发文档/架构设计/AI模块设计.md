@@ -251,7 +251,7 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 
 | 节点 | 函数 | 职责 |
 |------|------|------|
-| `preprocess` | `_preprocess_multimodal` | 验证消息、分析附件、护栏验证 |
+| `preprocess` | `_preprocess_multimodal` | 验证消息、分析附件、护栏验证，并承接显式复合问题 fast lane（goals 预编译 / 事实预取 / 直达 `data_expert`） |
 | `intent_classify` | `_classify_intent` | 🆕 意图识别，决定路由目标 |
 | `supervisor` | Supervisor Agent | 理解意图、路由决策、直接处理简单任务 |
 | `data_expert` | Data Agent | 复杂多步骤数据分析 |
@@ -701,6 +701,14 @@ llm = get_scene_llm(
 - 生产环境默认不启用实验适配分支。
 - 非实验 provider 继续走既有 `get_llm()` 逻辑，无额外协议分支。
 - 实验逻辑仅在命中条件时读取 `extra_config` 并注入参数，避免全量路径开销。
+
+### 显式复合问题快车道（2026-03-10）
+
+1. 对编号列表、分行等显式多问题输入，`preprocess` 可直接生成 `decomposed_goals`，并优先发出 `plan_ready`，避免所有子问题都先等待 Supervisor 完整往返。
+2. 若复合问题同时包含内部数据查询与公开事实查询，`preprocess` 可先预取已能直答的公开事实结果，并直接编译 canonical `pending_handoff` 路由到 `data_expert`。
+3. 公开事实查询统一归入 `public_structured_fact` 能力层：它负责识别事实类型、抽取槽位（如地点/日期/指标）、选择对应事实源并返回统一 contract；天气只是其中一个实例，不再作为编排层专用特判继续扩散。
+4. 编排层只消费 `decomposed_goals`、`pending_handoff` 与统一 tool payload 做路由和收口，不在 `chat_service`、router/controller 层追加“天气/汇率/股价”等关键词分支。
+5. fast lane 只优化首事件与总耗时，不改变最终收口责任：最终用户可见正文仍由 `final_answer` 唯一收敛；若 fast lane 命中失败，回退既有 Supervisor 规划链路。
 
 ### 意图运行态契约收敛（v2，2026-03-07）
 
