@@ -1,6 +1,6 @@
 /**
  * SQL 查询结果表格组件
- * 
+ *
  * 渲染问数助手返回的 SQL 查询结果，支持：
  * - 数据表格展示（带表头和斑马纹）
  * - SQL 语句折叠展示
@@ -8,7 +8,18 @@
  * - 空结果提示
  */
 import { ChevronDown, ChevronUp, Database } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+
+import { CodeBlock } from "@/components/chat/code-block";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface SqlResultTableProps {
   columns: string[];
@@ -25,12 +36,24 @@ function formatValue(value: any): string {
   if (value === null || value === undefined) return "-";
   if (typeof value === "number") {
     const abs = Math.abs(value);
-    if (abs >= 1_0000_0000) return `${(value / 1_0000_0000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} 亿`;
-    if (abs >= 1_0000) return `${(value / 1_0000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} 万`;
+    if (abs >= 1_0000_0000)
+      return `${(value / 1_0000_0000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} 亿`;
+    if (abs >= 1_0000)
+      return `${(value / 1_0000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} 万`;
     if (Number.isInteger(value)) return value.toLocaleString("zh-CN");
     return value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
   }
   return String(value);
+}
+
+function isNumericColumn(rows: Record<string, any>[], column: string): boolean {
+  const values = rows
+    .map((row) => row[column])
+    .filter((value) => value !== null && value !== undefined && value !== "");
+
+  return (
+    values.length > 0 && values.every((value) => typeof value === "number")
+  );
 }
 
 export function SqlResultTable({
@@ -44,85 +67,116 @@ export function SqlResultTable({
 }: SqlResultTableProps) {
   const [showSql, setShowSql] = useState(false);
   const normalizedScopeText = (permissionScopeText || "").trim();
-  const resolvedScopeHint = normalizedScopeText.length > 0
-    ? normalizedScopeText
-    : "结果已按当前账号的数据权限范围（机构/部门）过滤";
+  const resolvedScopeHint =
+    normalizedScopeText.length > 0
+      ? normalizedScopeText
+      : "结果已按当前账号的数据权限范围（机构/部门）过滤";
+  const numericColumns = useMemo(
+    () => new Set(columns.filter((column) => isNumericColumn(rows, column))),
+    [columns, rows],
+  );
 
   if (!rows || rows.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+      <div className="border-border/60 bg-muted/30 text-muted-foreground rounded-xl border p-4 text-sm">
         查询完成，但没有找到符合条件的数据。
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-full overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <div className="border-border/60 bg-card text-card-foreground w-full max-w-full min-w-0 overflow-hidden rounded-xl border shadow-sm">
       {permissionScopeApplied && (
-        <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+        <div className="border-b border-amber-200/70 bg-amber-50/80 px-4 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">
           注：{resolvedScopeHint}。
         </div>
       )}
 
-      {/* 表格 */}
-      <div className="max-w-full overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              {columns.map((col, idx) => (
-                <th
-                  key={col}
-                  className="px-3 py-2 text-left font-medium text-gray-700 whitespace-nowrap"
-                >
-                  {columnDisplayNames?.[idx] ?? col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr
-                key={i}
-                className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
-              >
-                {columns.map((col) => (
-                  <td
+      <div className="min-w-0">
+        <Table className="w-full min-w-full table-fixed">
+          <TableHeader>
+            <TableRow className="border-border/60 bg-muted/35 hover:bg-muted/35">
+              {columns.map((col, idx) => {
+                const isNumeric = numericColumns.has(col);
+                return (
+                  <TableHead
                     key={col}
-                    className="px-3 py-2 text-gray-800 whitespace-nowrap"
+                    className={cn(
+                      "text-foreground/80 h-auto px-4 py-3 text-xs font-semibold tracking-[0.01em]",
+                      isNumeric ? "text-right" : "text-left",
+                    )}
                   >
-                    {formatValue(row[col])}
-                  </td>
-                ))}
-              </tr>
+                    {columnDisplayNames?.[idx] ?? col}
+                  </TableHead>
+                );
+              })}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row, rowIndex) => (
+              <TableRow
+                key={rowIndex}
+                className={cn(
+                  "border-border/50 hover:bg-muted/20 align-top",
+                  rowIndex % 2 === 1 && "bg-muted/[0.22]",
+                )}
+              >
+                {columns.map((col, columnIndex) => {
+                  const isNumeric = numericColumns.has(col);
+                  return (
+                    <TableCell
+                      key={col}
+                      className={cn(
+                        "text-foreground/90 px-4 py-3 text-sm",
+                        isNumeric
+                          ? "text-right whitespace-nowrap tabular-nums"
+                          : columnIndex === 0
+                            ? "font-medium whitespace-nowrap tabular-nums"
+                            : "leading-6 break-words whitespace-normal",
+                      )}
+                    >
+                      {formatValue(row[col])}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
-      {/* 底栏：行数 + SQL 折叠 */}
-      <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-500">
+      <div className="border-border/60 bg-muted/25 text-muted-foreground flex items-center justify-between border-t px-4 py-2 text-xs">
         <span>
-          共 {(totalRows ?? 0).toLocaleString()} 条
-          {totalRows != null && rows.length < totalRows ? `（已展示前 ${rows.length} 条）` : ""}
+          共 {(totalRows ?? rows.length).toLocaleString()} 条
+          {totalRows != null && rows.length < totalRows
+            ? `（已展示前 ${rows.length} 条）`
+            : ""}
         </span>
         {sql && (
           <button
             onClick={() => setShowSql(!showSql)}
-            className="flex items-center gap-1 hover:text-gray-700 transition-colors"
+            className="hover:bg-muted hover:text-foreground inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors"
+            type="button"
           >
-            <Database className="h-3 w-3" />
+            <Database className="size-3.5" />
             SQL
-            {showSql ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showSql ? (
+              <ChevronUp className="size-3.5" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
           </button>
         )}
       </div>
 
-      {/* SQL 展开区 */}
       {showSql && sql && (
-        <div className="border-t border-gray-200 bg-gray-900 p-3">
-          <pre className="text-xs text-green-400 whitespace-pre-wrap break-all font-mono">
-            {sql}
-          </pre>
+        <div className="border-border/60 min-w-0 border-t px-4 py-3">
+          <CodeBlock
+            language="sql"
+            label="SQL"
+            code={sql}
+            wrapLongLines
+          />
         </div>
       )}
     </div>

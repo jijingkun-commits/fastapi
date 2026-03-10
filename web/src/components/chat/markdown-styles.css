@@ -4,12 +4,6 @@
   font-size: var(--chat-reading-font-size);
   --markdown-code-inline-surface: var(--chat-code-inline-surface);
   --markdown-code-inline-color: var(--chat-code-inline-color);
-  --markdown-code-block-surface: var(--chat-code-block-surface);
-  --markdown-code-block-header-surface: var(--chat-code-block-header-surface);
-  --markdown-code-block-border: var(--chat-code-block-border);
-  --markdown-code-block-header-foreground: var(
-    --chat-code-block-header-foreground
-  );
 }
 
 .markdown-content-readable {
@@ -150,65 +144,6 @@
   padding: 0.18em 0.42em;
   border-radius: 0.45rem;
   font-size: 0.92em;
-}
-
-.markdown-content .markdown-code-block {
-  overflow: hidden;
-  margin: 1.3rem 0;
-  border: 1px solid var(--markdown-code-block-border);
-  border-radius: 1rem;
-  background: var(--markdown-code-block-surface);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
-}
-
-.markdown-content .markdown-code-block__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.72rem 1rem;
-  border-bottom: 1px solid var(--markdown-code-block-border);
-  background: var(--markdown-code-block-header-surface);
-  color: var(--markdown-code-block-header-foreground);
-}
-
-.markdown-content .markdown-code-block__language {
-  font-size: 0.75rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-}
-
-.markdown-content .markdown-code-block__copy {
-  color: var(--markdown-code-block-header-foreground);
-}
-
-.markdown-content .markdown-code-block__copy:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--markdown-code-block-header-surface) 82%,
-    var(--foreground) 18%
-  );
-  color: var(--foreground);
-}
-
-.markdown-content .markdown-code-block__body {
-  margin: 0;
-  width: 100%;
-  background: transparent !important;
-  font-size: 0.92rem;
-  line-height: 1.72;
-}
-
-.markdown-content .markdown-code-block__body > code,
-.markdown-content
-  .markdown-code-block__body
-  :where(code[class*="language-"], pre[class*="language-"]) {
-  background: transparent !important;
-}
-
-.markdown-content .markdown-code-block__body code {
-  padding: 0 !important;
-  color: inherit;
 }
 
 .markdown-content table {
