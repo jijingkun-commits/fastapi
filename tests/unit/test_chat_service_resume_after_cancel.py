@@ -9,7 +9,7 @@ from contextlib import contextmanager
 import pytest
 
 from app.services.chat_service import sse_resume_stream
-from app.services.run_control_service import run_control_service
+from app.services.run_control_service import get_run_control_service, reset_run_control_service
 
 
 class _FakeQuery:
@@ -72,27 +72,24 @@ def _collect_events(async_gen):
 
 @pytest.fixture(autouse=True)
 def _reset_run_control_state():
-    prev_enable = run_control_service.enable_override
-    prev_stopped = run_control_service.stopped_event_override
-
-    run_control_service.enable_override = True
-    run_control_service.stopped_event_override = True
-    run_control_service.reset()
+    service = get_run_control_service()
+    service.enable_override = True
+    service.stopped_event_override = True
+    service.reset()
 
     yield
 
-    run_control_service.reset()
-    run_control_service.enable_override = prev_enable
-    run_control_service.stopped_event_override = prev_stopped
+    reset_run_control_service()
 
 
 def test_resume_after_cancel_returns_stopped_and_done(monkeypatch: pytest.MonkeyPatch) -> None:
     """已取消 run 不应继续 resume 到原执行上下文。"""
 
     run_id = "run_resume_cancel_001"
-    run_control_service.create_run(thread_id="thread-resume-cancel", user_id=1, run_id=run_id)
-    run_control_service.cancel_run(run_id=run_id, requester_user_id=1, reason="user_cancelled")
-    run_control_service.mark_stopped(run_id=run_id, reason="user_cancelled")
+    service = get_run_control_service()
+    service.create_run(thread_id="thread-resume-cancel", user_id=1, run_id=run_id)
+    service.cancel_run(run_id=run_id, requester_user_id=1, reason="user_cancelled")
+    service.mark_stopped(run_id=run_id, reason="user_cancelled")
 
     monkeypatch.setattr("app.services.chat_service.get_db_context", _fake_get_db_context)
 

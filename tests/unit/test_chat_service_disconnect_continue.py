@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from psycopg import OperationalError
 
 from app.services.chat_service import ChatService
-from app.services.run_control_service import run_control_service
+from app.services.run_control_service import get_run_control_service, reset_run_control_service
 
 
 class _FakeQuery:
@@ -118,18 +118,14 @@ def _collect_events(async_gen):
 
 @pytest.fixture(autouse=True)
 def _reset_run_control_state():
-    prev_enable = run_control_service.enable_override
-    prev_stopped = run_control_service.stopped_event_override
-
-    run_control_service.enable_override = True
-    run_control_service.stopped_event_override = True
-    run_control_service.reset()
+    service = get_run_control_service()
+    service.enable_override = True
+    service.stopped_event_override = True
+    service.reset()
 
     yield
 
-    run_control_service.reset()
-    run_control_service.enable_override = prev_enable
-    run_control_service.stopped_event_override = prev_stopped
+    reset_run_control_service()
 
 
 def test_stream_disconnect_does_not_cancel_run():
@@ -168,7 +164,7 @@ def test_stream_disconnect_does_not_cancel_run():
     assert event_types[0] == "init"
     assert "stopped" not in event_types
 
-    snapshot = run_control_service.get_run(run_id)
+    snapshot = get_run_control_service().get_run(run_id)
     assert snapshot is not None
     assert snapshot.status == "completed"
     assert snapshot.cancel_reason is None
@@ -211,6 +207,6 @@ def test_stream_disconnect_skips_snapshot_readback_on_busy_error():
     assert event_types[0] == "init"
     assert "error" not in event_types
 
-    snapshot = run_control_service.get_run(run_id)
+    snapshot = get_run_control_service().get_run(run_id)
     assert snapshot is not None
     assert snapshot.status == "completed"

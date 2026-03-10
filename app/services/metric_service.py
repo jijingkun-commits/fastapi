@@ -3,10 +3,11 @@ import logging
 import re
 from typing import Optional, Set, List, Tuple, Dict, Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.config import DATABASE_URL, ANALYTICS_DATABASE_URL
+from app.core.cache_registry import get_cache_registry
+from app.db.session import analytics_engine, engine
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +34,17 @@ class MetricDefinition:
 class MetricService:
     """指标服务：提供指标匹配和表可用性检查。"""
     
-    def __init__(self):
-        self._chat_engine = None
-        self._data_engine = None
+    def __init__(self, chat_engine_override=None, data_engine_override=None):
+        self._chat_engine = chat_engine_override or engine
+        self._data_engine = data_engine_override or analytics_engine
         self._existing_tables: Optional[Set[str]] = None
     
     @property
     def chat_engine(self):
-        if self._chat_engine is None:
-            self._chat_engine = create_engine(str(DATABASE_URL))
         return self._chat_engine
     
     @property
     def data_engine(self):
-        if self._data_engine is None:
-            self._data_engine = create_engine(str(ANALYTICS_DATABASE_URL))
         return self._data_engine
     
     def match_metric(self, question: str) -> Optional[MetricDefinition]:
@@ -329,13 +326,16 @@ class MetricService:
         return sql
 
 
-# 模块级单例
-_metric_service: Optional[MetricService] = None
+_METRIC_SERVICE_KEY = "metric_service.instance"
+
+
+def reset_metric_service() -> None:
+    """清理共享 MetricService 实例。"""
+
+    get_cache_registry().clear(_METRIC_SERVICE_KEY)
 
 
 def get_metric_service() -> MetricService:
-    """获取指标服务单例。"""
-    global _metric_service
-    if _metric_service is None:
-        _metric_service = MetricService()
-    return _metric_service
+    """获取共享 MetricService 实例。"""
+
+    return get_cache_registry().get_or_create(_METRIC_SERVICE_KEY, MetricService)

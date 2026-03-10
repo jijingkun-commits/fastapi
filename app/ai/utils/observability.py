@@ -305,6 +305,15 @@ def reset_tracer():
     _tracer_instance = None
 
 
+def flush_tracer() -> None:
+    """刷新当前追踪器。"""
+
+    tracer = get_tracer()
+    flush = getattr(tracer, "flush", None)
+    if callable(flush):
+        flush()
+
+
 # ==================== 便捷函数和装饰器 ====================
 
 @contextmanager

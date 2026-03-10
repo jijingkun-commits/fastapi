@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 
+from app.core.cache_registry import get_cache_registry
 from app.core.config import ANALYTICS_SCHEMAS, RESULT_ENRICHMENT_RULE_TTL_SECONDS
 from app.db.session import get_db_context
 from app.models.result_enrichment_rule import ResultEnrichmentRule
@@ -273,15 +274,22 @@ class ResultEnrichmentRuleService:
         return self._ttl_seconds
 
 
-_service_singleton: Optional[ResultEnrichmentRuleService] = None
+_RESULT_ENRICHMENT_RULE_SERVICE_KEY = "result_enrichment_rule_service.instance"
+
+
+def reset_result_enrichment_rule_service() -> None:
+    """清理共享结果增强规则服务实例。"""
+
+    get_cache_registry().clear(_RESULT_ENRICHMENT_RULE_SERVICE_KEY)
 
 
 def get_result_enrichment_rule_service() -> ResultEnrichmentRuleService:
-    """获取规则服务单例。"""
-    global _service_singleton
-    if _service_singleton is None:
-        _service_singleton = ResultEnrichmentRuleService()
-    return _service_singleton
+    """获取共享结果增强规则服务实例。"""
+
+    return get_cache_registry().get_or_create(
+        _RESULT_ENRICHMENT_RULE_SERVICE_KEY,
+        ResultEnrichmentRuleService,
+    )
 
 
 def _resolve_column(columns: List[str], candidates: Tuple[str, ...]) -> Optional[str]:

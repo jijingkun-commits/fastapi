@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.ai.utils.permission_context import UserPermissionContext
+from app.core.cache_registry import get_cache_registry
 from app.db.session import get_db_context
 from app.models.data_permission import (
     DataPermissionColumn,
@@ -66,14 +67,9 @@ class PermissionService:
     线程安全：使用锁保护缓存操作。
     """
 
-    _instance = None
-    _cache: Dict[int, Tuple[UserPermissionContext, datetime]] = {}
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    def __init__(self) -> None:
+        self._cache: Dict[int, Tuple[UserPermissionContext, datetime]] = {}
+        self._lock = threading.Lock()
 
     def get_user_permission_context(
         self,
@@ -820,17 +816,19 @@ class PermissionService:
         }
 
 
-# 全局单例
-_permission_service: Optional[PermissionService] = None
+_PERMISSION_SERVICE_KEY = "permission_service.instance"
+
+
+def reset_permission_service() -> None:
+    """清理共享 PermissionService 实例。"""
+
+    get_cache_registry().clear(_PERMISSION_SERVICE_KEY)
 
 
 def get_permission_service() -> PermissionService:
-    """获取权限服务单例。"""
+    """获取共享 PermissionService 实例。"""
 
-    global _permission_service
-    if _permission_service is None:
-        _permission_service = PermissionService()
-    return _permission_service
+    return get_cache_registry().get_or_create(_PERMISSION_SERVICE_KEY, PermissionService)
 
 
 def get_user_permission_context(user_id: int, db: Optional[Session] = None) -> UserPermissionContext:

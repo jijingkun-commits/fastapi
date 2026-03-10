@@ -5,6 +5,8 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
+- 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
+- 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
 
 ### 2026-03-10 CardRun 分支感知基线收口到 task state
 - 状态：ACTIVE
@@ -16,7 +18,6 @@
 - 回退/失效条件：若未来明确规定 `cardrun` 只能在 `main/master` 主线运行，且禁止 feature 分支收口，则可删除 `integration_branch` 逻辑并回退为固定主线；在此之前保持 branch-aware 语义
 - 关联文档/代码：`docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`、`docs/plans/2026-03-10-cardrun-branch-aware-base.md`
 
-- 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 ### 2026-03-09 记忆异步队列由 FastAPI lifespan 常驻 worker 消费
 - 状态：ACTIVE
 - 决策主题：`memory.intent_async_enabled` 开启时，记忆意图队列必须由 FastAPI `lifespan` 启动的常驻 worker 负责消费，禁止只入队不接消费者
@@ -36,6 +37,16 @@
 - 影响范围：`app/models/todo.py`、`web/src/types/todo.ts`、`install/sql/init_postgres.sql`、`install/scripts/init_postgres.sql/*`、`docs/开发文档/架构设计/数据库设计.md`
 - 回退/失效条件：若未来需要派生完成标记，只能作为只读计算字段存在，且不得承担持久化真理源或写入口
 - 关联文档/代码：`app/repositories/todo_repository.py`、`docs/开发文档/架构设计/数据库设计.md`、`install/sql/init_postgres.sql`
+
+### 2026-03-09 Lifespan 资源治理收口为 `app.state.runtime`
+- 状态：ACTIVE
+- 决策主题：FastAPI 应用级共享资源统一由 `lifespan + AppRuntime` 管理，`lifespan` 只做编排，`app.state.runtime` 成为唯一 owner
+- 背景与问题：当前项目虽然已经使用 `lifespan`，但 DB engine、checkpointer、tracer、asset client、图缓存和导入期副作用仍散落在 `app/main.py`、`app/db/session.py`、`app/services/**` 与 `app/ai/**` 中；owner 分裂后，依赖方向、状态归属和 teardown 责任都不稳定
+- 最终决策：采用 `AppRuntime` 收口应用级共享资源；`lifespan` 仅负责 `build_runtime() -> yield -> runtime.aclose()`；应用级共享对象优先经由 runtime 管理的 registry / getter 访问（如 graph cache、asset service），请求侧按需通过 `request.app.state.runtime` 读取；用户态/请求态缓存不进入 runtime
+- 取舍理由：项目未上线，优先把结构收敛到单一 owner，而不是继续在 `main.py` 堆初始化或在 service 中维持模块级 singleton；相比引入完整 DI 容器，`app.state.runtime` 更轻、更贴近 FastAPI/Starlette 原生实践
+- 影响范围：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`docs/plans/2026-03-09-lifespan-runtime-consolidation-phase1-implementation.md`、后续 `app/main.py`、`app/core/runtime.py`、`app/db/session.py`、`app/services/asset_service.py`、`app/ai/utils/observability.py`、`app/ai/workflow/runtime_graph_provider.py` 等应用级资源 owner 收口工作
+- 回退/失效条件：若未来明确引入统一 DI 容器并以其替代 `app.state.runtime` 作为唯一应用级资源 owner，可将该决策升级或替换；在此之前，不得重新回退到模块全局 singleton 分散持有资源
+- 关联文档/代码：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`docs/plans/2026-03-09-lifespan-runtime-consolidation-phase1-implementation.md`、`app/main.py`
 
 ### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
 - 状态：ACTIVE
@@ -550,3 +561,22 @@
 - 回退/失效条件：若后续 CI 已稳定承接 docs_guard 严格门禁，可继续保持本地提醒模式；若需要恢复本地强门禁，必须显式改回 `--strict`
 - 关联文档/代码：`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`、`.githooks/pre-commit`、`scripts/README.md`
 
+### 2026-03-10 Phase 4 收尾：service getter 只保留薄入口
+- 状态：ACTIVE
+- 决策主题：应用级共享 service 若继续保留 `get_xxx_service()` 入口，该入口只能做 registry 访问，不能再持有 singleton 状态
+- 背景与问题：`permission_service` 同时存在 `__new__` 单例和模块级 `_permission_service`，`result_enrichment_rule_service` 存在 `_service_singleton`，`data_admin_api` 还在导入期提前取实例；这会让 `lifespan -> AppRuntime -> CacheRegistry` 主干外再长出第二套 owner
+- 最终决策：删除类级 / 模块级 singleton owner；`get_permission_service()`、`get_result_enrichment_rule_service()` 保留为无状态薄入口，内部统一走 `CacheRegistry`；endpoint 禁止在 import 阶段缓存共享 service 实例
+- 取舍理由：这样既保住现有调用面，避免无意义签名扩散，又能把状态归属重新收回 runtime 管理域，符合 FastAPI lifespan 的单 owner 最佳实践
+- 影响范围：`app/services/permission_service.py`、`app/services/result_enrichment_rule_service.py`、`app/api/v1/endpoints/data_admin_api.py`、相关 registry/runtime 测试
+- 回退/失效条件：若未来引入统一 DI 容器并明确替代薄 getter，可让 getter 进一步退场；在那之前禁止恢复模块级 singleton 或导入期实例化
+- 关联文档/代码：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`docs/plans/2026-03-09-lifespan-runtime-consolidation-phase4-closeout-implementation.md`、`app/services/permission_service.py`、`app/services/result_enrichment_rule_service.py`
+
+### 2026-03-10 run_control_service 收口到 runtime registry
+- 状态：ACTIVE
+- 决策主题：`RunControlService` 这类跨请求共享、持有可变内存态的 service，不再允许用模块级实例持有状态
+- 背景与问题：`run_control_service = RunControlService()` 被 `chat_service` 与 `chat_api` 直接导入使用，导致运行中任务状态藏在模块全局，和 `lifespan -> AppRuntime -> CacheRegistry` 主干形成双 owner
+- 最终决策：删除模块级 `run_control_service`；改为 `get_run_control_service()` / `reset_run_control_service()` 走 runtime registry；`chat_service`、`chat_api` 只按需获取共享实例
+- 取舍理由：这样能把跨请求共享内存态收回单一 owner，同时不扩大函数签名；相比继续保留模块实例或引入兼容代理，更符合未上线阶段的 lean 收口原则
+- 影响范围：`app/services/run_control_service.py`、`app/services/chat_service.py`、`app/api/v1/endpoints/chat_api.py`、`app/core/runtime.py`、相关 run control/chat/API 测试
+- 回退/失效条件：若未来引入统一 DI 容器，可让 getter 进一步退场；在那之前禁止恢复模块级 `run_control_service` 或 import 期共享实例绑定
+- 关联文档/代码：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`app/services/run_control_service.py`、`app/services/chat_service.py`、`app/api/v1/endpoints/chat_api.py`

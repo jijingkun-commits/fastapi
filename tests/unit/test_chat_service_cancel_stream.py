@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services.chat_service import ChatService
-from app.services.run_control_service import run_control_service
+from app.services.run_control_service import get_run_control_service, reset_run_control_service
 
 
 class _FakeQuery:
@@ -98,7 +98,7 @@ class _CancelableGraph:
             "data": {"content": "第一段输出"},
             "node": "supervisor",
         }
-        run_control_service.cancel_run(
+        get_run_control_service().cancel_run(
             run_id=self._run_id,
             requester_user_id=1,
             reason="user_cancelled",
@@ -133,18 +133,14 @@ def _collect_events(async_gen):
 
 @pytest.fixture(autouse=True)
 def _reset_run_control_state():
-    prev_enable = run_control_service.enable_override
-    prev_stopped = run_control_service.stopped_event_override
-
-    run_control_service.enable_override = True
-    run_control_service.stopped_event_override = True
-    run_control_service.reset()
+    service = get_run_control_service()
+    service.enable_override = True
+    service.stopped_event_override = True
+    service.reset()
 
     yield
 
-    run_control_service.reset()
-    run_control_service.enable_override = prev_enable
-    run_control_service.stopped_event_override = prev_stopped
+    reset_run_control_service()
 
 
 def test_stream_marks_activity_for_visible_output_and_status_progress():
@@ -156,10 +152,12 @@ def test_stream_marks_activity_for_visible_output_and_status_progress():
     async def _fake_get_graph(self, enable_thinking=False, model_id=None):
         return graph
 
+    service = get_run_control_service()
     with patch("app.services.chat_service.get_db_context", _fake_get_db_context), patch(
         "app.repositories.chat_repo.save_message", lambda *args, **kwargs: SimpleNamespace(id=1)
-    ), patch.object(ChatService, "get_graph", _fake_get_graph), patch(
-        "app.services.chat_service.run_control_service.mark_activity"
+    ), patch.object(ChatService, "get_graph", _fake_get_graph), patch.object(
+        service,
+        "mark_activity",
     ) as mock_mark_activity:
         svc = ChatService()
         _collect_events(

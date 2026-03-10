@@ -10,6 +10,7 @@ import logging
 import time
 from typing import List, Optional, Dict, Set, Tuple
 
+from app.core.cache_registry import get_cache_registry
 from app.db.session import get_db_context
 from app.core.config import ANALYTICS_SCHEMAS
 
@@ -77,7 +78,7 @@ ALLOWED_METADATA_VIEWS: Set[str] = {
 }
 
 # 配置缓存（避免每次查询都访问数据库）
-_config_cache: Dict[str, Tuple[Set[str], float]] = {}  # key -> (value_set, timestamp)
+_CONFIG_CACHE_NAME = "askdata.config"
 _CACHE_TTL = 300  # 缓存 5 分钟
 
 # 主键与兼容键定义（配置治理收敛）
@@ -98,13 +99,19 @@ ASKDATA_SCHEMA_BLACKLIST_KEY = ASKDATA_SYSTEM_SCHEMA_BLACKLIST_KEY
 ASKDATA_SCHEMA_BLACKLIST_LEGACY_KEYS = ASKDATA_SYSTEM_SCHEMA_BLACKLIST_LEGACY_KEYS
 
 
+def _get_config_cache() -> Dict[str, Tuple[Set[str], float]]:
+    """返回 askdata 配置缓存槽。"""
+
+    return get_cache_registry().get_dict_cache(_CONFIG_CACHE_NAME, {})
+
+
 def _load_config_from_db(config_key: str, default: Set[str], aliases: Tuple[str, ...] = ()) -> Set[str]:
     """从数据库加载配置，带缓存并兼容旧键。"""
-    global _config_cache
 
+    cache = _get_config_cache()
     cache_key = "|".join((config_key, *aliases))
-    if cache_key in _config_cache:
-        cached_value, cached_time = _config_cache[cache_key]
+    if cache_key in cache:
+        cached_value, cached_time = cache[cache_key]
         if time.time() - cached_time < _CACHE_TTL:
             return cached_value
 
@@ -116,14 +123,14 @@ def _load_config_from_db(config_key: str, default: Set[str], aliases: Tuple[str,
                 value = config_repo.get_config_value(db, lookup_key)
                 if value:
                     result = {s.strip().lower() for s in value.split(",") if s.strip()}
-                    _config_cache[cache_key] = (result, time.time())
+                    cache[cache_key] = (result, time.time())
                     logger.debug("从数据库加载配置 %s (lookup=%s): %s", config_key, lookup_key, result)
                     return result
     except Exception as e:
         logger.warning(f"加载配置 {config_key} 失败，使用默认值: {e}")
 
     default_lower = {s.lower() for s in default}
-    _config_cache[cache_key] = (default_lower, time.time())
+    cache[cache_key] = (default_lower, time.time())
     return default_lower
 
 
@@ -375,7 +382,7 @@ class DataAccessControl:
 def invalidate_config_cache() -> None:
     """清理访问控制配置缓存。"""
 
-    _config_cache.clear()
+    get_cache_registry().clear(_CONFIG_CACHE_NAME)
 
 
 # 全局访问控制实例工厂

@@ -7227,39 +7227,3 @@ async def create_multi_agent_graph(
     )
     
     return graph
-
-
-# 全局多智能体图缓存（线程安全）
-_MULTI_AGENT_GRAPH_CACHE: Dict[Tuple[bool, Optional[str]], Any] = {}
-_CACHE_LOCKS: Dict[Tuple[bool, Optional[str]], asyncio.Lock] = {}
-
-
-async def get_multi_agent_graph(enable_thinking: bool = False, model_id: str = None):
-    """获取全局多智能体图实例（缓存），线程安全。
-    
-    Args:
-        enable_thinking: 是否启用深度思考模式
-        model_id: 模型标识
-        
-    Returns:
-        编译后的多智能体图实例
-    """
-    cache_key = (enable_thinking, model_id)
-    
-    # 获取或创建锁（防止并发创建）
-    if cache_key not in _CACHE_LOCKS:
-        _CACHE_LOCKS[cache_key] = asyncio.Lock()
-    
-    # 使用锁保护缓存访问
-    async with _CACHE_LOCKS[cache_key]:
-        if cache_key not in _MULTI_AGENT_GRAPH_CACHE:
-            logger.info(
-                "创建新的多智能体图实例: enable_thinking=%s, model_id=%s", 
-                enable_thinking, model_id
-            )
-            _MULTI_AGENT_GRAPH_CACHE[cache_key] = await create_multi_agent_graph(
-                enable_thinking=enable_thinking, 
-                model_id=model_id
-            )
-    
-    return _MULTI_AGENT_GRAPH_CACHE[cache_key]

@@ -24,7 +24,7 @@ from app.services.run_control_service import (
     RunNotFoundError,
     RunPermissionDeniedError,
     RunThreadMismatchError,
-    run_control_service,
+    get_run_control_service,
 )
 from app.schemas.chat import ChatRequest, FeedbackRequest
 from app.repositories import chat_repo
@@ -152,6 +152,7 @@ async def chat_stream(
         payload.run_id,
     )
 
+    run_control_service = get_run_control_service()
     if run_control_service.is_enabled():
         try:
             run_snapshot = run_control_service.create_run(
@@ -230,6 +231,7 @@ def list_active_runs(
 ):
     """返回当前用户全部 active runs。"""
 
+    run_control_service = get_run_control_service()
     if not run_control_service.is_active_runs_query_enabled():
         raise HTTPException(
             status_code=503,
@@ -280,6 +282,8 @@ async def cancel_run(
         request_payload.thread_id,
         trace_id,
     )
+
+    run_control_service = get_run_control_service()
 
     try:
         result = run_control_service.cancel_run(

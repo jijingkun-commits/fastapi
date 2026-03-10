@@ -47,7 +47,7 @@ from app.services.document_memory_service import (
 from app.services.user_memory_intent_job_service import (
     enqueue_from_chat_message as enqueue_memory_intent_job,
 )
-from app.services.run_control_service import run_control_service
+from app.services.run_control_service import get_run_control_service
 
 
 logger = logging.getLogger(__name__)
@@ -777,6 +777,7 @@ class ChatService:
         d = self.default_delay_ms if delay_ms is None else delay_ms
         thread_id = thread_id or str(uuid4())
 
+        run_control_service = get_run_control_service()
         run_control_enabled = run_control_service.is_enabled()
         resolved_run_id = run_id
         if run_control_enabled:
@@ -1692,6 +1693,7 @@ async def sse_resume_stream(
     """
     from langgraph.types import Command
     
+    run_control_service = get_run_control_service()
     resolved_run_id = run_id
     config = {"configurable": {"thread_id": thread_id}}
 

@@ -62,6 +62,7 @@ from app.ai.utils.sql_empty_result_recovery import (
     rewrite_sql_for_column_compatibility,
 )
 from app.db.session import engine
+from app.core.cache_registry import get_cache_registry
 from app.core.config import (
     ANALYTICS_DEFAULT_SCHEMA, ENABLE_LLM_JUDGE, ENABLE_RESULT_ENRICHMENT,
 )
@@ -1108,21 +1109,41 @@ def _is_sql_semantically_compatible(
 
 _DATA_GRAPH_INTENT_POLICY_KEY = "data_graph.intent_policy"
 _DATA_GRAPH_INTENT_POLICY_CACHE_TTL_SECONDS = 60
-_DATA_GRAPH_INTENT_POLICY_CACHE: Dict[str, Any] = {
-    "payload": {},
-    "loaded_at": 0.0,
-    "source": "cold_start",
-    "cache_hit": False,
-}
+
+
+def _get_data_graph_intent_policy_cache() -> Dict[str, Any]:
+    """返回 data_graph 意图策略缓存槽。"""
+
+    cache = get_cache_registry().get_dict_cache(
+        _DATA_GRAPH_INTENT_POLICY_KEY,
+        {
+            "payload": {},
+            "loaded_at": 0.0,
+            "source": "cold_start",
+            "cache_hit": False,
+        },
+    )
+    cache.setdefault("payload", {})
+    cache.setdefault("loaded_at", 0.0)
+    cache.setdefault("source", "cold_start")
+    cache.setdefault("cache_hit", False)
+    return cache
+
+
+def invalidate_data_graph_intent_policy_cache() -> None:
+    """清理 data_graph 意图策略缓存。"""
+
+    get_cache_registry().clear(_DATA_GRAPH_INTENT_POLICY_KEY)
 
 
 def _get_data_graph_intent_policy_cache_meta() -> Dict[str, Any]:
     """返回当前策略缓存元信息（用于日志排障）。"""
-    loaded_at = float(_DATA_GRAPH_INTENT_POLICY_CACHE.get("loaded_at") or 0.0)
+    cache = _get_data_graph_intent_policy_cache()
+    loaded_at = float(cache.get("loaded_at") or 0.0)
     cache_age = time.time() - loaded_at if loaded_at > 0 else None
     return {
-        "source": _DATA_GRAPH_INTENT_POLICY_CACHE.get("source", "unknown"),
-        "cache_hit": bool(_DATA_GRAPH_INTENT_POLICY_CACHE.get("cache_hit", False)),
+        "source": cache.get("source", "unknown"),
+        "cache_hit": bool(cache.get("cache_hit", False)),
         "cache_age_sec": round(cache_age, 3) if cache_age is not None else None,
     }
 
@@ -1130,15 +1151,16 @@ def _get_data_graph_intent_policy_cache_meta() -> Dict[str, Any]:
 def _load_data_graph_intent_policy(force_refresh: bool = False) -> Dict[str, Any]:
     """加载问数意图策略配置（数据库配置优先，带本地缓存）。"""
     now = time.time()
-    loaded_at = float(_DATA_GRAPH_INTENT_POLICY_CACHE.get("loaded_at") or 0.0)
+    cache = _get_data_graph_intent_policy_cache()
+    loaded_at = float(cache.get("loaded_at") or 0.0)
     if (
         not force_refresh
         and loaded_at > 0
         and now - loaded_at <= _DATA_GRAPH_INTENT_POLICY_CACHE_TTL_SECONDS
     ):
-        cached_payload = _DATA_GRAPH_INTENT_POLICY_CACHE.get("payload")
+        cached_payload = cache.get("payload")
         if isinstance(cached_payload, dict):
-            _DATA_GRAPH_INTENT_POLICY_CACHE["cache_hit"] = True
+            cache["cache_hit"] = True
             return cached_payload
 
     configured: Any = {}
@@ -1170,10 +1192,10 @@ def _load_data_graph_intent_policy(force_refresh: bool = False) -> Dict[str, Any
         configured = {}
         source = "default"
 
-    _DATA_GRAPH_INTENT_POLICY_CACHE["payload"] = configured
-    _DATA_GRAPH_INTENT_POLICY_CACHE["loaded_at"] = now
-    _DATA_GRAPH_INTENT_POLICY_CACHE["source"] = source
-    _DATA_GRAPH_INTENT_POLICY_CACHE["cache_hit"] = False
+    cache["payload"] = configured
+    cache["loaded_at"] = now
+    cache["source"] = source
+    cache["cache_hit"] = False
     return configured
 
 
@@ -4663,4 +4685,4 @@ def create_data_graph(model=None, enable_thinking: bool = False, model_id: str =
 
 
 # 导出
-__all__ = ["create_data_graph", "DataAgentState"]
+__all__ = ["create_data_graph", "DataAgentState", "invalidate_data_graph_intent_policy_cache"]

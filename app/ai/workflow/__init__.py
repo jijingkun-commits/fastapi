@@ -5,7 +5,8 @@
 注意：单智能体模式 (chat_graph.py) 已废弃（2026-01-31），
 备份见 docs/开发文档/归档备份/单智能体模式备份.md
 """
-from app.ai.workflow.multi_agent_graph import get_multi_agent_graph, create_multi_agent_graph, MultiAgentState
+from app.ai.workflow.multi_agent_graph import create_multi_agent_graph, MultiAgentState
+from app.ai.workflow.runtime_graph_provider import get_multi_agent_graph
 
 __all__ = [
     "get_multi_agent_graph",
