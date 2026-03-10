@@ -28,7 +28,6 @@ from app.api.deps import get_admin_user
 logger = logging.getLogger(__name__)
 
 _rule_repo = ResultEnrichmentRuleRepo()
-_rule_service = get_result_enrichment_rule_service()
 
 router = APIRouter(prefix="/data-admin", tags=["问数管理"])
 
@@ -1057,7 +1056,7 @@ def create_enrichment_rule(
     """创建结果增强规则。"""
     payload = _rule_payload_from_request(request.model_dump())
     try:
-        normalized = _rule_service.validate_rule_payload(payload)
+        normalized = get_result_enrichment_rule_service().validate_rule_payload(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1073,7 +1072,7 @@ def create_enrichment_rule(
     db.commit()
     db.refresh(rule)
 
-    _rule_service.invalidate_cache()
+    get_result_enrichment_rule_service().invalidate_cache()
     return _rule_to_response(rule)
 
 
@@ -1091,7 +1090,7 @@ def update_enrichment_rule(
 
     payload = _rule_payload_from_request(request.model_dump())
     try:
-        normalized = _rule_service.validate_rule_payload(payload)
+        normalized = get_result_enrichment_rule_service().validate_rule_payload(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1107,7 +1106,7 @@ def update_enrichment_rule(
     db.commit()
     db.refresh(rule)
 
-    _rule_service.invalidate_cache()
+    get_result_enrichment_rule_service().invalidate_cache()
     return _rule_to_response(rule)
 
 
@@ -1129,7 +1128,7 @@ def set_enrichment_rule_enabled(
     db.commit()
     db.refresh(rule)
 
-    _rule_service.invalidate_cache()
+    get_result_enrichment_rule_service().invalidate_cache()
     return _rule_to_response(rule)
 
 
@@ -1151,7 +1150,7 @@ def update_enrichment_rule_priority(
     db.commit()
     db.refresh(rule)
 
-    _rule_service.invalidate_cache()
+    get_result_enrichment_rule_service().invalidate_cache()
     return _rule_to_response(rule)
 
 
@@ -1175,12 +1174,12 @@ def test_enrichment_rules(
         if not selected_rule:
             raise HTTPException(status_code=404, detail="规则不存在")
 
-        runtime_rule = _rule_service._validate_and_convert_rule(selected_rule)
+        runtime_rule = get_result_enrichment_rule_service()._validate_and_convert_rule(selected_rule)
         if not runtime_rule:
             raise HTTPException(status_code=400, detail="规则配置非法，无法测试")
         rules = (runtime_rule,)
     else:
-        rules = _rule_service.get_active_rules(force_refresh=False, fallback_rules=())
+        rules = get_result_enrichment_rule_service().get_active_rules(force_refresh=False, fallback_rules=())
 
     matched_rule_codes: List[str] = []
     applied_rule_codes: List[str] = []
@@ -1243,10 +1242,10 @@ def refresh_enrichment_rule_cache(
     """手动刷新结果增强规则缓存。"""
     _ = db
     _ = admin_user
-    rules = _rule_service.get_active_rules(force_refresh=True, fallback_rules=())
+    rules = get_result_enrichment_rule_service().get_active_rules(force_refresh=True, fallback_rules=())
 
     return EnrichmentRuleRefreshResponse(
         message="规则缓存刷新成功",
         rule_count=len(rules),
-        ttl_seconds=_rule_service.ttl_seconds,
+        ttl_seconds=get_result_enrichment_rule_service().ttl_seconds,
     )

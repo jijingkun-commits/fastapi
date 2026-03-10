@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from app.core.cache_registry import get_cache_registry
 from app.models.chat_run import ChatRun, ChatRunStatus
 from app.models.user import User
 
@@ -807,4 +808,19 @@ class RunControlService:
             self._last_activity_flush_at.clear()
 
 
-run_control_service = RunControlService()
+_RUN_CONTROL_SERVICE_KEY = "run_control_service.instance"
+
+
+def reset_run_control_service() -> None:
+    """清理共享 RunControlService 实例。"""
+
+    service = get_cache_registry().get(_RUN_CONTROL_SERVICE_KEY)
+    if isinstance(service, RunControlService):
+        service.reset()
+    get_cache_registry().clear(_RUN_CONTROL_SERVICE_KEY)
+
+
+def get_run_control_service() -> RunControlService:
+    """获取共享 RunControlService 实例。"""
+
+    return get_cache_registry().get_or_create(_RUN_CONTROL_SERVICE_KEY, RunControlService)

@@ -1,5 +1,5 @@
 # AI 模块详解
-> 更新时间：2026-03-08
+> 更新时间：2026-03-10
 
 > **用途**: 作为 AI 架构设计权威源，定义模块边界、关键决策与状态契约，并提供实现落点索引。
 > **文档边界**: `架构设计/` 负责“为什么这样设计”；`代码解读/` 负责“代码如何运行与调试”。
@@ -228,6 +228,14 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 **当前方案**（postprocess 清理）是最务实的选择：改动小、效果等价、未来可平滑迁移。
 
 > 更多背景：参考 LangGraph [Discussion #3192](https://github.com/langchain-ai/langgraph/discussions/3192)
+
+### 应用级运行时 owner 收口（2026-03-10）
+
+1. `FastAPI lifespan` 现在只负责编排；应用级共享资源统一挂到 `AppRuntime + CacheRegistry`。
+2. 已收口的共享 owner 包括：DB runtime、asset service、graph provider、permission service、result enrichment rule service、run control service、metric service。
+3. `service` 层允许保留 `get_xxx_service()` 这类**薄入口**，但入口本身不能再持有模块级 singleton 状态。
+4. `chat_service` / `chat_api` 的 run control 共享实例已改为按需通过 `get_run_control_service()` 获取；`data_query_tools` 的 `MetricService` 共享实例已改为按需通过 `get_metric_service()` 获取。
+5. 当前仍属于 `Phase 4` 持续收口，不新开 `Phase 5/6`；下一批重点是 `postgres_checkpoint` 与 `observability tracer` 这两处“runtime 已编排、owner 仍在模块全局”的半收口项。
 
 ### 中断/终止/断流的会话语义（2026-03-07）
 

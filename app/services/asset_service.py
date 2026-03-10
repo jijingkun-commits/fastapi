@@ -21,6 +21,7 @@ from app.models.chat_asset import ChatAsset, AssetType
 from app.schemas.chat_asset import ChatAssetCreate
 from app.repositories import chat_assets_repository
 from app.core import config as ai_config
+from app.core.cache_registry import get_cache_registry
 
 logger = logging.getLogger(__name__)
 
@@ -280,13 +281,17 @@ class AssetService:
 
 
 
-# 全局单例
-_asset_service: Optional[AssetService] = None
+_ASSET_SERVICE_KEY = "asset_service.instance"
+
+
+def reset_asset_service() -> None:
+    """清理共享 AssetService 实例。"""
+
+    get_cache_registry().clear(_ASSET_SERVICE_KEY)
+
 
 
 def get_asset_service() -> AssetService:
-    """获取 AssetService 单例。"""
-    global _asset_service
-    if _asset_service is None:
-        _asset_service = AssetService()
-    return _asset_service
+    """获取共享 AssetService 实例。"""
+
+    return get_cache_registry().get_or_create(_ASSET_SERVICE_KEY, AssetService)

@@ -302,10 +302,12 @@ class TestStreamAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_enabled", return_value=True), patch(
-            "app.api.v1.endpoints.chat_api.run_control_service.create_run"
-        ) as mock_create_run, patch("app.api.v1.endpoints.chat_api.sse_stream") as mock_sse_stream:
-            mock_create_run.side_effect = ActiveRunExistsError(thread_id="thread-dup", active_run_id="run-active")
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service, patch(
+            "app.api.v1.endpoints.chat_api.sse_stream"
+        ) as mock_sse_stream:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.is_enabled.return_value = True
+            mock_run_control_service.create_run.side_effect = ActiveRunExistsError(thread_id="thread-dup", active_run_id="run-active")
 
             response = client.post(
                 "/api/v1/chat/stream",
@@ -331,10 +333,12 @@ class TestStreamAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_enabled", return_value=True), patch(
-            "app.api.v1.endpoints.chat_api.run_control_service.create_run"
-        ) as mock_create_run, patch("app.api.v1.endpoints.chat_api.sse_stream") as mock_sse_stream:
-            mock_create_run.side_effect = ParallelLimitExceededError(active_count=3, limit=3)
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service, patch(
+            "app.api.v1.endpoints.chat_api.sse_stream"
+        ) as mock_sse_stream:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.is_enabled.return_value = True
+            mock_run_control_service.create_run.side_effect = ParallelLimitExceededError(active_count=3, limit=3)
 
             response = client.post(
                 "/api/v1/chat/stream",
@@ -362,10 +366,10 @@ class TestActiveRunsAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_active_runs_query_enabled", return_value=True), patch(
-            "app.api.v1.endpoints.chat_api.run_control_service.list_active_runs_by_user"
-        ) as mock_list:
-            mock_list.return_value = [
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.is_active_runs_query_enabled.return_value = True
+            mock_run_control_service.list_active_runs_by_user.return_value = [
                 MagicMock(
                     run_id="run-1",
                     thread_id="thread-1",
@@ -385,7 +389,7 @@ class TestActiveRunsAPI:
             assert data["items"][0]["thread_id"] == "thread-1"
             assert data["items"][0]["status"] == "running"
             assert "messages" not in data["items"][0]
-            mock_list.assert_called_once()
+            mock_run_control_service.list_active_runs_by_user.assert_called_once()
 
         app.dependency_overrides.clear()
 
@@ -408,10 +412,11 @@ class TestCancelRunAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel, patch(
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service, patch(
             "app.api.v1.endpoints.chat_api.cancel_checkpoint", new_callable=AsyncMock
         ) as mock_checkpoint:
-            mock_cancel.return_value = MagicMock(
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.cancel_run.return_value = MagicMock(
                 accepted=True,
                 run_id="run-1",
                 thread_id="thread-1",
@@ -430,7 +435,7 @@ class TestCancelRunAPI:
             assert data["accepted"] is True
             assert data["run_id"] == "run-1"
             assert data["status"] == "stopped"
-            mock_cancel.assert_called_once_with(
+            mock_run_control_service.cancel_run.assert_called_once_with(
                 run_id="run-1",
                 requester_user_id=1,
                 is_admin=False,
@@ -455,8 +460,9 @@ class TestCancelRunAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
-            mock_cancel.side_effect = RunNotFoundError("run 不存在: run-missing")
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.cancel_run.side_effect = RunNotFoundError("run 不存在: run-missing")
 
             response = client.post(
                 "/api/v1/chat/runs/run-missing/cancel",
@@ -479,8 +485,9 @@ class TestCancelRunAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
-            mock_cancel.side_effect = RunPermissionDeniedError("无权限取消 run: run-locked")
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.cancel_run.side_effect = RunPermissionDeniedError("无权限取消 run: run-locked")
 
             response = client.post(
                 "/api/v1/chat/runs/run-locked/cancel",
@@ -501,11 +508,12 @@ class TestCancelRunAPI:
 
         app.dependency_overrides[get_db] = _mock_get_db
 
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service:
+            mock_run_control_service = mock_get_run_control_service.return_value
             response = client.post("/api/v1/chat/runs/run-1/cancel", json={})
 
             assert response.status_code == 400
-            assert mock_cancel.call_count == 0
+            assert mock_run_control_service.cancel_run.call_count == 0
 
         app.dependency_overrides.clear()
 
@@ -520,8 +528,9 @@ class TestCancelRunAPI:
         app.dependency_overrides[get_db] = _mock_get_db
 
         isolated_client = TestClient(app, raise_server_exceptions=False)
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.cancel_run") as mock_cancel:
-            mock_cancel.side_effect = ValueError("thread_id mismatch")
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service") as mock_get_run_control_service:
+            mock_run_control_service = mock_get_run_control_service.return_value
+            mock_run_control_service.cancel_run.side_effect = ValueError("thread_id mismatch")
 
             response = isolated_client.post(
                 "/api/v1/chat/runs/run-1/cancel",
@@ -536,7 +545,7 @@ class TestCancelRunAPI:
 def test_multi_worker_active_runs_reads_directly_from_db(db_session):
     """active runs 接口应以 DB 为真理源，而非依赖本 worker 内存态。"""
 
-    from app.api.v1.endpoints.chat_api import run_control_service
+    from app.services.run_control_service import get_run_control_service, reset_run_control_service
 
     app.dependency_overrides[get_current_user] = _mock_user
 
@@ -557,10 +566,18 @@ def test_multi_worker_active_runs_reads_directly_from_db(db_session):
     )
     db_session.commit()
 
+    run_control_service = get_run_control_service()
+
     try:
-        with patch("app.api.v1.endpoints.chat_api.run_control_service.is_active_runs_query_enabled", return_value=True), patch.dict(
-            run_control_service._runs, {}, clear=True
-        ), patch.dict(run_control_service._active_run_by_thread, {}, clear=True):
+        with patch("app.api.v1.endpoints.chat_api.get_run_control_service", return_value=run_control_service), patch.object(
+            run_control_service,
+            "is_active_runs_query_enabled",
+            return_value=True,
+        ), patch.dict(run_control_service._runs, {}, clear=True), patch.dict(
+            run_control_service._active_run_by_thread,
+            {},
+            clear=True,
+        ):
             response = client.get("/api/v1/chat/runs/active")
 
         assert response.status_code == 200
@@ -570,4 +587,5 @@ def test_multi_worker_active_runs_reads_directly_from_db(db_session):
         assert data["items"][0]["thread_id"] == "thread-db"
         assert data["items"][0]["status"] == "running"
     finally:
+        reset_run_control_service()
         app.dependency_overrides.clear()
