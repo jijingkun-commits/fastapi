@@ -182,7 +182,7 @@ function ThreadItem({
     <div className="w-full">
       <div
         className={cn(
-          "app-sidebar-item app-sidebar-entry group relative flex w-full cursor-pointer items-center gap-3 px-3 py-2.5",
+          "app-sidebar-item app-sidebar-entry group relative flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-2",
           isEmphasized && "app-sidebar-item-active",
         )}
         role="button"
@@ -242,9 +242,9 @@ function ThreadItem({
           <>
             <div
               className={cn(
-                "min-w-0 flex-1 truncate text-left text-[var(--chat-ui-font-md)] leading-6 transition-[padding,color] duration-150",
-                !isSelectMode && "pr-2 group-hover:pr-10",
-                isEmphasized ? "font-semibold text-[var(--app-sidebar-item-active-fg)]" : "font-medium text-[var(--app-sidebar-item-fg)]",
+                "min-w-0 flex-1 truncate text-left text-[var(--chat-ui-font-sm)] leading-5 transition-[padding,color] duration-150",
+                !isSelectMode && "pr-2 group-hover:pr-8",
+                isEmphasized ? "font-normal text-[var(--app-sidebar-item-active-fg)]" : "font-normal text-[var(--app-sidebar-item-fg)]",
               )}
             >
               {thread.title || "新对话"}
@@ -257,13 +257,13 @@ function ThreadItem({
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      "app-sidebar-item app-sidebar-row-action absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+                      "app-sidebar-item app-sidebar-row-action absolute right-1.5 top-1/2 h-[26px] w-[26px] -translate-y-1/2 rounded-[10px] opacity-0 transition-opacity duration-150 group-hover:opacity-100",
                       isEmphasized && "opacity-100",
                     )}
                     onClick={(event) => event.stopPropagation()}
                     aria-label="更多操作"
                   >
-                    <MoreHorizontal className="h-4 w-4" />
+                    <MoreHorizontal className="h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="chat-popover-surface w-36 rounded-2xl p-1 font-sans">
@@ -359,7 +359,7 @@ function ThreadList({
   }
 
   return (
-    <div className="chat-scrollable flex h-full w-full flex-col items-start justify-start gap-1 overflow-y-auto px-3 pb-3 pt-1.5">
+    <div className="chat-scrollable flex h-full w-full flex-col items-start justify-start gap-0.5 overflow-y-auto px-2.5 pb-2.5 pt-1">
       {groupedThreads.map((group) => {
         const isExpanded = isSearching ? true : (expandedGroups[group.label] ?? true);
 
@@ -385,7 +385,7 @@ function ThreadList({
               <span className="app-sidebar-section-count">{group.threads.length}</span>
             </button>
             {isExpanded ? (
-              <div id={`thread-group-${group.label}`} className="flex flex-col gap-1">
+              <div id={`thread-group-${group.label}`} className="flex flex-col gap-0.5">
                 {group.threads.map((thread) => (
                   <ThreadItem
                     key={thread.thread_id}
