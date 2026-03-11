@@ -4,6 +4,9 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+
+- 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
+- 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 - 2026-03-11｜task_split 机器契约/过程报告从 docs 彻底收口到 `workdocs/任务拆解/contracts|reports`，真实运行态只认 `.artifacts/states/task_splits`（ACTIVE）→ `docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
@@ -14,8 +17,30 @@
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
 
+### 2026-03-11 前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`
+
+- 状态：ACTIVE
+- 决策主题：前端 lint 不再走 `next lint` 包装入口，统一改为 `eslint .`，并在 flat config 里直接接入 `@next/eslint-plugin-next` 官方规则
+- 背景与问题：`next lint` 在当前 flat config 下持续提示 “The Next.js plugin was not detected in your ESLint configuration”；同时 `react-refresh` 对 provider/ui/headless 文件误报偏多，导致 lint 输出噪音高、可读性差
+- 最终决策：`web/package.json` 中 `lint/lint:fix` 改为 `eslint .`；`web/eslint.config.js` 直接接入 `@next/eslint-plugin-next` 的 `recommended + core-web-vitals` 规则；`react-refresh/only-export-components` 只保留在适合的组件文件，对 `providers/ui/headless/barrel` 精准关闭
+- 取舍理由：这是 Next/ESLint 官方更稳定的配置方向；相比继续依赖 `next lint` 包装层或放任规则误报，直接用 ESLint CLI + 精准 rule scope 更简单、更可维护
+- 影响范围：`web/package.json`、`web/eslint.config.js`、前端 lint 工作流、后续 warning 基线
+- 回退/失效条件：若未来升级到新的官方 lint 集成方案并明确替代 `eslint .`，可由新的入口替代；在此之前保持当前配置
+- 关联文档/代码：`web/package.json`、`web/eslint.config.js`、`docs/内部参考/迭代需求/refactor_report_chat-shell-style-unification.md`
+
+### 2026-03-11 聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class
+
+- 状态：ACTIVE
+- 决策主题：聊天页面壳层、状态条、输入区、消息工具条的皮肤 owner 统一收敛到 `web/src/app/globals.css` 的 `chat-*` 主题 class；组件不再保留第二套大段 inline Tailwind 壳层样式
+- 背景与问题：`ChatHeader` 已切到新主题，但 `Thread`、`ChatInput`、消息工具条仍保留旧 inline 样式；结果是“新 class 已定义、组件却没接线”，技能加载状态条与输入区视觉割裂
+- 最终决策：`Thread` 只负责页面壳层、滚动区与 `runtime-status` 接线，`ChatInput` 只负责输入区接线，消息组件只负责消息级接线；无消费者的聊天壳层 class 直接删除，不保留“以后也许会用”的死代码
+- 取舍理由：项目未上线，优先消灭双轨样式 owner；相比继续在组件里堆 inline class 或保留未接线 theme class，单入口皮肤更简洁、更易验证，也更符合 CSS 变量/组件职责分离的最佳实践
+- 影响范围：`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/{ai,human,shared}.tsx`、聊天 UI/架构文档、相关 E2E testid 契约
+- 回退/失效条件：若未来聊天页彻底迁移到另一套 design system 或 CSS-in-JS 方案，可由新的样式入口替代；在此之前保持 `chat-*` 为唯一皮肤 owner，不恢复 inline 双轨
+- 关联文档/代码：`docs/开发文档/架构设计/前端架构.md`、`docs/开发文档/架构设计/前端UI设计方案.md`、`docs/内部参考/迭代需求/refactor_report_chat-shell-style-unification.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 
 ### 2026-03-11 task_split 机器契约与过程报告收口到 `workdocs/任务拆解`
+
 - 状态：ACTIVE
 - 决策主题：task_split 的 canonical 根目录从 `docs/内部参考/任务拆解/` 切到 `workdocs/任务拆解/`；`contracts/` 承担过程契约，`reports/` 承担过程报告，真实运行态只认 `.artifacts/states/task_splits/`
 - 背景与问题：Phase 1 只迁出了 `.state/.jsonl/.lock`，但 `_active_task.json`、`vk_cards.json`、`preflight_status.json`、`consumption_report.json` 等机器 JSON 仍留在 docs，导致 docs / workdocs / .artifacts 边界继续打架，脚本也各自硬编码旧路径
@@ -26,6 +51,7 @@
 - 关联文档/代码：`docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_requirements.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`、`scripts/task_split_paths.py`
 
 ### 2026-03-11 瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断
+
 - 状态：ACTIVE
 - 决策主题：将“删旧代码”从交付后提醒前置为编码前 shrink contract，并把新实现覆盖旧职责但旧路径无理由残留定义为硬失败
 - 背景与问题：现有 Layer1 / Lean Guard 已明确反对继续长胖，但执行时仍容易先加新逻辑、后解释旧路径为什么没删；规则知道要瘦身，却还不够像实现前合同
@@ -36,6 +62,7 @@
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 
 ### 2026-03-11 文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启
+
 - 状态：ACTIVE
 - 决策主题：只要文档记忆 runtime worker 已就绪且 `ENABLE_DOC_MEMORY_ASYNC_DELETE=true`，配置默认值 `memory.intent_async_enabled` 必须保持开启，不再允许通过默认关闭把“只入队不消费”伪装成同步链路正常
 - 背景与问题：此前为绕过 runtime 缺口，配置曾长期保持“默认关闭”；worker 与删除链路补齐后，若仍默认关闭，会让真实能力长期停留在文档/代码不一致状态，也会误导后续实现继续围绕 fallback 打补丁
@@ -46,6 +73,7 @@
 - 关联文档/代码：`docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`、相关记忆链路实现与测试
 
 ### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）
+
 - 状态：ACTIVE
 - 决策主题：文档体系收敛为 `docs/`（长期真理源）+ `workdocs/`（进行中工作文档）+ `.artifacts/`（运行/产物快照）三层结构；`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**` 在 Phase 1 仅作为兼容入口
 - 背景与问题：当前 `docs/plans/`、`docs/内部参考/迭代需求/`、`docs/内部参考/任务拆解/`、各类报告与中间 JSON 混杂，真理源、工作稿与机器产物边界不清，`doc_sync` / `docs_guard` / 执行链都在同一层目录相互踩踏
@@ -56,6 +84,7 @@
 - 关联文档/代码：`docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_requirements.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 
 ### 2026-03-11 JJK 命令执行统一采用单步单目标
+
 - 状态：ACTIVE
 - 决策主题：`/jjk-*` 命令执行 shell / Git / 测试 / 验证步骤时，统一采用“单步单目标”，禁止把基础观测、期望比对、解释器解析、测试执行、统计汇总拼成一条长链
 - 背景与问题：超长 one-liner 一旦失败或输出被截断，很难判断是哪一步失效，执行者容易整串重跑，既浪费时间，也会制造“同一命令反复调用”的糟糕体验
@@ -65,9 +94,8 @@
 - 回退/失效条件：若未来命令执行统一收敛到可复用脚本编排器，并由工具层天然提供单步状态与轮询协议，可把文档约束降级为实现说明；在此之前保持当前规则
 - 关联文档/代码：`.cursor/rules/core.mdc`、`.cursor/commands/jjk-verify.md`、`.cursor/commands/jjk-test.md`、`.cursor/commands/jjk-review.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
 
-
-
 ### 2026-03-11 Data handoff 与历史回放脏块统一收口
+
 - 状态：ACTIVE
 - 决策主题：`data.query` 委派必须在编排层落成 canonical `frame.query_text`；assistant 历史回放只保留用户可见文本，不再把 raw `Responses` 内部块或“继续补齐”泄漏文本重新喂回模型
 - 背景与问题：`assign_to_data_expert(frame=null, task_description=...)` 会被 router guard 阻断，并诱发内部“请确认是否继续补齐”提示外泄；旧线程若残留 `function_call` 或空壳 `text` block，继续聊天时会在 `langchain-openai` Responses payload 构造阶段触发 `KeyError: 'text'`
@@ -78,6 +106,7 @@
 - 关联文档/代码：`docs/产品文档/聊天系统需求.md`、`docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/workflow/multi_agent_graph.py`、`app/ai/message_utils.py`
 
 ### 2026-03-10 Assistant 空壳文本块在消息契约层清洗
+
 - 状态：ACTIVE
 - 决策主题：assistant 历史消息中 `type=text/output_text/refusal` 但无可读正文的空壳 block 必须在消息契约层被丢弃，不允许进入 LangGraph checkpoint
 - 背景与问题：`langchain-openai` 的 Responses 流式边界场景可能生成仅含 `id/index` 的空壳 text block；若直接写入 `state.messages`，后续复用同一 `thread_id` 时会在 payload 构造阶段触发 `KeyError: 'text'`
@@ -88,6 +117,7 @@
 - 关联文档/代码：`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`、`venv/lib/python3.11/site-packages/langchain_openai/chat_models/base.py`
 
 ### 2026-03-10 CardRun 分支感知基线收口到 task state
+
 - 状态：ACTIVE
 - 决策主题：`/jjk-cardrun -> wt-flow` 在非 `main/master` 分支上运行时，卡片 worktree 的集成目标必须首轮继承当前父分支，并写入 `task-runner-state.json.integration_branch`
 - 背景与问题：当前 `wt-flow create/next` 默认把 `base_branch` 固定为 `master`，导致 `cardrun` 即使在 feature 分支上启动，后续卡片仍会基于 `master` 创建并最终误收口到 `master`
@@ -98,6 +128,7 @@
 - 关联文档/代码：`docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`、`docs/plans/2026-03-10-cardrun-branch-aware-base.md`
 
 ### 2026-03-09 记忆异步队列由 FastAPI lifespan 常驻 worker 消费
+
 - 状态：ACTIVE
 - 决策主题：`memory.intent_async_enabled` 开启时，记忆意图队列必须由 FastAPI `lifespan` 启动的常驻 worker 负责消费，禁止只入队不接消费者
 - 背景与问题：聊天侧已切到“主链路只入队”，但运行时没有消费者和 `process_job` 接线，导致删除/写入承诺停留在口头，后台 `t_user_memory_document` 状态长期不变
@@ -108,6 +139,7 @@
 - 关联文档/代码：`docs/plans/2026-03-03-user-personalized-memory-llm-async-design.md`、`docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`、`docs/内部参考/迭代需求/debug_report_memory_intent_runtime.md`
 
 ### 2026-03-09 待办完成态收敛为 `status` 单字段
+
 - 状态：ACTIVE
 - 决策主题：待办完成态统一由 `t_todo.status` 表达，不再保留旧完成布尔镜像
 - 背景与问题：模型、仓储、前端展示已按 `status='done'` 工作，但初始化 SQL、增量脚本和前端类型仍残留旧布尔语义，导致 schema 脚本与运行时口径漂移
@@ -118,6 +150,7 @@
 - 关联文档/代码：`app/repositories/todo_repository.py`、`docs/开发文档/架构设计/数据库设计.md`、`install/sql/init_postgres.sql`
 
 ### 2026-03-09 Lifespan 资源治理收口为 `app.state.runtime`
+
 - 状态：ACTIVE
 - 决策主题：FastAPI 应用级共享资源统一由 `lifespan + AppRuntime` 管理，`lifespan` 只做编排，`app.state.runtime` 成为唯一 owner
 - 背景与问题：当前项目虽然已经使用 `lifespan`，但 DB engine、checkpointer、tracer、asset client、图缓存和导入期副作用仍散落在 `app/main.py`、`app/db/session.py`、`app/services/**` 与 `app/ai/**` 中；owner 分裂后，依赖方向、状态归属和 teardown 责任都不稳定
@@ -128,6 +161,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`docs/plans/2026-03-09-lifespan-runtime-consolidation-phase1-implementation.md`、`app/main.py`
 
 ### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
+
 - 状态：ACTIVE
 - 决策主题：把 `jjk-commit` 从“交付门禁 + 半套 merge 口径”收敛为交付编排层，并将真实 Git 生命周期统一下沉到共享 delivery engine
 - 背景与问题：当前 `jjk-commit` 文案仍以 `--ff-only` + 人工冲突处理为主，而 `wt-flow.sh` 已实现 `rebase + --no-ff merge + abort`；命令层和脚本层形成两套 merge 真理源，用户无法稳定判断应该信哪一套
@@ -138,6 +172,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`、`docs/plans/2026-03-09-jjk-commit-delivery-engine-implementation.md`、`.cursor/commands/jjk-commit.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-09 共享开发库 Alembic 漂移收口规则
+
 - 状态：ACTIVE
 - 决策主题：共享开发库 revision 漂移时，必须补齐缺失历史迁移并新增 merge revision 收口，禁止直接篡改 `alembic_version`
 - 背景与问题：当前开发库记录在 `20260309_0023`，但本分支最初只携带另一条 `20260309_0022` 迁移，导致 `alembic current` 直接失败；若继续手工改版本表，会让数据库历史与代码历史永久脱钩
@@ -148,6 +183,7 @@
 - 关联文档/代码：`alembic/versions/20260308_0022_add_skill_tool_contract.py`、`alembic/versions/20260309_0023_seed_data_handoff_tool_contract.py`、`alembic/versions/20260309_0024_merge_runtime_bucket_and_skill_tool_contract_heads.py`
 
 ### 2026-03-09 管理后台总览旧快照表正式退役
+
 - 状态：ACTIVE
 - 决策主题：删除 `t_ops_metric_snapshot_minute`，总览运行态不再保留展示快照表
 - 背景与问题：旧快照表仍被 `AdminOverviewQueryService` 当作 fallback 与持久化使用，形成分钟桶与展示快照双真源；继续保留只会掩盖聚合链路问题并扩大语义漂移
@@ -158,6 +194,7 @@
 - 关联文档/代码：`docs/开发文档/架构设计/数据库设计.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`
 
 ### 2026-03-09 管理后台总览真理源切换完成
+
 - 状态：ACTIVE
 - 决策主题：总览 V2 正式退役旧 collector、旧聚合服务与进程内双写缓存
 - 背景与问题：`AdminOverviewQueryService` 已经接管分钟桶读模型，但仓内仍保留 `admin_overview_service.py`、`overview_runtime_collector.py` 和 `runtime_request_metrics_store` 双写链路，导致状态 owner 与依赖方向仍有双源
@@ -201,6 +238,7 @@
 - 2026-03-09｜Git 交付收口分层为命令编排层 + 共享 delivery engine（ACTIVE）→ `docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`
 
 ## 记录模板
+
 - 日期：YYYY-MM-DD
 - 状态：ACTIVE / SUPERSEDED / DEPRECATED
 - 决策主题：
@@ -212,6 +250,7 @@
 - 关联文档/代码：
 
 ## 治理规则
+
 - 仅记录长期有效决策，不记录一次性执行日志。
 - 单条记录建议 8~12 行，聚焦“决策与理由”，不贴大段实现细节。
 - 当决策被替代时，将原记录状态更新为 `SUPERSEDED` 并链接替代记录。
@@ -220,6 +259,7 @@
 ## 决策记录
 
 ### 2026-03-09 Git 交付收口分层为命令编排层 + 共享 delivery engine
+
 - 状态：ACTIVE
 - 决策主题：把 `jjk-commit` 从“交付门禁 + 半套 merge 口径”收敛为交付编排层，并将真实 Git 生命周期统一下沉到共享 delivery engine
 - 背景与问题：当前 `jjk-commit` 文案仍以 `--ff-only` + 人工冲突处理为主，而 `wt-flow.sh` 已实现 `rebase + --no-ff merge + abort`；命令层和脚本层形成两套 merge 真理源，用户无法稳定判断应该信哪一套
@@ -230,6 +270,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-jjk-commit-delivery-engine-design.md`、`docs/plans/2026-03-09-jjk-commit-delivery-engine-implementation.md`、`.cursor/commands/jjk-commit.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-09 共享开发库 Alembic 漂移收口规则
+
 - 状态：ACTIVE
 - 决策主题：共享开发库 revision 漂移时，必须补齐缺失历史迁移并新增 merge revision 收口，禁止直接篡改 `alembic_version`
 - 背景与问题：当前开发库记录在 `20260309_0023`，但本分支最初只携带另一条 `20260309_0022` 迁移，导致 `alembic current` 直接失败；若继续手工改版本表，会让数据库历史与代码历史永久脱钩
@@ -240,6 +281,7 @@
 - 关联文档/代码：`alembic/versions/20260308_0022_add_skill_tool_contract.py`、`alembic/versions/20260309_0023_seed_data_handoff_tool_contract.py`、`alembic/versions/20260309_0024_merge_runtime_bucket_and_skill_tool_contract_heads.py`
 
 ### 2026-03-09 管理后台总览旧快照表正式退役
+
 - 状态：ACTIVE
 - 决策主题：删除 `t_ops_metric_snapshot_minute`，总览运行态不再保留展示快照表
 - 背景与问题：旧快照表仍被 `AdminOverviewQueryService` 当作 fallback 与持久化使用，形成分钟桶与展示快照双真源；继续保留只会掩盖聚合链路问题并扩大语义漂移
@@ -250,6 +292,7 @@
 - 关联文档/代码：`docs/开发文档/架构设计/数据库设计.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`
 
 ### 2026-03-09 管理后台总览真理源切换完成
+
 - 状态：ACTIVE
 - 决策主题：总览 V2 正式退役旧 collector、旧聚合服务与进程内双写缓存
 - 背景与问题：`AdminOverviewQueryService` 已经接管分钟桶读模型，但仓内仍保留 `admin_overview_service.py`、`overview_runtime_collector.py` 和 `runtime_request_metrics_store` 双写链路，导致状态 owner 与依赖方向仍有双源
@@ -260,6 +303,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-admin-overview-metrics-v2-design.md`、`docs/plans/2026-03-09-admin-overview-metrics-v2-implementation.md`、`app/services/runtime_request_metrics.py`
 
 ### 2026-03-08 治理前置命令显式化
+
 - 状态：ACTIVE
 - 决策主题：把架构门禁与 API 文档同步从散落规则显式收敛为 `jjk-*` 前置命令
 - 背景与问题：Layer1 已要求任何改动前先给四段式架构结论，且 API / 契约变更必须先同步文档，但当前只有规则没有显式命令入口，执行者容易直接跳去 `/jjk-plan`、`/jjk-imp`、`/jjk-refactor`，遗漏治理动作
@@ -270,6 +314,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-jjk-governance-skills-design.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-api-doc-sync.md`
 
 ### 2026-03-08 数据库证据门禁左移到六段主链
+
 - 状态：ACTIVE
 - 决策主题：数据库风险任务的证据责任统一左移到 `plan -> vkplan -> cardrun -> wtimp -> test -> verify` 主链，不再依赖末端人工补证据
 - 背景与问题：当前工程流已把 worktree、dispatch、commit、merge 收口做得较强，但“哪些任务必须验证 `chat_db/data_db/scripted_flow/E2E`”仍未成为可机读契约，导致卡片可能局部通过、全链缺少数据库级证据
@@ -280,6 +325,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-engineering-flow-db-evidence-gate-design.md`、`docs/plans/2026-03-08-engineering-flow-db-evidence-gate-implementation.md`、`.cursor/commands/jjk-cardrun.md`、`.cursor/commands/jjk-wtimp.md`
 
 ### 2026-03-08 产品运行时 Skill 文档同步矩阵冻结
+
 - 状态：ACTIVE
 - 决策主题：产品运行时 Skill 的文档同步不再依赖执行者自行猜测，统一冻结为显式强制矩阵
 - 背景与问题：`技能系统需求.md`、`AI技能库.md`、`接口文档.md`、配置/部署/测试文档虽已存在，但 `doc_sync` 未对 `app/ai/skills`、`skill_service`、`skill_admin`、`import_skills` 等路径给出单一门禁，导致 AI 容易只更新部分文档
@@ -290,6 +336,7 @@
 - 关联文档/代码：`.cursor/rules/doc_sync.mdc`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
 
 ### 2026-03-08 wtimp dispatch 失败路径收口
+
 - 状态：ACTIVE
 - 决策主题：`wtimp_dispatch_bridge` 必须独占 dispatch 子执行器生命周期治理，失败路径统一负责 process-group 清理与唯一 JSON contract 校验
 - 背景与问题：此前虽已补 `dispatch_timeout_seconds` 契约，但 bridge 仍使用 `subprocess.run(...)` + 宽松 JSON 提取；timeout 后只能杀最外层进程，stdout 中任意 dict 也可能被误判为成功回执
@@ -300,9 +347,10 @@
 - 关联文档/代码：`docs/内部参考/迭代需求/debug_report_wf02_dispatch_timeout.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wtimp_dispatch_bridge.py`
 
 ### 2026-03-08 dirty path 解析协议收口
+
 - 状态：ACTIVE
 - 决策主题：`wt-flow` 与 `coder4_bootstrap_kernel` 的 dirty path 统一以 `git status --porcelain -z --untracked-files=no` 为真理源
-- 背景与问题：此前虽已补 quoted-path decode，但 rename/copy 仍依赖文本箭头切割；当文件名自身包含 ` -> ` 时，whitelist 命中会被误伤
+- 背景与问题：此前虽已补 quoted-path decode，但 rename/copy 仍依赖文本箭头切割；当文件名自身包含 `->` 时，whitelist 命中会被误伤
 - 最终决策：shell/python 两侧都改为解析 NUL 分隔记录；rename/copy 一律消费目标路径；删除 `core.quotePath=false` / 文本补码作为主路径依赖
 - 取舍理由：把路径解析提升到 Git 原生记录协议层，消除“引号/箭头/空格/中文”交织时的字符串歧义
 - 影响范围：`scripts/coder4/wt-flow.sh`、`scripts/coder4/coder4_bootstrap_kernel.py`、相关 dirty policy / merge / local-mode 回归测试
@@ -310,6 +358,7 @@
 - 关联文档/代码：`docs/内部参考/迭代需求/debug_report_wf04_porcelain_z_dirty_parser.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`
 
 ### 2026-03-08 工程流 wrapper 真理源提示收口
+
 - 状态：ACTIVE
 - 决策主题：工程流 wrapper 在脱离仓库布局时必须 fail-fast，并直接提示实体脚本路径作为单一真理源
 - 背景与问题：`scripts/wt-flow.sh` 被复制到仓库外时，旧行为只会抛出 `coder4/wt-flow.sh: No such file or directory`，用户难以判断自己拿错了 wrapper 还是实体脚本
@@ -320,6 +369,7 @@
 - 关联文档/代码：`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`、`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_wt_flow_wrapper_entrypoint.py`
 
 ### 2026-03-08 Skill 真理源收敛为 DB-only，退役本地 SKILL.md 导入链
+
 - 状态：ACTIVE
 - 决策主题：Skill 的正式维护、管理面与运行时统一只认数据库 versioned 真理源，本地 `SKILL.md` 与目录导入脚本退出主路径
 - 背景与问题：即使 runtime/admin 已切到 `definition/version`，只要仍保留本地目录导入链，就会继续诱发第二真理源与“重启/导入即可修复”的错误操作心智
@@ -330,6 +380,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`、`docs/内部参考/AI技能库.md`、`app/services/skill_service.py`
 
 ### 2026-03-07 DB 驱动渐进式 Skill Loader Phase A 冻结
+
 - 状态：ACTIVE
 - 决策主题：Skill 运行时收敛到 progressive loader，Phase A 的 schema 真理源、会话态与 canonical replay 一次冻结
 - 背景与问题：当前聊天主链仍依赖 hybrid 检索后静默注入 `skill_context`，导致命中决策、状态归属与回放语义散落；同时 catalog metadata 若继续落在 `t_agent_skills` 兼容表，会形成双真理源
@@ -340,6 +391,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-db-backed-progressive-skill-loading-design.md`
 
 ### 2026-03-07 聊天控制面恢复/终止语义冻结
+
 - 状态：ACTIVE
 - 决策主题：`interrupt/resume/cancel/disconnect` 与普通聊天消息彻底分离，恢复旧 run 只能走控制面
 - 背景与问题：用户在流式处理中遇到中断、断流或网关报错时，容易把“继续”“你刚刚中断了”作为普通消息发送，导致控制动作与新用户意图混杂，放大旧瞬态状态污染风险
@@ -350,6 +402,7 @@
 - 关联文档/代码：`docs/产品文档/聊天系统需求.md`、`docs/API文档/接口文档.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/services/chat_service.py`、`app/ai/workflow/multi_agent_graph.py`
 
 ### 2026-03-06 MCP 权威配置收敛
+
 - 状态：ACTIVE
 - 决策主题：Codex MCP 配置统一以用户本地运行时配置为权威源，项目内 `.mcp.json` 退化为协作镜像
 - 背景与问题：`/Users/jijingkun/.codex/config.toml` 与仓库内 `.mcp.json` 并存且不一致，导致 GitHub MCP 缺 Token、`vibe_kanban` 启动命令漂移、排障口径不统一
@@ -360,6 +413,7 @@
 - 关联文档/代码：`docs/plans/2026-03-06-mcp-governance-design.md`、`docs/plans/2026-03-06-mcp-governance-plan.md`、`docs/开发文档/工作流/开发工作流.md`
 
 ### 2026-03-05 规则分层落地
+
 - 状态：ACTIVE
 - 决策主题：建立 Layer1~Layer4 执行模型
 - 背景与问题：规则散落在 AGENTS、rules、skills、工具偏好中，执行优先级不够显式
@@ -370,6 +424,7 @@
 - 关联文档/代码：`AGENTS.md`
 
 ### 2026-03-05 Layer1/Layer2 去重口径
+
 - 状态：ACTIVE
 - 决策主题：Layer1 与 Layer2 重复条款收敛
 - 背景与问题：`AGENTS.md` Layer1 与 `.cursor/rules/core.mdc` 在“架构先行/拒绝补丁/文档先行”存在重复描述，违反“Layer1 仅保留治理口径”的定位
@@ -380,6 +435,7 @@
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc`
 
 ### 2026-03-05 分支端口自动校验与 merge 防错门禁
+
 - 状态：ACTIVE
 - 决策主题：verify 与 cardrun 的上下文防错收敛
 - 背景与问题：仅依赖 `pwd/branch/worktree` 观测不能证明“测对分支”；多会话并行时存在误 merge 风险
@@ -390,6 +446,7 @@
 - 关联文档/代码：`AGENTS.md`、`.cursor/commands/jjk-verify.md`、`.cursor/commands/jjk-cardrun.md`、`scripts/wt-flow.sh`
 
 ### 2026-03-06 复合提问多模态响应契约收敛
+
 - 状态：ACTIVE
 - 决策主题：SSE 复合输出（文字/表格/图片）统一契约与降级语义冻结
 - 背景与问题：`data_type` 扩展依赖手工分支，易出现“新增类型前端静默丢失”与“实时/回放口径漂移”
@@ -400,6 +457,7 @@
 - 关联文档/代码：`docs/plans/2026-03-06-composite-query-multimodal-response-design.md`
 
 ### 2026-03-06 Clarify 发散/冻结分流口径调整
+
 - 状态：ACTIVE
 - 决策主题：`/jjk-clarify` 采用单指令闭环（命令内完成探索与冻结）
 - 背景与问题：原口径要求“可用时必须先走 brainstorming”，与 `/jjk-clarify` 的单方案冻结目标冲突，导致执行时频繁输出“规则冲突声明”，降低可用性
@@ -410,6 +468,7 @@
 - 关联文档/代码：`.cursor/commands/jjk-clarify.md`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/技巧与速查/AI协作速查表.md`、`docs/开发文档/技巧与速查/vibe-coding开发技巧.md`
 
 ### 2026-03-07 `/ask` 退化为 clarify 兼容壳
+
 - 状态：ACTIVE
 - 决策主题：`/ask` 从独立发散入口降级为 `/jjk-clarify` 兼容别名
 - 背景与问题：`/ask` 与 `/jjk-clarify` 同时被描述为主入口，导致工作流主链、状态归属与用户心智出现双源漂移
@@ -420,6 +479,7 @@
 - 关联文档/代码：`.cursor/commands/ask.md`、`docs/开发文档/工作流/开发工作流.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`、`docs/开发文档/技巧与速查/vibe-coding开发技巧.md`
 
 ### 2026-03-06 cardrun 默认执行器切换至 wtimp
+
 - 状态：ACTIVE
 - 决策主题：`cardrun` dispatch 主链统一到 `jjk-wtimp`（`executor_mode=cardrun_dispatch`）
 - 背景与问题：`cardrun` 原链路默认分派 `imp-ws`，导致“编排层强约束”与“执行层 worktree 生命周期”分离，commit 证据门禁难以在同一收口链上落地
@@ -429,8 +489,8 @@
 - 回退/失效条件：若 `wtimp` 执行链异常，可通过 `--dispatch-executor`/`CODER4_DISPATCH_EXECUTOR` 临时切回兼容执行器；若后续出现统一执行编排器，应将本决策升级为平台级执行契约
 - 关联文档/代码：`docs/plans/2026-03-06-cardrun-wtimp-executor-design.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md`、`docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md`
 
-
 ### 2026-03-07 active-task `.state/<task_key>/` 纳入 dirty whitelist
+
 - 状态：ACTIVE
 - 决策主题：active task 运行态真理源 `.state/<task_key>/` 默认视为工程流运行产物，`wt-flow` 与 `bootstrap kernel` 的 dirty policy 必须自动放行该目录
 - 背景与问题：此前 dirty whitelist 仅覆盖文档目录，导致 `task-runner-state.json`、`task-ledger.jsonl`、`coder4-idempotency.json` 等运行态文件一旦变脏，就会误阻断 `bootstrap/merge`；同时中文路径在 git quoted path 下又会进一步放大误判
@@ -441,6 +501,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`docs/内部参考/迭代需求/debug_report_wf03_state_dirty_whitelist.md`
 
 ### 2026-03-07 wt-flow merge 统一收口到 common repo
+
 - 状态：ACTIVE
 - 决策主题：`wt-flow merge` 的基线分支合并上下文固定归属 `common repo root`，不再依赖当前 card worktree checkout
 - 背景与问题：当前 `cmd_merge` 在 card worktree 内执行时，会把当前 checkout 当成 merge 驱动仓并尝试 `git checkout master`；当 `master` 已被主工作区占用时，Git 会直接报 `already used by worktree`，导致已 verified 的卡片无法在原位完成 merge
@@ -451,6 +512,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-06 工程减法退役流程冻结
+
 - 状态：ACTIVE
 - 决策主题：L1 门禁脚本退役执行口径统一为“迁移入口 -> 兼容壳 -> 零调用观测 -> 再删除”
 - 背景与问题：`工程减法体检报告_2026-03-06.md` 中存在“候选可删”与“3.1 NO-GO 冻结”并存，团队执行口径易漂移
@@ -461,6 +523,7 @@
 - 关联文档/代码：`docs/plans/2026-03-06-workflow-gate-retirement-design.md`、`docs/内部参考/工程减法体检报告_2026-03-06_v3.md`
 
 ### 2026-03-08 parallel_plan 降级为 vk_cards 派生总览
+
 - 状态：ACTIVE
 - 决策主题：`parallel_plan.md` 从拆卡阶段并列真理源降级为 `vk_cards.json` 自动生成的人类可读总览
 - 背景与问题：当前 `parallel_plan.md` 与 `vk_cards.json` 同时承载执行策略、Gate 契约与总览信息，而实际执行链主要消费 `vk_cards.json`，双写带来漂移与心智负担
@@ -471,6 +534,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-parallel-plan-vk-cards-unification-design.md`、`docs/内部参考/任务拆解/_templates/parallel_plan_template.md`
 
 ### 2026-03-08 wt-flow status 状态发现契约显式化
+
 - 状态：ACTIVE
 - 决策主题：`wt-flow status` 必须显式输出 active task 与 stale state 候选的映射，不允许再让人工靠目录名猜真理源
 - 背景与问题：历史 `.state/<task_key>/` 与当前 active task 的 `.state/<task_key>/` 可同时存在；此前 `status` 只给 session/worktree 信息，无法直接看出当前命中的 active task file、task_key 与 state root
@@ -481,6 +545,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`scripts/coder4/wt-flow.sh`
 
 ### 2026-03-08 文件编辑工具面契约冻结
+
 - 状态：ACTIVE
 - 决策主题：文件编辑必须以当前会话**实际暴露**的工具面为准；若无独立 `apply_patch` 入口，禁止通过 `exec_command` 包装 `apply_patch`
 - 背景与问题：本轮执行中外层提示持续要求“使用 apply_patch tool”，但真实工具清单并未暴露该入口，导致代理在遵从提示与遵从工具事实之间反复空转
@@ -491,6 +556,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_workflow_tooling_contract_docs.py`
 
 ### 2026-03-08 仓级测试解释器真理源冻结
+
 - 状态：ACTIVE
 - 决策主题：测试/验证命令必须先解析仓级 Python 解释器真理源，不再默认裸用 `python3 -m pytest`
 - 背景与问题：本轮定向回归首次失败并非业务断言失败，而是系统 `python3` 缺少 pytest；而仓内 `venv` 已具备完整依赖，说明问题出在解释器入口漂移
@@ -501,6 +567,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_repo_python_script.py`、`scripts/repo_python.sh`
 
 ### 2026-03-08 定向 pytest 与最终 gate 语义分层
+
 - 状态：ACTIVE
 - 决策主题：开发期定向红绿验证与最终 coverage 门禁必须使用不同入口，禁止再混成同一条 pytest 命令
 - 背景与问题：本轮新回归测试 RED 时，真实失败之外又叠加了全局 coverage 阈值失败，说明开发期最小验证被最终门禁语义污染
@@ -511,6 +578,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_pytest_targeted_script.py`、`scripts/pytest_targeted.sh`
 
 ### 2026-03-08 usage 运行日志与提交证据分轨
+
 - 状态：ACTIVE
 - 决策主题：`logs/workflow-gate-usage.jsonl` 只承担运行态观测；提交证据必须由 `usage-report` 显式导出到 tracked report 文件
 - 背景与问题：此前 `C05` 把 ignored `logs/` 文件同时当作运行态台账和验收证据，导致默认提交链路需要 `git add -f` 才能携带关键证据
@@ -521,6 +589,7 @@
 - 关联文档/代码：`docs/plans/2026-03-07-cardrun-wtflow-execution-issues.md`、`tests/unit/test_workflow_gate_usage_report_contract.py`、`scripts/check_workflow_contract.py`
 
 ### 2026-03-08 聊天前端字体系统切换为 CJK WebFont + 内容列宽统一 token
+
 - 状态：ACTIVE
 - 决策主题：聊天前端统一采用 CJK 主字体、阅读型 typography 与共享会话内容列宽契约
 - 背景与问题：原方案以 `Inter` 作为全局主字体，中文主要依赖系统 fallback，导致英文与中文气质割裂；同时 AI 正文、用户气泡、状态行与底部输入框分别挂在不同宽度层，出现“会话元素脱离统一内容列”的布局割裂。
@@ -529,7 +598,9 @@
 - 影响范围：`web/src/app/layout.tsx`、`web/src/app/globals.css`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/human.tsx`、`web/src/components/chat/messages/ai.tsx`、`web/src/components/chat/markdown-text.tsx`、`web/src/components/chat/markdown-styles.css`、`web/src/components/chat/index.tsx`、会话消息渲染链路。
 - 回退/失效条件：若后续需要按平台或品牌拆分多套字体系统，或针对图表工作台引入独立内容栅格，可在保留单一 token 入口的前提下按场景拆分。
 - 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`
+
 ### 2026-03-10 问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成
+
 - 状态：ACTIVE
 - 决策主题：`data.query` 的 `query_shape/ranking` 必须成为问数 SQL 生成的稳定真值源，禁止在 handoff 后退化为“只看重建摘要文本”
 - 背景与问题：TopN 查询在 `pending_handoff.frame` 已带 `query_shape=top_n/ranking.limit=10`，但 `analyze_data_intent` 会把补充轮问题重建成“查询贷款余额，时间范围…，按客户聚合”，`metric_resolve` 再次只按自然语言判断形态，导致 `ORDER BY/LIMIT 10` 丢失，最终被 SQL 安全层补成默认 `LIMIT 1000`
@@ -540,6 +611,7 @@
 - 关联文档/代码：`docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/workflow/data_query_contract.py`
 
 ### 2026-03-09 补充回合语义识别收敛到 intent 层
+
 - 状态：ACTIVE
 - 决策主题：图表/维度/时间/筛选类补充回合统一由 `session_intent_kernel` 输出结构化信号，`decompose_goals` 仅基于该信号和 persisted visible window 做 `data.query` 纠偏
 - 背景与问题：同线程第二轮输入“以柱状图方式展示”时，planner 可能退化成 `general.reply`，并把内部 coverage 缺口暴露成“问题回复未完成”
@@ -550,6 +622,7 @@
 - 关联文档/代码：`app/ai/workflow/session_intent_kernel.py`、`app/ai/workflow/multi_agent_graph.py`、`docs/产品文档/问数助手需求.md`、`docs/开发文档/测试管理/问数引擎测试案例.md`
 
 ### 2026-03-08 编排层禁止硬编码语义关键词词表
+
 - 状态：ACTIVE
 - 决策主题：把“自然语言语义识别不得下沉到编排层”冻结为仓级治理门禁
 - 背景与问题：Codex 在修复聊天/记忆等链路时，倾向于在 `chat_service`、API endpoint 等编排层直接补 `*_HINTS`、`*_KEYWORDS` 或 substring 判断，短期可跑通，长期会把语义 owner 打散到多层
@@ -559,8 +632,8 @@
 - 回退/失效条件：若未来编排层被完全替换为统一的 schema-driven contract adapter，且语义规则可由中心化 policy 自动校验，可将静态测试迁移到新的治理入口；在此之前保持仓级 fail-fast
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`tests/unit/test_semantic_keyword_boundary_gate.py`
 
-
 ### 2026-03-08 Git 生命周期收口命令显式化
+
 - 状态：ACTIVE
 - 决策主题：把“提交并合并到 master”与“删除当前分支/worktree”从零散 Git 口头操作提升为显式命令 `/jjk-commit`、`/jjk-deleteworktree`
 - 背景与问题：此前工程流虽覆盖规划、实现、验收与 PR 交付，但本地 Git 收尾仍依赖临时口述，容易出现“未验证先 merge”“删错 worktree”“在主工作区误删”等高风险操作
@@ -571,6 +644,7 @@
 - 关联文档/代码：`.cursor/commands/jjk-commit.md`、`.cursor/commands/jjk-deleteworktree.md`、`docs/开发文档/工作流/开发工作流.md`
 
 ### 2026-03-08 Lean Guard 上线：热点文件进入 shrink-only
+
 - 状态：ACTIVE
 - 决策主题：把“热点文件禁止继续膨胀”从软约束升级为 `lean-guard` 硬门禁
 - 背景与问题：此前虽已在 `AGENTS.md` 与 `core.mdc` 强调 lean/refactor，但没有自动阻断；执行者会自然选择在大文件中继续添加 `_helper`、嵌套函数与包装层
@@ -581,6 +655,7 @@
 - 关联文档/代码：`docs/工程规范/lean-guard.md`、`scripts/ci/check_lean_budget.py`
 
 ### 2026-03-08 文档单一真相源与动态融合治理
+
 - 状态：ACTIVE
 - 决策主题：主文档动态融合治理口径冻结
 - 背景与问题：当前产品文档、架构文档持续通过“增量需求 / 实现进展 / 日期补充”承载新事实，导致当前态与历史过程混杂，review 与执行链无法稳定判断哪份文档才是最新口径
@@ -591,6 +666,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-doc-single-source-dynamic-governance-design.md`、`docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md`、`docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md`
 
 ### 2026-03-08 运行态补齐缺口不再进入用户交互
+
 - 状态：ACTIVE
 - 决策主题：Coverage 缺口与编排型工具调用统一收回内部运行态，不再暴露为用户确认动作或原始工具名
 - 背景与问题：单目标问数在模型主判定退化为 `general.reply` 时，coverage gate 会把内部补齐缺口转成“请回复继续”，前端同时直出 `assign_to_data_expert` 等内部工具名，导致用户看到编排状态而不是产品语义
@@ -601,6 +677,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-multi-agent-coverage-gap-visible-contract-design.md`
 
 ### 2026-03-08 memory intent 删除解析收敛到 resolver
+
 - 状态：ACTIVE
 - 决策主题：删除/撤销类记忆解析统一下沉到 `memory_intent_resolver_service`，`chat_service` 只保留编排职责
 - 背景与问题：上一轮为了修复“忘掉这个记忆”落库失败，把删除词表、指代修复和成功/失败话术补丁直接叠加到了 `chat_service`；但项目真实口径是“对话结束后异步记忆”，这导致语义判断、状态事实和回复策略错层耦合
@@ -611,6 +688,7 @@
 - 关联文档/代码：`docs/plans/2026-03-08-memory-intent-resolver-contract-design.md`
 
 ### 2026-03-09 document_memory_repo 列表契约改为默认窄返回
+
 - 状态：ACTIVE
 - 决策主题：`document_memory_repo.list_documents()` 默认只返回通用文档列表字段，`source_thread_id/source_message_id` 改为调用方显式 opt-in
 - 背景与问题：为了支持 memory 删除确认链，当前分支一度把 `source_thread_id/source_message_id` 直接加入 `list_documents()` 默认返回；这会让 resolver 场景字段上升为全局 repo 契约，扩大影响面
@@ -621,6 +699,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`、`app/repositories/document_memory_repo.py`、`app/services/memory_intent_resolver_service.py`
 
 ### 2026-03-09 response guidance 收敛为结构化 contract
+
 - 状态：ACTIVE
 - 决策主题：memory 删除后的运行时回复约束不再由 `chat_service` 直接拼接文本，而是收敛为 `response_guidance_contract` 结构化字段
 - 背景与问题：上一轮虽然已把删除识别从 `chat_service` 拔到 resolver，但删除成功/幂等删除的提示文案仍由 service 直接拼接；这让状态事实与系统提示文本继续耦合在同一层
@@ -631,6 +710,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md`、`app/services/chat_service.py`、`app/services/response_policy_service.py`、`app/ai/workflow/multi_agent_graph.py`
 
 ### 2026-03-09 docs_guard 提交门禁降级为提醒模式
+
 - 状态：ACTIVE
 - 决策主题：本地提交链路中的 `docs_guard` 从严格阻断改为提醒模式，手动校验与 CI 继续保留严格门禁
 - 背景与问题：当前 `docs_guard` 同时挂在 `.githooks/pre-commit` 与 `scripts/check_doc_sync.sh` 的 `--strict` 路径上，broken link 等存量文档债务会频繁阻断代码提交，影响正常收口
@@ -641,6 +721,7 @@
 - 关联文档/代码：`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`、`.githooks/pre-commit`、`scripts/README.md`
 
 ### 2026-03-10 Phase 4 收尾：service getter 只保留薄入口
+
 - 状态：ACTIVE
 - 决策主题：应用级共享 service 若继续保留 `get_xxx_service()` 入口，该入口只能做 registry 访问，不能再持有 singleton 状态
 - 背景与问题：`permission_service` 同时存在 `__new__` 单例和模块级 `_permission_service`，`result_enrichment_rule_service` 存在 `_service_singleton`，`data_admin_api` 还在导入期提前取实例；这会让 `lifespan -> AppRuntime -> CacheRegistry` 主干外再长出第二套 owner
@@ -651,6 +732,7 @@
 - 关联文档/代码：`docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`、`docs/plans/2026-03-09-lifespan-runtime-consolidation-phase4-closeout-implementation.md`、`app/services/permission_service.py`、`app/services/result_enrichment_rule_service.py`
 
 ### 2026-03-10 run_control_service 收口到 runtime registry
+
 - 状态：ACTIVE
 - 决策主题：`RunControlService` 这类跨请求共享、持有可变内存态的 service，不再允许用模块级实例持有状态
 - 背景与问题：`run_control_service = RunControlService()` 被 `chat_service` 与 `chat_api` 直接导入使用，导致运行中任务状态藏在模块全局，和 `lifespan -> AppRuntime -> CacheRegistry` 主干形成双 owner

@@ -40,6 +40,7 @@ function ContentCopyable({
       variant="ghost"
       tooltip="复制内容"
       disabled={disabled}
+      className="chat-message-tool-button"
     >
       <AnimatePresence
         mode="wait"
@@ -93,7 +94,7 @@ function FeedbackButtons({
     try {
       await submitFeedback(messageId, finalScore);
       // toast.success(finalScore === 0 ? "已取消" : "感谢反馈");
-    } catch (err) {
+    } catch {
       // Revert on error
       setScore(score);
       toast.error("反馈失败");
@@ -107,7 +108,11 @@ function FeedbackButtons({
         tooltip="这条回答有帮助"
         variant="ghost"
         onClick={() => handleFeedback(1)}
-        className={score === 1 ? "text-green-600 bg-green-50" : ""}
+        className={
+          score === 1
+            ? "chat-message-tool-button bg-green-50 text-green-600"
+            : "chat-message-tool-button"
+        }
       >
         <ThumbsUp className={score === 1 ? "fill-current" : ""} />
       </TooltipIconButton>
@@ -116,7 +121,11 @@ function FeedbackButtons({
         tooltip="这条回答没帮助"
         variant="ghost"
         onClick={() => handleFeedback(-1)}
-        className={score === -1 ? "text-red-600 bg-red-50" : ""}
+        className={
+          score === -1
+            ? "chat-message-tool-button bg-red-50 text-red-600"
+            : "chat-message-tool-button"
+        }
       >
         <ThumbsDown className={score === -1 ? "fill-current" : ""} />
       </TooltipIconButton>
@@ -139,11 +148,11 @@ export function BranchSwitcher({
   const index = branchOptions.indexOf(branch);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="chat-branch-switcher flex items-center gap-0.5">
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 p-1"
+        className="chat-message-tool-button size-6 rounded-full p-0"
         onClick={() => {
           const prevBranch = branchOptions[index - 1];
           if (!prevBranch) return;
@@ -153,13 +162,13 @@ export function BranchSwitcher({
       >
         <ChevronLeft />
       </Button>
-      <span className="text-sm">
+      <span className="text-muted-foreground min-w-[38px] text-center text-[11px] font-medium">
         {index + 1} / {branchOptions.length}
       </span>
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 p-1"
+        className="chat-message-tool-button size-6 rounded-full p-0"
         onClick={() => {
           const nextBranch = branchOptions[index + 1];
           if (!nextBranch) return;
@@ -227,11 +236,12 @@ export function CommandBar({
 
   if (isHumanMessage && isEditing && !!setIsEditing && !!handleSubmitEdit) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <TooltipIconButton
           disabled={isLoading}
           tooltip="取消编辑"
           variant="ghost"
+          className="chat-message-tool-button"
           onClick={() => {
             setIsEditing(false);
           }}
@@ -242,6 +252,7 @@ export function CommandBar({
           disabled={isLoading}
           tooltip="提交"
           variant="secondary"
+          className="chat-message-tool-button"
           onClick={handleSubmitEdit}
         >
           <SendHorizontal />
@@ -251,7 +262,7 @@ export function CommandBar({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
       <ContentCopyable
         content={content}
         disabled={isLoading}
@@ -261,6 +272,7 @@ export function CommandBar({
           disabled={isLoading}
           tooltip="重新生成"
           variant="ghost"
+          className="chat-message-tool-button"
           onClick={handleRegenerate}
         >
           <RefreshCcw />
@@ -278,6 +290,7 @@ export function CommandBar({
           disabled={isLoading}
           tooltip="编辑"
           variant="ghost"
+          className="chat-message-tool-button"
           onClick={() => {
             setIsEditing?.(true);
           }}

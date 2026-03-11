@@ -8,9 +8,16 @@
  * - 重命名对话
  * - 批量删除对话
  */
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { useThreads, Thread } from "@/providers/Thread";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { useQueryState } from "nuqs";
 import {
   Sheet,
@@ -75,7 +82,11 @@ function getThreadTimestamp(thread: Thread) {
 
 function groupThreadsByTime(threads: Thread[]): ThreadGroup[] {
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
   const yesterday = today - 24 * 60 * 60 * 1000;
   const sevenDaysAgo = today - 7 * 24 * 60 * 60 * 1000;
   const thirtyDaysAgo = today - 30 * 24 * 60 * 60 * 1000;
@@ -147,11 +158,6 @@ function ThreadItem({
     }
   };
 
-  const handleDelete = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    await confirmDelete();
-  };
-
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       void handleRename();
@@ -174,9 +180,6 @@ function ThreadItem({
   const actionButtonClassName = isEmphasized
     ? "app-sidebar-action text-[var(--app-sidebar-item-active-fg)]"
     : "app-sidebar-action";
-  const deleteButtonClassName = isEmphasized
-    ? "app-sidebar-action text-rose-600"
-    : "app-sidebar-action text-rose-500/80";
 
   return (
     <div className="w-full">
@@ -205,7 +208,10 @@ function ThreadItem({
         ) : null}
 
         {isEditing ? (
-          <div className="flex flex-1 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="flex flex-1 items-center gap-1"
+            onClick={(event) => event.stopPropagation()}
+          >
             <Input
               value={editTitle}
               onChange={(event) => setEditTitle(event.target.value)}
@@ -242,9 +248,11 @@ function ThreadItem({
           <>
             <div
               className={cn(
-                "min-w-0 flex-1 truncate text-left text-[var(--chat-ui-font-sm)] leading-5 transition-[padding,color] duration-150",
+                "min-w-0 flex-1 truncate text-left leading-5 text-[var(--chat-ui-font-sm)] transition-[padding,color] duration-150",
                 !isSelectMode && "pr-2 group-hover:pr-8",
-                isEmphasized ? "font-normal text-[var(--app-sidebar-item-active-fg)]" : "font-normal text-[var(--app-sidebar-item-fg)]",
+                isEmphasized
+                  ? "font-normal text-[var(--app-sidebar-item-active-fg)]"
+                  : "font-normal text-[var(--app-sidebar-item-fg)]",
               )}
             >
               {thread.title || "新对话"}
@@ -257,7 +265,7 @@ function ThreadItem({
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      "app-sidebar-item app-sidebar-row-action absolute right-1.5 top-1/2 h-[26px] w-[26px] -translate-y-1/2 rounded-[10px] opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+                      "app-sidebar-item app-sidebar-row-action absolute top-1/2 right-1.5 h-[26px] w-[26px] -translate-y-1/2 rounded-[10px] opacity-0 transition-opacity duration-150 group-hover:opacity-100",
                       isEmphasized && "opacity-100",
                     )}
                     onClick={(event) => event.stopPropagation()}
@@ -266,13 +274,16 @@ function ThreadItem({
                     <MoreHorizontal className="h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="chat-popover-surface w-36 rounded-2xl p-1 font-sans">
+                <DropdownMenuContent
+                  align="end"
+                  className="chat-popover-surface w-36 rounded-2xl p-1 font-sans"
+                >
                   <DropdownMenuItem
                     onClick={(event) => {
                       event.stopPropagation();
                       setIsEditing(true);
                     }}
-                    className="mx-1 my-0.5 rounded-xl px-3 py-2 text-[var(--chat-ui-font-sm)] font-medium"
+                    className="mx-1 my-0.5 rounded-xl px-3 py-2 font-medium text-[var(--chat-ui-font-sm)]"
                   >
                     <Edit2 className="mr-2 h-4 w-4" />
                     重命名
@@ -282,7 +293,7 @@ function ThreadItem({
                       event.stopPropagation();
                       void confirmDelete();
                     }}
-                    className="mx-1 my-0.5 rounded-xl px-3 py-2 text-[var(--chat-ui-font-sm)] font-medium text-rose-600 focus:bg-rose-50 focus:text-rose-600"
+                    className="mx-1 my-0.5 rounded-xl px-3 py-2 font-medium text-[var(--chat-ui-font-sm)] text-rose-600 focus:bg-rose-50 focus:text-rose-600"
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
                     删除
@@ -315,13 +326,15 @@ function ThreadList({
   const [threadId, setThreadId] = useQueryState("threadId");
   const { deleteThread, updateThreadTitle } = useThreads();
   const groupedThreads = useMemo(() => groupThreadsByTime(threads), [threads]);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    今天: true,
-    昨天: true,
-    "最近 7 天": true,
-    "最近 30 天": true,
-    更早: true,
-  });
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {
+      今天: true,
+      昨天: true,
+      "最近 7 天": true,
+      "最近 30 天": true,
+      更早: true,
+    },
+  );
 
   const isSearching = Boolean(searchQuery?.trim());
 
@@ -348,23 +361,38 @@ function ThreadList({
     return (
       <div className="mx-4 mt-3 flex min-h-28 flex-col items-center justify-center gap-2 rounded-3xl border border-black/[0.05] bg-white px-4 text-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black/[0.03] text-[var(--app-sidebar-empty-icon)]">
-          {isSearchingEmpty ? <Search className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}
+          {isSearchingEmpty ? (
+            <Search className="h-5 w-5" />
+          ) : (
+            <MessageSquare className="h-5 w-5" />
+          )}
         </div>
         <div>
-          <p className="text-sm font-medium text-[var(--app-sidebar-item-active-fg)]">{isSearchingEmpty ? "没有找到相关对话" : "还没有历史对话"}</p>
-          <p className="mt-1 text-xs text-[var(--app-sidebar-title)]">{isSearchingEmpty ? "换个关键词试试。" : "发起一次对话后，这里会自动出现。"}</p>
+          <p className="text-sm font-medium text-[var(--app-sidebar-item-active-fg)]">
+            {isSearchingEmpty ? "没有找到相关对话" : "还没有历史对话"}
+          </p>
+          <p className="mt-1 text-xs text-[var(--app-sidebar-title)]">
+            {isSearchingEmpty
+              ? "换个关键词试试。"
+              : "发起一次对话后，这里会自动出现。"}
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="chat-scrollable flex h-full w-full flex-col items-start justify-start gap-0.5 overflow-y-auto px-2.5 pb-2.5 pt-1">
+    <div className="chat-scrollable flex h-full w-full flex-col items-start justify-start gap-0.5 overflow-y-auto px-2.5 pt-1 pb-2.5">
       {groupedThreads.map((group) => {
-        const isExpanded = isSearching ? true : (expandedGroups[group.label] ?? true);
+        const isExpanded = isSearching
+          ? true
+          : (expandedGroups[group.label] ?? true);
 
         return (
-          <div key={group.label} className="w-full">
+          <div
+            key={group.label}
+            className="w-full"
+          >
             <button
               type="button"
               className={cn(
@@ -382,10 +410,15 @@ function ThreadList({
                 <ChevronRight className="h-3.5 w-3.5 shrink-0" />
               )}
               <span>{group.label}</span>
-              <span className="app-sidebar-section-count">{group.threads.length}</span>
+              <span className="app-sidebar-section-count">
+                {group.threads.length}
+              </span>
             </button>
             {isExpanded ? (
-              <div id={`thread-group-${group.label}`} className="flex flex-col gap-0.5">
+              <div
+                id={`thread-group-${group.label}`}
+                className="flex flex-col gap-0.5"
+              >
                 {group.threads.map((thread) => (
                   <ThreadItem
                     key={thread.thread_id}
@@ -410,17 +443,22 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-1 overflow-y-auto px-3 pb-3 pt-1.5">
+    <div className="flex h-full w-full flex-col items-start justify-start gap-1 overflow-y-auto px-3 pt-1.5 pb-3">
       {Array.from({ length: 8 }).map((_, index) => (
-        <Skeleton key={`skeleton-${index}`} className="h-10 w-full rounded-2xl bg-black/[0.05]" />
+        <Skeleton
+          key={`skeleton-${index}`}
+          className="h-10 w-full rounded-2xl bg-black/[0.05]"
+        />
       ))}
     </div>
   );
 }
 
 export default function ThreadHistory() {
-  const { chatHistoryOpen, setChatHistoryOpen, isLargeScreen } = useChatHistoryOpen();
-  const { threads, threadsLoading, ensureThreadsLoaded, refreshThreads } = useThreads();
+  const { chatHistoryOpen, setChatHistoryOpen, isLargeScreen } =
+    useChatHistoryOpen();
+  const { threads, threadsLoading, ensureThreadsLoaded, refreshThreads } =
+    useThreads();
 
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -468,7 +506,9 @@ export default function ThreadHistory() {
   };
 
   const visibleThreadIds = filteredThreads.map((thread) => thread.thread_id);
-  const selectedVisibleCount = visibleThreadIds.filter((threadId) => selectedIds.has(threadId)).length;
+  const selectedVisibleCount = visibleThreadIds.filter((threadId) =>
+    selectedIds.has(threadId),
+  ).length;
 
   const handleToggleSelect = (threadId: string) => {
     setSelectedIds((previous) => {
@@ -489,7 +529,8 @@ export default function ThreadHistory() {
 
     setSelectedIds((previous) => {
       const next = new Set(previous);
-      const shouldClearVisible = selectedVisibleCount === filteredThreads.length;
+      const shouldClearVisible =
+        selectedVisibleCount === filteredThreads.length;
 
       visibleThreadIds.forEach((threadId) => {
         if (shouldClearVisible) {
@@ -508,7 +549,11 @@ export default function ThreadHistory() {
       return;
     }
 
-    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个对话吗？此操作不可恢复。`)) {
+    if (
+      !confirm(
+        `确定要删除选中的 ${selectedIds.size} 个对话吗？此操作不可恢复。`,
+      )
+    ) {
       return;
     }
 
@@ -539,7 +584,12 @@ export default function ThreadHistory() {
   const renderSidebarHeader = (isMobile = false) => (
     <div className="w-full">
       {isSelectMode ? (
-        <div className={cn("app-sidebar-header-row app-sidebar-manage-header", isMobile && "pr-10")}>
+        <div
+          className={cn(
+            "app-sidebar-header-row app-sidebar-manage-header",
+            isMobile && "pr-10",
+          )}
+        >
           <div className="app-sidebar-inline-manage-shell">
             <Button
               type="button"
@@ -548,12 +598,16 @@ export default function ThreadHistory() {
               className="app-sidebar-inline-manage-toggle"
               onClick={handleSelectAll}
             >
-              {selectedVisibleCount === filteredThreads.length && filteredThreads.length > 0 ? (
+              {selectedVisibleCount === filteredThreads.length &&
+              filteredThreads.length > 0 ? (
                 <CheckSquare className="mr-1.5 h-4 w-4" />
               ) : (
                 <Square className="mr-1.5 h-4 w-4" />
               )}
-              {selectedVisibleCount === filteredThreads.length && filteredThreads.length > 0 ? "取消全选" : "全选"}
+              {selectedVisibleCount === filteredThreads.length &&
+              filteredThreads.length > 0
+                ? "取消全选"
+                : "全选"}
             </Button>
 
             <span className="app-sidebar-inline-manage-count">
@@ -572,7 +626,9 @@ export default function ThreadHistory() {
                 <Trash2 className="mr-1.5 h-4 w-4" />
                 {isDeleting ? "删除中..." : `删除 ${selectedIds.size}`}
               </Button>
-            ) : <div className="min-w-0 flex-1" />}
+            ) : (
+              <div className="min-w-0 flex-1" />
+            )}
 
             <Button
               type="button"
@@ -593,12 +649,21 @@ export default function ThreadHistory() {
               title="收起侧边栏"
               aria-label="收起侧边栏"
             >
-              {chatHistoryOpen ? <PanelRightOpen className="size-4.5" /> : <PanelRightClose className="size-4.5" />}
+              {chatHistoryOpen ? (
+                <PanelRightOpen className="size-4.5" />
+              ) : (
+                <PanelRightClose className="size-4.5" />
+              )}
             </Button>
           )}
         </div>
       ) : searchVisible || searchQuery.trim() ? (
-        <div className={cn("app-sidebar-header-row app-sidebar-search-header", isMobile && "pr-10")}>
+        <div
+          className={cn(
+            "app-sidebar-header-row app-sidebar-search-header",
+            isMobile && "pr-10",
+          )}
+        >
           <div className="app-sidebar-inline-search-shell">
             <Search className="app-sidebar-inline-search-icon h-4 w-4" />
             <Input
@@ -629,7 +694,11 @@ export default function ThreadHistory() {
               title="收起侧边栏"
               aria-label="收起侧边栏"
             >
-              {chatHistoryOpen ? <PanelRightOpen className="size-4.5" /> : <PanelRightClose className="size-4.5" />}
+              {chatHistoryOpen ? (
+                <PanelRightOpen className="size-4.5" />
+              ) : (
+                <PanelRightClose className="size-4.5" />
+              )}
             </Button>
           )}
         </div>
@@ -637,17 +706,19 @@ export default function ThreadHistory() {
         <div className={cn("app-sidebar-header-row", isMobile && "pr-10")}>
           <div className="app-sidebar-brand">
             <div className="app-sidebar-brand-mark">
-              <img
+              <Image
                 src="/logo.png"
                 alt="嘉银助手"
+                width={22}
+                height={22}
                 className="h-[22px] w-[22px] object-contain"
-                onError={(event) => {
-                  event.currentTarget.src = "/favicon.ico";
-                }}
+                priority
               />
             </div>
             <div className="min-w-0">
-              <p className="app-sidebar-brand-text truncate font-sans">嘉银助手</p>
+              <p className="app-sidebar-brand-text truncate font-sans">
+                嘉银助手
+              </p>
             </div>
           </div>
           <div className={cn("app-sidebar-header-actions", isMobile && "pr-0")}>
@@ -682,7 +753,11 @@ export default function ThreadHistory() {
                 title="收起侧边栏"
                 aria-label="收起侧边栏"
               >
-                {chatHistoryOpen ? <PanelRightOpen className="size-4.5" /> : <PanelRightClose className="size-4.5" />}
+                {chatHistoryOpen ? (
+                  <PanelRightOpen className="size-4.5" />
+                ) : (
+                  <PanelRightClose className="size-4.5" />
+                )}
               </Button>
             )}
           </div>
@@ -690,8 +765,6 @@ export default function ThreadHistory() {
       )}
     </div>
   );
-
-  const renderSearchBox = () => null;
 
   return (
     <>
@@ -723,7 +796,10 @@ export default function ThreadHistory() {
             }
           }}
         >
-          <SheetContent side="left" className="app-sidebar-surface flex w-[85vw] max-w-[300px] flex-col p-0 lg:hidden">
+          <SheetContent
+            side="left"
+            className="app-sidebar-surface flex w-[85vw] max-w-[300px] flex-col p-0 lg:hidden"
+          >
             <SheetHeader className="px-0 py-0">
               <SheetTitle className="sr-only">对话列表</SheetTitle>
               {renderSidebarHeader(true)}

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -396,9 +397,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           touchAction: "none",
         }}
       >
-        <img
+        <Image
           src={src}
           alt={alt || "图片"}
+          width={1600}
+          height={1200}
+          unoptimized
           className={cn(
             "object-contain transition-transform duration-200 will-change-transform",
             !imageReady && "opacity-0",

@@ -115,7 +115,7 @@ export function HumanMessage({
               // 移除工具调用提示行 "(请使用 analyze_image...)"
               const displayText = contentString.replace(/\(请使用 analyze_image 工具分析此图片:.*?\)\n*/g, '');
               return displayText.trim() ? (
-                <div className="bg-muted ml-auto w-fit max-w-full rounded-3xl px-4 py-2 text-left">
+                <div className="chat-human-bubble ml-auto w-fit max-w-full rounded-3xl px-4 py-2 text-left">
                   <MarkdownText>{displayText}</MarkdownText>
                 </div>
               ) : null;
@@ -125,9 +125,9 @@ export function HumanMessage({
 
         <div
           className={cn(
-            "ml-auto flex items-center gap-2 transition-opacity",
-            "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-            isEditing && "opacity-100",
+            "chat-message-toolbar ml-auto flex w-fit items-center gap-1.5 transition-all duration-200",
+            "translate-y-1 opacity-0 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:translate-y-0 group-hover:opacity-100",
+            isEditing && "translate-y-0 opacity-100",
           )}
         >
           <BranchSwitcher
