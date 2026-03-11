@@ -1,14 +1,8 @@
-"""Agent 通信协议解析模块。
-
-负责处理 Agent 间的隐式通信协议，包括：
-1. Handoff 指令: <!--HANDOFF:{...}-->
-2. 知识库图片映射: <!--KB_IMAGES:{...}-->
-3. 内部状态过滤: JSON 代码块等
-"""
+"""Agent 通信协议解析。"""
 import re
 import json
 import logging
-from typing import Optional, Dict, Any, Tuple, List, Set, TypedDict, NotRequired, cast
+from typing import Optional, Dict, Any, Tuple, List, Set, TypedDict, NotRequired, Literal, cast
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage
 
@@ -17,14 +11,42 @@ from app.contracts.result_event_contract import build_result_event_payload
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_text(value: Any, default: str = "") -> str:
+    text = str(value or "").strip()
+    return text or default
+
+
+def _normalize_unique_strings(values: Any, *, lowercase: bool = False) -> List[str]:
+    if not isinstance(values, list):
+        return []
+
+    normalized: List[str] = []
+    seen: Set[str] = set()
+    for item in values:
+        text = _normalize_text(item)
+        if lowercase:
+            text = text.lower()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+    return normalized
+
+
+def _normalize_non_negative_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(parsed, 0)
+
 class AgentProtocol:
-    """协议常量定义"""
     HANDOFF_PATTERN = r'<!--HANDOFF:(\{.*?\})-->'
     KB_IMAGES_PATTERN = r'<!--KB_IMAGES:(\{.*?\})-->'
     IMG_PLACEHOLDER_PATTERN = r'\[IMG-\d+\]'
 
 class HandoffResult(BaseModel):
-    """[Phase 2] 标准 Handoff 结果模型。"""
     action: str = Field(default="handoff", description="操作类型")
     target_agent: str = Field(..., description="目标专家 Agent 名称")
     task_description: Optional[str] = Field(default=None, description="任务描述与上下文（非 data.query 必填）")
@@ -32,14 +54,12 @@ class HandoffResult(BaseModel):
     turn_act_hint: Optional[str] = Field(default=None, description="回合行为提示（可选）")
 
 class StreamingToolStartPayload(TypedDict):
-    """tool_start 事件统一载荷。"""
 
     name: str
     input: Dict[str, Any]
 
 
 class StreamingResultEnvelope(TypedDict):
-    """result 事件 envelope。"""
 
     id: str
     source: str
@@ -52,7 +72,6 @@ class StreamingResultEnvelope(TypedDict):
 
 
 class StreamingResultPayload(TypedDict):
-    """result 事件统一载荷。"""
 
     data_type: str
     data: Dict[str, Any]
@@ -62,26 +81,22 @@ class StreamingResultPayload(TypedDict):
 
 
 class StreamingKbImagesPayload(TypedDict):
-    """kb_images 事件统一载荷。"""
 
     images: Dict[str, str]
 
 
 class ResultAdditionalKwargsPayload(TypedDict):
-    """结构化结果的 additional_kwargs 统一载荷。"""
 
     data_type: str
     data: Dict[str, Any]
 
 
 class OperationAdditionalKwargsPayload(TypedDict):
-    """操作确认类 additional_kwargs 统一载荷。"""
 
     operation: Dict[str, Any]
 
 
 class SkillRuntimeLoadedSkillPayload(TypedDict):
-    """Skill runtime canonical 中的单条已加载技能条目。"""
 
     skill_id: str
     version: str
@@ -89,7 +104,6 @@ class SkillRuntimeLoadedSkillPayload(TypedDict):
 
 
 class SkillRuntimeAdditionalKwargsPayload(TypedDict):
-    """Skill runtime canonical additional_kwargs 载荷。"""
 
     runtime_mode: str
     catalog_version: str
@@ -99,8 +113,151 @@ class SkillRuntimeAdditionalKwargsPayload(TypedDict):
     replay_source: str
 
 
+class ConversationStateSnapshotPayload(TypedDict):
+
+    owner: Literal["supervisor"]
+    turn_act: str
+    active_goal_ids: List[str]
+    active_workflow: str
+    pending_user_action: str
+    session_frame_slots: List[str]
+    snapshot_version: str
+    clarify_fsm_state: NotRequired[str]
+    clarify_round: NotRequired[int]
+
+
+class ExpertInputContractPayload(TypedDict):
+
+    contract_id: str
+    contract_version: str
+    target_agent: str
+    state_owner: str
+    source_fields: List[str]
+
+
+class ResearchEvidencePayload(TypedDict):
+
+    source: str
+    excerpt: str
+
+
+class ResearchResultPayload(TypedDict):
+
+    contract_version: str
+    research_mode: str
+    research_task_id: str
+    summary: str
+    evidence: List[ResearchEvidencePayload]
+    insufficiency: str
+    source_count: int
+    citation_count: int
+
+
+def build_conversation_state_snapshot_payload(
+    *,
+    owner: Any,
+    turn_act: Any,
+    active_goal_ids: Any,
+    active_workflow: Any,
+    pending_user_action: Any,
+    session_frame_slots: Any,
+    snapshot_version: Any,
+    clarify_fsm_state: Any = None,
+    clarify_round: Any = None,
+) -> Optional[ConversationStateSnapshotPayload]:
+
+    if _normalize_text(owner, "supervisor") != "supervisor":
+        return None
+
+    payload: ConversationStateSnapshotPayload = {
+        "owner": "supervisor",
+        "turn_act": _normalize_text(turn_act, "UNKNOWN"),
+        "active_goal_ids": _normalize_unique_strings(active_goal_ids),
+        "active_workflow": _normalize_text(active_workflow, "supervisor"),
+        "pending_user_action": _normalize_text(pending_user_action, "none"),
+        "session_frame_slots": _normalize_unique_strings(session_frame_slots),
+        "snapshot_version": _normalize_text(snapshot_version, "v1"),
+    }
+
+    normalized_clarify_state = _normalize_text(clarify_fsm_state)
+    if normalized_clarify_state:
+        payload["clarify_fsm_state"] = normalized_clarify_state
+
+    normalized_clarify_round = _normalize_non_negative_int(clarify_round, -1)
+    if normalized_clarify_round >= 0:
+        payload["clarify_round"] = normalized_clarify_round
+
+    return payload
+
+
+def build_expert_input_contract_payload(
+    *,
+    contract_id: Any,
+    target_agent: Any,
+    state_owner: Any,
+    source_fields: Any,
+    contract_version: Any = "v1",
+) -> Optional[ExpertInputContractPayload]:
+
+    normalized_contract_id = _normalize_text(contract_id)
+    normalized_target_agent = _normalize_text(target_agent)
+    if not normalized_contract_id or not normalized_target_agent:
+        return None
+
+    return {
+        "contract_id": normalized_contract_id,
+        "contract_version": _normalize_text(contract_version, "v1"),
+        "target_agent": normalized_target_agent,
+        "state_owner": _normalize_text(state_owner, "supervisor"),
+        "source_fields": _normalize_unique_strings(source_fields),
+    }
+
+
+def build_research_result_payload(
+    *,
+    research_mode: Any,
+    research_task_id: Any,
+    summary: Any,
+    evidence: Any,
+    insufficiency: Any,
+    source_count: Any = None,
+    citation_count: Any = None,
+    contract_version: Any = "v1",
+) -> ResearchResultPayload:
+
+    normalized_evidence: List[ResearchEvidencePayload] = []
+    seen_pairs: Set[Tuple[str, str]] = set()
+    if isinstance(evidence, list):
+        for item in evidence:
+            if isinstance(item, dict):
+                source = _normalize_text(item.get("source"), "unknown")
+                excerpt = _normalize_text(item.get("excerpt"))
+            else:
+                source = "unknown"
+                excerpt = _normalize_text(item)
+            if not excerpt:
+                continue
+            pair = (source, excerpt)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            normalized_evidence.append({"source": source, "excerpt": excerpt})
+
+    normalized_mode = _normalize_text(research_mode, "research")
+    inferred_source_count = len({item["source"] for item in normalized_evidence})
+    return {
+        "contract_version": _normalize_text(contract_version, "v1"),
+        "research_mode": normalized_mode,
+        "research_task_id": _normalize_text(research_task_id, f"{normalized_mode}:unknown"),
+        "summary": _normalize_text(summary),
+        "evidence": normalized_evidence,
+        "insufficiency": _normalize_text(insufficiency),
+        "source_count": _normalize_non_negative_int(source_count, inferred_source_count),
+        "citation_count": _normalize_non_negative_int(citation_count, 0),
+    }
+
+
 def _normalize_skill_runtime_loaded_skills(loaded_skills: Any) -> List[SkillRuntimeLoadedSkillPayload]:
-    """标准化 skill_runtime.loaded_skills 列表。"""
 
     if not isinstance(loaded_skills, list):
         return []
@@ -127,20 +284,8 @@ def _normalize_skill_runtime_loaded_skills(loaded_skills: Any) -> List[SkillRunt
 
 
 def _normalize_skill_runtime_allowed_tools(allowed_tools: Any) -> List[str]:
-    """标准化 skill_runtime.allowed_tools 列表。"""
 
-    if not isinstance(allowed_tools, list):
-        return []
-
-    normalized: List[str] = []
-    seen: Set[str] = set()
-    for item in allowed_tools:
-        tool_name = str(item or '').strip().lower()
-        if not tool_name or tool_name in seen:
-            continue
-        normalized.append(tool_name)
-        seen.add(tool_name)
-    return normalized
+    return _normalize_unique_strings(allowed_tools, lowercase=True)
 
 
 def build_skill_runtime_additional_kwargs_payload(
@@ -151,7 +296,6 @@ def build_skill_runtime_additional_kwargs_payload(
     allowed_tools: Any,
     replay_source: Any,
 ) -> Optional[SkillRuntimeAdditionalKwargsPayload]:
-    """构建 skill_runtime canonical additional_kwargs 载荷。"""
 
     normalized_runtime_mode = str(runtime_mode or "").strip()
     if not normalized_runtime_mode:
@@ -178,7 +322,6 @@ def build_skill_runtime_additional_kwargs_payload(
 
 
 def normalize_skill_runtime_additional_kwargs(additional_kwargs: Any) -> Dict[str, Any]:
-    """规范化 additional_kwargs 中的 skill_runtime 结构。"""
 
     normalized = dict(additional_kwargs) if isinstance(additional_kwargs, dict) else {}
     runtime_payload = normalized.get("skill_runtime")
@@ -199,7 +342,6 @@ def normalize_skill_runtime_additional_kwargs(additional_kwargs: Any) -> Dict[st
 
 
 def extract_skill_runtime_from_ai_message(message: BaseMessage) -> Optional[Dict[str, Any]]:
-    """从 AIMessage 提取 skill_runtime additional_kwargs。"""
 
     if not isinstance(message, AIMessage):
         return None
@@ -215,7 +357,6 @@ def build_streaming_tool_start_payload(
     tool_name: Any,
     tool_args: Any,
 ) -> Optional[StreamingToolStartPayload]:
-    """构建 tool_start 事件统一载荷。"""
     normalized_name = str(tool_name or "").strip()
     if not normalized_name:
         return None
@@ -231,7 +372,6 @@ def build_streaming_result_payload(
     ai_message: Any,
     msg_content: str,
 ) -> Optional[StreamingResultPayload]:
-    """从 AIMessage 提取 result 事件统一载荷。"""
     additional = getattr(ai_message, "additional_kwargs", {})
     return build_streaming_result_payload_from_fields(
         data_type=additional.get("data_type"),
@@ -245,7 +385,6 @@ def build_streaming_result_payload_from_fields(
     data: Any,
     message: Any,
 ) -> Optional[StreamingResultPayload]:
-    """从字段值构建 result 事件统一载荷。"""
     payload = build_result_event_payload(
         data_type=data_type,
         data=data,
@@ -262,7 +401,6 @@ def build_streaming_result_payload_from_fields(
 def build_streaming_kb_images_payload(
     kb_images: Dict[str, str],
 ) -> StreamingKbImagesPayload:
-    """构建 kb_images 事件统一载荷。"""
     return {"images": dict(kb_images)}
 
 
@@ -270,7 +408,6 @@ def build_result_additional_kwargs_payload(
     data_type: Any,
     data: Any,
 ) -> Optional[ResultAdditionalKwargsPayload]:
-    """构建结果回放 additional_kwargs 统一载荷。"""
     result_payload = build_streaming_result_payload_from_fields(
         data_type=data_type,
         data=data,
@@ -288,7 +425,6 @@ def build_result_additional_kwargs_payload(
 def build_operation_additional_kwargs_payload(
     operation: Any,
 ) -> Optional[OperationAdditionalKwargsPayload]:
-    """构建操作确认回放 additional_kwargs 统一载荷。"""
     if not isinstance(operation, dict):
         return None
 
@@ -305,7 +441,6 @@ def build_operation_additional_kwargs_payload(
 
 
 def extract_operation_from_ai_message(message: BaseMessage) -> Optional[Dict[str, Any]]:
-    """从 AIMessage 提取 operation additional_kwargs。"""
     if not isinstance(message, AIMessage):
         return None
 
@@ -320,12 +455,9 @@ def extract_operation_from_ai_message(message: BaseMessage) -> Optional[Dict[str
     return operation
 
 class AgentOutputParser:
-    """Agent 输出解析器"""
     
     @staticmethod
     def parse_handoff(content: str) -> Optional[Dict[str, Any]]:
-        """解析 Handoff 指令 (支持 Regex 和 纯 JSON)"""
-        # 1. 优先尝试 Regex (兼容旧协议)
         match = re.search(AgentProtocol.HANDOFF_PATTERN, content)
         if match:
             try:
@@ -334,13 +466,10 @@ class AgentOutputParser:
             except json.JSONDecodeError:
                 logger.warning("Handoff Regex JSON 解析失败")
         
-        # 2. 尝试解析纯 JSON (标准化协议)
-        # 只有当内容看起来像 JSON 对象时才尝试
         stripped = content.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
                 data = json.loads(stripped)
-                # 简单校验
                 if data.get("action") == "handoff":
                     return data
             except json.JSONDecodeError:
@@ -350,13 +479,6 @@ class AgentOutputParser:
 
     @staticmethod
     def extract_latest_handoff_from_messages(messages: List[BaseMessage]) -> Optional[Dict[str, Any]]:
-        """从消息列表中提取最近一次 handoff 指令（只扫描 ToolMessage）。
-        
-        说明：
-        - 在 ReAct/工具调用链路中，模型可能在调用工具后继续输出一条 AIMessage。
-          因此 ToolMessage 不一定是 messages[-1]，需要回溯扫描。
-        - 调用方应传入“本轮增量消息”（delta），避免误取历史回合的 handoff。
-        """
         if not messages:
             return None
         
@@ -374,7 +496,6 @@ class AgentOutputParser:
 
     @staticmethod
     def extract_all_handoffs_from_messages(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
-        """按消息出现顺序提取当前增量中的全部 handoff 指令。"""
         if not messages:
             return []
 
@@ -395,13 +516,6 @@ class AgentOutputParser:
     
     @staticmethod
     def parse_handoff_typed(content: str) -> Optional["HandoffResult"]:
-        """类型安全的 Handoff 解析（返回 Pydantic 模型）。
-        
-        相比 parse_handoff，此方法提供：
-        1. 返回类型为 HandoffResult，IDE 可直接提示字段
-        2. Pydantic 验证确保数据结构正确
-        3. 失败时返回 None 而不是抛异常
-        """
         data = AgentOutputParser.parse_handoff(content)
         if data is None:
             return None
@@ -414,7 +528,6 @@ class AgentOutputParser:
 
     @staticmethod
     def parse_kb_images(content: str) -> Optional[Dict[str, str]]:
-        """解析知识库图片映射"""
         match = re.search(AgentProtocol.KB_IMAGES_PATTERN, content)
         if match:
             try:
@@ -426,10 +539,6 @@ class AgentOutputParser:
 
     @staticmethod
     def should_filter_content(content: str) -> bool:
-        """判断内容是否应该被过滤（不发送给用户）。
-        
-        只过滤明确属于内部协议的内容，避免误过滤 LLM 的正常回复。
-        """
         if not content or not isinstance(content, str):
             return False
         
@@ -437,11 +546,9 @@ class AgentOutputParser:
         if not stripped:
             return False
         
-        # 1. 纯 JSON - 只过滤包含内部协议字段的 JSON
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
                 data = json.loads(stripped)
-                # 只有包含明确的内部协议字段才过滤
                 INTERNAL_KEYS = {"intent", "action", "target_agent", "task_description"}
                 if isinstance(data, dict) and data.get("action") == "handoff":
                     return True
@@ -450,46 +557,28 @@ class AgentOutputParser:
             except (json.JSONDecodeError, TypeError):
                 pass
                 
-        # 2. Markdown JSON 代码块 - 仅当整个内容就是一个代码块时才过滤
         if stripped.startswith("```json") and stripped.endswith("```"):
             return True
             
-        # 3. 包含特定内部关键词
         if "<!--HANDOFF:" in stripped:
             return True
             
         return False
 
 class MessageFilter:
-    """消息过滤器：用于隔离不同 Agent 的上下文"""
-    
+
     @staticmethod
     def filter_for_tool_whitelist(messages: List[BaseMessage], allowed_tools: Set[str]) -> List[BaseMessage]:
-        """
-        基于工具白名单过滤消息历史。
-        用于防止 Agent A 的工具调用（如 SQL 查询）污染 Agent B 的上下文（导致 400 错误）。
-        
-        Args:
-            messages: 原始消息列表
-            allowed_tools: 允许的工具名称集合
-            
-        Returns:
-            过滤后的安全消息列表
-        """
         filtered = []
         for msg in messages:
-            # A. 工具调用消息 (AIMessage with tool_calls)
             if isinstance(msg, AIMessage) and msg.tool_calls:
-                # 过滤不在白名单的工具调用
                 safe_calls = [tc for tc in msg.tool_calls if tc.get("name") in allowed_tools]
                 
                 if not safe_calls:
-                    # 如果没有合法的工具调用，但有文本内容，保留文本
                     if msg.content:
                         filtered.append(create_ai_message(msg.content, id=msg.id))
                     continue
                 
-                # 如果部分工具调用不合法，仅保留合法的
                 if len(safe_calls) != len(msg.tool_calls):
                     new_msg = create_ai_message(msg.content, id=msg.id, tool_calls=safe_calls)
                     filtered.append(new_msg)
@@ -497,7 +586,6 @@ class MessageFilter:
                     filtered.append(msg)
                 continue
             
-            # B. 工具执行结果 (ToolMessage)
             if isinstance(msg, ToolMessage):
                 if msg.name not in allowed_tools:
                     continue

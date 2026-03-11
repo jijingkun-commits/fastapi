@@ -5,11 +5,15 @@
 import os
 import json
 import logging
+import hashlib
+from typing import Any, Dict
+
 from pydantic import BaseModel, Field
 from langchain.tools import tool
+from langchain_core.runnables.config import RunnableConfig
 
 from app.ai import config as ai_config
-from app.ai.protocol import build_streaming_result_payload_from_fields
+from app.ai.protocol import build_research_result_payload, build_streaming_result_payload_from_fields
 from app.db.session import get_db_context
 from app.models.chat_asset import AssetType
 
@@ -49,6 +53,77 @@ from app.db.session import analytics_engine  # 使用业务数据库连接
 # 定义结构化参数模型
 class SQLQuerySchema(BaseModel):
     sql_query: str = Field(description="用于从 PostgreSQL 提取数据的 SQL 查询语句。")
+
+class WebResearchInput(BaseModel):
+    query: str = Field(description="需要做网页研究的任务描述，适用于总结、对比、证据归纳")
+
+@tool(args_schema=WebResearchInput)
+def web_research(query: str) -> str:
+    """
+    用于需要跨网页检索结果做总结、对比、证据归纳时的 stateless research 入口。
+    简单单点实时搜索继续使用 search_tool。
+    """
+    if search_tool is None:
+        payload = build_research_result_payload(
+            research_mode="web",
+            research_task_id=_build_web_research_task_id(query),
+            summary="",
+            evidence=[],
+            insufficiency="联网搜索不可用，请检查 TAVILY_API_KEY 或工具依赖。",
+            source_count=0,
+            citation_count=0,
+        )
+        return json.dumps(payload, ensure_ascii=False)
+
+    try:
+        raw_result = search_tool.invoke({"query": query})
+    except Exception as exc:
+        payload = build_research_result_payload(
+            research_mode="web",
+            research_task_id=_build_web_research_task_id(query),
+            summary="",
+            evidence=[],
+            insufficiency=str(exc)[:240],
+            source_count=0,
+            citation_count=0,
+        )
+        return json.dumps(payload, ensure_ascii=False)
+
+    evidence = []
+    citation_count = 0
+    if isinstance(raw_result, dict):
+        items = raw_result.get("results") if isinstance(raw_result.get("results"), list) else [raw_result]
+    elif isinstance(raw_result, list):
+        items = raw_result
+    else:
+        items = []
+
+    for item in items[:3]:
+        if isinstance(item, dict):
+            title = str(item.get("title") or "").strip()
+            content = str(item.get("content") or item.get("snippet") or "").strip()
+            url = str(item.get("url") or "").strip()
+            excerpt = " - ".join(part for part in (title, content, url) if part).strip(" -")
+            if excerpt:
+                evidence.append({"source": "search_tool", "excerpt": excerpt[:240]})
+                if url:
+                    citation_count += 1
+    if not evidence:
+        raw_text = str(raw_result or "").strip()
+        if raw_text:
+            evidence.append({"source": "search_tool", "excerpt": raw_text[:240]})
+
+    payload = build_research_result_payload(
+        research_mode="web",
+        research_task_id=_build_web_research_task_id(query),
+        summary=(evidence[0]["excerpt"] if evidence else ""),
+        evidence=evidence,
+        insufficiency="" if evidence else "web search 未返回可用证据",
+        source_count=1 if evidence else 0,
+        citation_count=citation_count,
+    )
+    return json.dumps(payload, ensure_ascii=False)
+
 
 # 封装为 LangGraph 工具
 @tool(args_schema=SQLQuerySchema)
@@ -156,12 +231,38 @@ class ExtractQuerySchema(BaseModel):
     sql_query: str = Field(description="用于从 PostgreSQL 提取数据的 SQL 查询语句。")
     df_name: str = Field(description="指定用于保存结果的 pandas 变量名称（字符串形式）。")
 
-from typing import Dict, Any
-from langchain_core.runnables.config import RunnableConfig
 
 # 用于存储提取的 DataFrame 的全局字典
 # 结构: {thread_id: {df_name: DataFrame}}
 extracted_dataframes: Dict[str, Dict[str, Any]] = {}
+
+
+def _build_web_research_task_id(query: str) -> str:
+    return f"web:{hashlib.sha1(str(query or '').encode('utf-8')).hexdigest()[:8]}"
+
+
+def _truncate_error_message(error: Any, limit: int = 500) -> str:
+    message = str(error)
+    return message if len(message) <= limit else message[:limit] + "..."
+
+
+def _get_configurable_value(config: RunnableConfig, key: str) -> Any:
+    return config.get("configurable", {}).get(key)
+
+
+def _get_thread_dataframe_store(thread_id: str) -> Dict[str, Any]:
+    return extracted_dataframes.setdefault(thread_id, {})
+
+
+def _build_exec_globals(thread_id: str | None) -> Dict[str, Any]:
+    namespace = globals().copy()
+    if thread_id:
+        namespace.update(extracted_dataframes.get(thread_id, {}))
+    return namespace
+
+
+def _is_pandas_tabular(value: Any) -> bool:
+    return pd is not None and isinstance(value, (pd.DataFrame, pd.Series))
 
 
 def _emit_fig_image_result_event(proxy_url: str) -> None:
@@ -227,21 +328,12 @@ def extract_data(sql_query: str, df_name: str, config: RunnableConfig) -> str:
         # 使用业务数据库连接读取数据
         df = pd.read_sql(sql_query, analytics_engine)
         
-        # 初始化该 thread 的存储空间
-        if thread_id not in extracted_dataframes:
-            extracted_dataframes[thread_id] = {}
-            
-        # 将 DataFrame 保存到该 thread 的字典中
-        extracted_dataframes[thread_id][df_name] = df
+        _get_thread_dataframe_store(thread_id)[df_name] = df
         
         shape_info = f"，数据形状: {df.shape}" if hasattr(df, 'shape') else ""
         return f"成功创建 pandas 对象 `{df_name}`，包含 {len(df)} 行数据{shape_info}。"
     except Exception as e:
-        error_msg = str(e)
-        # 截断过长的错误信息
-        if len(error_msg) > 500:
-            error_msg = error_msg[:500] + "..."
-        return f" 执行失败：{error_msg}"
+        return f" 执行失败：{_truncate_error_message(e)}"
     
 
 # Python代码执行工具
@@ -255,22 +347,14 @@ def python_inter(py_code: str, config: RunnableConfig):
     当用户需要编写Python程序并执行时，请调用该函数。
     该函数可以执行一段Python代码并返回最终结果，需要注意，本函数只能执行非绘图类的代码，若是绘图相关代码，则需要调用fig_inter函数运行。
     """    
-    import traceback
-    
-    # 获取 thread_id
-    thread_id = config.get("configurable", {}).get("thread_id")
-    
-    g = globals().copy()
-    
-    # 注入该 thread 之前提取的 DataFrame
-    if thread_id and thread_id in extracted_dataframes:
-        g.update(extracted_dataframes[thread_id])
+    thread_id = _get_configurable_value(config, "thread_id")
+    g = _build_exec_globals(thread_id)
     
     try:
         # 尝试如果是表达式，则返回表达式运行结果
         result = eval(py_code, g)
         # 确保返回值是可序列化的字符串
-        if isinstance(result, (pd.DataFrame, pd.Series)):
+        if _is_pandas_tabular(result):
             return f"执行成功，返回数据形状: {result.shape if hasattr(result, 'shape') else 'N/A'}"
         elif isinstance(result, (dict, list)):
             try:
@@ -285,11 +369,7 @@ def python_inter(py_code: str, config: RunnableConfig):
         try:            
             exec(py_code, g)
         except Exception as exec_error:
-            error_msg = str(exec_error)
-            # 截断过长的错误信息
-            if len(error_msg) > 500:
-                error_msg = error_msg[:500] + "..."
-            return f"代码执行时报错: {error_msg}"
+            return f"代码执行时报错: {_truncate_error_message(exec_error)}"
         global_vars_after = set(g.keys())
         new_vars = global_vars_after - global_vars_before
         # 若存在新变量
@@ -300,13 +380,11 @@ def python_inter(py_code: str, config: RunnableConfig):
                     val = g[var]
                     
                     # 如果生成了新的 DataFrame，也保存到当前 thread 的上下文
-                    if isinstance(val, pd.DataFrame) and thread_id:
-                        if thread_id not in extracted_dataframes:
-                            extracted_dataframes[thread_id] = {}
-                        extracted_dataframes[thread_id][var] = val
+                    if pd is not None and isinstance(val, pd.DataFrame) and thread_id:
+                        _get_thread_dataframe_store(thread_id)[var] = val
                     
                     # 对于复杂对象，只返回类型和基本信息
-                    if isinstance(val, (pd.DataFrame, pd.Series)):
+                    if _is_pandas_tabular(val):
                         result[var] = f"<{type(val).__name__} shape={val.shape if hasattr(val, 'shape') else 'N/A'}>"
                     elif isinstance(val, (dict, list)):
                         try:
@@ -346,9 +424,8 @@ def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
     import time
     from uuid import uuid4
     
-    # 获取 thread_id 和 user_id
-    thread_id = config.get("configurable", {}).get("thread_id")
-    user_id = config.get("configurable", {}).get("user_id")
+    thread_id = _get_configurable_value(config, "thread_id")
+    user_id = _get_configurable_value(config, "user_id")
     
     current_backend = matplotlib.get_backend()
     matplotlib.use('Agg')
@@ -356,11 +433,7 @@ def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
     local_vars = {"plt": plt, "pd": pd, "sns": sns}
 
     try:
-        g = globals().copy()
-        
-        # 注入该 thread 之前提取的 DataFrame
-        if thread_id and thread_id in extracted_dataframes:
-            g.update(extracted_dataframes[thread_id])
+        g = _build_exec_globals(thread_id)
             
         exec(py_code, g, local_vars)
         g.update(local_vars)
@@ -465,10 +538,7 @@ def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
         else:
             return json.dumps({"status": "error", "message": "图像对象未找到"}, ensure_ascii=False)
     except Exception as e:
-        error_msg = str(e)
-        if len(error_msg) > 500:
-            error_msg = error_msg[:500] + "..."
-        return f" 执行失败：{error_msg}"
+        return f" 执行失败：{_truncate_error_message(e)}"
     finally:
         try:
             plt.close('all')

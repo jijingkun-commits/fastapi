@@ -30,7 +30,8 @@ def test_filter_messages_for_todo_should_merge_tool_observation_into_description
 
     filtered, handoff_context, pre_extracted = filter_messages_for_todo(messages, pending_handoff)
 
-    assert len(filtered) == 1
+    assert len(filtered) == 2
+    assert filtered[0].name == "__internal_todo_handoff__"
     assert pre_extracted is not None
     assert pre_extracted.get("action") == "update"
     assert pre_extracted.get("todo_id") == 123
@@ -95,3 +96,56 @@ def test_augment_todo_handoff_should_inject_tool_observations_and_todo_id():
     assert "外部信息补充" in todo_fields.get("description", "")
     assert observations and observations[0].get("tool") == "tavily_search_results_json"
     assert enriched.get("turn_act_hint") == "SUPPLEMENT"
+
+
+def test_filter_messages_for_todo_should_build_contract_first_messages():
+    """命中 handoff 时应优先生成内部 contract 消息，而不是透传历史消息窗口。"""
+    messages = [
+        HumanMessage(content="旧问题：帮我查天气"),
+        HumanMessage(content="描述里加上天气情况"),
+    ]
+    pending_handoff = {
+        "task_description": "请补充外部信息后更新待办",
+        "turn_act_hint": "SUPPLEMENT",
+        "frame": {
+            "todo_action": "update",
+            "todo_fields": {"todo_id": 123, "description": "会前确认议程"},
+        },
+    }
+
+    filtered, _, pre_extracted = filter_messages_for_todo(messages, pending_handoff)
+
+    assert len(filtered) == 2
+    assert filtered[0].name == "__internal_todo_handoff__"
+    assert filtered[0].additional_kwargs["expert_input_contract"] == {
+        "contract_id": "todo_handoff_frame",
+        "contract_version": "v1",
+        "target_agent": "todo_expert",
+        "state_owner": "supervisor",
+        "source_fields": [
+            "pending_handoff.frame.todo_action",
+            "pending_handoff.frame.todo_fields",
+            "pending_handoff.turn_act_hint",
+        ],
+    }
+    assert filtered[1].content == "描述里加上天气情况"
+    assert pre_extracted.get("action") == "update"
+    assert pre_extracted.get("todo_id") == 123
+
+
+def test_filter_messages_for_todo_should_prefer_frame_over_task_description_noise():
+    """frame 存在时，应优先吃结构化 frame，而不是 task_description 噪声。"""
+    messages = [HumanMessage(content="把描述补完整")]
+    pending_handoff = {
+        "task_description": "删除这个待办",
+        "frame": {
+            "todo_action": "update",
+            "todo_fields": {"todo_id": 99, "description": "保留原待办"},
+        },
+    }
+
+    _, handoff_context, pre_extracted = filter_messages_for_todo(messages, pending_handoff)
+
+    assert pre_extracted.get("action") == "update"
+    assert pre_extracted.get("todo_id") == 99
+    assert "删除这个待办" not in handoff_context

@@ -19,10 +19,8 @@ import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
 
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
-from app.ai.utils.message_factory import create_ai_message
+from langchain_core.messages import BaseMessage, HumanMessage
 from app.ai.config.todo_config import get_todo_config
 
 logger = logging.getLogger(__name__)
@@ -50,6 +48,49 @@ _EXPLICIT_ACTION_HINTS = (
     "创建", "新建", "新增", "记录", "记一下", "查询", "查看", "列出",
     "完成", "做完", "标记", "删除", "删掉", "取消", "修改", "更新", "改到", "改成", "推迟"
 )
+
+_TODO_SAFE_TOOLS = {"add_todo", "list_todos", "update_todo", "complete_todo", "delete_todo", "update_progress"}
+_TASK_DESC_FIELD_PATTERNS = {
+    "title": r"标题[：:]\s*(.+?)(?:\n|$|-)",
+    "time": r"时间[：:]\s*(.+?)(?:\n|$|-)",
+    "location": r"地点[：:]\s*(.+?)(?:\n|$|-)",
+    "participants": r"参与人员[：:]\s*(.+?)(?:\n|$|-)",
+}
+_TODO_PRIORITY_LABELS = {1: "高", 2: "中", 3: "低"}
+
+
+def _project_todo_handoff_messages(
+    filtered_messages: List[BaseMessage],
+    *,
+    content: str,
+    contract_id: str,
+    source_fields: List[str],
+    dedupe_latest_content: bool,
+) -> List[BaseMessage]:
+    from app.ai.protocol import build_expert_input_contract_payload
+
+    contract_payload = build_expert_input_contract_payload(
+        contract_id=contract_id,
+        target_agent="todo_expert",
+        state_owner="supervisor",
+        source_fields=source_fields,
+    )
+    latest_human_message = next(
+        (msg for msg in reversed(filtered_messages) if isinstance(msg, HumanMessage)),
+        None,
+    )
+    projected_messages: List[BaseMessage] = [
+        HumanMessage(
+            content=content,
+            name="__internal_todo_handoff__",
+            additional_kwargs={"expert_input_contract": contract_payload} if contract_payload else None,
+        )
+    ]
+    if latest_human_message is not None:
+        latest_content = str(latest_human_message.content or "").strip()
+        if not dedupe_latest_content or latest_content != content:
+            projected_messages.append(latest_human_message)
+    return projected_messages
 
 
 def clean_reference_text(text: Optional[str]) -> str:
@@ -221,40 +262,22 @@ def _extract_tool_observation_summary(handoff_frame: Optional[Dict[str, Any]]) -
 # ==================== 消息过滤 ====================
 
 def filter_messages_for_todo(
-    messages: List[BaseMessage], 
+    messages: List[BaseMessage],
     pending_handoff: Optional[Dict] = None
 ) -> Tuple[List[BaseMessage], str, Optional[Dict]]:
-    """过滤消息并构建 Handoff 上下文。
-    
-    Args:
-        messages: 原始消息列表
-        pending_handoff: 来自 Supervisor 的 Handoff 信息
-        
-    Returns:
-        (过滤后的消息列表, Handoff 上下文字符串, 预提取的 extracted_info)
-    """
+    """过滤消息并构建 Handoff 上下文。"""
     from app.ai.protocol import MessageFilter
-    import re
-    
-    # 待办相关的安全工具白名单
-    SAFE_TOOLS = {'add_todo', 'list_todos', 'update_todo', 'complete_todo', 'delete_todo', 'update_progress'}
-    
-    filtered_messages = MessageFilter.filter_for_tool_whitelist(messages, SAFE_TOOLS)
-    
-    # 构建 Handoff 上下文 + 解析结构化信息
+
+    filtered_messages = MessageFilter.filter_for_tool_whitelist(messages, _TODO_SAFE_TOOLS)
     handoff_context = ""
     pre_extracted_info = None
-    
+
     if pending_handoff:
-        task_desc = pending_handoff.get("task_description", "")
+        task_desc = str(pending_handoff.get("task_description") or "").strip()
         handoff_frame = pending_handoff.get("frame")
-
-        if task_desc:
-            handoff_context = f"\n\n## 任务来源 (Supervisor Handoff)\n用户意图已由 Supervisor 预识别：{task_desc}\n请基于此描述进行操作。"
-
+        turn_act_hint = str(pending_handoff.get("turn_act_hint") or "").strip()
         pre_extracted_info = {}
 
-        # 优先消费结构化 frame（会话意图内核 V2）
         if isinstance(handoff_frame, dict):
             todo_fields = handoff_frame.get("todo_fields") if isinstance(handoff_frame.get("todo_fields"), dict) else {}
             for key in ("title", "time", "due_date", "priority", "category", "description", "progress_notes", "todo_id"):
@@ -266,7 +289,6 @@ def filter_messages_for_todo(
             if todo_action:
                 pre_extracted_info["action"] = todo_action
 
-            # Supervisor 工具观察结果：提炼摘要并并入描述
             raw_observations = handoff_frame.get("tool_observations")
             if isinstance(raw_observations, str):
                 try:
@@ -274,11 +296,10 @@ def filter_messages_for_todo(
                 except json.JSONDecodeError:
                     raw_observations = None
 
+            observation_summary = ""
             if isinstance(raw_observations, list):
                 pre_extracted_info["tool_observations"] = raw_observations
-                observation_summary = _extract_tool_observation_summary(
-                    {"tool_observations": raw_observations}
-                )
+                observation_summary = _extract_tool_observation_summary({"tool_observations": raw_observations})
                 if observation_summary:
                     existing_desc = str(pre_extracted_info.get("description") or "").strip()
                     observation_desc = f"外部信息补充：{observation_summary}"
@@ -287,25 +308,59 @@ def filter_messages_for_todo(
                     elif not existing_desc:
                         pre_extracted_info["description"] = observation_desc
 
-                    handoff_context += f"\n外部信息摘要：{observation_summary}"
+            known_fields = sorted(
+                key for key, value in pre_extracted_info.items()
+                if key != "tool_observations" and value not in (None, "", [], {})
+            )
+            handoff_context = (
+                "\n\n## 任务来源 (Supervisor Handoff)\n"
+                "优先按结构化 handoff contract 执行当前待办闭环。"
+            )
+            if todo_action:
+                handoff_context += f"\n- todo_action: {todo_action}"
+            if turn_act_hint:
+                handoff_context += f"\n- turn_act_hint: {turn_act_hint}"
+            if known_fields:
+                handoff_context += f"\n- 已冻结字段: {', '.join(known_fields)}"
+            if observation_summary:
+                handoff_context += f"\n- 外部信息摘要: {observation_summary}"
 
-        # 回退：从 task_description 中做轻量结构化解析
-        if task_desc:
-            title_match = re.search(r'标题[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if title_match and not pre_extracted_info.get("title"):
-                pre_extracted_info["title"] = title_match.group(1).strip()
+            internal_payload = {
+                "todo_action": todo_action,
+                "turn_act_hint": turn_act_hint,
+                "todo_fields": {k: v for k, v in pre_extracted_info.items() if k != "tool_observations"},
+            }
+            filtered_messages = _project_todo_handoff_messages(
+                filtered_messages,
+                content=json.dumps(internal_payload, ensure_ascii=False),
+                contract_id="todo_handoff_frame",
+                source_fields=[
+                    "pending_handoff.frame.todo_action",
+                    "pending_handoff.frame.todo_fields",
+                    "pending_handoff.turn_act_hint",
+                ],
+                dedupe_latest_content=False,
+            )
 
-            time_match = re.search(r'时间[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if time_match and not pre_extracted_info.get("time"):
-                pre_extracted_info["time"] = time_match.group(1).strip()
+        elif task_desc:
+            handoff_context = f"\n\n## 任务来源 (Supervisor Handoff)\n用户意图已由 Supervisor 预识别：{task_desc}\n请基于此描述进行操作。"
+            filtered_messages = _project_todo_handoff_messages(
+                filtered_messages,
+                content=task_desc,
+                contract_id="todo_handoff_text",
+                source_fields=["pending_handoff.task_description"],
+                dedupe_latest_content=True,
+            )
 
-            location_match = re.search(r'地点[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if location_match and not pre_extracted_info.get("location"):
-                pre_extracted_info["location"] = location_match.group(1).strip()
-
-            participants_match = re.search(r'参与人员[：:]\s*(.+?)(?:\n|$|-)', task_desc)
-            if participants_match and not pre_extracted_info.get("participants"):
-                pre_extracted_info["participants"] = [p.strip() for p in participants_match.group(1).split('、')]
+        if task_desc and not isinstance(handoff_frame, dict):
+            for key, pattern_text in _TASK_DESC_FIELD_PATTERNS.items():
+                if pre_extracted_info.get(key):
+                    continue
+                match = re.search(pattern_text, task_desc)
+                if not match:
+                    continue
+                value = match.group(1).strip()
+                pre_extracted_info[key] = [part.strip() for part in value.split("、")] if key == "participants" else value
 
         if pre_extracted_info:
             logger.info(f"从 Handoff 预提取信息: {pre_extracted_info}")
@@ -339,8 +394,7 @@ def query_existing_todos(user_id: int, limit: int = 10) -> str:
             todo_list = []
             for t in existing_todos[:limit]:
                 due_str = t.due_date.strftime("%m月%d日") if t.due_date else "无截止"
-                priority_map = {1: "高", 2: "中", 3: "低"}
-                priority_str = priority_map.get(t.priority, "中")
+                priority_str = _TODO_PRIORITY_LABELS.get(t.priority, "中")
                 todo_list.append(f"- {t.title} (截止:{due_str}, 优先级:{priority_str})")
             
             context = f"\n\n## 用户现有待办 ({len(existing_todos)}项)\n" + "\n".join(todo_list)
@@ -418,8 +472,6 @@ def extract_heuristic_title(message: str) -> Optional[str]:
     Returns:
         提取到的标题，或 None
     """
-    import re
-    
     patterns = [
         r"(?:再|帮我|请)?创建一个?任务[：:]\s*(.+)",
         r"创建待办[：:]\s*(.+)",

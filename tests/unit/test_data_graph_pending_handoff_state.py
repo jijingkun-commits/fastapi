@@ -7,6 +7,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.ai.state import DataAgentState
+from app.ai.workflow.data_graph import _extract_handoff_context
 
 
 class _ProbeState(TypedDict, total=False):
@@ -71,3 +72,27 @@ def test_data_agent_state_keeps_pending_handoff_for_subgraph():
     assert captured["pending_handoff"]["turn_act_hint"] == "SUPPLEMENT"
     assert result.get("pending_handoff", {}).get("target_agent") == "data_expert"
 
+
+
+def test_extract_handoff_context_should_include_contract_metadata():
+    """handoff.frame 存在时，应输出 data contract 元信息。"""
+    context = _extract_handoff_context({
+        "pending_handoff": {
+            "target_agent": "data_expert",
+            "turn_act_hint": "NEW_QUERY",
+            "frame": {
+                "query_text": "查询2025-06-30贷款余额前10名客户",
+                "metric": "贷款余额",
+                "time_range": "2025-06-30",
+            },
+        }
+    })
+
+    assert context["query_text"] == "查询2025-06-30贷款余额前10名客户"
+    assert context["expert_input_contract"] == {
+        "contract_id": "data_handoff_query_text",
+        "contract_version": "v1",
+        "target_agent": "data_expert",
+        "state_owner": "supervisor",
+        "source_fields": ["pending_handoff.frame.query_text"],
+    }

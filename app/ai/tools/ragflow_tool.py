@@ -6,11 +6,13 @@ import requests
 import logging
 import json
 import os
+import hashlib
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from langchain.tools import tool
 
 from app.core import config
+from app.ai.protocol import build_research_result_payload
 
 logger = logging.getLogger(__name__)
 
@@ -73,24 +75,6 @@ def _call_ragflow_retrieval(
     except requests.exceptions.RequestException as e:
         # 统一抛出异常，由上层捕获
         raise e
-
-def _convert_ragflow_image_url(url: str) -> str:
-    """将 RAGFlow 图片 URL 转换为代理 URL。
-    
-    Args:
-        url: 原始 RAGFlow 图片 URL，如 http://localhost/v1/document/image/kb-img
-        
-    Returns:
-        代理 URL，如 /api/v1/assets/proxy/ragflow/kb-img
-    """
-    import re
-    # 匹配 /v1/document/image/{image_id} 格式
-    match = re.search(r'/v1/document/image/([a-zA-Z0-9\-]+)', url)
-    if match:
-        image_id = match.group(1)
-        return f"/api/v1/assets/proxy/ragflow/{image_id}"
-    return url
-
 
 def _to_bool_flag(value: Any, default: bool) -> bool:
     """将配置值转换为布尔开关。"""
@@ -1020,6 +1004,40 @@ def knowledge_search(query: str, dataset_id: str = None) -> str:
         logger.exception("RAGFlow 检索异常: %s", e)
         return f"知识库检索失败: {str(e)}"
 
+
+
+@tool(args_schema=KnowledgeSearchInput)
+def knowledge_research(query: str, dataset_id: str = None) -> str:
+    """
+    用于需要跨多条知识库资料做总结、对比、证据归纳时的 stateless research 入口。
+    简单单点直查继续使用 knowledge_search。
+    """
+    raw_result = str(knowledge_search.func(query=query, dataset_id=dataset_id) or "").strip()
+    evidence_lines = []
+    for line in raw_result.splitlines():
+        excerpt = str(line or "").strip()
+        if not excerpt or excerpt.startswith("[IMG-"):
+            continue
+        evidence_lines.append({"source": "knowledge_search", "excerpt": excerpt[:240]})
+        if len(evidence_lines) >= 3:
+            break
+
+    insufficiency = ""
+    if not raw_result:
+        insufficiency = "knowledge_search 未返回可用证据"
+    elif "知识库检索失败" in raw_result:
+        insufficiency = raw_result[:240]
+
+    payload = build_research_result_payload(
+        research_mode="knowledge",
+        research_task_id=f"knowledge:{hashlib.sha1(str(query or '').encode('utf-8')).hexdigest()[:8]}",
+        summary=(evidence_lines[0]["excerpt"] if evidence_lines else raw_result[:240]),
+        evidence=evidence_lines,
+        insufficiency=insufficiency,
+        source_count=1 if evidence_lines else 0,
+        citation_count=raw_result.count("[IMG-"),
+    )
+    return json.dumps(payload, ensure_ascii=False)
 
 def is_ragflow_configured() -> bool:
     """检查 RAGFlow 是否已配置。"""

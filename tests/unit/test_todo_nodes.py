@@ -494,6 +494,73 @@ class TestOutOfScopeGuard:
         assert "外部信息补充" in description
         assert "上海明天多云" in description
 
+    @patch("app.ai.workflow.todo_graph.parse_time_info", side_effect=lambda extracted_info, _constraints: (extracted_info, None))
+    @patch("app.ai.workflow.todo_graph.query_existing_todos", return_value="")
+    @patch("app.ai.workflow.todo_graph._get_user_id_from_state", return_value=1)
+    @patch("app.ai.workflow.todo_graph.get_scene_llm")
+    def test_analyze_intent_should_use_contract_first_handoff_messages(
+        self,
+        mock_get_llm,
+        _mock_user_id,
+        _mock_query,
+        _mock_parse_time,
+    ):
+        """handoff 场景下，todo analyze 只应消费内部 contract + 最新用户补充。"""
+        from app.ai.workflow.todo_graph import analyze_intent
+
+        captured = {}
+
+        class _FakeLLM:
+            def invoke(self, messages):
+                captured["messages"] = messages
+                return MagicMock(content=(
+                    '{"intent":"update","action_state":"need_confirm",'
+                    '"response_message":"好的，已准备更新待办。",'
+                    '"extracted_info":{"description":"补充天气信息"},'
+                    '"missing_info":[]}'
+                ))
+
+        mock_get_llm.return_value = _FakeLLM()
+
+        state = {
+            "messages": [
+                HumanMessage(content="旧问题：帮我查天气"),
+                AIMessage(content="旧回答：上海多云"),
+                HumanMessage(content="描述里添加，当天的天气情况"),
+            ],
+            "user_id": 1,
+            "pending_handoff": {
+                "target_agent": "todo_expert",
+                "task_description": "请补充外部信息后更新待办",
+                "turn_act_hint": "SUPPLEMENT",
+                "frame": {
+                    "todo_action": "update",
+                    "todo_fields": {"todo_id": 88, "description": "原始描述"},
+                },
+            },
+            "pending_operation": None,
+            "user_confirmed": None,
+            "quick_mode": None,
+            "conversation_context": None,
+            "current_focus": None,
+            "detected_conflicts": None,
+            "time_constraints": None,
+            "extracted_info": None,
+            "pending_clarifications": None,
+            "response_message": None,
+        }
+
+        analyze_intent(state)
+
+        analysis_messages = captured["messages"]
+        assert len(analysis_messages) == 3
+        assert analysis_messages[1].name == "__internal_todo_handoff__"
+        assert analysis_messages[1].additional_kwargs["expert_input_contract"]["contract_id"] == "todo_handoff_frame"
+        assert analysis_messages[2].content == "描述里添加，当天的天气情况"
+        joined = "\n".join(str(msg.content) for msg in analysis_messages[1:])
+        assert "旧问题：帮我查天气" not in joined
+        assert "旧回答：上海多云" not in joined
+
     def test_in_scope_todo_query_not_blocked(self):
         """包含待办语义的查询不应被超范围兜底误拦截。"""
         from app.ai.workflow.todo_graph import _is_out_of_scope_for_todo

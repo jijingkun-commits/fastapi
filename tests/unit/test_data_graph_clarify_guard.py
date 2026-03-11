@@ -557,6 +557,13 @@ class TestDataGraphClarifyGuard(unittest.TestCase):
         self.assertEqual(result.get("data_intent"), "metric_query")
         self.assertIn("贷款余额", result.get("query_context", {}).get("original_question", ""))
         self.assertNotIn("嘉兴", result.get("query_context", {}).get("original_question", ""))
+        self.assertEqual(result.get("query_context", {}).get("expert_input_contract"), {
+            "contract_id": "data_handoff_query_text",
+            "contract_version": "v1",
+            "target_agent": "data_expert",
+            "state_owner": "supervisor",
+            "source_fields": ["pending_handoff.frame.query_text"],
+        })
 
     def test_intent_analysis_model_access_error_should_surface_stable_failure_message(self):
         """意图模型不可用时，不得伪装成 free_query 继续执行。"""

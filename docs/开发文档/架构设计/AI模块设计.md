@@ -134,36 +134,60 @@ graph LR
 
 ```python
 class BaseAgentState(TypedDict, total=False):
-    """所有 Agent 共享状态。"""
-    messages: Annotated[list, add_messages]  # 对话消息列表
-    user_id: Optional[int]                    # 用户 ID
-    thread_id: Optional[str]                  # 对话线程 ID
-    enable_thinking: Optional[bool]           # 是否启用深度思考
-    model_id: Optional[str]                   # 模型标识
-    pending_handoff: Optional[Dict]           # 当前轮委派上下文（供专家子图消费）
-    handoff_queue: Optional[List[Dict]]       # 复合任务剩余委派队列
-    completed_handoffs: Optional[List[Dict]]  # 已执行委派记录
-    handoff_execution_trace: Optional[List[Dict]]  # 执行轨迹（统一汇总输入）
-    multi_intent_mode: Optional[bool]         # 是否进入复合任务串行模式
+    """所有 Agent 共享的基础传输字段。"""
+    messages: Annotated[list, add_messages]
+    user_id: int
+    thread_id: str
+    enable_thinking: bool
+    model_id: str
 
 
-class MultiAgentState(BaseAgentState, total=False):
-    """多智能体 Supervisor 扩展状态。"""
-    attachment_analysis: Optional[str]        # 附件分析结果
-    evaluation: Optional[str]                 # 评估结果
-    evaluation_route: Optional[str]           # evaluate 下一跳路由
-    iteration_count: Optional[int]            # 迭代计数
-    thinking_content: Optional[str]           # 思考内容
-    detected_intent: Optional[str]            # 识别到的意图类型
-    intent_route: Optional[str]               # 意图路由目标
-    skill_candidates: Optional[List[Dict]]    # 候选技能（含向量分/关键词分/融合分/裁决结果）
-    selected_skill_ids: Optional[List[str]]   # 最终入选 skill_id 列表
-    skill_context: Optional[str]              # 检索到的相关技能上下文
-    skill_injection_meta: Optional[Dict]      # 注入预算与命中章节统计
-    system_context: Optional[str]             # 系统级上下文（当前时间、用户信息等）
+class SupervisorConversationState(TypedDict, total=False):
+    """由 supervisor 单写、workflow 只读投影的主会话状态。"""
+    session_frame: Dict
+    turn_act: Literal["NEW_QUERY", "SUPPLEMENT", "CORRECTION", "CONFIRM", "UNKNOWN"]
+    clarify_fsm_state: str
+    clarify_round: int
+    frame_source_map: Dict
+
+
+class RoutingTransientState(TypedDict, total=False):
+    """由 supervisor 维护的路由瞬态。"""
+    pending_handoff: Dict
+    handoff_queue: List[Dict]
+    completed_handoffs: List[Dict]
+    handoff_execution_trace: List[Dict]
+    multi_intent_mode: bool
+
+
+class TodoAnchorState(TypedDict, total=False):
+    """供 supervisor/todo 共享的待办锚点。"""
+    current_todo_id: int
+
+
+class TodoWorkflowState(TypedDict, total=False):
+    """仅由 todo workflow 维护的局部流程状态。"""
+    pending_operation: Dict
+    user_confirmed: bool
+    pending_clarifications: List[str]
+    draft_todos: List[Dict]
+
+
+class DataWorkflowState(TypedDict, total=False):
+    """仅由 data workflow 维护的局部分析状态。"""
+    query_context: Dict
+    generated_sql: str
+    pending_sql: str
+    sql_approved: bool
+    sql_history: List[Dict]
 ```
 
-说明：`pending_handoff + handoff_queue` 放在 `BaseAgentState`，确保 `DataAgentState` / `TodoAgentState` 子图都能读取同一份委派上下文；`handoff_execution_trace` 由 evaluate 累积，最终在 summarize 节点统一汇总，避免复合任务中途提前收口。
+说明：
+- `BaseAgentState` 只保留真正跨所有 Agent 的基础字段，不再承载带 owner 的业务状态。
+- `SupervisorConversationState` 代表主会话真理源；`todo/data` 在当前阶段可读取其投影，但 owner 仍然是 `supervisor`。
+- `RoutingTransientState` 单独抽出，表达“这是一份共享可读但由 supervisor 维护的运行中瞬态”，避免继续误判为 workflow local state。
+- `TodoAnchorState` 只表达前端选中待办锚点，不把它继续混进通用基类。
+- `TodoWorkflowState` / `DataWorkflowState` 只承载各自闭环所需局部状态，为后续 `contract-first` 收口留出明确落点。
 
 ### 状态生命周期管理 (2026-02)
 
@@ -174,8 +198,12 @@ class MultiAgentState(BaseAgentState, total=False):
 
 | 类型 | 字段 | 说明 |
 |------|------|------|
-| **持久化状态** | `messages`, `user_id`, `thread_id`, `model_id`, `enable_thinking` | 跨轮次保留，用于上下文连续性 |
-| **瞬态状态** | `pending_handoff`, `handoff_queue`, `completed_handoffs`, `handoff_execution_trace`, `multi_intent_mode`, `pending_operation`, `evaluation`, `evaluation_route`, `iteration_count`, `user_confirmed`, `quick_mode`, `detected_intent`, `intent_route`, `attachment_analysis`, `skill_candidates`, `selected_skill_ids`, `skill_context`, `skill_injection_meta` | 仅在单轮有效，每轮结束时清理 |
+| **基础持久化状态** | `messages`, `user_id`, `thread_id`, `model_id`, `enable_thinking` | 所有 Agent 共用的基础上下文 |
+| **主会话状态（supervisor owner）** | `session_frame`, `turn_act`, `clarify_fsm_state`, `clarify_round`, `frame_source_map` | 主会话连续性真理源；workflow 当前可读但不可主导 |
+| **路由瞬态（supervisor owner）** | `pending_handoff`, `handoff_queue`, `completed_handoffs`, `handoff_execution_trace`, `multi_intent_mode` | 单轮编排控制面状态，统一由 supervisor 维护与清理 |
+| **todo 锚点与局部状态（todo owner）** | `current_todo_id`, `pending_operation`, `user_confirmed`, `quick_mode`, `pending_clarifications`, `draft_todos`, `response_message` | `current_todo_id` 作为待办锚点投影，其余字段只服务待办确认/澄清/执行闭环 |
+| **data 局部状态（data owner）** | `query_context`, `generated_sql`, `pending_sql`, `sql_approved`, `clarification_needed`, `sql_history` | 仅服务问数澄清/生成/执行闭环 |
+| **其余运行态瞬态** | `evaluation`, `evaluation_route`, `iteration_count`, `detected_intent`, `intent_route`, `attachment_manifest`, `lightweight_probe`, `attachment_planning`, `skill_context`, `loaded_skill_registry` 等 | 仅在当前轮有效，由出口统一清理 |
 
 #### 清理机制
 
@@ -207,7 +235,6 @@ def _postprocess(state: MultiAgentState) -> dict:
         "detected_intent": None,
         "intent_route": None,
         # 预处理结果
-        "attachment_analysis": None,
         "skill_candidates": [],
         "selected_skill_ids": [],
         "skill_context": None,
@@ -253,17 +280,32 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 
 | 节点 | 函数 | 职责 |
 |------|------|------|
-| `preprocess` | `_preprocess_multimodal` | 验证消息、分析附件、护栏验证，并承接显式复合问题 fast lane（goals 预编译 / 事实预取 / 直达 `data_expert`） |
+| `preprocess` | `_preprocess_multimodal` | 验证消息、做附件 planning、护栏验证，并承接显式复合问题 fast lane（goals 预编译 / 事实预取 / 直达 `data_expert`） |
 | `intent_classify` | `_classify_intent` | 🆕 意图识别，决定路由目标 |
-| `supervisor` | Supervisor Agent | 理解意图、路由决策、直接处理简单任务 |
-| `data_expert` | Data Agent | 复杂多步骤数据分析 |
-| `todo_expert` | Todo Agent | 待办事项管理（需要确认流程） |
+| `supervisor` | Supervisor Agent | 理解意图、维护主会话状态、选择 `direct_tool/data_workflow/research_subagent/todo_workflow/mixed` |
+| `data_expert` | Data Workflow Node | 承接 `data_workflow`，消费 supervisor 投影与 handoff contract，执行确定性数据分析闭环 |
+| `todo_expert` | Todo Workflow Node | 承接 `todo_workflow`，消费 supervisor 投影与 handoff contract，执行待办确认闭环 |
 | `evaluate` | `_evaluate_expert_work` | 评估任务完成度 |
 | `postprocess` | `_postprocess` | 保存对话、清理缓存 |
 
-### 路由机制 (2026-01 类型安全重构)
+### 能力分层（2026-03-10）
 
-Supervisor 通过 **Handoff Tools** 进行路由，使用类型安全的 `HandoffResult` 协议：
+| 层级 | 当前落点 | 是否持有跨轮 state | 责任边界 |
+|------|----------|-------------------|----------|
+| `service` | `chat_service`、`skill_service` | 否 | 做 API/运行时装配与调用编排，不拥有会话语义 |
+| `supervisor` | `multi_agent_graph.supervisor` | 是 | 主会话 `conversation_state` 唯一 owner，统一规划路由与用户可见错误 |
+| `workflow` | `todo_workflow`、`data_workflow` | 仅局部 workflow state | 消费 `pending_handoff.frame + expert_input_contract` 完成闭环，不接管主会话 |
+| `research_subagent` | `knowledge_research`、`web_research` | 否 | 处理单次研究任务，隔离 scratchpad，返回 `summary + evidence + insufficiency` |
+| `tool` | `knowledge_search`、`search_tool`、`read_uploaded_file`、`analyze_image` | 否 | 提供原子能力，由 supervisor/workflow 直接调用 |
+
+说明：
+- `data_expert` / `todo_expert` 仍是图内节点名，但能力语义已经收口为 `workflow`，不是通用长生命周期 subagent。
+- `mixed` 路由场景下，owner 仍然只能是 `supervisor`；workflow 与 research_subagent 只返回局部结果，不接管主会话。
+- `router_result_v2.conversation_state` 是唯一 replay snapshot；禁止再并行维护第二套主会话快照字段。
+
+### 路由机制 (2026-03 contract-first)
+
+Supervisor 通过 **Handoff Tools** 进行路由，运行态统一使用类型安全的 `HandoffResult` 与最小 `expert_input_contract`：
 
 **文件**: `app/ai/protocol.py`
 
@@ -274,7 +316,9 @@ class HandoffResult(BaseModel):
     """标准 Handoff 结果模型（Pydantic 验证）"""
     action: str = Field(default="handoff")
     target_agent: str = Field(..., description="目标专家 Agent 名称")
-    task_description: str = Field(..., description="任务描述与上下文")
+    task_description: Optional[str] = Field(default=None, description="任务描述与上下文（非 data.query 必填）")
+    frame: Optional[Dict[str, Any]] = Field(default=None, description="结构化会话帧（可选）")
+    turn_act_hint: Optional[str] = Field(default=None, description="回合行为提示（可选）")
 ```
 
 **文件**: `app/ai/workflow/multi_agent_graph.py`
@@ -283,20 +327,31 @@ class HandoffResult(BaseModel):
 from app.ai.protocol import HandoffResult
 
 def _create_task_handoff_tool(agent_name: str, description: str):
-    """创建带任务描述的 Handoff 工具。"""
-    
+    """创建 Handoff 工具。"""
+
+    if agent_name == AgentType.DATA:
+        @tool(name=f"assign_to_{agent_name}", description=description)
+        def handoff_tool(
+            frame: Annotated[Dict[str, Any], "data.query 结构化合同（必填）"],
+            turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）"] = None,
+        ) -> str:
+            result = HandoffResult(target_agent=agent_name, frame=frame, turn_act_hint=turn_act_hint)
+            return result.model_dump_json(ensure_ascii=False, exclude_none=True)
+        return handoff_tool
+
     @tool(name=f"assign_to_{agent_name}", description=description)
     def handoff_tool(
         task_description: Annotated[str, "详细描述下一个专家需要完成的任务"],
+        frame: Annotated[Optional[Dict[str, Any]], "结构化上下文（可选）"] = None,
+        turn_act_hint: Annotated[Optional[str], "回合行为提示（可选）"] = None,
     ) -> str:
-        """将任务委派给指定的专家 Agent。返回 JSON 格式的委派指令。"""
         result = HandoffResult(
             target_agent=agent_name,
-            task_description=task_description
+            task_description=task_description,
+            frame=frame,
+            turn_act_hint=turn_act_hint,
         )
-        return result.model_dump_json(ensure_ascii=False)
-    
-    return handoff_tool
+        return result.model_dump_json(ensure_ascii=False, exclude_none=True)
 ```
 
 **Wrapper 层检测**（`streaming_wrapper` 中的 `on_tool_end` 处理）:
@@ -304,15 +359,13 @@ def _create_task_handoff_tool(agent_name: str, description: str):
 ```python
 from app.ai.protocol import AgentOutputParser
 
-# 类型安全解析
 handoff_result = AgentOutputParser.parse_handoff_typed(tool_output)
 if handoff_result:
-    # handoff_result 是 HandoffResult 类型，IDE 可直接提示字段
     return {"pending_handoff": handoff_result.model_dump()}
 ```
 
 > [!NOTE]
-> 2026-01 重构：从字符串协议 `<!--HANDOFF:{...}-->` 迁移到类型安全的 `HandoffResult` Pydantic 模型。
+> 运行态已从“文本委派”收口为“frame + contract first”。其中 `task_description` 只保留给 todo/研究类任务做人类可读补充，`data.query` 一律以结构化 `frame` 为准。
 
 ---
 
@@ -322,7 +375,7 @@ if handoff_result:
 
 **文件**: `app/ai/workflow/todo_graph.py`
 
-Todo Agent 是一个独立的 StateGraph，采用**意图驱动架构**，支持多轮对话、确认流程、冲突检测等特性。
+Todo Graph 在当前口径下是一个独立的 `todo_workflow` StateGraph，采用**意图驱动 + contract-first** 架构，支持多轮确认、冲突检测与 handoff contract 消费。
 
 ### 核心节点
 
@@ -384,6 +437,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | `ChatService done` | `done`（仅生命周期） | 严禁携带结构化数据 |
 
 - 2026-03-10 起，知识库检索这类“独立预构建 Agent 入口”统一使用 `langchain.agents.create_agent`；Supervisor 由于仍依赖运行时工具可见性裁剪与自定义 `ToolNode`，继续保留 `create_react_agent`。
+- `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 继续保留 atomic tool；只有 `knowledge_research` / `web_research` 这类“单次研究任务入口”才视为 stateless research subagent，且结果合同固定为 `summary + evidence + insufficiency`。
 - 本轮只收口可独立迁移的预构建 Agent API，不改 `create_todo_graph` / `create_data_graph` 等 Graph factory，也不重写当前多智能体主图的 runtime gating 结构。
 - `interrupt / resume / replay` 与 `agent.astream(..., stream_mode=["messages", "values", "custom"])` 相关契约保持不变，迁移层只改安全边界内的 Agent 构建入口，不改运行时状态归属。
 
@@ -718,14 +772,14 @@ llm = get_scene_llm(
 
 1. **运行态目标源唯一化**：运行阶段只消费 `decomposed_goals`，不再读取 `state.intent_plan`。
 2. **运行态委派字段唯一化**：Router Guard 统一以 `handoff.target_agent + frame/task_description` 为入口；其中 `data.query` 会优先编译 canonical `frame.query_text` 后再校验，禁止继续放行缺失结构化 frame 的 data handoff。
-3. **运行态结构化结果唯一化**：仅写入 `additional_kwargs.router_result_v2`（`version=v2`）；历史字段（如 `route_decisions`）命中即 `legacy_field_detected` 并 fail-fast。
+3. **运行态结构化结果唯一化**：仅写入 `additional_kwargs.router_result_v2`（`version=v2`）；其中 `conversation_state` 是唯一 replay snapshot，固定挂在 `router_result_v2.conversation_state`，禁止再增加第二套顶层 replay 字段；历史字段（如 `route_decisions`）命中即 `legacy_field_detected` 并 fail-fast。
 4. **planner 输入冻结**：`decompose_goals` 输入固定为 `user_query + recent_5_persisted_user_visible_chat_turns`；窗口仅含已落库 `user/assistant`，`tool/system/内部中间态` 不入窗。
 5. **当前输入隔离**：当前轮用户输入仅作为 `user_query`；不计入 recent-5 历史窗口。
 6. **异常语义统一**：运行态合同异常统一 `block -> supervisor_fallback`，禁止专家兜底；指代无法消解走 `clarify_needed -> supervisor`。
 
 **当前口径（实现态）**：
 - 路由判定：`decompose_goals -> router_guard -> dispatch/blocked`。
-- 可观测字段：`event/turn_id/reason/goal_id/target_agent`（承载于 `router_result_v2`）。
+- 可观测字段：`event/turn_id/reason/goal_id/target_agent`，以及 `conversation_state.owner/turn_act/active_goal_ids/active_workflow/pending_user_action/session_frame_slots`（均承载于 `router_result_v2`）。
 - 收口链路：`coverage_gate -> final_composer`，缺口优先回流 `supervisor`。
 
 ### internal 调用输入兼容（2026-02-08）
@@ -2195,13 +2249,15 @@ graph TD
 ### 8. 当前运行时落点
 
 1. `data.query` handoff 只写 `frame + turn_act_hint` 作为运行态真值；`task_description` 不再承担 data 子任务语义恢复。
-2. `data_graph.analyze_data_intent` 与 `todo_graph.analyze_intent` 统一消费 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`，不再各自维护补充轮主判定。
-3. `todo_intent_helpers.filter_messages_for_todo` 优先读取 `pending_handoff.frame`；todo 类 handoff 在缺少 frame 时才读取文本 `task_description`。
-4. `response_message` 已纳入 `TodoAgentState` 统一管理，避免 `analyze -> clarify` 链路字段丢失。
-5. `missing_info` 仅允许 `todo_target/time_range/todo_action` 三类 canonical 槽位，非法值直接丢弃并记录日志。
-6. 创建待办确认后若用户先取消再补充细节，且历史会话帧仍表明 `todo_action=create`，系统优先恢复原创建草稿并重新进入 `need_confirm`。
-7. 确认文案与展示层只消费 canonical 槽位，不再把 UI 文案耦合进状态机决策。
-8. 当前对外聊天 API 与 SSE 主协议保持不变，结构收敛集中在 AI 内部状态、handoff 协议和确认链路。
+2. `router_result_v2.conversation_state` 是唯一 replay snapshot，`owner` 固定为 `supervisor`；禁止再增加第二套顶层主会话快照。
+3. `data_expert` 的内部推理消息只投影 `pending_handoff.frame.query_text`，并附带 `expert_input_contract(contract_id=data_handoff_query_text, contract_version=v1, state_owner=supervisor)`，避免继续把整句复合问题当专家真理源。
+4. `data_graph.analyze_data_intent` 与 `todo_graph.analyze_intent` 统一消费 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`，不再各自维护补充轮主判定；workflow 只读投影，不回写主会话 owner。
+5. `data_graph` 命中 handoff contract 时，会把 `expert_input_contract` 回填到 `query_context`，`todo_intent_helpers.filter_messages_for_todo` 命中 handoff 时会生成 `__internal_todo_handoff__ + expert_input_contract` 最小输入；两条链路都固定声明 `state_owner=supervisor`。
+6. `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 仍是 atomic tool；当任务目标变成“多来源研究/对比/证据归纳”时，Supervisor 才切到 `knowledge_research` / `web_research` 这类 stateless research 入口。
+7. `mixed` 路由仍由 `supervisor` 负责汇总与最终答复；workflow 和 research_subagent 只返回局部结果，不拥有主会话最终态。
+8. `response_message` 已纳入 `TodoAgentState` 统一管理，避免 `analyze -> clarify` 链路字段丢失；`missing_info` 仅允许 `todo_target/time_range/todo_action` 三类 canonical 槽位。
+9. 创建待办确认后若用户先取消再补充细节，且历史会话帧仍表明 `todo_action=create`，系统优先恢复原创建草稿并重新进入 `need_confirm`；确认文案与展示层只消费 canonical 槽位，不再把 UI 文案耦合进状态机决策。
+10. 当前对外聊天 API 与 SSE 主协议保持不变，结构收敛集中在 AI 内部状态、handoff 协议、research contract 和确认链路。
 
 
 ### 9. 当前架构落点（2026-02-08 起持续生效）
@@ -2209,7 +2265,7 @@ graph TD
 当前稳定口径如下，且保持外部 API 不变（`/api/v1/chat/stream` 入参与响应结构不变）：
 
 1. **会话意图内核落地**：新增 `app/ai/workflow/session_intent_kernel.py`，统一提供 `TurnActClassifier`、`SessionFrameReducer`、`Clarification FSM` 基础能力。
-2. **Handoff 协议收敛**：`data.query` 已切到 `goal compiler -> frame + turn_act_hint` 单轨合同；`task_description` 仅保留给 todo 类 handoff。
+2. **Handoff 协议收敛**：`data.query` 已切到 `goal compiler -> frame + turn_act_hint` 单轨合同；`task_description` 仅保留给 todo / research 类 handoff。
 3. **TopN contract 不丢槽**：`frame.query_shape/ranking` 会继续进入 `session_frame/query_context`，并由 SQL 生成直接消费；即使补充轮把问题摘要重写成“查询贷款余额，时间范围...”，也不得丢失 `TopN` 限定。
 3. **Supervisor 透传结构化上下文**：`multi_agent_graph` handoff 工具可携带 `frame/turn_act_hint`，减少专家侧纯文本解析损耗。
 4. **问数 Agent 接入 V2 内核**：`data_graph.analyze_data_intent` 已接入 `turn_act + session_frame + frame_source_map + clarify_fsm_state + clarify_round`，并将 handoff frame 纳入基线判定。
