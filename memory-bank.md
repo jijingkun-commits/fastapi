@@ -4,11 +4,22 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-10｜文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）（ACTIVE）→ `docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 - 2026-03-10｜Assistant 空壳文本块在消息契约层清洗，禁止进入 checkpoint（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
+
+### 2026-03-11 瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断
+- 状态：ACTIVE
+- 决策主题：将“删旧代码”从交付后提醒前置为编码前 shrink contract，并把新实现覆盖旧职责但旧路径无理由残留定义为硬失败
+- 背景与问题：现有 Layer1 / Lean Guard 已明确反对继续长胖，但执行时仍容易先加新逻辑、后解释旧路径为什么没删；规则知道要瘦身，却还不够像实现前合同
+- 最终决策：在 `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md` 中统一引入 `obsolete_paths`、`retained_paths`、`single_entry_owner`、`line_budget`；并把 `jjk-arch-gate`、`jjk-refactor` 命令入口同步到同一 contract
+- 取舍理由：相比继续堆长规则或事后要求“顺手删掉旧代码”，前置 shrink contract 更短、更硬、更可验证，也更符合 OpenAI 对仓库指令“高信号、少冗余”的最佳实践
+- 影响范围：所有 `bugfix/refactor` 任务、Lean Guard 热点文件治理、`/jjk-arch-gate` 与 `/jjk-refactor` 输出模板、后续瘦身证据口径
+- 回退/失效条件：若后续执行链改为脚本自动生成 shrink contract，或存在更高优先级治理文件统一承接同一 contract，可将本记录标记为 `SUPERSEDED`；在此之前保持启用
+- 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 
 ### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治
 - 状态：ACTIVE

@@ -40,6 +40,7 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 3. 缺少行为基线（现有测试或可执行断言），`FAIL_FAST` 输出 `REFACTOR_BASELINE_MISSING`。
 4. 重构后出现行为漂移，`FAIL_FAST` 输出 `REFACTOR_BEHAVIOR_DRIFT`。
 5. 未产出重构报告，`FAIL_FAST` 输出 `REFACTOR_REPORT_MISSING`。
+6. 未冻结 `obsolete_paths` / `retained_paths` / `single_entry_owner` / `line_budget`，`FAIL_FAST` 输出 `REFACTOR_SHRINK_CONTRACT_MISSING`。
 
 ## 执行流程（强制顺序）
 
@@ -79,6 +80,12 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 2. 对每项约束绑定验证证据（测试用例/命令/日志断言）。
 3. 无法验证的约束必须先补证据再开工。
 
+### 1.5) 冻结瘦身合同
+
+1. 明确 `obsolete_paths`、`retained_paths`、`single_entry_owner`、`line_budget`。
+2. 若引入替代实现，旧路径必须同步删除；确需保留时给出唯一理由与失效条件。
+3. 未冻结瘦身合同不得进入实施阶段。
+
 ### 2) 设计重构切片
 
 1. 拆分为可独立回滚的最小重构单元。
@@ -96,7 +103,8 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 1. 对照重构前后的行为、复杂度、可维护性指标。
 2. 校验性能是否满足目标（若涉及性能优化）。
 3. 证据不足时 `FAIL_FAST` 输出 `REFACTOR_EVIDENCE_MISSING`。
-4. 若本次重构命中 Lean Guard 热点文件，完成重构前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `REFACTOR_LEAN_GUARD_FAILED`。
+4. 若 `obsolete_paths` 未执行或 `retained_paths` 无唯一理由，`FAIL_FAST` 输出 `REFACTOR_OBSOLETE_PATH_RETAINED`。
+5. 若本次重构命中 Lean Guard 热点文件，完成重构前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `REFACTOR_LEAN_GUARD_FAILED`。
 
 ### 5) 报告产出与交接
 
@@ -108,9 +116,10 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 
 1. 输入映射（`task_id/card_id/pr_id|none`）
 2. 重构切片与改动清单
-3. 行为等价验证证据
-4. 仍待处理项与风险说明
-5. 下一步命令建议（`$jjk-review`、`$jjk-verify`）
+3. 瘦身合同执行结果（`obsolete_paths` 命中结果、`retained_paths` 保留理由、`single_entry_owner` 收敛结果）
+4. 行为等价验证证据
+5. 仍待处理项与风险说明
+6. 下一步命令建议（`$jjk-review`、`$jjk-verify`）
 
 ---
 
@@ -124,7 +133,8 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 1. 禁止无基线测试直接宣称“行为不变”。
 2. 禁止在重构阶段引入未声明的新需求。
 3. 禁止用临时条件分支掩盖结构问题。
-4. 禁止无报告结束重构流程。
+4. 禁止新增实现落地后仍保留同职责旧路径且不给唯一理由。
+5. 禁止无报告结束重构流程。
 
 ## 推荐链路
 
