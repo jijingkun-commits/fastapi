@@ -354,6 +354,43 @@ def test_stream_done_payload_handles_list_content_without_error():
     assert done_events[0]["thread_id"] == "thread-list"
 
 
+def test_stream_done_payload_should_fallback_when_turn_slice_errors() -> None:
+    """当前轮切片失败时，stream() 应降级为读取最新 AI 消息并正常 done。"""
+
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                HumanMessage(content="你好", id="human-1"),
+                AIMessage(content="线程可继续"),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(chunks=[], snapshot=fake_snapshot)
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph), patch(
+        "app.services.chat_service._slice_current_turn_messages",
+        side_effect=NameError("name 'current_human_message_id' is not defined"),
+    ):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="你好", thread_id="thread-slice-fallback", user_id=1)
+        )
+
+    event_types = [event for event, _ in events]
+    assert "error" not in event_types
+    token_payloads = [payload for event, payload in events if event == "token"]
+    assert any(p.get("content") == "线程可继续" for p in token_payloads)
+    done_events = [payload for event, payload in events if event == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["final_content"] == "线程可继续"
+
+
 def test_format_sse_supports_date_serialization():
     """_format_sse 应能序列化 date 对象，避免 result 事件崩溃。"""
 

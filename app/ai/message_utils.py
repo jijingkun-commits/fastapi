@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 _TEXT_BLOCK_TYPES = {"text", "output_text", "refusal"}
+_INTERNAL_BLOCK_TYPES = {"function_call", "function_result", "tool_call", "tool_use", "tool_result"}
 
 
 def _has_readable_text_payload(block: dict) -> bool:
@@ -34,8 +35,15 @@ def _sanitize_ai_message_content(message: AIMessage) -> AIMessage | None:
     sanitized: list = []
     removed_count = 0
     for block in content:
-        if isinstance(block, dict) and str(block.get("type", "")).lower() in _TEXT_BLOCK_TYPES:
-            if not _has_readable_text_payload(block):
+        if isinstance(block, dict):
+            block_type = str(block.get("type", "")).lower()
+            if block_type in _INTERNAL_BLOCK_TYPES:
+                removed_count += 1
+                continue
+            if block_type in _TEXT_BLOCK_TYPES and not _has_readable_text_payload(block):
+                removed_count += 1
+                continue
+            if block_type and not normalize_message_content(block).strip():
                 removed_count += 1
                 continue
         sanitized.append(block)

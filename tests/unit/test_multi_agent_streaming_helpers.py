@@ -390,6 +390,27 @@ def test_prepare_streaming_inference_state_keeps_tool_message_without_truncation
     assert delivery_meta["tool_message_chars_before"] == delivery_meta["tool_message_chars_after"]
 
 
+def test_prepare_streaming_inference_state_should_drop_dirty_checkpoint_text_block() -> None:
+    """真正进模型前应剥离 checkpoint 残留的空壳 text block。"""
+    state = {
+        "messages": [
+            HumanMessage(content="查询2025年6月30日各机构的贷款余额分布"),
+            AIMessage(
+                content=[{"type": "text", "id": "msg-dirty", "index": -1}],
+                id="resp-dirty",
+            ),
+            HumanMessage(content="图片是什么"),
+        ],
+    }
+
+    pruned_state, original_count, input_count, *_ = _prepare_streaming_inference_state(state)
+
+    assert original_count == 3
+    assert input_count == 2
+    assert [type(msg).__name__ for msg in pruned_state["messages"]] == ["HumanMessage", "HumanMessage"]
+    assert all(getattr(msg, "id", None) != "resp-dirty" for msg in pruned_state["messages"])
+
+
 def test_emit_messages_mode_token_filters_internal_content() -> None:
     """内部协议文本不应向前端发送 token。"""
     emitted_tokens = []
@@ -832,8 +853,8 @@ def test_dispatch_values_mode_chunk_reconciles_runtime_goals_for_single_data_han
     assert final_state["decomposed_goals"][0]["allowed_agents"] == ["data_expert"]
 
 
-def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> None:
-    """当 handoff 全部被门禁拦截时，应保留补齐上下文并等待下一轮重试。"""
+def test_dispatch_values_mode_chunk_renders_result_style_message_when_all_handoffs_blocked() -> None:
+    """当 handoff 全部被门禁拦截时，应直接结果式收口，而不是回灌补齐提示。"""
     ctx = _make_ctx(
         writer=lambda _event: None,
         node_name="supervisor",
@@ -882,7 +903,62 @@ def test_dispatch_values_mode_chunk_marks_retry_when_all_handoffs_blocked() -> N
     assert final_state["multi_intent_mode"] is True
     assert final_state["delivery_meta"]["router_contract_blocked_count"] == 1
     assert final_state["router_result_v2"]["event"] == "intent_router_handoff_blocked"
-    assert "【交付补齐提示】" in final_state["system_context"]
+    assert "system_context" not in final_state or "【交付补齐提示】" not in str(final_state.get("system_context") or "")
+    assert final_state["messages"][-1].type == "ai"
+    assert "请稍后重试" in final_state["messages"][-1].content
+    assert "你回复“继续”即可" not in final_state["messages"][-1].content
+
+
+def test_dispatch_values_mode_chunk_builds_data_frame_from_task_description_when_frame_missing() -> None:
+    """data handoff 若只有 task_description，编排层也必须先编译出 canonical frame。"""
+    ctx = _make_ctx(
+        writer=lambda _event: None,
+        node_name="supervisor",
+        state={
+            "messages": [HumanMessage(content="查询2025年6月30日各机构的贷款余额分布")],
+            "thread_id": "thread-1",
+            "decomposed_goals": [
+                {
+                    "goal_id": "GOAL-01",
+                    "order": 1,
+                    "kind": "data.query",
+                    "title": "数据查询",
+                    "must_answer": True,
+                    "allowed_agents": ["data_expert"],
+                }
+            ],
+        },
+    )
+
+    final_state = {
+        "messages": [ToolMessage(content="handoff-json", tool_call_id="tc-1", name="assign_to_data_expert")],
+        "thread_id": "thread-1",
+    }
+
+    with patch("app.ai.workflow.multi_agent_graph.AgentOutputParser") as mock_parser:
+        mock_parser.extract_all_handoffs_from_messages.return_value = [
+            {
+                "action": "handoff",
+                "target_agent": "data_expert",
+                "task_description": "查询2025年6月30日各机构的贷款余额分布",
+                "frame": None,
+            }
+        ]
+        mock_parser.parse_kb_images.return_value = {}
+        mock_parser.should_filter_content.return_value = False
+
+        updated_count, handoff_return = _dispatch_values_mode_chunk(
+            final_state=final_state,
+            initial_input_count=0,
+            input_message_count=0,
+            ctx=ctx,
+        )
+
+    assert updated_count == 0
+    assert handoff_return is not None
+    assert handoff_return["pending_handoff"]["target_agent"] == "data_expert"
+    assert handoff_return["pending_handoff"]["frame"]["query_text"] == "查询2025年6月30日各机构的贷款余额分布"
+    assert handoff_return["pending_handoff"]["goal_id"] == "GOAL-01"
 
 
 def test_dispatch_values_mode_chunk_marks_multi_intent_for_direct_lookup_plus_single_handoff() -> None:

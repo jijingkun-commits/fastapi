@@ -748,6 +748,7 @@ class ChatService:
         """
         d = self.default_delay_ms if delay_ms is None else delay_ms
         thread_id = thread_id or str(uuid4())
+        current_human_message_id: Optional[str] = None
 
         run_control_service = get_run_control_service()
         run_control_enabled = run_control_service.is_enabled()
@@ -1256,9 +1257,19 @@ class ChatService:
             done_payload = _build_done_payload(thread_id=thread_id, run_id=resolved_run_id, message_id=None)
             
             if snapshot and "messages" in snapshot.values:
-                messages = snapshot.values["messages"]
+                messages = list(snapshot.values["messages"] or [])
                 if messages:
-                    turn_messages = _slice_current_turn_messages(messages, current_human_message_id)
+                    try:
+                        turn_messages = _slice_current_turn_messages(messages, current_human_message_id)
+                    except Exception as slice_error:
+                        logger.warning(
+                            "当前轮消息切片失败，已回退到最新消息: thread_id=%s, error=%s",
+                            thread_id,
+                            slice_error,
+                        )
+                        turn_messages = messages
+                    if not turn_messages:
+                        turn_messages = messages
 
                     last_msg = turn_messages[-1]
 

@@ -562,7 +562,18 @@ class AgentOutputParser:
             
         if "<!--HANDOFF:" in stripped:
             return True
-            
+
+        LEGACY_INTERNAL_PROMPTS = (
+            "【交付补齐提示】",
+            "为了保证回答完整，我还需要补齐以下目标",
+            "请确认是否继续补齐",
+            "你回复“继续”即可",
+            '你回复"继续"即可',
+            "如果你愿意，我可以继续补齐",
+        )
+        if any(marker in stripped for marker in LEGACY_INTERNAL_PROMPTS):
+            return True
+
         return False
 
 class MessageFilter:
