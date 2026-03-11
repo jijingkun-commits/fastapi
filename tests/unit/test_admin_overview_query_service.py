@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.models.runtime_metric_bucket import RuntimeMetricBucketMinute
 from app.services.admin_overview_query_service import AdminOverviewQueryService
 
@@ -74,12 +76,18 @@ def test_get_overview_snapshot_builds_v2_snapshot_from_minute_buckets() -> None:
 
     assert snapshot["source"] == "bucket"
     assert snapshot["degraded"] is False
-    assert snapshot["system_status"]["status"] == "ok"
-    assert snapshot["traffic_health"]["status"] == "ok"
+    assert snapshot["source"] == "bucket"
+    assert snapshot["degraded"] is False
+    assert "system_status" not in snapshot
+    assert "traffic_health" not in snapshot
+    assert "health_score" not in snapshot
+    assert "stability" not in snapshot
+    assert "capacity_cost" not in snapshot
+    assert "change_feed" not in snapshot
     assert snapshot["request_quality"]["status"] == "ok"
     assert snapshot["request_quality"]["request_total"] == 12
-    assert snapshot["question_activity"]["status"] == "ok"
-    assert snapshot["question_activity"]["question_total"] == 4
+    assert snapshot["question_health"]["status"] == "ok"
+    assert snapshot["question_health"]["question_total"] == 4
     assert snapshot["freshness"]["status"] == "fresh"
     assert snapshot["meta"]["trace_id"] == "trace-v2-001"
 
@@ -105,11 +113,12 @@ def test_get_overview_snapshot_returns_no_data_when_no_business_rows_in_window()
 
     snapshot = service.get_overview_snapshot(trace_id="trace-no-data-001")
 
-    assert snapshot["system_status"]["status"] == "ok"
-    assert snapshot["traffic_health"]["status"] == "no_data"
+    assert snapshot["source"] == "bucket"
     assert snapshot["request_quality"]["status"] == "no_data"
-    assert snapshot["question_activity"]["status"] == "no_data"
-    assert snapshot["health_score"] is None
+    assert snapshot["question_health"]["status"] == "no_data"
+    assert "system_status" not in snapshot
+    assert "traffic_health" not in snapshot
+    assert "health_score" not in snapshot
 
 
 def test_get_overview_snapshot_degrades_to_explainable_empty_state_when_loader_failed() -> None:
@@ -126,10 +135,10 @@ def test_get_overview_snapshot_degrades_to_explainable_empty_state_when_loader_f
 
     assert snapshot["source"] == "empty"
     assert snapshot["degraded"] is True
-    assert snapshot["system_status"]["status"] == "degraded"
-    assert snapshot["traffic_health"]["status"] == "no_data"
     assert snapshot["request_quality"]["status"] == "degraded"
-    assert snapshot["question_activity"]["status"] == "degraded"
+    assert snapshot["question_health"]["status"] == "degraded"
+    assert "system_status" not in snapshot
+    assert "traffic_health" not in snapshot
     assert snapshot["alerts"][0]["code"] == "overview.bucket.unavailable"
     assert snapshot["meta"]["trace_id"] == "trace-fallback-v2"
 
@@ -192,3 +201,69 @@ def test_get_overview_trends_returns_degraded_empty_payload_when_loader_failed()
     assert series["status"] == "degraded"
     assert series["points"] == []
     assert series["snapshot_at"] is None
+
+
+def test_get_overview_snapshot_question_health_uses_question_scope() -> None:
+    """question 选择器：提问链路健康只统计 user_question 样本。"""
+
+    fixed_now = datetime(2026, 3, 9, 4, 30, 0, tzinfo=timezone.utc)
+    bucket_minute = fixed_now.replace(second=0, microsecond=0) - timedelta(minutes=1)
+    rows = [
+        _row(
+            bucket_minute=bucket_minute,
+            scope="all_business",
+            module_key="chat",
+            request_count=6,
+            success_count=6,
+            last_event_at=fixed_now - timedelta(seconds=10),
+        ),
+        _row(
+            bucket_minute=bucket_minute,
+            scope="user_question",
+            module_key="chat",
+            request_count=2,
+            success_count=2,
+            last_event_at=fixed_now - timedelta(seconds=8),
+        ),
+    ]
+    service = AdminOverviewQueryService(
+        bucket_row_loader=lambda start_at: list(rows),
+        latest_bucket_loader=lambda: rows[0],
+        now_provider=lambda: fixed_now,
+    )
+
+    snapshot = service.get_overview_snapshot(trace_id="trace-question-health")
+
+    assert snapshot["question_health"]["status"] == "ok"
+    assert snapshot["question_health"]["question_total"] == 2
+    assert snapshot["question_health"]["question_qps"] == pytest.approx(0.0067, rel=1e-4)
+
+
+def test_get_overview_snapshot_alerts_only_keep_actionable_items() -> None:
+    """alerts 选择器：首页告警只保留可动作异常。"""
+
+    fixed_now = datetime(2026, 3, 9, 4, 35, 0, tzinfo=timezone.utc)
+    bucket_minute = fixed_now.replace(second=0, microsecond=0) - timedelta(minutes=1)
+    rows = [
+        _row(
+            bucket_minute=bucket_minute,
+            scope="all_business",
+            module_key="chat",
+            request_count=10,
+            success_count=8,
+            error_5xx_count=2,
+            last_event_at=fixed_now - timedelta(seconds=6),
+            histogram={"count": 10, "total_ms": 18000.0, "min_ms": 400.0, "max_ms": 2600.0, "buckets": {"le_3000": 10}},
+        ),
+    ]
+    service = AdminOverviewQueryService(
+        bucket_row_loader=lambda start_at: list(rows),
+        latest_bucket_loader=lambda: rows[0],
+        now_provider=lambda: fixed_now,
+    )
+
+    snapshot = service.get_overview_snapshot(trace_id="trace-alerts")
+
+    assert snapshot["alerts"]
+    assert snapshot["alerts"][0]["severity"] in {"warning", "critical"}
+    assert all(alert["code"] != "overview.runtime.no_data" for alert in snapshot["alerts"])

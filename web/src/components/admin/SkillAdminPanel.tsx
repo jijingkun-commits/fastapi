@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { AdminCompactStatCard } from "@/components/admin/shared/AdminCompactStatCard";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -464,51 +465,34 @@ export function SkillAdminPanel() {
         </Alert>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="py-4">
-          <CardHeader className="px-4 pb-1">
-            <CardTitle className="text-sm font-medium text-muted-foreground">技能总数</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4">
-            <div className="text-3xl font-semibold leading-none">{vectorStatus?.total_skills || 0}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="py-4">
-          <CardHeader className="px-4 pb-1">
-            <CardTitle className="text-sm font-medium text-muted-foreground">有向量</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4">
-            <div className="text-3xl font-semibold leading-none text-green-600">
-              {vectorStatus?.with_embedding || 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="py-4">
-          <CardHeader className="px-4 pb-1">
-            <CardTitle className="text-sm font-medium text-muted-foreground">无向量</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4">
-            <div className="text-3xl font-semibold leading-none text-red-600">
-              {vectorStatus?.without_embedding || 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="py-4">
-          <CardHeader className="px-4 pb-1">
-            <CardTitle className="text-sm font-medium text-muted-foreground">向量维度</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4">
-            <div className="text-3xl font-semibold leading-none">
-              {vectorStatus?.embedding_dim || "-"}
-              {vectorStatus?.dimension_mismatch ? (
-                <span className="ml-1.5 text-xs text-red-500">(模型: {vectorStatus.current_model_dim})</span>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+        <AdminCompactStatCard
+          label="技能总数"
+          value={vectorStatus?.total_skills || 0}
+          hint="技能条目"
+          testId="admin-skill-summary-total"
+        />
+        <AdminCompactStatCard
+          label="有向量"
+          value={vectorStatus?.with_embedding || 0}
+          hint="已生成向量"
+          tone="success"
+          testId="admin-skill-summary-with-embedding"
+        />
+        <AdminCompactStatCard
+          label="无向量"
+          value={vectorStatus?.without_embedding || 0}
+          hint="待补齐向量"
+          tone="danger"
+          testId="admin-skill-summary-without-embedding"
+        />
+        <AdminCompactStatCard
+          label="向量维度"
+          value={vectorStatus?.embedding_dim || "-"}
+          hint={vectorStatus?.dimension_mismatch ? `模型: ${vectorStatus.current_model_dim}` : "当前索引维度"}
+          tone={vectorStatus?.dimension_mismatch ? "danger" : "default"}
+          testId="admin-skill-summary-dimension"
+        />
       </div>
 
       <Tabs defaultValue="list" className="space-y-3">

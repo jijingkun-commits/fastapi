@@ -1,34 +1,24 @@
 /**
  * 管理后台总览 API 客户端。
- *
- * 提供：
- * - summary 快照拉取
- * - trends 趋势拉取
- * - stream SSE 事件消费
  */
 
 import { apiFetch } from "@/lib/backend";
 import type {
   AdminOverviewAlertItem,
-  AdminOverviewCapacityCost,
   AdminOverviewCardStatus,
-  AdminOverviewChangeItem,
   AdminOverviewFreshness,
   AdminOverviewHealthLevel,
   AdminOverviewModuleItem,
-  AdminOverviewQuestionActivity,
+  AdminOverviewQuestionHealth,
   AdminOverviewRealtimeStatus,
   AdminOverviewRequestQuality,
   AdminOverviewSeverity,
   AdminOverviewSnapshot,
   AdminOverviewSnapshotPatch,
-  AdminOverviewStability,
   AdminOverviewStreamDoneEvent,
   AdminOverviewStreamEvent,
   AdminOverviewStreamInterruptEvent,
   AdminOverviewStreamResultEvent,
-  AdminOverviewSystemStatus,
-  AdminOverviewTrafficHealth,
   AdminOverviewTrendPoint,
   AdminOverviewTrendSeries,
   AdminOverviewTrendsResponse,
@@ -128,14 +118,6 @@ function normalizeStatusMeta(raw: unknown) {
   };
 }
 
-function normalizeSystemStatus(raw: unknown): AdminOverviewSystemStatus {
-  return normalizeStatusMeta(raw);
-}
-
-function normalizeTrafficHealth(raw: unknown): AdminOverviewTrafficHealth {
-  return normalizeStatusMeta(raw);
-}
-
 function normalizeRequestQuality(raw: unknown): AdminOverviewRequestQuality {
   const data = isRecord(raw) ? raw : {};
 
@@ -151,7 +133,7 @@ function normalizeRequestQuality(raw: unknown): AdminOverviewRequestQuality {
   };
 }
 
-function normalizeQuestionActivity(raw: unknown): AdminOverviewQuestionActivity {
+function normalizeQuestionHealth(raw: unknown): AdminOverviewQuestionHealth {
   const data = isRecord(raw) ? raw : {};
 
   return {
@@ -161,34 +143,6 @@ function normalizeQuestionActivity(raw: unknown): AdminOverviewQuestionActivity 
     question_success_rate: toNumber(data.question_success_rate),
     question_latency_p95_ms: toNumber(data.question_latency_p95_ms),
     question_qps: toNumber(data.question_qps),
-    stream_interrupt_rate: toNumber(data.stream_interrupt_rate),
-  };
-}
-
-function normalizeStability(raw: unknown): AdminOverviewStability {
-  const data = isRecord(raw) ? raw : {};
-
-  return {
-    status: normalizeCardStatus(data.status),
-    health_level: normalizeHealthLevel(data.health_level),
-    score: toNumber(data.score),
-    critical_alerts: toNumber(data.critical_alerts),
-    warning_alerts: toNumber(data.warning_alerts),
-    module_score: toNumber(data.module_score),
-  };
-}
-
-function normalizeCapacityCost(raw: unknown): AdminOverviewCapacityCost {
-  const data = isRecord(raw) ? raw : {};
-
-  return {
-    ...normalizeStatusMeta(data),
-    score: toNumber(data.score),
-    qps: toNumber(data.qps),
-    question_qps: toNumber(data.question_qps),
-    cost_per_minute: toNumber(data.cost_per_minute),
-    budget_per_minute: toNumber(data.budget_per_minute),
-    budget_usage_pct: toNumber(data.budget_usage_pct),
   };
 }
 
@@ -197,15 +151,13 @@ function normalizeAlerts(raw: unknown): AdminOverviewAlertItem[] {
     return [];
   }
 
-  return raw
-    .filter(isRecord)
-    .map((item, index) => ({
-      code: toStringValue(item.code, `alert_${index}`),
-      severity: normalizeSeverity(item.severity),
-      message: toStringValue(item.message, "系统告警"),
-      module: item.module == null ? null : toStringValue(item.module),
-      status: toStringValue(item.status, "active"),
-    }));
+  return raw.filter(isRecord).map((item, index) => ({
+    code: toStringValue(item.code, `alert_${index}`),
+    severity: normalizeSeverity(item.severity),
+    message: toStringValue(item.message, "总览告警"),
+    module: toStringValue(item.module) || undefined,
+    status: toStringValue(item.status) || undefined,
+  }));
 }
 
 function normalizeFreshness(raw: unknown): AdminOverviewFreshness {
@@ -219,7 +171,7 @@ function normalizeFreshness(raw: unknown): AdminOverviewFreshness {
     delay_sec: toNumber(data.delay_sec),
     expired: Boolean(data.expired),
     max_delay_sec: toNumber(data.max_delay_sec),
-    source: typeof data.source === "string" ? data.source : undefined,
+    source: toStringValue(data.source) || undefined,
   };
 }
 
@@ -228,32 +180,15 @@ function normalizeModuleMatrix(raw: unknown): AdminOverviewModuleItem[] {
     return [];
   }
 
-  return raw
-    .filter(isRecord)
-    .map((item, index) => ({
-      key: toStringValue(item.key, `module_${index}`),
-      label: toStringValue(item.label, `模块 ${index + 1}`),
-      health_level: normalizeHealthLevel(item.health_level),
-      score: toNumber(item.score),
-      error_rate: toNumber(item.error_rate),
-      latency_p95_ms: toNumber(item.latency_p95_ms),
-      data_delay_sec: toNumber(item.data_delay_sec),
-    }));
-}
-
-function normalizeChangeFeed(raw: unknown): AdminOverviewChangeItem[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .filter(isRecord)
-    .map((item, index) => ({
-      id: toStringValue(item.id, `change_${index}`),
-      title: toStringValue(item.title, "配置变更"),
-      level: normalizeSeverity(item.level),
-      occurred_at: toStringValue(item.occurred_at),
-    }));
+  return raw.filter(isRecord).map((item, index) => ({
+    key: toStringValue(item.key, `module_${index}`),
+    label: toStringValue(item.label, `模块 ${index + 1}`),
+    health_level: normalizeHealthLevel(item.health_level),
+    score: toNumber(item.score),
+    error_rate: toNumber(item.error_rate),
+    latency_p95_ms: toNumber(item.latency_p95_ms),
+    data_delay_sec: toNumber(item.data_delay_sec),
+  }));
 }
 
 function normalizeSummaryPayload(raw: unknown): AdminOverviewSnapshot {
@@ -271,19 +206,11 @@ function normalizeSummaryPayload(raw: unknown): AdminOverviewSnapshot {
     snapshot_at: snapshotAt,
     source: toStringValue(payload.source, "unknown"),
     degraded: Boolean(payload.degraded),
-    system_status: normalizeSystemStatus(payload.system_status),
-    traffic_health: normalizeTrafficHealth(payload.traffic_health),
-    health_score: toNumber(payload.health_score),
-    health_level: normalizeHealthLevel(payload.health_level),
-    budget_usage_pct: toNumber(payload.budget_usage_pct),
     request_quality: normalizeRequestQuality(payload.request_quality),
-    question_activity: normalizeQuestionActivity(payload.question_activity),
-    stability: normalizeStability(payload.stability),
-    capacity_cost: normalizeCapacityCost(payload.capacity_cost),
+    question_health: normalizeQuestionHealth(payload.question_health),
     alerts: normalizeAlerts(payload.alerts),
     freshness: normalizeFreshness(payload.freshness),
     module_matrix: normalizeModuleMatrix(payload.module_matrix),
-    change_feed: normalizeChangeFeed(payload.change_feed),
     meta: {
       generated_at: isRecord(payload.meta)
         ? toStringValue(payload.meta.generated_at, snapshotAt)
@@ -308,10 +235,8 @@ function normalizeTrendPoint(raw: unknown): AdminOverviewTrendPoint | null {
 
   return {
     timestamp,
-    health_score: toNumber(raw.health_score),
     request_qps: toNumber(raw.request_qps || raw.qps),
     question_qps: toNumber(raw.question_qps),
-    budget_usage_pct: toNumber(raw.budget_usage_pct),
   };
 }
 
@@ -350,17 +275,6 @@ function normalizeTrendsPayload(raw: unknown): AdminOverviewTrendsResponse {
 
   const result = buildEmptyTrends();
   result.snapshot_at = toStringValue(payload.snapshot_at, nowIsoString());
-
-  if (Array.isArray(payload.series)) {
-    payload.series.filter(isRecord).forEach((series) => {
-      const seriesWindow = normalizeTrendWindow(series.window);
-      if (!seriesWindow) {
-        return;
-      }
-      result.windows[seriesWindow] = normalizeTrendSeries(series, seriesWindow).points;
-    });
-    return result;
-  }
 
   const windowsMap = isRecord(payload.windows)
     ? (payload.windows as Record<string, unknown>)
@@ -523,26 +437,6 @@ export function buildEmptyAdminOverviewSnapshot(snapshotAt = nowIsoString()): Ad
     snapshot_at: snapshotAt,
     source: "empty",
     degraded: true,
-    health_score: null,
-    health_level: "unknown",
-    budget_usage_pct: null,
-    system_status: {
-      status: "unknown",
-      health_level: "unknown",
-      sample_count: null,
-      watermark_at: null,
-      data_source: "empty",
-      explain: "总览尚未初始化",
-    },
-    traffic_health: {
-      status: "unknown",
-      health_level: "unknown",
-      sample_count: null,
-      watermark_at: null,
-      data_source: "empty",
-      explain: "暂无业务样本",
-      window_sec: null,
-    },
     request_quality: {
       status: "unknown",
       health_level: "unknown",
@@ -559,7 +453,7 @@ export function buildEmptyAdminOverviewSnapshot(snapshotAt = nowIsoString()): Ad
       explain: "暂无业务样本",
       window_sec: null,
     },
-    question_activity: {
+    question_health: {
       status: "unknown",
       health_level: "unknown",
       score: null,
@@ -567,33 +461,10 @@ export function buildEmptyAdminOverviewSnapshot(snapshotAt = nowIsoString()): Ad
       question_success_rate: null,
       question_latency_p95_ms: null,
       question_qps: null,
-      stream_interrupt_rate: null,
       sample_count: null,
       watermark_at: null,
       data_source: "empty",
       explain: "暂无用户提问样本",
-      window_sec: null,
-    },
-    stability: {
-      status: "unknown",
-      health_level: "unknown",
-      score: null,
-      critical_alerts: null,
-      warning_alerts: null,
-    },
-    capacity_cost: {
-      status: "unknown",
-      health_level: "unknown",
-      score: null,
-      qps: null,
-      question_qps: null,
-      cost_per_minute: null,
-      budget_per_minute: null,
-      budget_usage_pct: null,
-      sample_count: null,
-      watermark_at: null,
-      data_source: "empty",
-      explain: "暂无容量与成本样本",
       window_sec: null,
     },
     alerts: [],
@@ -607,7 +478,6 @@ export function buildEmptyAdminOverviewSnapshot(snapshotAt = nowIsoString()): Ad
       source: "empty",
     },
     module_matrix: [],
-    change_feed: [],
     meta: {
       generated_at: snapshotAt,
     },
@@ -689,12 +559,16 @@ export async function streamAdminOverview(options: StreamOptions = {}): Promise<
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        break;
+        buffer += decoder.decode();
+      } else {
+        buffer += decoder.decode(value, { stream: true });
       }
 
-      buffer += decoder.decode(value, { stream: true });
-      const { events, restBuffer } = parseSSEEvents(buffer);
-      buffer = restBuffer;
+      const parseTarget = done && buffer.trim().length > 0 ? `${buffer}
+
+` : buffer;
+      const { events, restBuffer } = parseSSEEvents(parseTarget);
+      buffer = done ? "" : restBuffer;
 
       for (const rawEvent of events) {
         const event = normalizeStreamEvent(rawEvent);
@@ -715,6 +589,10 @@ export async function streamAdminOverview(options: StreamOptions = {}): Promise<
         if (event.type === "done") {
           onDone?.(event);
         }
+      }
+
+      if (done) {
+        break;
       }
     }
   } catch (error) {

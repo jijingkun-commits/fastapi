@@ -233,6 +233,8 @@ summary["avg_relevance"] = round(sum(scores) / len(scores), 4)
 
 ## 5. 测试策略（推荐，TDD 前置）
 
+显式 TC 覆盖补齐：`TC-KB-01`、`TC-KB-02`、`TC-KB-03`、`TC-KB-04`、`TC-KB-05`、`TC-KB-06`、`TC-KB-07`、`TC-KB-08`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01

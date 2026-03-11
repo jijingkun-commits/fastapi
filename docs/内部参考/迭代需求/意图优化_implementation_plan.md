@@ -31,6 +31,7 @@
 - 不足 5 轮时必须允许短列表/空列表进入规划。
 - `tool/system` 与内部结构化产物不得进入 `decompose_goals` 输入视图。
 - 任意运行态合同异常必须验证 `supervisor_fallback` 收口。
+- 显式 TC 覆盖补齐：`TC-IO-01`、`TC-IO-02`、`TC-IO-03`、`TC-IO-04`、`TC-IO-05`、`TC-IO-06`、`TC-IO-07`。
 
 ## 2. 功能机制包（Feature Packet）
 

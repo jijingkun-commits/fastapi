@@ -20,12 +20,6 @@ export type AdminOverviewRealtimeMode =
   | "polling"
   | "error";
 
-export interface AdminOverviewNumericSignal {
-  value: number | null;
-  score: number | null;
-  level: AdminOverviewHealthLevel;
-}
-
 export interface AdminOverviewStatusMeta {
   status: AdminOverviewCardStatus;
   health_level: AdminOverviewHealthLevel;
@@ -35,10 +29,6 @@ export interface AdminOverviewStatusMeta {
   explain?: string;
   window_sec?: number | null;
 }
-
-export type AdminOverviewSystemStatus = AdminOverviewStatusMeta;
-
-export type AdminOverviewTrafficHealth = AdminOverviewStatusMeta;
 
 export interface AdminOverviewRequestQuality extends AdminOverviewStatusMeta {
   score: number | null;
@@ -50,31 +40,12 @@ export interface AdminOverviewRequestQuality extends AdminOverviewStatusMeta {
   qps: number | null;
 }
 
-export interface AdminOverviewQuestionActivity extends AdminOverviewStatusMeta {
+export interface AdminOverviewQuestionHealth extends AdminOverviewStatusMeta {
   score: number | null;
   question_total: number | null;
   question_success_rate: number | null;
   question_latency_p95_ms: number | null;
   question_qps: number | null;
-  stream_interrupt_rate: number | null;
-}
-
-export interface AdminOverviewStability {
-  status: AdminOverviewCardStatus;
-  health_level: AdminOverviewHealthLevel;
-  score: number | null;
-  critical_alerts: number | null;
-  warning_alerts: number | null;
-  module_score?: number | null;
-}
-
-export interface AdminOverviewCapacityCost extends AdminOverviewStatusMeta {
-  score: number | null;
-  qps: number | null;
-  question_qps: number | null;
-  cost_per_minute: number | null;
-  budget_per_minute: number | null;
-  budget_usage_pct: number | null;
 }
 
 export interface AdminOverviewAlertItem {
@@ -105,13 +76,6 @@ export interface AdminOverviewModuleItem {
   data_delay_sec: number | null;
 }
 
-export interface AdminOverviewChangeItem {
-  id: string;
-  title: string;
-  level: AdminOverviewSeverity;
-  occurred_at: string;
-}
-
 export interface AdminOverviewMeta {
   generated_at: string;
   trace_id?: string | null;
@@ -122,28 +86,18 @@ export interface AdminOverviewSnapshot {
   snapshot_at: string;
   source: string;
   degraded: boolean;
-  system_status: AdminOverviewSystemStatus;
-  traffic_health: AdminOverviewTrafficHealth;
-  health_score: number | null;
-  health_level: AdminOverviewHealthLevel;
-  budget_usage_pct: number | null;
   request_quality: AdminOverviewRequestQuality;
-  question_activity: AdminOverviewQuestionActivity;
-  stability: AdminOverviewStability;
-  capacity_cost: AdminOverviewCapacityCost;
+  question_health: AdminOverviewQuestionHealth;
   alerts: AdminOverviewAlertItem[];
   freshness: AdminOverviewFreshness;
   module_matrix: AdminOverviewModuleItem[];
-  change_feed: AdminOverviewChangeItem[];
   meta: AdminOverviewMeta;
 }
 
 export interface AdminOverviewTrendPoint {
   timestamp: string;
-  health_score?: number | null;
   request_qps?: number | null;
   question_qps?: number | null;
-  budget_usage_pct?: number | null;
 }
 
 export type AdminOverviewTrendWindow = "1h" | "24h";

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { MemoryDetailDrawer } from "@/components/admin/memory/MemoryDetailDrawer";
 import { MemorySearchDebugPanel } from "@/components/admin/memory/MemorySearchDebugPanel";
+import { AdminCompactStatCard } from "@/components/admin/shared/AdminCompactStatCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -460,34 +461,32 @@ export function MemoryAdminPanel() {
       </div>
 
       {overview ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>活跃用户</CardDescription>
-              <CardTitle className="text-xl">{overview.totals.users}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>文档总数</CardDescription>
-              <CardTitle className="text-xl">{overview.totals.documents}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>分块总数</CardDescription>
-              <CardTitle className="text-xl">{overview.totals.chunks}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>向量状态</CardDescription>
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                待处理 {overview.embedding_status.pending} / 已就绪 {overview.embedding_status.ready} /
-                失败 {overview.embedding_status.failed}
-              </CardTitle>
-            </CardHeader>
-          </Card>
+        <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+          <AdminCompactStatCard
+            label="活跃用户"
+            value={overview.totals.users}
+            hint="参与记忆链路"
+            testId="admin-memory-summary-users"
+          />
+          <AdminCompactStatCard
+            label="文档总数"
+            value={overview.totals.documents}
+            hint="记忆文档"
+            testId="admin-memory-summary-documents"
+          />
+          <AdminCompactStatCard
+            label="分块总数"
+            value={overview.totals.chunks}
+            hint="向量分块"
+            testId="admin-memory-summary-chunks"
+          />
+          <AdminCompactStatCard
+            label="向量状态"
+            value={overview.embedding_status.ready}
+            hint={`待处理 ${overview.embedding_status.pending} · 失败 ${overview.embedding_status.failed}`}
+            tone={overview.embedding_status.failed > 0 ? "danger" : overview.embedding_status.pending > 0 ? "brand" : "success"}
+            testId="admin-memory-summary-embedding-status"
+          />
         </div>
       ) : (
         <Card>

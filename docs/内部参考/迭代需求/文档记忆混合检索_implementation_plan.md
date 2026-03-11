@@ -351,6 +351,8 @@ implementation_tasks:
 
 ## 7. 测试策略（TDD 前置）
 
+显式 TC 覆盖补齐：`TC-HYB-01`、`TC-HYB-02`、`TC-HYB-03`、`TC-HYB-04`、`TC-HYB-05`、`TC-HYB-06`、`TC-HYB-07`、`TC-HYB-08`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01

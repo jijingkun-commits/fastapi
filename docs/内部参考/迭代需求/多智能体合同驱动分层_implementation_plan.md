@@ -28,6 +28,7 @@
 2. `tests/unit/test_multi_agent_streaming_helpers.py`
 3. `tests/unit/test_chat_service_done_payload.py`
 4. `tests/unit/test_todo_handoff_observation.py`
+5. 显式 TC 覆盖补齐：`TC-CDL-001`、`TC-CDL-002`、`TC-CDL-003`、`TC-CDL-004`、`TC-CDL-005`、`TC-CDL-006`。
 
 ### 0.3 外部参考（实现准绳）
 

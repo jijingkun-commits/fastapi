@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { AdminCompactStatCard } from "@/components/admin/shared/AdminCompactStatCard";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -205,50 +206,33 @@ export function LLMAdminPanel() {
       </div>
 
       {/* 概览卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">提供商</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{providers.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {providers.filter(p => p.is_active).length} 个启用
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">模型总数</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{models.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {models.filter(m => m.is_active).length} 个启用
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">模型类型</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{modelTypes.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {modelTypes.filter(t => t.default_model).length} 个有默认
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">默认对话模型</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-lg font-bold truncate">
-              {modelTypes.find(t => t.type === "chat")?.default_model || "未设置"}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+        <AdminCompactStatCard
+          label="提供商"
+          value={providers.length}
+          hint={`${providers.filter(p => p.is_active).length} 个启用`}
+          testId="admin-llm-summary-providers"
+        />
+        <AdminCompactStatCard
+          label="模型总数"
+          value={models.length}
+          hint={`${models.filter(m => m.is_active).length} 个启用`}
+          testId="admin-llm-summary-models"
+        />
+        <AdminCompactStatCard
+          label="模型类型"
+          value={modelTypes.length}
+          hint={`${modelTypes.filter(t => t.default_model).length} 个有默认`}
+          testId="admin-llm-summary-types"
+        />
+        <AdminCompactStatCard
+          label="默认对话模型"
+          value={modelTypes.find(t => t.type === "chat")?.default_model || "未设置"}
+          valueTitle={modelTypes.find(t => t.type === "chat")?.default_model || "未设置"}
+          valueClassName="max-w-[9rem] truncate text-base font-semibold"
+          hint="chat 类型默认模型"
+          testId="admin-llm-summary-default-chat"
+        />
       </div>
 
       <Tabs defaultValue="providers" className="space-y-4">

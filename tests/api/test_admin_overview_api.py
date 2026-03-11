@@ -78,18 +78,11 @@ def test_admin_overview_summary_returns_v2_snapshot(admin_override) -> None:
         "snapshot_at": "2026-03-09T04:00:00Z",
         "source": "bucket",
         "degraded": False,
-        "system_status": {"status": "ok", "health_level": "healthy"},
-        "traffic_health": {"status": "ok", "sample_count": 12},
-        "health_score": 92.5,
-        "health_level": "healthy",
         "request_quality": {"status": "ok", "request_total": 12},
-        "question_activity": {"status": "ok", "question_total": 4},
-        "stability": {"status": "ok", "score": 90.0},
-        "capacity_cost": {"status": "ok", "budget_usage_pct": 24.5},
+        "question_health": {"status": "ok", "question_total": 4},
         "alerts": [],
         "freshness": {"status": "fresh", "expired": False},
         "module_matrix": [],
-        "change_feed": [],
         "meta": {"generated_at": "2026-03-09T04:00:01Z", "trace_id": "trace-unit-v2"},
     }
     service_stub = _OverviewQueryServiceStub(snapshot=snapshot)
@@ -106,10 +99,41 @@ def test_admin_overview_summary_returns_v2_snapshot(admin_override) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "bucket"
-    assert body["system_status"]["status"] == "ok"
+    assert "system_status" not in body
     assert body["request_quality"]["request_total"] == 12
-    assert body["question_activity"]["question_total"] == 4
+    assert body["question_health"]["question_total"] == 4
+    assert "stability" not in body
+    assert "capacity_cost" not in body
+    assert "change_feed" not in body
     assert service_stub.trace_ids == ["trace-from-header"]
+
+
+def test_admin_overview_summary_preserves_freshness_payload(admin_override) -> None:
+    """freshness 选择器：summary 返回 freshness contract。"""
+
+    snapshot = {
+        "snapshot_at": "2026-03-09T04:00:00Z",
+        "source": "bucket",
+        "degraded": False,
+        "request_quality": {"status": "ok", "request_total": 12},
+        "question_health": {"status": "ok", "question_total": 4},
+        "alerts": [],
+        "freshness": {"status": "fresh", "delay_sec": 2, "expired": False},
+        "module_matrix": [],
+        "meta": {"generated_at": "2026-03-09T04:00:01Z", "trace_id": "trace-freshness"},
+    }
+    service_stub = _OverviewQueryServiceStub(snapshot=snapshot)
+    app.dependency_overrides[get_admin_overview_service] = lambda: service_stub
+
+    try:
+        response = client.get("/api/v1/admin-overview/summary")
+    finally:
+        app.dependency_overrides.pop(get_admin_overview_service, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["freshness"]["status"] == "fresh"
+    assert body["freshness"]["delay_sec"] == 2
 
 
 def test_admin_overview_trends_returns_multi_window_payload(admin_override) -> None:
@@ -178,13 +202,13 @@ def test_admin_overview_stream_pushes_multiple_results(admin_override, monkeypat
                 "snapshot_at": "2026-03-09T04:00:00Z",
                 "source": "bucket",
                 "degraded": False,
-                "system_status": {"status": "ok"},
+                "request_quality": {"status": "no_data"},
             },
             {
                 "snapshot_at": "2026-03-09T04:00:10Z",
                 "source": "bucket",
                 "degraded": False,
-                "system_status": {"status": "ok"},
+                "request_quality": {"status": "no_data"},
             },
         ]
     )

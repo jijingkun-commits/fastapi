@@ -1,10 +1,11 @@
 const { test, expect } = require('@playwright/test');
-const { loginAndGoto } = require('../helpers/auth-helper');
+
+const E2E_MOCK_TOKEN = 'e2e-admin-overview-token';
 
 /**
  * 管理后台总览驾驶舱主流程覆盖。
  *
- * @test-case TC-ADMIN-OV-01 实时 8 块驾驶舱渲染与轮询降级
+ * @test-case TC-ADMIN-OV-01 精简驾驶舱渲染与轮询降级
  * @test-case TC-ADMIN-OV-02 告警/模块跳转路由正确性
  * @see docs/开发文档/测试管理/管理后台测试案例.md
  */
@@ -18,25 +19,6 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
             snapshot_at: snapshotAt,
             source: degraded ? 'empty' : 'bucket',
             degraded,
-            health_score: degraded ? null : 90.4,
-            health_level: degraded ? 'unknown' : 'healthy',
-            budget_usage_pct: degraded ? null : 62.1,
-            system_status: {
-                status: degraded ? 'degraded' : 'ok',
-                health_level: degraded ? 'unknown' : 'healthy',
-                sample_count: degraded ? 0 : 1,
-                watermark_at: degraded ? null : snapshotAt,
-                data_source: degraded ? 'empty' : 'bucket',
-                explain: degraded ? '聚合链路暂时降级，当前展示可解释空态。' : '聚合链路正常。',
-            },
-            traffic_health: {
-                status: degraded ? 'no_data' : 'ok',
-                health_level: degraded ? 'unknown' : 'healthy',
-                sample_count: degraded ? 0 : 1380,
-                watermark_at: degraded ? null : snapshotAt,
-                data_source: degraded ? 'empty' : 'bucket',
-                explain: degraded ? '分钟桶不可用，当前窗口无法确认业务样本。' : '业务请求样本正常。',
-            },
             request_quality: {
                 status: degraded ? 'degraded' : 'ok',
                 health_level: degraded ? 'unknown' : 'healthy',
@@ -48,7 +30,7 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                 qps: degraded ? null : 39.6,
                 explain: degraded ? '请求质量暂不可判定。' : '全业务 API 请求质量正常。',
             },
-            question_activity: {
+            question_health: {
                 status: degraded ? 'degraded' : 'ok',
                 health_level: degraded ? 'unknown' : 'healthy',
                 score: degraded ? null : 89.6,
@@ -56,26 +38,7 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                 question_success_rate: degraded ? null : 0.985,
                 question_latency_p95_ms: degraded ? null : 648,
                 question_qps: degraded ? null : 2.1,
-                stream_interrupt_rate: degraded ? null : 0.012,
-                explain: degraded ? '提问链路暂不可判定。' : '提问链路活跃且健康。',
-            },
-            stability: {
-                status: degraded ? 'degraded' : 'ok',
-                health_level: degraded ? 'critical' : 'healthy',
-                score: degraded ? null : 88.4,
-                critical_alerts: degraded ? 1 : 1,
-                warning_alerts: degraded ? 0 : 1,
-                module_score: degraded ? null : 88.0,
-            },
-            capacity_cost: {
-                status: degraded ? 'degraded' : 'ok',
-                score: degraded ? null : 87.9,
-                qps: degraded ? null : 39.6,
-                cost_per_minute: degraded ? null : 15.5,
-                budget_per_minute: 25,
-                budget_usage_pct: degraded ? null : 62.1,
-                health_level: degraded ? 'unknown' : 'healthy',
-                question_qps: degraded ? null : 2.1,
+                explain: degraded ? '提问链路暂不可判定。' : '提问链路健康。',
             },
             alerts: [
                 {
@@ -115,14 +78,6 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                     data_delay_sec: 47,
                 },
             ],
-            change_feed: [
-                {
-                    id: 'chg-1',
-                    title: '模型路由切换至 qwen-max，增加对公问询稳定性',
-                    level: 'warning',
-                    occurred_at: '2026-02-14T08:00:00Z',
-                },
-            ],
             meta: {
                 generated_at: snapshotAt,
                 trace_id: `trace-${summaryRequestCount}`,
@@ -155,13 +110,11 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                             '1h': [
                                 {
                                     timestamp: '2026-02-14T07:50:00Z',
-                                    health_score: 88.1,
                                     request_qps: 31.2,
                                     question_qps: 1.8,
                                 },
                                 {
                                     timestamp: '2026-02-14T08:00:00Z',
-                                    health_score: 90.4,
                                     request_qps: 39.6,
                                     question_qps: 2.1,
                                 },
@@ -171,13 +124,11 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                                     timestamp: '2026-02-13T09:00:00Z',
                                     request_qps: 25.4,
                                     question_qps: 1.1,
-                                    health_score: 81.2,
                                 },
                                 {
                                     timestamp: '2026-02-14T08:00:00Z',
                                     request_qps: 39.6,
                                     question_qps: 2.1,
-                                    health_score: 90.4,
                                 },
                             ],
                         },
@@ -191,8 +142,6 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
                     `data: ${JSON.stringify({
                         snapshot_at: '2026-02-14T08:00:06Z',
                         patch: {
-                            health_score: 89.4,
-                            health_level: 'warning',
                             freshness: {
                                 delay_sec: 66,
                                 status: 'fresh',
@@ -224,19 +173,20 @@ test.describe('用户故事: 管理后台总览驾驶舱', () => {
         });
 
         await test.step('Given/When: 管理员进入 /admin 总览页', async () => {
-            await loginAndGoto(page, '/admin');
+            await page.addInitScript((token) => {
+                window.sessionStorage.setItem('auth:token', token);
+            }, E2E_MOCK_TOKEN);
+            await page.goto('/admin', { waitUntil: 'domcontentloaded' });
         });
 
-        await test.step('Then: 首屏可见 8 块驾驶舱信息卡', async () => {
+        await test.step('Then: 首屏可见精简后的 6 个主展示块', async () => {
             const cards = [
-                'overview-card-system-status',
                 'overview-card-request-quality',
-                'overview-card-stability',
-                'overview-card-capacity-cost',
                 'overview-card-alerts',
                 'overview-card-freshness',
                 'overview-card-module-matrix',
-                'overview-card-question-activity',
+                'overview-card-question-health',
+                'overview-card-traffic-trends',
             ];
 
             for (const cardId of cards) {
