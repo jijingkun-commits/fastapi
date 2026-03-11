@@ -1695,66 +1695,6 @@ def _should_enable_multi_intent_mode(
     return _count_must_answer_goals(_resolve_active_goals(state)) >= 2
 
 
-def _build_multi_intent_recovery_system_context(
-    base_context: str,
-    intent_plan: Dict[str, Any],
-    missing_goals: Sequence[Dict[str, Any]],
-) -> str:
-    """构造补齐未完成目标的 system_context 提示。"""
-    normalized_base = str(base_context or "").strip()
-    marker_idx = normalized_base.find(DELIVERY_RECOVERY_MARKER)
-    if marker_idx >= 0:
-        normalized_base = normalized_base[:marker_idx].rstrip()
-
-    goal_index: Dict[str, Dict[str, Any]] = {
-        str(goal.get("goal_id") or ""): goal
-        for goal in list(intent_plan.get("goals") or [])
-        if str(goal.get("goal_id") or "")
-    }
-
-    pending_titles: list[str] = []
-    pending_actions: list[str] = []
-    seen_buckets: set[str] = set()
-    for item in missing_goals:
-        if not isinstance(item, dict):
-            continue
-        goal_id = str(item.get("goal_id") or "")
-        title = str(item.get("title") or goal_id or "未命名目标").strip()
-        if title:
-            pending_titles.append(title)
-
-        goal_kind = str((goal_index.get(goal_id) or {}).get("kind") or "")
-        bucket = _goal_kind_bucket(goal_kind)
-        if bucket in seen_buckets:
-            continue
-        seen_buckets.add(bucket)
-        if bucket == "external":
-            pending_actions.append("外部信息未完成：优先调用 tavily_search（必要时 knowledge_search）补齐结果。")
-        elif bucket == "todo":
-            pending_actions.append("待办事项未完成：调用 assign_to_todo_expert 获取或更新待办结果。")
-        elif bucket == "data":
-            pending_actions.append("数据查询未完成：调用 assign_to_data_expert 补齐数据答案。")
-        else:
-            pending_actions.append("通用问题未完成：请继续补齐该目标后再结束。")
-
-    if not pending_titles:
-        return normalized_base
-
-    lines = [
-        DELIVERY_RECOVERY_MARKER,
-        f"当前轮仍缺少目标：{'、'.join(pending_titles)}。",
-        "请继续完成上述目标后再结束本轮回复，禁止只覆盖部分问题直接结束。",
-    ]
-    if pending_actions:
-        lines.append("补齐动作：")
-        lines.extend(f"- {action}" for action in pending_actions)
-
-    recovery_hint = "\n".join(lines)
-    if normalized_base:
-        return f"{normalized_base}\n{recovery_hint}"
-    return recovery_hint
-
-
 def _coerce_replay_result_event(raw_event: Any) -> Optional[Dict[str, Any]]:
     """规范化回放 result_event 结构。"""
 
@@ -1810,6 +1750,7 @@ def _resolve_replay_result_events(additional_kwargs: Dict[str, Any]) -> tuple[li
             return [legacy_pair_event], "data_type_data"
 
     return [], "none"
+
 
 
 def _result_event_sort_key(event: Dict[str, Any], index: int) -> tuple[int, int, int]:
@@ -1942,6 +1883,7 @@ def _ensure_intent_plan_covers_runtime(
         runtime_goals=goals,
         source=str((base_plan or {}).get("source") or "runtime"),
     )
+
 
 
 def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
@@ -2455,6 +2397,11 @@ def _augment_data_handoff_payload(
     enriched["turn_act_hint"] = turn_act_hint
 
     query_text = _normalize_text_content(frame.get("query_text"))
+    if not query_text:
+        query_text = _normalize_text_content(enriched.get("task_description"))
+    if not query_text:
+        query_text = _normalize_text_content(_resolve_semantic_user_query(state))
+
     if query_text:
         try:
             from app.ai.workflow.data_graph import build_data_query_handoff_frame
@@ -2462,7 +2409,7 @@ def _augment_data_handoff_payload(
             enriched["frame"] = build_data_query_handoff_frame(query_text, base_frame=frame)
         except Exception as exc:
             logger.warning("data_handoff_frame_build_failed: %s", exc)
-            enriched["frame"] = frame
+            enriched["frame"] = {**frame, "query_text": query_text} if frame else {"query_text": query_text}
     else:
         enriched["frame"] = frame or None
 
@@ -2535,6 +2482,7 @@ def fallback_router(node_name: str, state: MultiAgentState, error_text: str) -> 
             plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
         ),
     }
+
 
 
 def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
@@ -3288,64 +3236,6 @@ def _apply_router_contract_guard(
         pending_goals.pop(0)
 
     return accepted, blocked, pending_goals
-
-def _build_router_contract_repair_hints(blocked_handoffs: Sequence[Dict[str, Any]]) -> list[str]:
-    """根据阻塞的 handoff 生成可执行修复提示。"""
-    hints: list[str] = []
-    seen: set[str] = set()
-    for item in blocked_handoffs or []:
-        if not isinstance(item, dict):
-            continue
-        reason = str(item.get("reason") or "").strip()
-        contract_error = str(item.get("contract_error") or "").strip()
-        hint = ""
-        if reason == "invalid_data_query_contract":
-            if contract_error == "query_text_missing":
-                hint = "data.query 的 frame.query_text 必填，且必须直接描述数据子任务本身。"
-            elif contract_error == "query_text_sql_like":
-                hint = "data.query 的 frame.query_text 必须是自然语言子任务描述，禁止直接填写 SQL/SELECT 语句。"
-            elif contract_error == "ranking_limit_missing":
-                hint = "TopN 数据子任务必须补齐 frame.ranking.limit。"
-        if hint and hint not in seen:
-            seen.add(hint)
-            hints.append(hint)
-    return hints
-
-
-def _build_router_blocked_system_context(
-    *,
-    state: MultiAgentState,
-    pending_goals: Sequence[Dict[str, Any]],
-    blocked_handoffs: Optional[Sequence[Dict[str, Any]]] = None,
-) -> str:
-    """构造 Router 门禁阻塞后的补齐提示上下文。"""
-    missing_goals = [
-        {
-            "goal_id": str(goal.get("goal_id") or ""),
-            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
-            "reason": "router_contract_blocked",
-        }
-        for goal in pending_goals
-    ]
-    if not missing_goals:
-        return str(state.get("system_context") or "")
-
-    active_plan = _build_active_goal_plan(state, source="router_guard")
-
-    recovery_context = _build_multi_intent_recovery_system_context(
-        str(state.get("system_context") or ""),
-        active_plan,
-        missing_goals,
-    )
-    repair_hints = _build_router_contract_repair_hints(blocked_handoffs or [])
-    if not repair_hints:
-        return recovery_context
-
-    hint_block = "\n".join(["【Router 合同修复提示】", *[f"- {hint}" for hint in repair_hints]])
-    if recovery_context:
-        return f"{recovery_context}\n{hint_block}"
-    return hint_block
-
 
 def _should_mute_expert_text_output(state: Dict[str, Any], node_name: str) -> bool:
     """决定是否抑制专家节点文本直出（复合任务改为最终统一汇总）。"""
@@ -4523,13 +4413,36 @@ def _build_expert_inference_messages(
     ]
 
 
+def _validate_state_messages_for_runtime(
+    state: Dict[str, Any],
+    messages: Sequence[BaseMessage],
+) -> list[BaseMessage]:
+    """统一复用消息契约层清洗，避免 checkpoint 脏历史直达运行态。"""
+    from app.ai.message_utils import validate_messages
+
+    model_id = str(state.get("model_id") or "").lower()
+    should_fix_reasoning = bool(state.get("enable_thinking"))
+    if "deepseek" in model_id or "reasoner" in model_id:
+        should_fix_reasoning = True
+
+    return validate_messages(messages, fix_reasoning=should_fix_reasoning)
+
+
 def _prepare_streaming_inference_state(
     state: Dict[str, Any],
     *,
     node_name: str = "supervisor",
 ) -> Tuple[Dict[str, Any], int, int, int, int, int]:
     """构造 streaming_wrapper 调用 agent.astream 前的推理态 state。"""
-    original_messages = _build_expert_inference_messages(state, node_name)
+    raw_messages = _build_expert_inference_messages(state, node_name)
+    original_messages = _validate_state_messages_for_runtime(state, raw_messages)
+    if len(original_messages) != len(raw_messages):
+        logger.info(
+            "[%s] 推理态消息清洗: %d -> %d",
+            node_name,
+            len(raw_messages),
+            len(original_messages),
+        )
     inference_diagnostics: Dict[str, Any] = {}
     prepared_messages = _prepare_messages_for_supervisor_inference(
         original_messages,
@@ -4588,7 +4501,7 @@ def _prepare_streaming_inference_state(
 
     return (
         pruned_state,
-        len(original_messages),
+        len(raw_messages),
         input_message_count,
         prepared_token_estimate,
         pruned_token_estimate,
@@ -4965,7 +4878,7 @@ def _dispatch_values_mode_chunk(
                 )
                 emit_status(
                     ctx.writer,
-                    message=f"路由门禁拦截 {len(blocked_handoffs)} 条无效委派，正在按目标合同重试。",
+                    message=f"路由门禁拦截 {len(blocked_handoffs)} 条无效委派，正在整理可返回结果。",
                     node=ctx.node_name,
                 )
 
@@ -4994,22 +4907,51 @@ def _dispatch_values_mode_chunk(
             final_state["delivery_meta"] = delivery_meta
 
             if not guarded_batch and blocked_handoffs:
-                pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in pending_goals]
+                unresolved_goals = [dict(goal) for goal in (pending_goals or active_goals) if isinstance(goal, dict)]
+                pending_titles = [str(goal.get("title") or goal.get("goal_id") or "未命名目标") for goal in unresolved_goals]
                 if pending_titles:
-                    final_state["system_context"] = _build_router_blocked_system_context(
-                        state=guard_state,
-                        pending_goals=pending_goals,
-                        blocked_handoffs=blocked_handoffs,
-                    )
                     final_state["delivery_meta"] = {
                         **dict(final_state.get("delivery_meta") or {}),
                         "pending_goal_titles": pending_titles,
                         "pending_goal_ids": [
                             str(goal.get("goal_id") or "")
-                            for goal in pending_goals
+                            for goal in unresolved_goals
                             if str(goal.get("goal_id") or "")
                         ],
                     }
+
+                blocked_answer = _render_coverage_blocked_message(
+                    unresolved_goals or active_goals,
+                    {
+                        "pass": False,
+                        "missing_goals": [
+                            {
+                                "goal_id": str(goal.get("goal_id") or ""),
+                                "title": str(goal.get("title") or goal.get("goal_id") or "未命名目标"),
+                                "reason": "router_contract_blocked",
+                            }
+                            for goal in unresolved_goals or active_goals
+                            if isinstance(goal, dict)
+                        ],
+                    },
+                )
+                preview_markdown = _sanitize_direct_answer_markdown(
+                    _extract_latest_visible_ai_markdown(delta_messages_for_scan)
+                ) or _build_external_lookup_display_markdown_from_findings(direct_findings)
+                if preview_markdown:
+                    blocked_answer = f"{preview_markdown}\n\n{blocked_answer}"
+
+                final_state["messages"] = [
+                    *list(ctx.state.get("messages") or []),
+                    _create_ai_message_with_skill_runtime(
+                        blocked_answer,
+                        {**guard_state, **final_state},
+                    ),
+                ]
+                final_state["final_answer"] = blocked_answer
+                final_state["pending_handoff"] = None
+                final_state["handoff_queue"] = []
+                final_state.pop("system_context", None)
                 final_state["multi_intent_mode"] = True
                 return input_message_count, None
 
@@ -6195,6 +6137,8 @@ def _load_recent_persisted_user_visible_messages(
         content = _normalize_text_content(getattr(item, "content", ""))
         if not content:
             continue
+        if role == "assistant" and AgentOutputParser.should_filter_content(content):
+            continue
         user_visible_messages.append({"role": role, "content": content})
 
     normalized_query = str(user_query or "").strip()
@@ -6518,22 +6462,23 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         "turn_id": f"{state.get('thread_id') or 'thread'}:{datetime.now(timezone.utc).isoformat(timespec='seconds')}",
     }
     
-    from app.ai.message_utils import validate_messages
+    # 注意：临时状态（pending_handoff 等）在 postprocess 节点统一清理
+    # 详见：_postprocess 函数的状态清理逻辑
     
-    enable_thinking = state.get("enable_thinking", False)
-    model_id = state.get("model_id")
-    
-    should_fix_reasoning = enable_thinking
-    if model_id and ("deepseek" in model_id.lower() or "reasoner" in model_id.lower()):
-        should_fix_reasoning = True
-    
+    # ========== 1. 消息验证与修复 ==========
+    # 【补丁代码】修复 DeepSeek Reasoner 的 reasoning_content 缺失问题
+    # 详见: app.ai.message_utils.fix_deepseek_reasoning
+    # 原因: DeepSeek R1 要求历史消息必须包含 reasoning_content 字段
+    # 方案: 已将修复逻辑封装为独立函数 validate_messages，保持代码整洁
+    # 兼容策略：待 DeepSeek 官方修复 reasoning_content 历史消息校验后再评估移除
     original_count = len(messages)
-    validated = validate_messages(messages, fix_reasoning=should_fix_reasoning)
+    validated = _validate_state_messages_for_runtime(state, messages)
     
-    if len(validated) != original_count or should_fix_reasoning:
+    if len(validated) != original_count or bool(state.get("enable_thinking")):
         logger.debug(
-            "预处理节点: 消息验证完成, should_fix=%s, 消息数 %d -> %d",
-            should_fix_reasoning, original_count, len(validated)
+            "预处理节点: 消息验证完成, 消息数 %d -> %d",
+            original_count,
+            len(validated),
         )
         updates["messages"] = validated
         messages = validated

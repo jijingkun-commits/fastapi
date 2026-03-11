@@ -43,7 +43,7 @@ def test_render_response_guidance_contract_should_render_memory_archive_text() -
     assert "已唯一确认的删除链" in rendered
 
 
-def test_build_multi_intent_recovery_system_context_should_append_marker_and_actions() -> None:
+def test_build_multi_intent_recovery_system_context_should_not_append_legacy_recovery_prompt() -> None:
     rendered = response_policy_service.build_multi_intent_recovery_system_context(
         "当前时间: 2026-02-28",
         {
@@ -58,20 +58,19 @@ def test_build_multi_intent_recovery_system_context_should_append_marker_and_act
         ],
     )
 
-    assert rendered.startswith("当前时间: 2026-02-28")
-    assert "【交付补齐提示】" in rendered
-    assert "当前轮仍缺少目标：待办事项、天气信息。" in rendered
-    assert "assign_to_todo_expert" in rendered
-    assert "tavily_search" in rendered
+    assert rendered == "当前时间: 2026-02-28"
+    assert "【交付补齐提示】" not in rendered
+    assert "assign_to_todo_expert" not in rendered
+    assert "tavily_search" not in rendered
 
 
-def test_build_router_blocked_system_context_should_reuse_recovery_builder() -> None:
+def test_build_router_blocked_system_context_should_not_append_recovery_prompt() -> None:
     rendered = response_policy_service.build_router_blocked_system_context(
         base_context="当前时间: 2026-02-28",
         active_plan={"goals": [{"goal_id": "GOAL-1", "kind": "todo.query"}]},
         pending_goals=[{"goal_id": "GOAL-1", "title": "待办事项"}],
     )
 
-    assert "【交付补齐提示】" in rendered
-    assert "待办事项" in rendered
-    assert "assign_to_todo_expert" in rendered
+    assert rendered == "当前时间: 2026-02-28"
+    assert "【交付补齐提示】" not in rendered
+    assert "assign_to_todo_expert" not in rendered

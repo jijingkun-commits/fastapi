@@ -67,12 +67,22 @@
 
 
 
+### 2026-03-11 Data handoff 与历史回放脏块统一收口
+- 状态：ACTIVE
+- 决策主题：`data.query` 委派必须在编排层落成 canonical `frame.query_text`；assistant 历史回放只保留用户可见文本，不再把 raw `Responses` 内部块或“继续补齐”泄漏文本重新喂回模型
+- 背景与问题：`assign_to_data_expert(frame=null, task_description=...)` 会被 router guard 阻断，并诱发内部“请确认是否继续补齐”提示外泄；旧线程若残留 `function_call` 或空壳 `text` block，继续聊天时会在 `langchain-openai` Responses payload 构造阶段触发 `KeyError: 'text'`
+- 最终决策：data handoff 的唯一真理源为 `frame.query_text`，缺失时只允许把 `task_description` / 当前轮问句作为编译输入补成 canonical `frame`；router blocked / coverage blocked 不再通过 `system_context` 注入自然语言补齐提示；消息契约层继续扩展为剥离 `function_call/tool_use/tool_result` 与空壳 text block，并过滤已知内部补齐提示
+- 取舍理由：问题根因在 contract 和历史回放结构，而不是单条文案；把 owner 收回编排层与消息契约层，比继续在 UI 或 postprocess 追加兼容过滤更简洁、更稳定
+- 影响范围：`app/ai/workflow/multi_agent_graph.py`、`app/ai/message_utils.py`、`app/ai/protocol.py`、聊天/问数需求与测试文档
+- 回退/失效条件：若 supervisor 未来完全不再输出 task_description 型 data handoff，且上游 `langchain-openai` 对 Responses block 回放做了稳定兼容，可评估删除对应兜底编译与清洗分支；在此之前保持启用
+- 关联文档/代码：`docs/产品文档/聊天系统需求.md`、`docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/workflow/multi_agent_graph.py`、`app/ai/message_utils.py`
+
 ### 2026-03-10 Assistant 空壳文本块在消息契约层清洗
 - 状态：ACTIVE
 - 决策主题：assistant 历史消息中 `type=text/output_text/refusal` 但无可读正文的空壳 block 必须在消息契约层被丢弃，不允许进入 LangGraph checkpoint
 - 背景与问题：`langchain-openai` 的 Responses 流式边界场景可能生成仅含 `id/index` 的空壳 text block；若直接写入 `state.messages`，后续复用同一 `thread_id` 时会在 payload 构造阶段触发 `KeyError: 'text'`
-- 最终决策：将 assistant content 清洗收口到 `app/ai/message_utils.py.validate_messages()`；编排层只调用该契约层，不再分散添加本地特判
-- 取舍理由：坏块治理属于消息结构合法性问题，不属于业务编排职责；在底层统一清洗比在 `multi_agent_graph`、`chat_service` 等入口重复兜底更简洁、更稳定
+- 最终决策：将 assistant content 清洗收口到 `app/ai/message_utils.py.validate_messages()`；所有读取 checkpoint 历史进入模型/恢复链路的边界都必须复用同一契约层，不再分散添加本地特判
+- 取舍理由：坏块治理属于消息结构合法性问题，不属于业务编排职责；同时 `messages` 使用的 `add_messages` reducer 是 append-only，不能指望 preprocess 仅靠返回删减列表就移除旧坏块，所以需要在真正消费历史的读取边界再次复用同一清洗契约
 - 影响范围：`app/ai/message_utils.py`、`app/ai/workflow/multi_agent_graph.py` 调用链、所有复用 LangGraph checkpoint 的多轮对话线程
 - 回退/失效条件：若上游 `langchain-openai` 后续彻底修复该边界行为，且仓内确认不再产生空壳 assistant block，可评估删除此兼容清洗；在此之前保持启用
 - 关联文档/代码：`docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`、`venv/lib/python3.11/site-packages/langchain_openai/chat_models/base.py`

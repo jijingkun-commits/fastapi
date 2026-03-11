@@ -5,6 +5,7 @@ import asyncio
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.ai.message_utils import validate_messages
+from app.ai.protocol import AgentOutputParser
 from app.ai.workflow import multi_agent_graph
 from app.services.skill_service import SkillService
 
@@ -38,6 +39,39 @@ def test_validate_messages_should_keep_tool_call_ai_message() -> None:
     assert len(validated) == 2
     assert validated[0].type == "ai"
     assert validated[0].tool_calls[0]["id"] == "call_1"
+
+
+def test_validate_messages_should_strip_function_call_blocks_but_keep_tool_call_contract() -> None:
+    """Responses 风格的 function_call 内容块应剥离，但 tool_calls 契约仍要保留。"""
+
+    ai_message = AIMessage(
+        content=[
+            {
+                "type": "function_call",
+                "name": "assign_to_data_expert",
+                "arguments": '{"frame": null}',
+                "call_id": "call_1",
+            },
+            {"type": "text", "id": "msg_1", "index": -1},
+        ],
+        tool_calls=[{"name": "assign_to_data_expert", "args": {"frame": None}, "id": "call_1", "type": "tool_call"}],
+    )
+    tool_message = ToolMessage(content='{}', tool_call_id='call_1')
+
+    validated = validate_messages([ai_message, tool_message])
+
+    assert len(validated) == 2
+    assert validated[0].type == 'ai'
+    assert validated[0].content == ''
+    assert validated[0].tool_calls[0]['id'] == 'call_1'
+
+
+def test_should_filter_content_should_treat_legacy_recovery_prompt_as_internal() -> None:
+    """旧的“回复继续即可”补齐提示属于内部协议，不应继续参与直出或回放。"""
+
+    content = "为了保证回答完整，我还需要补齐以下目标：\n- 问题回复\n\n请确认是否继续补齐？你回复“继续”即可。"
+
+    assert AgentOutputParser.should_filter_content(content) is True
 
 
 def test_preprocess_multimodal_should_strip_malformed_ai_message(monkeypatch) -> None:  # noqa: ANN001

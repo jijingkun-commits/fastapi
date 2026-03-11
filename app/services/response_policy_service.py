@@ -86,76 +86,19 @@ def render_response_guidance_contract(contract: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def _goal_kind_bucket(kind: str) -> str:
-    """将细粒度 kind 归一到恢复提示桶。"""
-    normalized = str(kind or "").strip().lower()
-    if normalized.startswith("todo"):
-        return "todo"
-    if normalized.startswith("external"):
-        return "external"
-    if normalized.startswith("data"):
-        return "data"
-    return "general"
-
-
 def build_multi_intent_recovery_system_context(
     base_context: str,
     intent_plan: Dict[str, Any] | None,
     missing_goals: Sequence[Dict[str, Any]],
 ) -> str:
-    """构造补齐未完成目标的 system_context 提示。"""
+    """补齐提示不再通过 system_context 注入，统一返回剥离 marker 后的基础上下文。"""
+    del intent_plan, missing_goals
+
     normalized_base = str(base_context or "").strip()
     marker_idx = normalized_base.find(_DELIVERY_RECOVERY_MARKER)
     if marker_idx >= 0:
         normalized_base = normalized_base[:marker_idx].rstrip()
-
-    goal_index: Dict[str, Dict[str, Any]] = {
-        str(goal.get("goal_id") or ""): goal
-        for goal in list((intent_plan or {}).get("goals") or [])
-        if isinstance(goal, dict) and str(goal.get("goal_id") or "")
-    }
-
-    pending_titles: list[str] = []
-    pending_actions: list[str] = []
-    seen_buckets: set[str] = set()
-    for item in missing_goals:
-        if not isinstance(item, dict):
-            continue
-        goal_id = str(item.get("goal_id") or "")
-        title = str(item.get("title") or goal_id or "未命名目标").strip()
-        if title:
-            pending_titles.append(title)
-
-        goal_kind = str((goal_index.get(goal_id) or {}).get("kind") or "")
-        bucket = _goal_kind_bucket(goal_kind)
-        if bucket in seen_buckets:
-            continue
-        seen_buckets.add(bucket)
-        if bucket == "external":
-            pending_actions.append("外部信息未完成：优先调用 tavily_search（必要时 knowledge_search）补齐结果。")
-        elif bucket == "todo":
-            pending_actions.append("待办事项未完成：调用 assign_to_todo_expert 获取或更新待办结果。")
-        elif bucket == "data":
-            pending_actions.append("数据查询未完成：调用 assign_to_data_expert 补齐数据答案。")
-        else:
-            pending_actions.append("通用问题未完成：请继续补齐该目标后再结束。")
-
-    if not pending_titles:
-        return normalized_base
-
-    lines = [
-        _DELIVERY_RECOVERY_MARKER,
-        f"当前轮仍缺少目标：{'、'.join(pending_titles)}。",
-        "请继续完成上述目标后再结束本轮回复，禁止只覆盖部分问题直接结束。",
-    ]
-    if pending_actions:
-        lines.append("补齐动作：")
-        lines.extend(f"- {action}" for action in pending_actions)
-
-    recovery_hint = "\n".join(lines)
-    if normalized_base:
-        return f"{normalized_base}\n{recovery_hint}"
-    return recovery_hint
+    return normalized_base
 
 
 def build_router_blocked_system_context(
@@ -164,21 +107,6 @@ def build_router_blocked_system_context(
     active_plan: Dict[str, Any] | None,
     pending_goals: Sequence[Dict[str, Any]],
 ) -> str:
-    """构造 Router 门禁阻塞后的补齐提示上下文。"""
-    missing_goals = [
-        {
-            "goal_id": str(goal.get("goal_id") or ""),
-            "title": str(goal.get("title") or goal.get("kind") or "未命名目标"),
-            "reason": "router_contract_blocked",
-        }
-        for goal in pending_goals
-        if isinstance(goal, dict)
-    ]
-    if not missing_goals:
-        return str(base_context or "")
-
-    return build_multi_intent_recovery_system_context(
-        str(base_context or ""),
-        active_plan or {},
-        missing_goals,
-    )
+    """Router blocked 不再向 system_context 注入自然语言补齐提示。"""
+    del active_plan, pending_goals
+    return build_multi_intent_recovery_system_context(base_context, None, ())

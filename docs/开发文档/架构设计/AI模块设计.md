@@ -256,7 +256,7 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 
 > 更多背景：参考 LangGraph [Discussion #3192](https://github.com/langchain-ai/langgraph/discussions/3192)
 >
-> 补充约束（2026-03-10）：`messages` 进入 checkpoint 前，必须先经过消息契约层清洗；对 `type=text/output_text/refusal` 且缺少可读正文的 assistant block 直接丢弃，避免把空壳块持久化到跨轮状态。
+> 补充约束（2026-03-10 / 2026-03-11）：`messages` 进入 checkpoint 前，必须先经过消息契约层清洗；对 `type=text/output_text/refusal` 且缺少可读正文的 assistant block 直接丢弃。若旧 checkpoint 已残留脏块，所有“真正进模型前”的恢复入口也必须再次调用同一清洗契约，因为 `add_messages` reducer 默认 append-only，不能靠 preprocess 的返回值删除历史坏块。
 
 ### 应用级运行时 owner 收口（2026-03-10）
 
@@ -771,7 +771,7 @@ llm = get_scene_llm(
 `multi_agent_graph` 已按“规划保留、运行剥离”收敛到单轨运行态合同：
 
 1. **运行态目标源唯一化**：运行阶段只消费 `decomposed_goals`，不再读取 `state.intent_plan`。
-2. **运行态委派字段唯一化**：Router Guard 统一以 `handoff.target_agent + frame/task_description` 为入口；其中 `data.query` 会优先编译 canonical `frame.query_text` 后再校验，禁止继续放行缺失结构化 frame 的 data handoff。
+2. **运行态委派字段唯一化**：Router Guard 统一以 `handoff.target_agent + frame/task_description` 为入口；其中 `data.query` 的真理源只允许是 canonical `frame.query_text`：已有 `frame.query_text` 时直接复用，缺失时只允许把 `task_description` / 当前轮问句作为编译输入补成 `frame`，禁止继续放行 `frame=null` 或让 `task_description` 与 `frame` 并行承担真理源。
 3. **运行态结构化结果唯一化**：仅写入 `additional_kwargs.router_result_v2`（`version=v2`）；其中 `conversation_state` 是唯一 replay snapshot，固定挂在 `router_result_v2.conversation_state`，禁止再增加第二套顶层 replay 字段；历史字段（如 `route_decisions`）命中即 `legacy_field_detected` 并 fail-fast。
 4. **planner 输入冻结**：`decompose_goals` 输入固定为 `user_query + recent_5_persisted_user_visible_chat_turns`；窗口仅含已落库 `user/assistant`，`tool/system/内部中间态` 不入窗。
 5. **当前输入隔离**：当前轮用户输入仅作为 `user_query`；不计入 recent-5 历史窗口。
@@ -791,7 +791,7 @@ llm = get_scene_llm(
 - 在 `InternalLLMWrapper.invoke/ainvoke` 内统一执行 `_sanitize_internal_invoke_input`。
 - 仅对 `content` 为列表的消息做兼容清洗：
   - 保留 `text` / `content` 文本块
-  - 跳过 `function_call` / `tool_call` / `function_result` 块
+  - 跳过 `function_call` / `tool_call` / `tool_use` / `tool_result` / `function_result` 块
 - 清洗后仅用于本次 internal 调用，不修改原始消息对象。
 
 **作用边界**：
@@ -2311,7 +2311,7 @@ graph TD
 ### 责任边界
 
 - **planner / reconcile**：决定运行态目标语义，避免过宽泛目标污染后续门禁。
-- **coverage gate**：只判断是否已覆盖，不承担用户交互责任。
+- **coverage gate / router blocked**：只判断是否已覆盖或是否能继续派发，不承担用户交互责任，也不再通过 `system_context` 回灌“继续补齐”提示。
 - **clarify 节点**：仅处理真实缺参、真实用户补充信息。
 - **presenter/UI**：只渲染脱敏后的用户可见 contract。
 
