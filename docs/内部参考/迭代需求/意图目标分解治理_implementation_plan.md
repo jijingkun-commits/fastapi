@@ -285,6 +285,8 @@ if cfg.intent_shadow_enabled:
 
 ## 9. 测试策略（TDD 前置）
 
+显式 TC 覆盖补齐：`TC-IMG-09`、`TC-IMG-10`、`TC-IMG-11`、`TC-IMG-12`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01

@@ -161,6 +161,8 @@ def test_sse_done_refreshes_thread_list(api_client): ...
 
 ## 5. 测试策略（TDD 前置）
 
+显式 TC 覆盖补齐：`TC-ARC-01`、`TC-ARC-02`、`TC-ARC-03`、`TC-BE-01`、`TC-FE-01`、`TC-QA-01`。
+
 ```yaml
 test_strategy:
   - feature_id: FP-ARC-01

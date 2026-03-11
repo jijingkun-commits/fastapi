@@ -198,6 +198,8 @@ if queue_len >= 5000:
 
 ## 4. 测试策略（test_strategy）
 
+显式 TC 覆盖补齐：`TC-UPM-06`、`TC-UPM-09`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01

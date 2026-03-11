@@ -547,6 +547,8 @@ metrics.record("answer_coverage_rate", coverage_rate, tags={"mode": "v2"})
 
 ## 12. 测试策略（TDD 前置）
 
+显式 TC 覆盖补齐：`TC-FULL-E2E-002`、`TC-FULL-IT-002`、`TC-FULL-IT-003`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01

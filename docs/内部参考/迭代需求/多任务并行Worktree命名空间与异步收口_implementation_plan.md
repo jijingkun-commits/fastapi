@@ -761,6 +761,8 @@ execution_contract:
 
 ## 8. 测试策略（TDD 前置）
 
+显式 TC 覆盖补齐：`TC-DOC-01`、`TC-WT-01`、`TC-WT-02`、`TC-WT-03`、`TC-WT-04`。
+
 ```yaml
 test_strategy:
   - feature_id: P1-01
