@@ -13,14 +13,12 @@ import Link from "next/link";
 import {
   Activity,
   ArrowUpRight,
-  Cpu,
   DatabaseZap,
-  Gauge,
   MessageSquare,
   RefreshCcw,
-  ShieldAlert,
   Siren,
   Timer,
+  TrendingUp,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -50,7 +48,6 @@ import type {
   AdminOverviewSeverity,
   AdminOverviewSnapshot,
   AdminOverviewTrendsResponse,
-  AdminOverviewTrendWindow,
 } from "@/types/admin-overview";
 import { Button } from "@/components/ui/button";
 import { ViewState } from "@/components/ui/view-state";
@@ -101,30 +98,22 @@ const CARD_STATUS_META: Record<
 
 const HEALTH_LEVEL_META: Record<
   AdminOverviewHealthLevel,
-  { label: string; badgeClass: string; textClass: string }
+  { label: string; textClass: string }
 > = {
   healthy: {
     label: "健康",
-    badgeClass:
-      "border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-300",
     textClass: "text-emerald-700 dark:text-emerald-300",
   },
   warning: {
     label: "预警",
-    badgeClass:
-      "border-amber-200/80 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:text-amber-300",
     textClass: "text-amber-700 dark:text-amber-300",
   },
   critical: {
     label: "严重",
-    badgeClass:
-      "border-rose-200/80 bg-rose-500/10 text-rose-700 dark:border-rose-500/30 dark:text-rose-300",
     textClass: "text-rose-700 dark:text-rose-300",
   },
   unknown: {
     label: "未知",
-    badgeClass:
-      "border-slate-200/80 bg-slate-500/10 text-slate-700 dark:border-slate-500/30 dark:text-slate-300",
     textClass: "text-slate-700 dark:text-slate-300",
   },
 };
@@ -185,28 +174,12 @@ function formatRatioPercent(value: number | null | undefined, digits = 2): strin
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-function formatPercent(value: number | null | undefined, digits = 1): string {
-  if (value == null || Number.isNaN(value)) {
-    return "--";
-  }
-
-  return `${value.toFixed(digits)}%`;
-}
-
 function formatLatency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) {
     return "--";
   }
 
   return `${formatNumber(value, 0)} ms`;
-}
-
-function formatCurrencyPerMinute(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) {
-    return "--";
-  }
-
-  return `¥${formatNumber(value, 2)}/min`;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -314,7 +287,7 @@ function resolveModuleRoute(moduleKey?: string | null): string | null {
 }
 
 function hasRealSnapshot(snapshot: AdminOverviewSnapshot): boolean {
-  return snapshot.source !== "empty" || snapshot.alerts.length > 0 || snapshot.change_feed.length > 0;
+  return snapshot.source !== "empty" || snapshot.alerts.length > 0 || snapshot.module_matrix.length > 0;
 }
 
 function computeRealtimeBadgeMeta(status: AdminOverviewRealtimeStatus): {
@@ -375,21 +348,6 @@ function RealtimeBadge({ status }: { status: AdminOverviewRealtimeStatus }) {
   );
 }
 
-function LevelBadge({ level }: { level: AdminOverviewHealthLevel }) {
-  const meta = HEALTH_LEVEL_META[level];
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        meta.badgeClass,
-      )}
-    >
-      {meta.label}
-    </span>
-  );
-}
-
 function StateBadge({ status }: { status: AdminOverviewCardStatus }) {
   const meta = CARD_STATUS_META[status];
 
@@ -432,68 +390,57 @@ function OverviewCard({
   title: string;
   subtitle: string;
   icon: ComponentType<{ className?: string }>;
-  testId: string;
+  testId?: string;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <section
       data-testid={testId}
-      className={cn("admin-surface flex h-full flex-col p-4", className)}
+      className={cn("admin-surface h-full p-4", className)}
     >
-      <header className="mb-3 flex items-start justify-between gap-2">
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold leading-none text-foreground">{title}</h2>
+          <div className="flex items-center gap-2">
+            <Icon className="h-4 w-4 text-[var(--color-brand-700)]" />
+            <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
         </div>
-        <div className="rounded-lg border border-border/60 bg-background/70 p-1.5">
-          <Icon className="h-3.5 w-3.5 text-[var(--color-brand-700)]" />
-        </div>
-      </header>
-      <div className="flex-1">{children}</div>
+      </div>
+      {children}
     </section>
   );
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2 last:border-b-0">
+    <div className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 py-2 last:border-b-0 last:pb-0">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-xs font-medium text-foreground">{value}</span>
     </div>
   );
 }
 
-function TrendChart({
-  window,
-  trends,
-  dataKey,
-  color,
-  valueFormatter,
-}: {
-  window: AdminOverviewTrendWindow;
-  trends: AdminOverviewTrendsResponse;
-  dataKey: "health_score" | "request_qps";
-  color: string;
-  valueFormatter: (value: number | null | undefined) => string;
-}) {
+function TrafficTrendChart({ trends }: { trends: AdminOverviewTrendsResponse }) {
   const data = useMemo(() => {
-    return trends.windows[window].map((point) => ({
+    return trends.windows["24h"].map((point) => ({
       label: formatTimeLabel(point.timestamp),
-      value: dataKey === "health_score" ? point.health_score : point.request_qps,
+      request: point.request_qps,
+      question: point.question_qps,
     }));
-  }, [dataKey, trends.windows, window]);
+  }, [trends.windows]);
 
   if (data.length === 0) {
     return (
-      <div className="flex h-[104px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-xs text-muted-foreground">
+      <div className="flex h-[140px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-xs text-muted-foreground">
         暂无趋势数据
       </div>
     );
   }
 
   return (
-    <div className="h-[104px] w-full">
+    <div className="h-[140px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 4, right: 6, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" opacity={0.35} />
@@ -511,7 +458,10 @@ function TrendChart({
             width={34}
           />
           <Tooltip
-            formatter={(value) => valueFormatter(toNumericValue(value))}
+            formatter={(value, name) => [
+              `${formatNumber(toNumericValue(value), 2)} QPS`,
+              name === "request" ? "全业务" : "提问",
+            ]}
             labelFormatter={(label) => `时间: ${label}`}
             contentStyle={{
               borderRadius: 10,
@@ -520,14 +470,8 @@ function TrendChart({
               fontSize: 12,
             }}
           />
-          <Line
-            type="monotone"
-            dataKey="value"
-            stroke={color}
-            strokeWidth={2.2}
-            dot={false}
-            connectNulls
-          />
+          <Line type="monotone" dataKey="request" stroke="var(--chart-2)" strokeWidth={2.2} dot={false} connectNulls />
+          <Line type="monotone" dataKey="question" stroke="var(--chart-4)" strokeWidth={2.2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -537,12 +481,12 @@ function TrendChart({
 function CockpitSkeleton() {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-12" data-testid="admin-overview-skeleton">
-      {Array.from({ length: 8 }).map((_, index) => (
+      {Array.from({ length: 6 }).map((_, index) => (
         <div
           key={index}
           className={cn(
             "admin-surface animate-pulse p-4",
-            index < 4 ? "xl:col-span-3" : "xl:col-span-4",
+            index < 4 ? "xl:col-span-3" : "xl:col-span-6",
           )}
         >
           <div className="h-4 w-24 rounded bg-muted/60" />
@@ -632,71 +576,45 @@ export function AdminOverviewCockpit() {
 
   const connectStream = useCallback(() => {
     stopStream();
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
 
-    const abortController = new AbortController();
-    streamAbortRef.current = abortController;
-    setRealtimeStatus(buildRealtimeStatus("connecting", "正在建立实时连接..."));
+    setRealtimeStatus(buildRealtimeStatus("connecting", "正在建立实时流连接..."));
 
     void streamAdminOverview({
-      signal: abortController.signal,
+      signal: controller.signal,
       onOpen: () => {
-        stopPolling();
         setRealtimeStatus(buildRealtimeStatus("streaming", "实时流已连接"));
       },
       onResult: (event) => {
         setSnapshot((current) =>
           mergeAdminOverviewSnapshot(current, event.data.patch, event.data.snapshot_at),
         );
+        setLoadError("");
+        setViewState("ready");
+        setRealtimeStatus(buildRealtimeStatus("streaming", "实时流在线"));
       },
       onInterrupt: (event) => {
         startPolling({
           reason: event.data.reason,
-          message: event.data.message ?? "实时流中断，10 秒轮询兜底已启用",
           retryAfterSec: event.data.retry_after_sec,
+          message: event.data.message ?? "实时连接中断，已降级为轮询刷新",
         });
       },
-      onDone: (event) => {
-        if (event.data.final) {
-          startPolling({
-            reason: "stream_done",
-            message: "实时批次已结束，已切换轮询刷新",
-          });
-        }
-      },
-      onError: () => {
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : "实时流连接失败";
+        setLoadError(message);
         startPolling({
           reason: "stream_error",
-          message: "实时链路异常，已切换轮询刷新",
+          message: "实时流连接失败，已降级为轮询刷新",
         });
       },
-    })
-      .then(() => {
-        if (!abortController.signal.aborted) {
-          startPolling({
-            reason: "stream_closed",
-            message: "实时连接已关闭，已切换轮询刷新",
-          });
-        }
-      })
-      .catch((error) => {
-        if ((error as Error).name === "AbortError" || abortController.signal.aborted) {
-          return;
-        }
-
-        startPolling({
-          reason: "stream_exception",
-          message: "实时连接失败，已切换轮询刷新",
-        });
-      });
-  }, [startPolling, stopPolling, stopStream]);
+    });
+  }, [startPolling, stopStream]);
 
   const bootstrap = useCallback(async () => {
-    stopStream();
     stopPolling();
-
-    setViewState("loading");
-    setLoadError("");
-    setRealtimeStatus(buildRealtimeStatus("connecting", "正在加载总览数据..."));
+    stopStream();
 
     try {
       const summary = await getAdminOverviewSummary();
@@ -724,23 +642,8 @@ export function AdminOverviewCockpit() {
     };
   }, [bootstrap, stopPolling, stopStream]);
 
-  const systemCardStatus =
-    snapshot.system_status.status !== "ok"
-      ? snapshot.system_status.status
-      : snapshot.traffic_health.status;
   const freshnessCardStatus = resolveFreshnessCardStatus(snapshot);
   const isDataStale = freshnessCardStatus === "stale";
-
-  const systemPrimaryText =
-    snapshot.health_score == null
-      ? describeCardState(systemCardStatus, {
-          ok: "系统正常",
-          no_data: "业务无样本",
-          stale: "使用旧快照",
-          degraded: "聚合已降级",
-          unknown: "状态未知",
-        })
-      : formatNumber(snapshot.health_score, 1);
 
   const realtimeMessage = useMemo(() => {
     const retryHint =
@@ -774,13 +677,14 @@ export function AdminOverviewCockpit() {
   }, [realtimeStatus.mode, trends]);
 
   const latestUpdateAt = formatDateTime(snapshot.snapshot_at);
+  const latestTrendPoint = trends.windows["24h"].at(-1);
 
   if (viewState === "loading") {
     return (
       <div className="admin-page-content space-y-4">
         <header>
           <h1 className="app-page-title">总览驾驶舱</h1>
-          <p className="app-page-subtitle mt-1">正在准备实时运行态数据...</p>
+          <p className="app-page-subtitle mt-1">正在准备精简后的实时运行态数据...</p>
         </header>
         <CockpitSkeleton />
       </div>
@@ -814,7 +718,7 @@ export function AdminOverviewCockpit() {
           <div>
             <h1 className="app-page-title">总览驾驶舱</h1>
             <p className="app-page-subtitle mt-1">
-              聚焦系统状态、业务请求质量与用户提问活跃度，支持实时流 + 轮询降级。
+              聚焦业务请求质量、提问链路健康与数据可信度，支持实时流 + 轮询降级。
             </p>
           </div>
 
@@ -857,73 +761,13 @@ export function AdminOverviewCockpit() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-12">
         <OverviewCard
-          title="系统状态"
-          subtitle="聚合链路、服务可用性与最后水位"
-          icon={Gauge}
-          testId="overview-card-system-status"
-          className="xl:col-span-3"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-2xl font-semibold tracking-tight text-foreground">{systemPrimaryText}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {snapshot.system_status.explain ||
-                  snapshot.traffic_health.explain ||
-                  "系统状态基于当前聚合链路计算。"}
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.health_level} />
-              <StateBadge status={systemCardStatus} />
-            </div>
-          </div>
-          <MetricRow
-            label="聚合链路"
-            value={describeCardState(snapshot.system_status.status, {
-              ok: "正常",
-              no_data: "无样本",
-              stale: "使用旧快照",
-              degraded: "聚合降级",
-              unknown: "未知",
-            })}
-          />
-          <MetricRow
-            label="业务流量态"
-            value={describeCardState(snapshot.traffic_health.status, {
-              ok: "有业务样本",
-              no_data: "无业务样本",
-              stale: "样本陈旧",
-              degraded: "聚合降级",
-              unknown: "未知",
-            })}
-          />
-          <MetricRow
-            label="最后水位"
-            value={formatDateTime(
-              snapshot.system_status.watermark_at ||
-                snapshot.traffic_health.watermark_at ||
-                snapshot.snapshot_at,
-            )}
-          />
-          <MetricRow
-            label="数据源"
-            value={
-              snapshot.system_status.data_source ||
-              snapshot.traffic_health.data_source ||
-              snapshot.source ||
-              "未知"
-            }
-          />
-        </OverviewCard>
-
-        <OverviewCard
           title="业务请求质量"
           subtitle="全业务 API 请求质量"
           icon={Activity}
           testId="overview-card-request-quality"
           className="xl:col-span-3"
         >
-          <div className="mb-1.5 flex items-start justify-between gap-2">
+          <div className="mb-2 flex items-start justify-between gap-2">
             <div>
               <p className="text-lg font-semibold text-foreground">
                 {withCardStateFallback(
@@ -942,63 +786,30 @@ export function AdminOverviewCockpit() {
                 {snapshot.request_quality.explain || "用于回答系统对外 API 质量如何。"}
               </p>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.request_quality.health_level} />
-              <StateBadge status={snapshot.request_quality.status} />
-            </div>
+            <StateBadge status={snapshot.request_quality.status} />
           </div>
-          <MetricRow
-            label="请求总量"
-            value={withCardStateFallback(
-              formatNumber(snapshot.request_quality.request_total, 0),
-              snapshot.request_quality.status,
-            )}
-          />
-          <MetricRow
-            label="全业务 QPS"
-            value={withCardStateFallback(
-              formatNumber(snapshot.request_quality.qps, 2),
-              snapshot.request_quality.status,
-            )}
-          />
-          <MetricRow
-            label="成功率"
-            value={withCardStateFallback(
-              formatRatioPercent(snapshot.request_quality.success_rate, 2),
-              snapshot.request_quality.status,
-            )}
-          />
-          <MetricRow
-            label="5xx 占比"
-            value={withCardStateFallback(
-              formatRatioPercent(snapshot.request_quality.error_5xx_rate, 2),
-              snapshot.request_quality.status,
-            )}
-          />
-          <MetricRow
-            label="P95 延迟"
-            value={withCardStateFallback(
-              formatLatency(snapshot.request_quality.latency_p95_ms),
-              snapshot.request_quality.status,
-            )}
-          />
+          <MetricRow label="请求总量" value={withCardStateFallback(formatNumber(snapshot.request_quality.request_total, 0), snapshot.request_quality.status)} />
+          <MetricRow label="全业务 QPS" value={withCardStateFallback(formatNumber(snapshot.request_quality.qps, 2), snapshot.request_quality.status)} />
+          <MetricRow label="成功率" value={withCardStateFallback(formatRatioPercent(snapshot.request_quality.success_rate, 2), snapshot.request_quality.status)} />
+          <MetricRow label="5xx 占比" value={withCardStateFallback(formatRatioPercent(snapshot.request_quality.error_5xx_rate, 2), snapshot.request_quality.status)} />
+          <MetricRow label="P95 延迟" value={withCardStateFallback(formatLatency(snapshot.request_quality.latency_p95_ms), snapshot.request_quality.status)} />
         </OverviewCard>
 
         <OverviewCard
-          title="用户提问活跃度"
-          subtitle="聊天提问链路的健康与活跃度"
+          title="提问链路健康"
+          subtitle="聊天提问链路的健康态"
           icon={MessageSquare}
-          testId="overview-card-question-activity"
+          testId="overview-card-question-health"
           className="xl:col-span-3"
         >
-          <div className="mb-1.5 flex items-start justify-between gap-2">
+          <div className="mb-2 flex items-start justify-between gap-2">
             <div>
               <p className="text-lg font-semibold text-foreground">
                 {withCardStateFallback(
-                  formatNumber(snapshot.question_activity.score, 1),
-                  snapshot.question_activity.status,
+                  formatNumber(snapshot.question_health.score, 1),
+                  snapshot.question_health.status,
                   {
-                    ok: "链路活跃",
+                    ok: "链路健康",
                     no_data: "暂无提问",
                     stale: "沿用旧值",
                     degraded: "聚合降级",
@@ -1007,171 +818,15 @@ export function AdminOverviewCockpit() {
                 )}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {snapshot.question_activity.explain || "用于回答用户提问链路是否活跃、是否健康。"}
+                {snapshot.question_health.explain || "用于回答聊天提问链路是否可用、是否稳定。"}
               </p>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.question_activity.health_level} />
-              <StateBadge status={snapshot.question_activity.status} />
-            </div>
+            <StateBadge status={snapshot.question_health.status} />
           </div>
-          <MetricRow
-            label="提问次数"
-            value={withCardStateFallback(
-              formatNumber(snapshot.question_activity.question_total, 0),
-              snapshot.question_activity.status,
-            )}
-          />
-          <MetricRow
-            label="提问 QPS"
-            value={withCardStateFallback(
-              formatNumber(snapshot.question_activity.question_qps, 2),
-              snapshot.question_activity.status,
-            )}
-          />
-          <MetricRow
-            label="成功率"
-            value={withCardStateFallback(
-              formatRatioPercent(snapshot.question_activity.question_success_rate, 2),
-              snapshot.question_activity.status,
-            )}
-          />
-          <MetricRow
-            label="流中断率"
-            value={withCardStateFallback(
-              formatRatioPercent(snapshot.question_activity.stream_interrupt_rate, 2),
-              snapshot.question_activity.status,
-            )}
-          />
-          <MetricRow
-            label="P95 延迟"
-            value={withCardStateFallback(
-              formatLatency(snapshot.question_activity.question_latency_p95_ms),
-              snapshot.question_activity.status,
-            )}
-          />
-        </OverviewCard>
-
-        <OverviewCard
-          title="稳定性"
-          subtitle="告警压力与模块异常情况"
-          icon={ShieldAlert}
-          testId="overview-card-stability"
-          className="xl:col-span-3"
-        >
-          <div className="mb-1.5 flex items-start justify-between gap-2">
-            <div>
-              <p className="text-lg font-semibold text-foreground">
-                {withCardStateFallback(
-                  formatNumber(snapshot.stability.score, 1),
-                  snapshot.stability.status,
-                  {
-                    ok: "稳定",
-                    no_data: "样本不足",
-                    stale: "沿用旧值",
-                    degraded: "聚合降级",
-                    unknown: "状态未知",
-                  },
-                )}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">异常项支持一键跳转到对应管理模块。</p>
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.stability.health_level} />
-              <StateBadge status={snapshot.stability.status} />
-            </div>
-          </div>
-          <MetricRow
-            label="严重告警"
-            value={withCardStateFallback(
-              formatNumber(snapshot.stability.critical_alerts, 0),
-              snapshot.stability.status,
-            )}
-          />
-          <MetricRow
-            label="预警告警"
-            value={withCardStateFallback(
-              formatNumber(snapshot.stability.warning_alerts, 0),
-              snapshot.stability.status,
-            )}
-          />
-          <MetricRow
-            label="模块稳定分"
-            value={withCardStateFallback(
-              formatNumber(snapshot.stability.module_score, 1),
-              snapshot.stability.status,
-            )}
-          />
-        </OverviewCard>
-
-        <OverviewCard
-          title="容量与成本"
-          subtitle="全业务 QPS、提问 QPS 与预算占用"
-          icon={Cpu}
-          testId="overview-card-capacity-cost"
-          className="xl:col-span-4"
-        >
-          <div className="mb-1.5 flex items-start justify-between gap-2">
-            <div>
-              <p className="text-lg font-semibold text-foreground">
-                {withCardStateFallback(
-                  formatNumber(snapshot.capacity_cost.score, 1),
-                  snapshot.capacity_cost.status,
-                  {
-                    ok: "容量稳定",
-                    no_data: "无容量样本",
-                    stale: "沿用旧值",
-                    degraded: "聚合降级",
-                    unknown: "状态未知",
-                  },
-                )}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {snapshot.capacity_cost.explain || "用于观察吞吐、预算与成本占用。"}
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.capacity_cost.health_level} />
-              <StateBadge status={snapshot.capacity_cost.status} />
-            </div>
-          </div>
-          <MetricRow
-            label="全业务 QPS"
-            value={withCardStateFallback(
-              formatNumber(snapshot.capacity_cost.qps, 2),
-              snapshot.capacity_cost.status,
-            )}
-          />
-          <MetricRow
-            label="提问 QPS"
-            value={withCardStateFallback(
-              formatNumber(snapshot.capacity_cost.question_qps, 2),
-              snapshot.capacity_cost.status,
-            )}
-          />
-          <MetricRow
-            label="每分钟成本"
-            value={withCardStateFallback(
-              formatCurrencyPerMinute(snapshot.capacity_cost.cost_per_minute),
-              snapshot.capacity_cost.status,
-            )}
-          />
-          <MetricRow
-            label="预算占用"
-            value={withCardStateFallback(
-              formatPercent(snapshot.capacity_cost.budget_usage_pct, 1),
-              snapshot.capacity_cost.status,
-            )}
-          />
-          <div className="mt-2">
-            <TrendChart
-              window="24h"
-              trends={trends}
-              dataKey="request_qps"
-              color="var(--chart-2)"
-              valueFormatter={(value) => `${formatNumber(value, 2)} QPS`}
-            />
-          </div>
+          <MetricRow label="提问次数" value={withCardStateFallback(formatNumber(snapshot.question_health.question_total, 0), snapshot.question_health.status)} />
+          <MetricRow label="提问 QPS" value={withCardStateFallback(formatNumber(snapshot.question_health.question_qps, 2), snapshot.question_health.status)} />
+          <MetricRow label="成功率" value={withCardStateFallback(formatRatioPercent(snapshot.question_health.question_success_rate, 2), snapshot.question_health.status)} />
+          <MetricRow label="P95 延迟" value={withCardStateFallback(formatLatency(snapshot.question_health.question_latency_p95_ms), snapshot.question_health.status)} />
         </OverviewCard>
 
         <OverviewCard
@@ -1179,9 +834,9 @@ export function AdminOverviewCockpit() {
           subtitle="快照延迟与陈旧判定"
           icon={Timer}
           testId="overview-card-freshness"
-          className="xl:col-span-4"
+          className="xl:col-span-3"
         >
-          <div className="mb-1.5 flex items-start justify-between gap-2">
+          <div className="mb-2 flex items-start justify-between gap-2">
             <div>
               <p className="text-lg font-semibold text-foreground">
                 {withCardStateFallback(
@@ -1200,22 +855,60 @@ export function AdminOverviewCockpit() {
               </p>
               <p className="mt-1 text-xs text-muted-foreground">用于判断当前快照是否仍然可信。</p>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <LevelBadge level={snapshot.freshness.health_level} />
-              <StateBadge status={freshnessCardStatus} />
-            </div>
+            <StateBadge status={freshnessCardStatus} />
           </div>
           <MetricRow label="当前状态" value={formatFreshnessStatus(snapshot.freshness.status)} />
-          <MetricRow
-            label="陈旧阈值"
-            value={
-              snapshot.freshness.max_delay_sec == null
-                ? "暂无阈值"
-                : `${formatNumber(snapshot.freshness.max_delay_sec, 0)} s`
-            }
-          />
+          <MetricRow label="陈旧阈值" value={snapshot.freshness.max_delay_sec == null ? "暂无阈值" : `${formatNumber(snapshot.freshness.max_delay_sec, 0)} s`} />
           <MetricRow label="来源" value={snapshot.freshness.source || "未知"} />
           <MetricRow label="快照时间" value={latestUpdateAt} />
+        </OverviewCard>
+
+        <OverviewCard
+          title="告警概览"
+          subtitle="当前最值得处理的异常"
+          icon={Siren}
+          testId="overview-card-alerts"
+          className="xl:col-span-3"
+        >
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <div>
+              <p className="text-lg font-semibold text-foreground">
+                {snapshot.alerts.length > 0 ? `${snapshot.alerts.length} 条告警` : "当前无告警"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">只展示可动作的实时告警，不再混入空占位变更流。</p>
+            </div>
+            {snapshot.alerts[0] ? <SeverityBadge severity={snapshot.alerts[0].severity} /> : <StateBadge status="no_data" />}
+          </div>
+          {snapshot.alerts.length === 0 ? (
+            <div className="flex min-h-[144px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
+              当前无告警
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {snapshot.alerts.slice(0, 3).map((alert, index) => {
+                const alertHref = resolveModuleRoute(alert.module);
+                return (
+                  <div key={`${alert.code}-${index}`} className="rounded-lg border border-border/70 bg-background/60 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <SeverityBadge severity={alert.severity} />
+                      <span className="text-[11px] text-muted-foreground">{alert.code}</span>
+                    </div>
+                    <p className="text-sm text-foreground">{alert.message}</p>
+                    {alertHref ? (
+                      <Link
+                        href={alertHref}
+                        data-testid={`overview-alert-link-${index}`}
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand-700)] hover:underline"
+                      >
+                        查看模块
+                        <ArrowUpRight className="h-3 w-3" />
+                      </Link>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </OverviewCard>
 
         <OverviewCard
@@ -1223,28 +916,25 @@ export function AdminOverviewCockpit() {
           subtitle="按模块聚合的健康态与跳转"
           icon={DatabaseZap}
           testId="overview-card-module-matrix"
-          className="xl:col-span-4"
+          className="xl:col-span-6"
         >
           {snapshot.module_matrix.length === 0 ? (
-            <div className="flex h-full min-h-[136px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
+            <div className="flex h-full min-h-[164px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
               暂无模块健康样本
             </div>
           ) : (
-            <div className="space-y-2">
-              {snapshot.module_matrix.slice(0, 5).map((moduleItem) => {
+            <div className="grid gap-2 md:grid-cols-2">
+              {snapshot.module_matrix.slice(0, 6).map((moduleItem) => {
                 const moduleHref = resolveModuleRoute(moduleItem.key);
                 const moduleLevelMeta = HEALTH_LEVEL_META[moduleItem.health_level];
                 const moduleTestId = `overview-module-link-${sanitizeTestIdSegment(moduleItem.key)}`;
 
                 return (
-                  <div
-                    key={moduleItem.key}
-                    className="rounded-lg border border-border/70 bg-background/60 p-2.5"
-                  >
+                  <div key={moduleItem.key} className="rounded-lg border border-border/70 bg-background/60 p-2.5">
                     <div className="mb-1.5 flex items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-medium text-foreground">{moduleItem.label}</p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">{moduleLevelMeta.label}</p>
+                        <p className={cn("mt-0.5 text-[11px]", moduleLevelMeta.textClass)}>{moduleLevelMeta.label}</p>
                       </div>
                       <span className={cn("text-xs font-medium", moduleLevelMeta.textClass)}>
                         {formatNumber(moduleItem.score, 1)}
@@ -1275,99 +965,23 @@ export function AdminOverviewCockpit() {
         </OverviewCard>
 
         <OverviewCard
-          title="实时告警 / 关键变更"
-          subtitle="当前告警与最近配置变更统一收口"
-          icon={Siren}
-          testId="overview-card-alerts"
-          className="xl:col-span-12"
+          title="24h 流量趋势"
+          subtitle="区分瞬时抖动与趋势性变化"
+          icon={TrendingUp}
+          testId="overview-card-traffic-trends"
+          className="xl:col-span-6"
         >
-          {snapshot.alerts.length === 0 && snapshot.change_feed.length === 0 ? (
-            <div className="flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
-              当前无告警，也无关键变更
+          <div className="mb-2 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">最新全业务 QPS</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{formatNumber(latestTrendPoint?.request_qps ?? null, 2)}</p>
             </div>
-          ) : (
-            <div className="grid gap-3 xl:grid-cols-2">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground">实时告警</p>
-                  <span className="text-[11px] text-muted-foreground">{snapshot.alerts.length} 条</span>
-                </div>
-                {snapshot.alerts.length === 0 ? (
-                  <div className="flex min-h-[96px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
-                    当前无告警
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {snapshot.alerts.slice(0, 5).map((alert, index) => {
-                      const alertHref = resolveModuleRoute(alert.module);
-                      return (
-                        <div
-                          key={`${alert.code}-${index}`}
-                          className="rounded-lg border border-border/70 bg-background/60 p-2.5"
-                        >
-                          <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <SeverityBadge severity={alert.severity} />
-                            <span className="text-[11px] text-muted-foreground">{alert.code}</span>
-                          </div>
-                          <p className="text-sm text-foreground">{alert.message}</p>
-                          {alertHref ? (
-                            <Link
-                              href={alertHref}
-                              data-testid={`overview-alert-link-${index}`}
-                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand-700)] hover:underline"
-                            >
-                              查看模块
-                              <ArrowUpRight className="h-3 w-3" />
-                            </Link>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground">关键变更</p>
-                  <span className="text-[11px] text-muted-foreground">{snapshot.change_feed.length} 条</span>
-                </div>
-                {snapshot.change_feed.length === 0 ? (
-                  <div className="flex min-h-[96px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/40 text-sm text-muted-foreground">
-                    暂无关键变更记录
-                  </div>
-                ) : (
-                  <div className="grid gap-2">
-                    {snapshot.change_feed.slice(0, 6).map((changeItem) => {
-                      const meta = SEVERITY_META[changeItem.level] ?? SEVERITY_META.info;
-
-                      return (
-                        <article
-                          key={changeItem.id}
-                          className="rounded-lg border border-border/70 bg-background/60 p-2.5"
-                        >
-                          <div className="mb-1 flex items-center justify-between gap-2">
-                            <span
-                              className={cn(
-                                "rounded-full border px-2 py-0.5 text-[11px]",
-                                meta.badgeClass,
-                              )}
-                            >
-                              {meta.label}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {formatDateTime(changeItem.occurred_at)}
-                            </span>
-                          </div>
-                          <p className="text-sm leading-5 text-foreground">{changeItem.title}</p>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+            <div className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">最新提问 QPS</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{formatNumber(latestTrendPoint?.question_qps ?? null, 2)}</p>
             </div>
-          )}
+          </div>
+          <TrafficTrendChart trends={trends} />
         </OverviewCard>
       </div>
     </div>

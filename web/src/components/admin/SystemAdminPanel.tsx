@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AdminCompactStatCard } from "@/components/admin/shared/AdminCompactStatCard";
 import {
   Table,
   TableBody,
@@ -169,24 +170,33 @@ export function SystemAdminPanel() {
         </div>
       </div>
 
-      {/* 概览卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {categories.map((cat) => (
-          <Card
-            key={cat.category}
-            className={`cursor-pointer transition-colors ${
-              selectedCategory === cat.category ? "border-primary" : ""
-            }`}
-            onClick={() => setSelectedCategory(cat.category === "未分类" ? "all" : cat.category)}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">{cat.category}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{cat.count}</div>
-            </CardContent>
-          </Card>
-        ))}
+      {/* 分类摘要 */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">分类摘要</h2>
+            <p className="text-xs text-muted-foreground">点击分类即可筛选下方配置列表，摘要区保持紧凑展示。</p>
+          </div>
+          <Badge variant="outline">{categories.length} 个分类</Badge>
+        </div>
+        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-6">
+          {categories.map((cat) => {
+            const targetCategory = cat.category === "未分类" ? "all" : cat.category;
+            const isSelected = selectedCategory === targetCategory;
+
+            return (
+              <AdminCompactStatCard
+                key={cat.category}
+                label={cat.category}
+                value={cat.count}
+                hint="配置项"
+                selected={isSelected}
+                onClick={() => setSelectedCategory(targetCategory)}
+                testId={`admin-system-summary-${cat.category}`}
+              />
+            );
+          })}
+        </div>
       </div>
 
       {/* 配置列表 */}

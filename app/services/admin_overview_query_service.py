@@ -27,7 +27,6 @@ LATENCY_WARNING_MS = 900.0
 LATENCY_CRITICAL_MS = 2200.0
 ERROR_5XX_WARNING_RATE = 0.01
 ERROR_5XX_CRITICAL_RATE = 0.03
-BUDGET_PER_MINUTE = Decimal("100")
 
 
 def _utc_now() -> datetime:
@@ -326,20 +325,10 @@ class AdminOverviewQueryService:
         question_rows = [row for row in rows if row.scope == "user_question"]
         all_business_stats = _aggregate_rows(all_business_rows)
         question_stats = _aggregate_rows(question_rows)
-        capacity_cost = self._build_capacity_cost_card(all_business_stats, question_stats)
-        request_quality = self._build_request_quality_card(all_business_stats)
-        freshness = self._build_freshness_card(latest_event_at=self._latest_event_from_rows(rows), generated_at=bucket_minute + timedelta(minutes=1))
-        stability = self._build_stability_card(
-            alerts=self._build_alerts(request_quality=request_quality, freshness=freshness),
-            module_matrix=self._build_module_matrix(all_business_rows, generated_at=bucket_minute + timedelta(minutes=1)),
-        )
-        health_score = self._build_health_score(request_quality=request_quality, stability=stability, capacity_cost=capacity_cost, freshness=freshness)
         return {
             "timestamp": _to_iso8601(bucket_minute),
-            "health_score": health_score,
             "request_qps": _round_optional(all_business_stats.request_count / 60.0 if all_business_stats.request_count else 0.0, 2),
             "question_qps": _round_optional(question_stats.request_count / 60.0 if question_stats.request_count else 0.0, 2),
-            "budget_usage_pct": capacity_cost.get("budget_usage_pct"),
         }
 
     def _build_live_snapshot(
@@ -356,51 +345,21 @@ class AdminOverviewQueryService:
         all_business_stats = _aggregate_rows(all_business_rows)
         question_stats = _aggregate_rows(question_rows)
 
-        system_status = {
-            "status": "ok",
-            "health_level": "healthy",
-            "watermark_at": _to_iso8601(latest_event_at),
-            "data_source": "bucket",
-            "explain": "聚合链路在线，正在消费分钟桶数据",
-        }
-        traffic_status = _metric_status_with_samples(all_business_stats.request_count)
-        traffic_health = {
-            **_build_metric_meta(
-                status=traffic_status,
-                sample_count=all_business_stats.request_count,
-                latest_event_at=all_business_stats.latest_event_at,
-                explain=("最近 5 分钟有业务样本" if traffic_status == "ok" else "最近 5 分钟无业务样本"),
-                source="bucket",
-            ),
-            "window_sec": WINDOW_SECONDS,
-        }
         request_quality = self._build_request_quality_card(all_business_stats)
-        question_activity = self._build_question_activity_card(question_stats)
-        capacity_cost = self._build_capacity_cost_card(all_business_stats, question_stats)
+        question_health = self._build_question_health_card(question_stats)
         freshness = self._build_freshness_card(latest_event_at=latest_event_at, generated_at=generated_at)
         module_matrix = self._build_module_matrix(all_business_rows, generated_at=generated_at)
         alerts = self._build_alerts(request_quality=request_quality, freshness=freshness)
-        stability = self._build_stability_card(alerts=alerts, module_matrix=module_matrix)
-        health_score = self._build_health_score(request_quality=request_quality, stability=stability, capacity_cost=capacity_cost, freshness=freshness)
-        health_level = _score_to_level(health_score)
 
         return {
             "snapshot_at": _to_iso8601(generated_at),
             "source": "bucket",
             "degraded": False,
-            "system_status": system_status,
-            "traffic_health": traffic_health,
-            "health_score": health_score,
-            "health_level": health_level,
-            "budget_usage_pct": capacity_cost.get("budget_usage_pct"),
             "request_quality": request_quality,
-            "question_activity": question_activity,
-            "stability": stability,
-            "capacity_cost": capacity_cost,
+            "question_health": question_health,
             "alerts": alerts,
             "freshness": freshness,
             "module_matrix": module_matrix,
-            "change_feed": [],
             "meta": {
                 "generated_at": _to_iso8601(generated_at),
                 "trace_id": trace_id,
@@ -442,7 +401,7 @@ class AdminOverviewQueryService:
             "qps": _round_optional(qps, 4),
         }
 
-    def _build_question_activity_card(self, stats: _AggregateStats) -> dict[str, Any]:
+    def _build_question_health_card(self, stats: _AggregateStats) -> dict[str, Any]:
         question_total = stats.request_count
         status = _metric_status_with_samples(question_total)
         success_rate = _safe_div(stats.success_count, question_total)
@@ -469,35 +428,6 @@ class AdminOverviewQueryService:
             "question_success_rate": _round_optional(success_rate, 4),
             "question_latency_p95_ms": _round_optional(latency_p95_ms, 2),
             "question_qps": _round_optional(qps, 4),
-            "stream_interrupt_rate": None,
-        }
-
-    def _build_capacity_cost_card(self, all_business_stats: _AggregateStats, question_stats: _AggregateStats) -> dict[str, Any]:
-        sample_count = all_business_stats.request_count
-        status = _metric_status_with_samples(sample_count)
-        request_qps = all_business_stats.request_count / WINDOW_SECONDS if all_business_stats.request_count else 0.0
-        question_qps = question_stats.request_count / WINDOW_SECONDS if question_stats.request_count else 0.0
-        cost_per_minute = float(all_business_stats.cost_total) / (WINDOW_SECONDS / 60.0) if sample_count else 0.0
-        budget_usage_pct = (cost_per_minute / float(BUDGET_PER_MINUTE) * 100.0) if sample_count else None
-        score = None
-        if status == "ok":
-            usage = budget_usage_pct or 0.0
-            score = 100.0 if usage < 85 else 70.0 if usage < 100 else 35.0
-        return {
-            **_build_metric_meta(
-                status=status,
-                sample_count=sample_count,
-                latest_event_at=all_business_stats.latest_event_at,
-                explain=("最近 5 分钟容量与成本可计算" if status == "ok" else "最近 5 分钟无业务样本，容量与成本不可计算"),
-                source="bucket",
-            ),
-            "health_level": _score_to_level(score),
-            "score": _round_optional(score, 2),
-            "qps": _round_optional(request_qps, 4),
-            "question_qps": _round_optional(question_qps, 4),
-            "cost_per_minute": _round_optional(cost_per_minute, 4),
-            "budget_per_minute": float(BUDGET_PER_MINUTE) if sample_count else None,
-            "budget_usage_pct": _round_optional(budget_usage_pct, 2),
         }
 
     def _build_freshness_card(self, *, latest_event_at: datetime | None, generated_at: datetime) -> dict[str, Any]:
@@ -559,15 +489,6 @@ class AdminOverviewQueryService:
 
     def _build_alerts(self, *, request_quality: Mapping[str, Any], freshness: Mapping[str, Any]) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []
-        if request_quality.get("status") == "no_data":
-            alerts.append(
-                {
-                    "code": "overview.runtime.no_data",
-                    "severity": "info",
-                    "message": "最近 5 分钟暂无业务请求样本",
-                    "status": "active",
-                }
-            )
         error_5xx_rate = _to_float(request_quality.get("error_5xx_rate"))
         if error_5xx_rate is not None and error_5xx_rate >= ERROR_5XX_CRITICAL_RATE:
             alerts.append(
@@ -617,45 +538,6 @@ class AdminOverviewQueryService:
             )
         return alerts
 
-    def _build_stability_card(self, *, alerts: Sequence[Mapping[str, Any]], module_matrix: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-        critical_count = sum(1 for alert in alerts if alert.get("severity") == "critical")
-        warning_count = sum(1 for alert in alerts if alert.get("severity") == "warning")
-        info_count = sum(1 for alert in alerts if alert.get("severity") == "info")
-        alerts_score = max(0.0, 100.0 - critical_count * 30.0 - warning_count * 12.0 - info_count * 3.0)
-        module_scores = [item.get("score") for item in module_matrix if item.get("score") is not None]
-        module_score = _round_optional(sum(module_scores) / len(module_scores), 2) if module_scores else None
-        score = _round_optional(_combine_weighted_scores(((alerts_score, 0.6), (module_score, 0.4))), 2)
-        return {
-            "status": "ok" if score is not None else "no_data",
-            "health_level": _score_to_level(score),
-            "score": score,
-            "critical_alerts": critical_count,
-            "warning_alerts": warning_count,
-            "module_score": module_score,
-        }
-
-    def _build_health_score(
-        self,
-        *,
-        request_quality: Mapping[str, Any],
-        stability: Mapping[str, Any],
-        capacity_cost: Mapping[str, Any],
-        freshness: Mapping[str, Any],
-    ) -> float | None:
-        if request_quality.get("status") != "ok":
-            return None
-        return _round_optional(
-            _combine_weighted_scores(
-                (
-                    (_to_float(request_quality.get("score")), 0.35),
-                    (_to_float(stability.get("score")), 0.25),
-                    (_to_float(capacity_cost.get("score")), 0.20),
-                    (_to_float(freshness.get("score")), 0.20),
-                )
-            ),
-            2,
-        )
-
     def _latest_event_from_rows(self, rows: Sequence[RuntimeMetricBucketMinute]) -> datetime | None:
         latest_event = None
         for row in rows:
@@ -668,28 +550,8 @@ class AdminOverviewQueryService:
             "snapshot_at": _to_iso8601(generated_at),
             "source": "empty",
             "degraded": True,
-            "system_status": {
-                "status": "degraded",
-                "health_level": "critical",
-                "watermark_at": None,
-                "data_source": "empty",
-                "explain": "分钟桶读取失败，当前总览已降级到可解释空态",
-            },
-            "traffic_health": {
-                "status": "no_data",
-                "sample_count": 0,
-                "watermark_at": None,
-                "data_source": "empty",
-                "explain": "分钟桶不可用，当前窗口无法确认业务样本",
-                "window_sec": WINDOW_SECONDS,
-            },
-            "health_score": None,
-            "health_level": "unknown",
-            "budget_usage_pct": None,
             "request_quality": {"status": "degraded", "health_level": "unknown", "window_sec": WINDOW_SECONDS, "sample_count": 0},
-            "question_activity": {"status": "degraded", "health_level": "unknown", "window_sec": WINDOW_SECONDS, "sample_count": 0},
-            "stability": {"status": "degraded", "health_level": "critical", "score": None, "critical_alerts": 1, "warning_alerts": 0, "module_score": None},
-            "capacity_cost": {"status": "degraded", "health_level": "unknown", "score": None, "qps": None, "question_qps": None, "cost_per_minute": None, "budget_per_minute": None, "budget_usage_pct": None},
+            "question_health": {"status": "degraded", "health_level": "unknown", "window_sec": WINDOW_SECONDS, "sample_count": 0},
             "alerts": [
                 {
                     "code": "overview.bucket.unavailable",
@@ -700,7 +562,6 @@ class AdminOverviewQueryService:
             ],
             "freshness": {"status": "unknown", "health_level": "unknown", "score": None, "delay_sec": None, "expired": True, "max_delay_sec": DATA_FRESH_CRITICAL_SEC, "source": "empty"},
             "module_matrix": [],
-            "change_feed": [],
             "meta": {"generated_at": _to_iso8601(generated_at), "trace_id": trace_id, "fallback_reason": fallback_reason},
         }
 

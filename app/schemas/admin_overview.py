@@ -14,10 +14,8 @@ class AdminOverviewTrendPoint(BaseModel):
     """总览趋势单点。"""
 
     timestamp: str
-    health_score: Optional[float] = None
     request_qps: Optional[float] = None
     question_qps: Optional[float] = None
-    budget_usage_pct: Optional[float] = None
 
 
 class AdminOverviewTrendsResponse(BaseModel):
@@ -39,24 +37,16 @@ class AdminOverviewTrendSeriesResponse(BaseModel):
 class AdminOverviewSummaryResponse(BaseModel):
     """总览快照响应。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     snapshot_at: str
     source: str
     degraded: bool
-    system_status: dict[str, Any] = Field(default_factory=dict)
-    traffic_health: dict[str, Any] = Field(default_factory=dict)
-    health_score: Optional[float] = None
-    health_level: str
-    budget_usage_pct: Optional[float] = None
     request_quality: dict[str, Any] = Field(default_factory=dict)
-    question_activity: dict[str, Any] = Field(default_factory=dict)
-    stability: dict[str, Any] = Field(default_factory=dict)
-    capacity_cost: dict[str, Any] = Field(default_factory=dict)
+    question_health: dict[str, Any] = Field(default_factory=dict)
     alerts: list[dict[str, Any]] = Field(default_factory=list)
     freshness: dict[str, Any] = Field(default_factory=dict)
     module_matrix: list[dict[str, Any]] = Field(default_factory=list)
-    change_feed: list[dict[str, Any]] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
