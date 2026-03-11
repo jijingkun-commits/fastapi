@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,8 +98,29 @@ CURRENT_STATE_PROCESS_DOCS = {
 }
 PROCESS_DOC_ROOTS = (
     DOCS_DIR / "plans",
-    DOCS_DIR / "内部参考",
+    DOCS_DIR / "内部参考" / "迭代需求",
+    DOCS_DIR / "内部参考" / "任务拆解",
     REPORT_DIR,
+)
+TASK_SPLIT_DIR = DOCS_DIR / "内部参考" / "任务拆解"
+TASK_SPLIT_PHASE1_COMPAT_JSON_NAMES = {
+    "_active_task.json",
+    "vk_cards.json",
+    "preflight_status.json",
+    "consumption_report.json",
+    "gate_contract_report.json",
+    "vktodo_create_result.json",
+}
+TASK_SPLIT_PHASE1_COMPAT_SUBDIRS = {"contracts", "sync"}
+RUNTIME_JSON_FILENAMES = {
+    "task-runner-state.json",
+    "coder4-idempotency.json",
+    "coder4_scope_request.json",
+    "vktodo_dryrun_result.json",
+}
+RUNTIME_JSON_PATTERNS = (
+    re.compile(r"^active-session-[^.]+\.json$"),
+    re.compile(r"^attempt_\d+\.json$"),
 )
 CURRENT_STATE_TIMESTAMP_RE = re.compile(r"^> 更新时间：\d{4}-\d{2}-\d{2}$", re.MULTILINE)
 CURRENT_STATE_FORBIDDEN_HEADING_RULES = (
@@ -143,6 +165,8 @@ CURRENT_STATE_LEGACY_ALLOWLIST = {
     "docs/开发文档/架构设计/RAG集成设计.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/待办Agent设计.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/DIDP数据架构与指标提取.md": {"timestamp_missing"},
+    "docs/产品文档/聊天系统需求.md": {"timestamp_missing", "incremental_heading"},
+    "docs/产品文档/问数助手需求.md": {"incremental_heading"},
 }
 
 PATH_CHECK_PLACEHOLDER_TOKENS = (
@@ -837,6 +861,33 @@ def is_archived_doc(path: Path) -> bool:
     return False
 
 
+def is_task_split_phase1_compat_json(path: Path) -> bool:
+    if path.suffix.lower() != ".json":
+        return False
+    if not is_relative_to(path, TASK_SPLIT_DIR):
+        return False
+
+    rel = path.relative_to(TASK_SPLIT_DIR)
+    parts = rel.parts
+    if not parts:
+        return False
+    if parts[0] == "_templates":
+        return True
+    if path.name in TASK_SPLIT_PHASE1_COMPAT_JSON_NAMES:
+        return True
+    if len(parts) >= 3 and parts[1] in TASK_SPLIT_PHASE1_COMPAT_SUBDIRS:
+        return True
+    return False
+
+
+def is_runtime_json_artifact(path: Path) -> bool:
+    if path.suffix.lower() != ".json":
+        return False
+    if path.name in RUNTIME_JSON_FILENAMES:
+        return True
+    return any(pattern.match(path.name) for pattern in RUNTIME_JSON_PATTERNS)
+
+
 def is_summary_optional_doc(path: Path) -> bool:
     rel_posix = path.relative_to(DOCS_DIR).as_posix()
     if rel_posix.startswith("内部参考/任务拆解/"):
@@ -878,6 +929,58 @@ def check_summary_coverage(findings: list[Finding]) -> tuple[int, int]:
     return covered, total
 
 
+def check_runtime_artifact_pollution(findings: list[Finding]) -> int:
+    count = 0
+    for current_root, dirnames, filenames in os.walk(DOCS_DIR, followlinks=False):
+        current_path = Path(current_root)
+
+        kept_dirs: list[str] = []
+        for dirname in dirnames:
+            candidate = current_path / dirname
+            if dirname == ".state" and not candidate.is_symlink():
+                count += 1
+                findings.append(
+                    Finding(
+                        category="runtime_artifact_pollution",
+                        level="error",
+                        file=str(candidate.relative_to(ROOT)),
+                        detail="docs 目录不应承载真实 `.state` 运行态目录，应迁移到 `.artifacts/`",
+                    )
+                )
+                continue
+            kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in filenames:
+            candidate = current_path / filename
+            suffix = candidate.suffix.lower()
+            if suffix in {".jsonl", ".lock"}:
+                count += 1
+                findings.append(
+                    Finding(
+                        category="runtime_artifact_pollution",
+                        level="error",
+                        file=str(candidate.relative_to(ROOT)),
+                        detail="docs 目录不应承载真实运行态文件（.jsonl/.lock），应迁移到 `.artifacts/`",
+                    )
+                )
+                continue
+            if is_task_split_phase1_compat_json(candidate):
+                continue
+            if not is_runtime_json_artifact(candidate):
+                continue
+            count += 1
+            findings.append(
+                Finding(
+                    category="runtime_artifact_pollution",
+                    level="error",
+                    file=str(candidate.relative_to(ROOT)),
+                    detail="docs 目录不应承载真实运行态 JSON，应迁移到 `.artifacts/`；迁移期 `task_split` 契约/报告 JSON 走 Phase 1 兼容口径",
+                )
+            )
+    return count
+
+
 def check_current_state_docs(findings: list[Finding], selected_docs: list[Path]) -> tuple[int, int]:
     timestamp_missing = 0
     forbidden_headings = 0
@@ -892,7 +995,16 @@ def check_current_state_docs(findings: list[Finding], selected_docs: list[Path])
         text = read_text(md_file)
 
         if not CURRENT_STATE_TIMESTAMP_RE.search(text):
-            if not is_allowlisted(md_file, "timestamp_missing", force_strict=force_strict):
+            if is_allowlisted(md_file, "timestamp_missing", force_strict=force_strict):
+                findings.append(
+                    Finding(
+                        category="current_state_legacy_allowlist",
+                        level="warning",
+                        file=rel_file,
+                        detail="存量债务已命中 allowlist：timestamp_missing；需后续收敛 `> 更新时间：YYYY-MM-DD`",
+                    )
+                )
+            else:
                 timestamp_missing += 1
                 findings.append(
                     Finding(
@@ -904,15 +1016,24 @@ def check_current_state_docs(findings: list[Finding], selected_docs: list[Path])
                 )
 
         for issue_key, pattern, message in CURRENT_STATE_FORBIDDEN_HEADING_RULES:
-            if is_allowlisted(md_file, issue_key, force_strict=force_strict):
-                continue
             matches = [match.group(0).strip() for match in pattern.finditer(text)]
             if not matches:
                 continue
 
-            forbidden_headings += len(matches)
             preview = "；".join(matches[:2])
             suffix = "" if len(matches) <= 2 else f"；... 共 {len(matches)} 处"
+            if is_allowlisted(md_file, issue_key, force_strict=force_strict):
+                findings.append(
+                    Finding(
+                        category="current_state_legacy_allowlist",
+                        level="warning",
+                        file=rel_file,
+                        detail=f"存量债务已命中 allowlist：{issue_key}；{message}；命中标题：{preview}{suffix}",
+                    )
+                )
+                continue
+
+            forbidden_headings += len(matches)
             findings.append(
                 Finding(
                     category="current_state_forbidden_heading",
@@ -1187,6 +1308,7 @@ def print_human_report(report: dict, *, non_blocking: bool = False) -> None:
     print(f"report_naming_errors: {stats['report_naming_errors']}")
     print(f"current_state_timestamp_missing: {stats['current_state_timestamp_missing']}")
     print(f"current_state_forbidden_headings: {stats['current_state_forbidden_headings']}")
+    print(f"runtime_artifact_pollution: {stats['runtime_artifact_pollution']}")
     print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
     print(f"openclaw_gate_status_errors: {stats['openclaw_gate_status_errors']}")
     print(f"g01_evidence_binding_errors: {stats['g01_evidence_binding_errors']}")
@@ -1241,6 +1363,7 @@ def main() -> int:
         "report_naming_errors": check_report_naming(findings),
         "current_state_timestamp_missing": current_state_timestamp_missing,
         "current_state_forbidden_headings": current_state_forbidden_headings,
+        "runtime_artifact_pollution": check_runtime_artifact_pollution(findings),
         "blacklist_var_hits": check_blacklist_vars(findings),
         "openclaw_gate_status_errors": check_openclaw_gate_status(findings),
         "g01_evidence_binding_errors": check_g01_evidence_binding(findings),
