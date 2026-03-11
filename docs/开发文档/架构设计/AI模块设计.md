@@ -28,6 +28,7 @@
 app/ai/
 ├── workflow/
 │   ├── multi_agent_graph.py   # 多智能体 Supervisor 图
+│   ├── exam_generation_workflow.py # AI 出题独立工作流（2026-03 新增）
 │   ├── data_graph.py          # 问数专用 StateGraph (2026-02 升级)
 │   └── todo_graph.py          # 待办专用 StateGraph (2026-01 重构)
 ├── agents/
@@ -2316,3 +2317,12 @@ graph TD
 - **presenter/UI**：只渲染脱敏后的用户可见 contract。
 
 - **single-handoff 补口**：当 supervisor 未显式调用 `decompose_goals` 但已产生 handoff 时，必须在 values dispatcher 中补冻结 `decomposed_goals`，确保 router guard / coverage 与 planner 使用同一份活动目标。
+
+
+## 📝 AI 出题独立工作流（2026-03）
+
+- 本能力不接入现有 `chat/supervisor/multi_agent_graph` 主链。
+- 唯一入口为后台管理页 + `/api/v1/exam-admin`。
+- 运行链路固定为：`dataset_ids -> evidence retrieval -> paper contract -> quality gate -> pdf export -> history replay`。
+- 只复用现有 `RAGFlow` 检索能力、LLM 运行能力与 MinIO 资产存储能力。
+- 历史记录 canonical 固定为 `exam_generation_job.result_payload`，禁止复用聊天线程/消息真理源。

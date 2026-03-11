@@ -68,3 +68,7 @@ api_router.include_router(dev_codex_router, dependencies=[Depends(get_admin_user
 from app.api.v1.endpoints.memory_admin_api import router as memory_admin_router
 api_router.include_router(memory_admin_router, dependencies=[Depends(get_admin_user)])
 
+
+# AI 出题后台路由：仅管理员
+from app.api.v1.endpoints.exam_admin_api import router as exam_admin_router
+api_router.include_router(exam_admin_router, dependencies=[Depends(get_admin_user)])
