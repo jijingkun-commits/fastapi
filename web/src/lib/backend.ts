@@ -1,3 +1,4 @@
+import { clearAuthToken, readAuthToken } from "@/lib/auth-session";
 import { validateResultEventPayload } from "@/lib/validators/result-event";
 import { STREAM_EVENT_TYPES } from "@/types/message";
 import type {
@@ -17,18 +18,22 @@ import type {
  * 后端请求封装（中文注释）。
  *
  * 设计约定：
- * - `API_BASE` 统一决定后端地址，默认拼接当前主机的 8000 端口，可通过 `NEXT_PUBLIC_API_BASE_URL` 覆盖。
+ * - `API_BASE` 统一决定后端地址：浏览器默认走同源 `/api/v1/*` 代理，服务端运行时优先使用内部代理目标；
+ * - `INTERNAL_API_BASE_URL` 仅供 Next 服务端/脚本指定代理目标，不暴露给浏览器；
+ * - `NEXT_PUBLIC_API_BASE_URL` 仅在需要让浏览器直连指定后端时显式覆盖；
  * - `apiFetch(path, init, options)` 为统一的请求入口：
- *   - 默认自动从 `sessionStorage` 读取 `auth:token` 并添加 `Authorization` 头；
- *   - 传 `options.auth=false` 可禁用认证注入（如登录接口）。
+ *   - 默认统一从 `auth-session` 读取浏览器登录态并添加 `Authorization` 头；
+ *   - 传 `options.auth=false` 可禁用认证注入（如登录接口）；
  *   - 若调用方已手动设置 `Authorization`，则不再覆盖。
- * - 其他具体接口方法（如 `login`/`getMe`/`streamLLM`）均基于 `apiFetch` 构建，避免重复拼接头与地址。
+ * - 其他具体接口方法（如 `login`/`getMe`/`streamLLM`）均基于 `apiFetch` 构建，避免重复拼接头、地址与错误处理。
  */
-const DEFAULT_BASE =
-  typeof window !== "undefined"
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : "http://localhost:8000";
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE;
+const DEFAULT_BROWSER_BASE = "";
+const DEFAULT_SERVER_BASE = "http://127.0.0.1:8000";
+const SERVER_PROXY_BASE = process.env.INTERNAL_API_BASE_URL || DEFAULT_SERVER_BASE;
+
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (typeof window === "undefined" ? SERVER_PROXY_BASE : DEFAULT_BROWSER_BASE);
 
 export class ApiError extends Error {
   status: number;
@@ -40,34 +45,21 @@ export class ApiError extends Error {
   }
 }
 
-function extractApiErrorMessage(payload: unknown, fallback: string): string {
+export async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = await response.clone().json().catch(() => null);
   if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
-    const message = record.message;
-    if (typeof message === "string" && message.trim().length > 0) {
-      return message;
-    }
-    if (message && typeof message === "object") {
-      const nested = (message as Record<string, unknown>).message;
-      if (typeof nested === "string" && nested.trim().length > 0) {
-        return nested;
-      }
-      const errorCode = (message as Record<string, unknown>).error_code;
-      if (typeof errorCode === "string" && errorCode.trim().length > 0) {
-        return errorCode;
-      }
-    }
-    const detail = record.detail;
-    if (typeof detail === "string" && detail.trim().length > 0) {
-      return detail;
+    const candidate = [
+      (payload as { message?: unknown }).message,
+      (payload as { detail?: unknown }).detail,
+      (payload as { error?: unknown }).error,
+    ].find((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (candidate) {
+      return candidate;
     }
   }
-  return fallback;
-}
 
-async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
-  const payload = await response.json().catch(() => null);
-  return extractApiErrorMessage(payload, fallback);
+  const text = await response.text().catch(() => "");
+  return text.trim() || fallback;
 }
 
 export async function apiFetch(
@@ -77,18 +69,28 @@ export async function apiFetch(
 ) {
   const addAuth = options?.auth !== false;
   const handle401 = options?.handle401 !== false;
-  // 使用 sessionStorage 存储 token，会话级别安全性更高（关闭浏览器自动清除）
-  const token = typeof window !== "undefined" ? window.sessionStorage.getItem("auth:token") : null;
+  const token = readAuthToken();
   const baseHeaders = init.headers ?? {};
   const hasAuth = typeof baseHeaders === "object" && baseHeaders !== null && "Authorization" in (baseHeaders as any);
   const authHeader = addAuth && !hasAuth && token ? { Authorization: `Bearer ${token}` } : {};
   const headers = { ...(baseHeaders as any), ...authHeader };
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name === "AbortError") {
+      throw error;
+    }
+    throw new ApiError("无法连接服务，请检查前端代理和后端是否已启动", 0);
+  }
 
   // 处理 401 未认证响应：清除 token 并跳转登录页
   if (response.status === 401 && handle401) {
     if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem("auth:token");
+      clearAuthToken();
+      clearCurrentUserCache();
+      clearLatestThreadCache();
       window.location.href = "/auth";
     }
   }
@@ -103,7 +105,9 @@ export async function login(payload: { username?: string; mobile?: string; passw
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }, { auth: false });
-  if (!r.ok) throw new Error("登录失败");
+  if (!r.ok) {
+    throw new ApiError(await readErrorMessage(r, "登录失败"), r.status);
+  }
   return r.json();
 }
 
@@ -129,15 +133,52 @@ export interface CurrentUserProfile {
   data_role_label: string | null;
 }
 
+let cachedCurrentUser: CurrentUserProfile | null = null;
+let currentUserPromise: Promise<CurrentUserProfile> | null = null;
+
+export function clearCurrentUserCache() {
+  cachedCurrentUser = null;
+  currentUserPromise = null;
+}
+
+
 /**
  * 获取当前用户信息：
  * - 若显式传入 `token`，使用该令牌；
- * - 否则自动走默认的 `apiFetch` 注入逻辑。
+ * - 否则自动走默认的 `apiFetch` 注入逻辑；
+ * - 默认请求会做会话级缓存与并发去重，避免聊天页初始化重复拉取 `/me`。
  */
+async function fetchCurrentUser(token?: string): Promise<CurrentUserProfile> {
+  const response = await apiFetch(`/api/v1/me`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
+  if (!response.ok) {
+    throw new Error("me failed");
+  }
+  return response.json();
+}
+
 export async function getMe(token?: string): Promise<CurrentUserProfile> {
-  const r = await apiFetch(`/api/v1/me`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
-  if (!r.ok) throw new Error("获取当前用户信息失败");
-  return r.json();
+  if (token) {
+    return fetchCurrentUser(token);
+  }
+
+  if (cachedCurrentUser) {
+    return cachedCurrentUser;
+  }
+
+  if (currentUserPromise) {
+    return currentUserPromise;
+  }
+
+  currentUserPromise = fetchCurrentUser()
+    .then((profile) => {
+      cachedCurrentUser = profile;
+      return profile;
+    })
+    .finally(() => {
+      currentUserPromise = null;
+    });
+
+  return currentUserPromise;
 }
 
 /**
@@ -214,7 +255,7 @@ export interface StreamCallbacks {
   /** 流初始化（返回 thread_id） */
   onInit?: (threadId: string, runId?: string) => void;
   /** 流结束 */
-  onDone?: (threadId?: string, messageId?: number, meta?: Record<string, unknown>) => void;
+  onDone?: (threadId?: string, messageId?: number) => void;
   /** 错误 */
   onError?: (message: string) => void;
   /** 需要人工审核（interrupt） */
@@ -339,14 +380,13 @@ function normalizeFinalAnswerEventData(data: unknown): FinalAnswerEventData | nu
 function normalizeDoneEventData(
   data: unknown,
   fallbackThreadId?: string,
-): { threadId?: string; messageId?: number; finalContent?: string; meta?: Record<string, unknown> } {
+): { threadId?: string; messageId?: number; finalContent?: string } {
   const doneData = (isObjectRecord(data) ? data : {}) as Partial<DoneEventData>;
   const threadId =
     toOptionalString(doneData.thread_id) ?? toOptionalString(fallbackThreadId);
   const messageId = toOptionalMessageId(doneData.message_id);
   const finalContent = toOptionalString(doneData.final_content);
-  const meta = isObjectRecord(doneData.meta) ? doneData.meta : undefined;
-  return { threadId, messageId, finalContent, meta };
+  return { threadId, messageId, finalContent };
 }
 
 function normalizeInterruptData(data: unknown): InterruptData | null {
@@ -612,7 +652,7 @@ function dispatchSSEEvent(
         doneControl.doneCalled = true;
       }
       const doneData = normalizeDoneEventData(event.data, fallbackThreadId);
-      onDone?.(doneData.threadId, doneData.messageId, doneData.meta);
+      onDone?.(doneData.threadId, doneData.messageId);
       return;
     }
     case "error": {
@@ -682,9 +722,7 @@ export async function streamLLM(
   });
 
   if (!response.ok) {
-    const message = await readApiErrorMessage(response, response.statusText || "请求失败");
-    cb.onError?.(message);
-    return;
+    throw new Error(response.statusText);
   }
 
   // ... (Stream processing logic)
@@ -697,8 +735,6 @@ export async function streamLLM(
   const decoder = new TextDecoder();
   let buffer = "";
   const doneControl = { doneCalled: false };
-  let terminatedByAbort = false;
-  let terminatedByError = false;
 
   try {
     while (true) {
@@ -715,14 +751,14 @@ export async function streamLLM(
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      terminatedByAbort = true;
+      // aborted
     } else {
-      terminatedByError = true;
       cb.onError?.(err.message || "Stream error");
     }
   } finally {
-    // 只有真实完成或 SSE 自然结束才允许走 onDone；abort/error 交由上层按未完成语义处理。
-    if (!doneControl.doneCalled && !terminatedByAbort && !terminatedByError) {
+    // 确保在正常结束或异常时调用 onDone，避免状态卡死
+    // 使用 doneCalled 标记防止重复调用
+    if (!doneControl.doneCalled) {
       doneControl.doneCalled = true;
       cb.onDone?.(options?.threadId);
     }
@@ -783,34 +819,6 @@ export interface CancelRunResponse {
   reason?: string | null;
 }
 
-export async function cancelRun(
-  runId: string,
-  threadId: string,
-): Promise<CancelRunResponse> {
-  const resolvedRunId = runId.trim();
-  if (!resolvedRunId) {
-    throw new Error("运行编号不能为空");
-  }
-
-  const resolvedThreadId = threadId.trim();
-  if (!resolvedThreadId) {
-    throw new Error("thread_id 不能为空");
-  }
-
-  const r = await apiFetch(`/api/v1/chat/runs/${encodeURIComponent(resolvedRunId)}/cancel`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ thread_id: resolvedThreadId }),
-  });
-
-  if (!r.ok) {
-    const message = await readApiErrorMessage(r, "取消运行失败");
-    throw new ApiError(message, r.status);
-  }
-
-  return r.json();
-}
-
 export interface ActiveRunItem {
   run_id: string;
   thread_id: string;
@@ -826,11 +834,44 @@ export interface ActiveRunsResponse {
   server_time: string;
 }
 
+export async function cancelRun(
+  runId: string,
+  payloadOrThreadId?: string | { reason?: string; cancel_mode?: "soft" | "hard" | string },
+): Promise<CancelRunResponse> {
+  const resolvedRunId = runId.trim();
+  if (!resolvedRunId) {
+    throw new Error("run_id 不能为空");
+  }
+
+  const payload = typeof payloadOrThreadId === "string"
+    ? { thread_id: payloadOrThreadId, reason: "user_cancelled", cancel_mode: "hard" as const }
+    : {
+        thread_id: undefined,
+        reason: payloadOrThreadId?.reason ?? "user_cancelled",
+        cancel_mode: payloadOrThreadId?.cancel_mode ?? "hard",
+      };
+
+  const r = await apiFetch(`/api/v1/chat/runs/${encodeURIComponent(resolvedRunId)}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(payload.thread_id ? { thread_id: payload.thread_id } : {}),
+      reason: payload.reason,
+      cancel_mode: payload.cancel_mode,
+    }),
+  });
+
+  if (!r.ok) {
+    throw new ApiError(await readErrorMessage(r, "取消运行失败"), r.status);
+  }
+
+  return r.json();
+}
+
 export async function listActiveRuns(): Promise<ActiveRunsResponse> {
   const r = await apiFetch(`/api/v1/chat/runs/active`);
   if (!r.ok) {
-    const message = await readApiErrorMessage(r, "获取活跃会话失败");
-    throw new ApiError(message, r.status);
+    throw new ApiError(await readErrorMessage(r, "获取活跃会话失败"), r.status);
   }
   return r.json();
 }
@@ -854,7 +895,7 @@ export async function resumeChat(
     }),
     signal: options?.signal,
   });
-  if (!r.ok || !r.body) throw new Error("恢复会话失败");
+  if (!r.ok || !r.body) throw new Error("resume failed");
 
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
@@ -933,13 +974,42 @@ export async function getThreads(userId: number, limit = 50): Promise<Conversati
   return r.json();
 }
 
+let latestThreadLoaded = false;
+let cachedLatestThread: ConversationThread | null = null;
+let latestThreadPromise: Promise<ConversationThread | null> | null = null;
+
+export function clearLatestThreadCache() {
+  latestThreadLoaded = false;
+  cachedLatestThread = null;
+  latestThreadPromise = null;
+}
+
 /**
  * 获取当前用户最近会话（无历史返回 null）
  */
 export async function getLatestThread(): Promise<ConversationThread | null> {
-  const r = await apiFetch(`/api/v1/chat/threads/latest`);
-  if (!r.ok) throw new Error("获取最近会话失败");
-  return r.json();
+  if (latestThreadLoaded) {
+    return cachedLatestThread;
+  }
+
+  if (latestThreadPromise) {
+    return latestThreadPromise;
+  }
+
+  latestThreadPromise = (async () => {
+    const response = await apiFetch(`/api/v1/chat/threads/latest`);
+    if (!response.ok) {
+      throw new Error("获取最近会话失败");
+    }
+    const thread = await response.json();
+    latestThreadLoaded = true;
+    cachedLatestThread = thread;
+    return thread;
+  })().finally(() => {
+    latestThreadPromise = null;
+  });
+
+  return latestThreadPromise;
 }
 
 /**
@@ -1118,6 +1188,8 @@ export async function logout(): Promise<void> {
   }, { handle401: false });
   // 不论服务端是否成功，都清除本地 token
   if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem("auth:token");
+    clearAuthToken();
+    clearCurrentUserCache();
+    clearLatestThreadCache();
   }
 }
