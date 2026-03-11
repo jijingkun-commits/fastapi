@@ -47,7 +47,7 @@ from app.services.user_memory_intent_job_service import (
     enqueue_from_chat_message as enqueue_memory_intent_job,
 )
 from app.services.run_control_service import get_run_control_service
-from app.ai.workflow.attachment_planning import build_attachment_manifest, build_lightweight_probe
+from app.services.chat_input_builder import build_human_turn_payload
 
 
 logger = logging.getLogger(__name__)
@@ -765,14 +765,12 @@ class ChatService:
         else:
             resolved_run_id = resolved_run_id or f"run_{uuid4().hex}"
 
-        # 构建输入：保留用户原始 query，附件改走结构化合同
-        attachment_manifest = build_attachment_manifest(attachments)
-        lightweight_probe = build_lightweight_probe(attachment_manifest)
-        if attachment_manifest:
+        payload = build_human_turn_payload(prompt, attachments)
+        if payload.attachment_manifest:
             logger.info(
                 "已构建附件合同: count=%d, ids=%s",
-                len(attachment_manifest),
-                [item.get("attachment_id") for item in attachment_manifest],
+                len(payload.attachment_manifest),
+                [item.get("attachment_id") for item in payload.attachment_manifest],
             )
         document_memory_enabled = _is_document_memory_enabled(ENABLE_DOCUMENT_MEMORY)
         document_memory_recall_enabled = (
@@ -826,7 +824,7 @@ class ChatService:
         memory_context = document_memory_context
         response_guidance_contract: dict[str, Any] | None = None
 
-        human_message = create_human_message(prompt)
+        human_message = create_human_message(payload.model_input)
         input_messages = [human_message]
 
         if memory_context:
@@ -853,15 +851,15 @@ class ChatService:
             "run_id": resolved_run_id,
             "control_flags": {
                 "run_control_enabled": bool(run_control_enabled),
-                "has_attachments": bool(attachments),
+                "has_attachments": bool(payload.attachment_manifest),
                 "has_current_todo_anchor": current_todo_id is not None,
             },
             "semantic_payload": {
-                "user_query": str(prompt or "").strip(),
+                "user_query": payload.raw_prompt,
                 "human_message_id": getattr(human_message, "id", None),
             },
-            "attachment_manifest": attachment_manifest,
-            "lightweight_probe": lightweight_probe,
+            "attachment_manifest": payload.attachment_manifest,
+            "lightweight_probe": payload.lightweight_probe,
         }
         
         # 用于收集完整回复
@@ -919,14 +917,14 @@ class ChatService:
         # 在流开始时保存 human 消息（单一入口，确保顺序正确）
         # AI 消息由 interrupt 或 postprocess 保存
         with get_db_context() as db:
-            title = prompt[:50] if len(prompt) > 50 else prompt
+            title = payload.title_text[:50] if len(payload.title_text) > 50 else payload.title_text
             saved_human = chat_repo.save_message(
                 db,
                 user_id=user_id,
                 thread_id=thread_id,
                 role="human",
                 content_type="text",
-                content=prompt,
+                content=payload.display_content,
                 title=title,
             )
 
