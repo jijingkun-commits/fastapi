@@ -27,6 +27,7 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 ├── check_special_doc_sync.py   # 防屎山手册强制同步检查
 ├── config_doctor.py            # 配置契约健康检查
 ├── release_rollout_manager.py  # C-5 灰度发布/回滚管理（规则+命令）
+├── jjk_deleteworktree.sh     # 输出当前 worktree 的可复制删除命令串
 ├── init_llm_config.py          # 初始化 LLM 模型配置
 ├── test_llm_config.py          # LLM 配置测试
 ├── sync-docs.sh                # 文档仓库同步
@@ -177,6 +178,28 @@ bash scripts/vk_cleanup.sh     # 清理进程
 ```
 
 > 主分支默认 8000/3000；子任务分支按 worktree 自动分配端口。
+
+### Worktree 生命周期清理
+
+```bash
+bash scripts/jjk_deleteworktree.sh
+# 输出一条可复制执行的删除命令；默认只生成，不直接删除
+```
+
+脚本会基于当前 worktree 自动解析：
+
+- 当前 worktree 根路径
+- 当前分支名
+- 当前 HEAD 是否已并入 `master`
+- 当前 worktree 是否干净
+
+若门禁通过，输出一条可在**任意目录**执行的命令串，例如：
+
+```bash
+git -C /path/to/repo worktree remove /path/to/worktree && git -C /path/to/repo branch -d branch-name
+```
+
+适合“先在当前 worktree 里生成，再复制到任意终端执行”，避免脚本在被删除目录内自删。
 
 ## 注意事项
 
