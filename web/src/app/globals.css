@@ -76,15 +76,18 @@
   --sidebar-border: oklch(0.91 0 0);
   --sidebar-ring: oklch(0.56 0.09 192);
 
-  --app-sidebar-bg: oklch(0.985 0.001 220);
-  --app-sidebar-border: rgba(17, 24, 39, 0.08);
+  --app-sidebar-bg: oklch(0.973 0.004 95);
+  --app-sidebar-border: rgba(34, 28, 20, 0.075);
   --app-sidebar-title: rgba(17, 24, 39, 0.56);
   --app-sidebar-item-fg: rgba(17, 24, 39, 0.82);
   --app-sidebar-item-hover-fg: #111827;
-  --app-sidebar-item-hover-bg: rgba(17, 24, 39, 0.03);
-  --app-sidebar-item-active-bg: rgba(17, 24, 39, 0.045);
+  --app-sidebar-item-hover-bg: rgba(34, 28, 20, 0.035);
+  --app-sidebar-item-active-bg: rgba(34, 28, 20, 0.055);
   --app-sidebar-item-active-fg: #111827;
   --app-sidebar-item-active-ring: transparent;
+  --app-sidebar-section-fg: rgba(17, 24, 39, 0.78);
+  --app-sidebar-section-hover-fg: #111827;
+  --app-sidebar-section-count-fg: rgba(17, 24, 39, 0.62);
   --app-sidebar-icon: rgba(17, 24, 39, 0.48);
   --app-sidebar-icon-active: rgb(47, 104, 104);
   --app-sidebar-icon-active-bg: rgba(47, 104, 104, 0.08);
@@ -196,6 +199,9 @@
   --app-sidebar-item-active-bg: oklch(0.36 0.036 194);
   --app-sidebar-item-active-fg: oklch(0.97 0.011 200);
   --app-sidebar-item-active-ring: oklch(0.56 0.1 192 / 0.6);
+  --app-sidebar-section-fg: oklch(0.9 0.012 218);
+  --app-sidebar-section-hover-fg: oklch(0.98 0.008 205);
+  --app-sidebar-section-count-fg: oklch(0.8 0.012 218);
   --app-sidebar-icon: oklch(0.72 0.02 214);
   --app-sidebar-icon-active: oklch(0.87 0.1 194);
   --app-sidebar-icon-active-bg: oklch(0.42 0.04 194);
@@ -729,7 +735,7 @@
 
   .app-sidebar-toggle {
     border: 1px solid rgba(17, 24, 39, 0.05);
-    background: color-mix(in srgb, #ffffff 76%, var(--app-sidebar-bg));
+    background: color-mix(in srgb, #ffffff 66%, var(--app-sidebar-bg));
     color: var(--app-sidebar-item-fg);
     box-shadow: none;
   }
@@ -876,7 +882,7 @@
 
   .app-sidebar-header-icon {
     border: 1px solid rgba(17, 24, 39, 0.05);
-    background: color-mix(in srgb, #ffffff 76%, var(--app-sidebar-bg));
+    background: color-mix(in srgb, #ffffff 72%, var(--app-sidebar-bg));
     color: var(--app-sidebar-item-fg);
     box-shadow: none;
   }
@@ -932,18 +938,19 @@
     width: 100%;
     align-items: center;
     gap: 6px;
-    padding: 12px 16px 6px;
-    color: var(--app-sidebar-title);
-    font-size: var(--chat-ui-font-xs);
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    line-height: 1.1;
+    padding: 10px 10px 4px;
+    color: var(--app-sidebar-section-fg);
+    font-size: var(--chat-ui-font-sm);
+    font-weight: 400;
+    letter-spacing: 0;
+    line-height: 1.15;
     text-align: left;
-    transition: color var(--ds-motion-fast);
+    transition: color var(--ds-motion-fast), background-color var(--ds-motion-fast);
   }
 
   .app-sidebar-section-toggle:hover {
-    color: var(--app-sidebar-item-hover-fg);
+    background: rgba(34, 28, 20, 0.022);
+    color: var(--app-sidebar-section-hover-fg);
   }
 
 
@@ -954,18 +961,18 @@
   .app-sidebar-section-count {
     margin-left: auto;
     min-width: 20px;
-    color: var(--app-sidebar-title);
-    font-size: 10px;
-    font-weight: 600;
+    color: var(--app-sidebar-section-count-fg);
+    font-size: var(--chat-ui-font-xs);
+    font-weight: 400;
     text-align: right;
   }
 
   .app-sidebar-entry {
-    min-height: 44px;
-    border-radius: 14px;
-    font-size: var(--chat-ui-font-md);
-    font-weight: 500;
-    line-height: 1.35rem;
+    min-height: 40px;
+    border-radius: 12px;
+    font-size: var(--chat-ui-font-sm);
+    font-weight: 400;
+    line-height: 1.2rem;
     transition: background-color var(--ds-motion-fast), color var(--ds-motion-fast), border-color var(--ds-motion-fast), box-shadow var(--ds-motion-fast);
   }
 
