@@ -25,11 +25,11 @@ description: 串行卡片执行入口：消费 /jjk-vkplan 产物并按 card_ord
 
 必备文件：
 
-1. `docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json`
-2. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览，仅供人工阅读）
-3. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
-4. `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
-5. `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`（首次执行可由调度器自动创建；可持久化 `integration_branch`）
+1. `workdocs/任务拆解/<task_split_dir>/contracts/vk_cards.json`
+2. `workdocs/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览，仅供人工阅读）
+3. `workdocs/任务拆解/<task_split_dir>/workstreams/WS-*.md`
+4. `workdocs/任务拆解/<task_split_dir>/contracts/_active_task.json`
+5. `.artifacts/states/task_splits/<task_split_dir>/<task_key>/task-runner-state.json`（首次执行可由调度器自动创建；可持久化 `integration_branch`）
 
 硬约束：
 

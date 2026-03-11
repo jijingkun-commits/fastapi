@@ -4,6 +4,7 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-11｜task_split 机器契约/过程报告从 docs 彻底收口到 `workdocs/任务拆解/contracts|reports`，真实运行态只认 `.artifacts/states/task_splits`（ACTIVE）→ `docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
 - 2026-03-11｜JJK 命令执行统一采用单步单目标，禁止长链整串重跑（ACTIVE）→ `.cursor/rules/core.mdc`、`.cursor/commands/jjk-verify.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
@@ -12,6 +13,17 @@
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
+
+
+### 2026-03-11 task_split 机器契约与过程报告收口到 `workdocs/任务拆解`
+- 状态：ACTIVE
+- 决策主题：task_split 的 canonical 根目录从 `docs/内部参考/任务拆解/` 切到 `workdocs/任务拆解/`；`contracts/` 承担过程契约，`reports/` 承担过程报告，真实运行态只认 `.artifacts/states/task_splits/`
+- 背景与问题：Phase 1 只迁出了 `.state/.jsonl/.lock`，但 `_active_task.json`、`vk_cards.json`、`preflight_status.json`、`consumption_report.json` 等机器 JSON 仍留在 docs，导致 docs / workdocs / .artifacts 边界继续打架，脚本也各自硬编码旧路径
+- 最终决策：新增 `scripts/task_split_paths.py` 作为唯一路径 owner；`wt-flow`、`coder4_*`、`workflow_contract_*` 全部改读 canonical path；task_split 目录整体迁到 `workdocs/任务拆解/`；旧 `docs/内部参考/任务拆解/` 只保留说明页，不再承载 task_split 文件
+- 取舍理由：项目未上线，优先一次性消灭双真源和散落 path resolver；相比继续靠 symlink、thin index 或双写保兼容，直接切 canonical path 更简洁、更可验证
+- 影响范围：`scripts/task_split_paths.py`、`scripts/coder4/*.py|*.sh`、`scripts/workflow_contract_*`、`scripts/check_workflow_contract.py`、`scripts/docs_guard.py`、`.cursor/rules/doc_sync.mdc`、`workdocs/任务拆解/**`、`docs/README.md`、`docs/SUMMARY.md`、`workdocs/README.md`、`memory-bank.md`
+- 回退/失效条件：若未来统一改到另一套工作流存储或正式文档站点，可由新的目录策略替代；在此之前保持 `workdocs/contracts|reports + .artifacts runtime` 这套边界，不恢复 docs 下 task_split 机器 JSON
+- 关联文档/代码：`docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_requirements.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`、`scripts/task_split_paths.py`
 
 ### 2026-03-11 瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断
 - 状态：ACTIVE

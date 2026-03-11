@@ -154,7 +154,7 @@ $jjk-create-pr
 ```
 
 ```text
-$jjk-create-pr @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md
+$jjk-create-pr @workdocs/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md
 ```
 
 ---

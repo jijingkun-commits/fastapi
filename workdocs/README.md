@@ -16,6 +16,7 @@
 
 - `docs/plans/`
 - `docs/内部参考/迭代需求/`
-- `docs/内部参考/任务拆解/`
+- `docs/plans/`
+- `docs/内部参考/迭代需求/`
 
-这些旧路径暂时继续存在，方便追溯；新的过程层根目录以 `workdocs/` 为准。
+其中 `task_split` 已完成 Phase 2 收口：canonical 根目录是 `workdocs/任务拆解/`；旧 `docs/内部参考/任务拆解/` 只保留说明页。

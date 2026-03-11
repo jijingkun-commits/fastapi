@@ -12,9 +12,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from task_split_paths import resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
 REQUIREMENTS_BASE = Path("docs/内部参考/迭代需求")
 YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
 FORBIDDEN_PROTOCOL_TOKENS = (

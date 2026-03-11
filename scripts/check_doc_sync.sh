@@ -161,7 +161,7 @@ else
         echo ""
         echo "提示："
         echo "  - 文档映射规则见 .cursor/rules/doc_sync.mdc"
-        echo "  - 过程文档（workdocs/、docs/plans/、docs/内部参考/迭代需求/、docs/内部参考/任务拆解/）不能替代稳定真理源"
+        echo "  - 过程文档（workdocs/、docs/plans/、docs/内部参考/迭代需求/）不能替代稳定真理源；task_split canonical 根目录已切到 workdocs/任务拆解/"
         echo "  - 建议先执行 /jjk-doc-check 再提交"
         if [[ "$STRICT_MODE" != "true" ]]; then
             echo "  - 当前为非阻断模式：本次仅告警，不阻断提交"

@@ -13,10 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from check_clarify_plan_alignment import AlignmentCheckError, run_alignment_check
-
+from task_split_paths import resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
 REQUIREMENTS_BASE = Path("docs/内部参考/迭代需求")
 YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
 REQUIRED_EXECUTION_FIELDS = (
@@ -856,7 +855,8 @@ def _check_coverage(*, contracts: dict[str, Any], vk_cards_payload: dict[str, An
 
 def run_check(*, repo_root: Path, task_split_dir_raw: str) -> dict[str, Any]:
     task_split_dir = _resolve_task_split_dir(repo_root, task_split_dir_raw)
-    vk_cards_path = task_split_dir / "vk_cards.json"
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=True)
+    vk_cards_path = locator.vk_cards_file
     if not vk_cards_path.exists():
         raise CoverageCheckError(f"缺少文件: {vk_cards_path}")
 

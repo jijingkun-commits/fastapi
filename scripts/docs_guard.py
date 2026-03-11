@@ -33,8 +33,8 @@ ITERATION_REQUIREMENTS_DIR = DOCS_DIR / "内部参考" / "迭代需求"
 REQUIREMENTS_SUFFIX = "_requirements.md"
 IMPLEMENTATION_PLAN_SUFFIX = "_implementation_plan.md"
 G01_WORKSTREAM_FILE = (
-    DOCS_DIR
-    / "内部参考"
+    ROOT
+    / "workdocs"
     / "任务拆解"
     / "2026-02-21_openclaw迁移重建基线"
     / "workstreams"
@@ -103,15 +103,6 @@ PROCESS_DOC_ROOTS = (
     REPORT_DIR,
 )
 TASK_SPLIT_DIR = DOCS_DIR / "内部参考" / "任务拆解"
-TASK_SPLIT_PHASE1_COMPAT_JSON_NAMES = {
-    "_active_task.json",
-    "vk_cards.json",
-    "preflight_status.json",
-    "consumption_report.json",
-    "gate_contract_report.json",
-    "vktodo_create_result.json",
-}
-TASK_SPLIT_PHASE1_COMPAT_SUBDIRS = {"contracts", "sync"}
 RUNTIME_JSON_FILENAMES = {
     "task-runner-state.json",
     "coder4-idempotency.json",
@@ -862,10 +853,8 @@ def is_archived_doc(path: Path) -> bool:
 
 
 def is_task_split_phase1_compat_json(path: Path) -> bool:
-    if path.suffix.lower() != ".json":
-        return False
-    if not is_relative_to(path, TASK_SPLIT_DIR):
-        return False
+    del path
+    return False
 
     rel = path.relative_to(TASK_SPLIT_DIR)
     parts = rel.parts
@@ -975,7 +964,7 @@ def check_runtime_artifact_pollution(findings: list[Finding]) -> int:
                     category="runtime_artifact_pollution",
                     level="error",
                     file=str(candidate.relative_to(ROOT)),
-                    detail="docs 目录不应承载真实运行态 JSON，应迁移到 `.artifacts/`；迁移期 `task_split` 契约/报告 JSON 走 Phase 1 兼容口径",
+                    detail="docs 目录不应承载 task_split 机器 JSON 或真实运行态 JSON；Phase 2 起统一迁移到 workdocs/任务拆解/** 或 .artifacts/**",
                 )
             )
     return count

@@ -40,8 +40,8 @@ while IFS= read -r src; do
   cp -p "${src}" "${dst}"
   echo -e "present\t${src}\t${dst}" >> "${MANIFEST}"
 done < <(
-  find "${REPO_ROOT}/docs/内部参考/任务拆解" \
-    -mindepth 3 -maxdepth 3 -type f -name "coder4_scope_request.json" 2>/dev/null \
+  find "${REPO_ROOT}/.artifacts/states/task_splits" \
+    -mindepth 2 -maxdepth 2 -type f -name "coder4_scope_request.json" 2>/dev/null \
     | LC_ALL=C sort
 )
 

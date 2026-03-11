@@ -51,6 +51,11 @@ if str(PARENT_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(PARENT_SCRIPTS_DIR))
 
 from check_plan_vk_coverage import CoverageCheckError, run_check as run_plan_vk_coverage_check
+from task_split_paths import (
+    resolve_active_task_path as resolve_task_split_active_task_path,
+    resolve_runtime_path as resolve_task_split_runtime_path,
+    resolve_task_split_paths,
+)
 import wtimp_dispatch_bridge
 
 
@@ -1283,59 +1288,30 @@ def parse_time(value: Any) -> str:
 
 
 def resolve_default_active_task(repo_root: Path) -> Path:
-    split_root = repo_root / "docs" / "内部参考" / "任务拆解"
-    candidates = [path for path in split_root.glob("*/_active_task.json") if path.is_file()]
-    if not candidates:
-        raise FileNotFoundError(
-            "未找到任务级 _active_task.json，请显式传 --active-task 或设置 CODER4_ACTIVE_TASK_FILE"
-        )
-    if len(candidates) > 1:
-        raise FileNotFoundError(
-            f"检测到多个任务级 _active_task.json（{len(candidates)} 个），请显式传 --active-task 或设置 CODER4_ACTIVE_TASK_FILE"
-        )
-    return candidates[0].resolve()
+    return resolve_task_split_active_task_path(repo_root, "")
 
 
 def resolve_active_task_path(raw_active_task: str, repo_root: Path) -> Path:
-    candidate = str(raw_active_task or "").strip()
-    if candidate:
-        path = Path(candidate).expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"active task not found: {path}")
-        return path
-    return resolve_default_active_task(repo_root)
+    return resolve_task_split_active_task_path(repo_root, raw_active_task)
 
 
 def resolve_vk_cards_path(active_task_path: Path) -> Path:
-    vk_cards_path = (active_task_path.parent / "vk_cards.json").resolve()
-    if vk_cards_path.exists():
-        return vk_cards_path
-
-    try:
-        active_payload = load_json(active_task_path)
-    except Exception:  # noqa: BLE001
-        active_payload = {}
-
-    task_split_dir = str(active_payload.get("task_split_dir") or "").strip()
-    if task_split_dir:
-        candidate = (active_task_path.parent / task_split_dir / "vk_cards.json").resolve()
-        if candidate.exists():
-            return candidate
-
-    raise FileNotFoundError(f"vk_cards.json not found: {vk_cards_path}")
+    repo_root = resolve_repo_root(active_task_path)
+    locator = resolve_task_split_paths(repo_root, str(active_task_path), must_exist=False)
+    vk_cards_path = locator.vk_cards_file.resolve()
+    if not vk_cards_path.exists():
+        raise FileNotFoundError(f"vk_cards.json not found: {vk_cards_path}")
+    return vk_cards_path
 
 
 def resolve_runtime_file_path(active_task_path: Path, raw_path: str) -> Path:
-    target_path = Path(raw_path).expanduser()
-    if target_path.is_absolute():
-        return target_path.resolve()
-    normalized = str(raw_path or "").strip()
-    if normalized == ".state" or normalized.startswith(".state/") or normalized.startswith("./.state/"):
-        return (active_task_path.parent / target_path).resolve()
-    for ancestor in active_task_path.parents:
-        if (ancestor / ".git").exists():
-            return (ancestor / target_path).resolve()
-    return (Path.cwd() / target_path).resolve()
+    repo_root = resolve_repo_root(active_task_path)
+    locator = resolve_task_split_paths(repo_root, str(active_task_path), must_exist=False)
+    return resolve_task_split_runtime_path(
+        repo_root=repo_root,
+        task_split_dir=locator.task_split_dir,
+        raw_path=raw_path,
+    )
 
 
 def sanitize_task_key_segment(task_key: str) -> str:
@@ -1356,19 +1332,10 @@ def resolve_repo_root(active_task_path: Path) -> Path:
 
 
 def resolve_task_scoped_active_task_path(active_task_path: Path, active_payload: dict[str, Any]) -> Path:
-    task_split_dir = str(active_payload.get("task_split_dir") or "").strip()
-    if not task_split_dir:
-        raise ValueError(f"active task missing task_split_dir: {active_task_path}")
-    if active_task_path.name != "_active_task.json":
-        raise ValueError(f"active task file name invalid: {active_task_path}")
-    if active_task_path.parent.name == task_split_dir:
-        return active_task_path.resolve()
-
-    candidate = (active_task_path.parent / task_split_dir / "_active_task.json").resolve()
-    if candidate.exists():
-        return candidate
-
-    return active_task_path.resolve()
+    repo_root = resolve_repo_root(active_task_path)
+    task_split_dir = str(active_payload.get("task_split_dir") or "").strip() or str(active_task_path)
+    locator = resolve_task_split_paths(repo_root, task_split_dir, must_exist=False)
+    return locator.active_task_file.resolve()
 
 
 def resolve_card_source_ws_file(
@@ -1403,7 +1370,9 @@ def resolve_card_source_ws_file(
 
 
 def resolve_active_session_state_file(active_task_path: Path, *, task_key: str) -> Path:
-    session_dir = active_task_path.parent / ".state" / sanitize_task_key_segment(task_key)
+    repo_root = resolve_repo_root(active_task_path)
+    locator = resolve_task_split_paths(repo_root, str(active_task_path), must_exist=False)
+    session_dir = locator.runtime_state_dir(task_key)
     session_id = str(os.getenv("WT_FLOW_SESSION_ID") or "").strip()
     if session_id:
         candidate = session_dir / f"active-session-{session_id}.json"
@@ -1541,7 +1510,7 @@ def build_active_task_state_dirty_whitelist(*, task_split_dir: str, task_key: st
         return []
 
     prefix = _normalize_dirty_prefix(
-        f"docs/内部参考/任务拆解/{normalized_split_dir}/.state/{normalized_task_key}"
+        f".artifacts/states/task_splits/{normalized_split_dir}/{normalized_task_key}"
     )
     return [prefix] if prefix else []
 

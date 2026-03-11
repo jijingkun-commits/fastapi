@@ -1,0 +1,1 @@
+请将 /Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/vk_cards.json 导入看板，project_id 来自 _active_task.json，按 card_order 串行执行。

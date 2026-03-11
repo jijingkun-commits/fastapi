@@ -49,7 +49,7 @@ docs/
 ```
 
 > 过程层的 canonical 根目录为仓库根的 `workdocs/`；运行态产物的 canonical 根目录为仓库根的 `.artifacts/`。  
-> 旧的 `docs/plans/`、`docs/内部参考/迭代需求/`、`docs/内部参考/任务拆解/` 当前仅保留迁移期兼容入口。
+> `docs/plans/`、`docs/内部参考/迭代需求/` 当前仍是迁移期旧过程路径；`task_split` 的 canonical 根目录已切到 `workdocs/任务拆解/`。
 
 ### 命名规范
 
@@ -67,7 +67,7 @@ docs/
 | 角色 | 范围 | 职责 |
 |---------|---------|---------|
 | `current_state` | `docs/产品文档/*.md`、`docs/开发文档/架构设计/*.md`、`docs/API文档/*.md`（`防屎山记录手册.md` 除外） | 只表达当前有效的产品/架构/API 口径 |
-| `process` | `docs/plans/*.md`、`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**`、`workdocs/**`、`docs/开发文档/测试管理/测试报告/**`、`docs/开发文档/架构设计/防屎山记录手册.md` | 承载设计推导、审批、计划、验收证据与历史问题 |
+| `process` | `docs/plans/*.md`、`docs/内部参考/迭代需求/**`、`workdocs/**`、`docs/开发文档/测试管理/测试报告/**`、`docs/开发文档/架构设计/防屎山记录手册.md` | 承载设计推导、审批、计划、验收证据与历史问题 |
 | `support` | `docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/**`（测试报告除外）、`docs/内部参考/AI技能库.md`、`docs/内部参考/决策记录.md`、`docs/内部参考/数据资料/**` 等说明类文档 | 负责索引、流程说明、长期内部知识与操作手册 |
 
 ### 主文档强制规则
@@ -77,7 +77,7 @@ docs/
 3. 设计推导、审批记录、实施拆解、测试证据只能写入 `docs/plans/` 或 `docs/内部参考/`，过程层永远不能反向替代主文档成为“当前口径”。
 4. 主文档头部必须维护 `> 更新时间：YYYY-MM-DD`，用于标识当前真相最近一次收敛时间。
 5. 主文档中的日期只允许作为当前契约的背景注记，不得形成独立变更日志章节。
-6. 过程文档与运行态产物必须分层：`workdocs/` 是 canonical 过程层，`.artifacts/` 是 canonical 运行态根；旧 `docs/**` 过程路径仅保留迁移期兼容入口。
+6. 过程文档与运行态产物必须分层：`workdocs/` 是 canonical 过程层，`.artifacts/` 是 canonical 运行态根；`task_split` 的 canonical 根目录固定为 `workdocs/任务拆解/`，`docs/内部参考/任务拆解/` 不再承载机器契约或过程 JSON。
 7. `docs/**` 禁止新增真实 `.state/` 目录、`.jsonl`、`.lock` 等运行态文件；命中存量债务时只允许通过受控 allowlist 短时放行，并保留 warning 可见性。
 8. 本规则由 `scripts/docs_guard.py` 与 `scripts/check_doc_sync.sh` 联合执行：本地 `check_doc_sync.sh` 默认告警不阻断，显式 `--strict` 与 CI 仍保持阻断语义。
 

@@ -2,8 +2,8 @@
 """校验 Gate 契约在三份产物中的一致性。
 
 校验目标：
-1) docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json
-2) docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md
+1) workdocs/任务拆解/<task_split_dir>/contracts/vk_cards.json
+2) workdocs/任务拆解/<task_split_dir>/parallel_plan.md
 3) implementation_plan（优先使用 vk_cards.source_files.implementation_plan）
 
 关键对齐项：
@@ -25,9 +25,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from task_split_paths import resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
 
 
 class ContractParseError(RuntimeError):
@@ -404,8 +404,9 @@ def _validate_gate_membership(contract: dict[str, Any], source_name: str) -> lis
 
 
 def run_check(task_split_dir: Path, repo_root: Path) -> dict[str, Any]:
-    vk_cards_path = task_split_dir / "vk_cards.json"
-    parallel_plan_path = task_split_dir / "parallel_plan.md"
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=True)
+    vk_cards_path = locator.vk_cards_file
+    parallel_plan_path = locator.parallel_plan_file
     if not vk_cards_path.exists():
         raise ContractParseError(f"缺少文件: {vk_cards_path}")
 

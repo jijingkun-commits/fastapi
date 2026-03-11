@@ -75,9 +75,9 @@ description: 并行拆解入口：消费 /jjk-plan 产物并生成可执行卡�
 
 必须生成：
 
-1. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`（自动生成的人类可读总览，非机器真理源）
-2. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
-3. `docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json`
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`（自动生成的人类可读总览，非机器真理源）
+2. `workdocs/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-*.md`
+3. `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/vk_cards.json`
 
 最小字段要求：
 
@@ -91,13 +91,13 @@ description: 并行拆解入口：消费 /jjk-plan 产物并生成可执行卡�
 ```bash
 python3 scripts/check_workflow_contract.py --mode plan_vk_coverage \
   --task-split-dir <YYYY-MM-DD_主题> \
-  --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/consumption_report.json
+  --output workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/consumption_report.json
 ```
 
 ```bash
 python3 scripts/check_workflow_contract.py --mode planning_temporal_gate \
   --task-split-dir <YYYY-MM-DD_主题> \
-  --output docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/temporal_gate_report.json
+  --output workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/temporal_gate_report.json
 ```
 
 通过标准：

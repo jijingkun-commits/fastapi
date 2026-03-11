@@ -26,11 +26,27 @@
 
 coder4 每轮执行前会读取并校验以下链路（缺一会阻断）：
 
-1. `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`（任务级作用域真理源）
-2. `docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json`
-3. `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`
-4. `docs/内部参考/任务拆解/<task_split_dir>/workstreams/WS-*.md`
+1. `workdocs/任务拆解/<task_split_dir>/contracts/_active_task.json`（任务级作用域真理源）
+2. `workdocs/任务拆解/<task_split_dir>/contracts/vk_cards.json`
+3. `workdocs/任务拆解/<task_split_dir>/parallel_plan.md`
+4. `workdocs/任务拆解/<task_split_dir>/workstreams/WS-*.md`
 5. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+
+### 2.2.1 Phase 2 分层图
+
+```mermaid
+flowchart LR
+    A[docs/] -->|稳定导航 / 治理文档| B[README + SUMMARY + 基线手册]
+    C[workdocs/任务拆解/<task_split_dir>] --> C1[contracts/_active_task.json]
+    C --> C2[contracts/vk_cards.json]
+    C --> C3[reports/*.json]
+    C --> C4[parallel_plan.md + workstreams]
+    D[.artifacts/states/task_splits/<task_split_dir>] --> D1[<task_key>/task-runner-state.json]
+    D --> D2[<task_key>/task-ledger.jsonl]
+    D --> D3[coder4_scope_request.json]
+    B -.不承载机器契约.-> C
+    C -.不承载真实运行态.-> D
+```
 
 ### 2.3 `bootstrap_kernel` 是什么
 
@@ -51,8 +67,8 @@ coder4 每轮执行前会读取并校验以下链路（缺一会阻断）：
 | 维度 | 结论 | 说明 |
 |---|---|---|
 | 模块边界 | 它是“轮次级调度内核”，不是业务实现器 | 负责判定与编排，不直接完成业务功能开发 |
-| 依赖方向 | 依赖 `_active_task.json`、`vk_cards.json`、运行态 state / VK 任务，再向下分派给 `wtimp` | 上游给它任务上下文，下游由它发起单卡执行 |
-| 状态归属 | 任务真理源在 `_active_task.json`；卡片契约在 `vk_cards.json`；运行态在 `.state/<task_key>/task-runner-state.json`；长期证据在 `task-ledger.jsonl` | 避免把“任务定义”“运行状态”“执行证据”混在一起 |
+| 依赖方向 | 依赖 `contracts/_active_task.json`、`contracts/vk_cards.json`、`.artifacts` 运行态 / VK 任务，再向下分派给 `wtimp` | 上游给它任务上下文，下游由它发起单卡执行 |
+| 状态归属 | 任务真理源在 `contracts/_active_task.json`；卡片契约在 `contracts/vk_cards.json`；运行态在 `.artifacts/states/task_splits/<task_split_dir>/<task_key>/task-runner-state.json`；长期证据在 `.artifacts/states/task_splits/<task_split_dir>/<task_key>/task-ledger.jsonl` | 避免把“任务定义”“运行状态”“执行证据”混在一起 |
 | 错误处理责任 | 它负责 fail-fast | 主仓 dirty、作用域冲突、依赖未满足、缺少 commit 证据、重复触发等都在这里阻断 |
 
 ### 2.5 `bootstrap_kernel` 的每轮决策图
@@ -96,9 +112,10 @@ flowchart TD
 
 ## 3. `_active_task.json` 是什么
 
-`_active_task.json` 采用任务级单一真理源：
+`contracts/_active_task.json` 采用任务级单一真理源：
 
-- 任务级真理源：`docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
+- 任务级真理源：`workdocs/任务拆解/<task_split_dir>/contracts/_active_task.json`
+- 根索引：`workdocs/任务拆解/_active_task.json`（只做默认入口指针，不是第二真理源）
 
 任务级文件用于保存每个任务的独立作用域，避免多任务互相覆盖。
 
@@ -123,10 +140,10 @@ python3 scripts/coder4/set_active_task.py \
 说明：
 
 - 推荐通过脚本更新，不建议手改 JSON。
-- 脚本会自动读取对应任务目录下的 `vk_cards.json`，同步 `task_key/execution_mode/preflight`。
+- 脚本会自动读取对应任务目录下的 `contracts/vk_cards.json`，同步 `task_key/execution_mode/preflight`。
 - 自动执行建议固定为 `--local-mode`，并默认关闭执行过程中的 VK 同步；需要回写看板时再显式运行 `scripts/coder4/coder4_vk_sync.py`。
 - `--local-mode` 与非 local-mode 都会读取 `status_source_of_truth` 作为 preflight 兜底判定（当 preflight 卡未落板或未在本地状态中出现时）。
-- `status_source_of_truth` 指向的 `preflight_status.json` 推荐使用标准字段：
+- `status_source_of_truth` 指向的 `workdocs/任务拆解/<task_split_dir>/reports/preflight_status.json` 推荐使用标准字段：
   - `preflight_required: "C00"`
   - `passed: true`
   - 可选 `task_key/evidence/updated_at`
@@ -139,9 +156,9 @@ python3 scripts/coder4/set_active_task.py \
 coder4 每一轮按固定顺序执行：
 
 1. 直接读取任务级 `_active_task.json`；缺失或字段不全 -> `BLOCKED_DOC_CONTEXT`。
-2. 读取 `vk_cards.json`，校验 `task_key` 一致性，失败 -> `BLOCKED_DOC_CONTEXT`。
+2. 读取 `contracts/vk_cards.json`，校验 `task_key` 一致性，失败 -> `BLOCKED_DOC_CONTEXT`。
 3. 构建当前轮的运行态上下文：
-   - `--local-mode`：读取 `docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/task-runner-state.json`
+   - `--local-mode`：读取 `.artifacts/states/task_splits/<task_split_dir>/<task_key>/task-runner-state.json`
    - 非 `--local-mode`：读取 project 看板任务，并按当前 `task_key` 拆分 `scoped_tasks / unscoped_tasks`
 4. 执行作用域门禁与前置门禁：
    - 主仓 clean-main gate：主仓 `git status --porcelain` 非空时直接阻断（`BLOCKED_MAIN_REPO_DIRTY`）。
@@ -278,7 +295,7 @@ coder4 每一轮按固定顺序执行：
 
 1. scope_guard action（`scope_switched|already_active|no_request`）
 2. 任务级 `_active_task.json` 的 `task_key / task_split_dir / project_id`
-3. 与当前 `vk_cards.json` 是否一致
+3. 与当前 `contracts/vk_cards.json` 是否一致
 
 ### Step D：开启自动执行（Bot 运维）
 
@@ -358,9 +375,9 @@ project_id：<VK_PROJECT_ID>
 请在 /Users/jijingkun/bojxAI/fastapi 执行以下任务并回报结果：
 1) 执行 /jjk-vktodo <task_split_dir> create（create-only）落卡到 project_id=<VK_PROJECT_ID>
 2) 严禁执行 /jjk-vktodo move/review/done，状态推进统一交给 /jjk-cardrun
-3) 写入 docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json：
+3) 写入 .artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json：
    {"task_split_dir":"<task_split_dir>","project_id":"<VK_PROJECT_ID>","requested_by":"operator","requested_at":"<now>","applied":false}
-4) 执行 python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json
+4) 执行 python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request .artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json
 5) 执行 /jjk-cardrun <task_split_dir> once（验证可启动）；持续执行使用 /jjk-cardrun <task_split_dir> loop
 6) 回报：
    - 当前 scoped 卡总数与非 done 数
@@ -392,9 +409,9 @@ project_id：<VK_PROJECT_ID>
 
 [执行步骤]
 1) 执行 /jjk-vktodo <task_split_dir> create（create-only 幂等建卡）
-2) 写入 docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json（task_split_dir/project_id/applied=false）
-3) 执行 python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json
-4) 校验任务级 `_active_task.json` 与 `vk_cards.json` 一致性（task_key/task_split_dir/project_id）
+2) 写入 .artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json（task_split_dir/project_id/applied=false）
+3) 执行 python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir <task_split_dir> --scope-request .artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json
+4) 校验任务级 `_active_task.json` 与 `contracts/vk_cards.json` 一致性（task_key/task_split_dir/project_id）
 5) 若 mode=start：执行 /jjk-cardrun <task_split_dir> loop；若 mode=stop：停止当前 loop/cron
 6) 调用 cron list（含 disabled）定位 coder4 job_id，并按 mode 更新 enabled
 7) 调用 cron runs 返回最近 5 次结果
@@ -418,7 +435,7 @@ project_id：<VK_PROJECT_ID>
 
 期望 Bot 内部动作：
 1) `/jjk-vktodo <task_split_dir> create`（create-only 落卡）
-2) 写入 `docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json`
+2) 写入 `.artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json`
 3) 执行 `python3 scripts/coder4/coder4_scope_guard.py ...`
 4) `/jjk-cardrun <task_split_dir> loop`
 5) `cron list` 找到 coder4 job，再 `cron update enabled=true`
