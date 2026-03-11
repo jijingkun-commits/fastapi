@@ -5,6 +5,7 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
+- 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
 - 2026-03-10｜文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）（ACTIVE）→ `docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 - 2026-03-10｜Assistant 空壳文本块在消息契约层清洗，禁止进入 checkpoint（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
@@ -20,6 +21,16 @@
 - 影响范围：所有 `bugfix/refactor` 任务、Lean Guard 热点文件治理、`/jjk-arch-gate` 与 `/jjk-refactor` 输出模板、后续瘦身证据口径
 - 回退/失效条件：若后续执行链改为脚本自动生成 shrink contract，或存在更高优先级治理文件统一承接同一 contract，可将本记录标记为 `SUPERSEDED`；在此之前保持启用
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
+
+### 2026-03-11 文档记忆常态运行默认异步入队
+- 状态：ACTIVE
+- 决策主题：当 `feature.enable_document_memory=true` 且 `memory_intent_runtime` Worker 已接通时，开发/日常交互环境默认保持 `memory.intent_async_enabled=true`，禁止让聊天主链继续同步执行记忆判定
+- 背景与问题：日志已证明一句“你好”也会先走 `memory_intent resolver`，把首包阻塞到 30+ 秒；当前项目未上线，应优先收敛主链职责，避免把可后置的记忆判定塞进用户可见响应路径
+- 最终决策：`chat_service` 主链在文档记忆启用场景默认走“只入队、不阻塞响应”；运维文档补充启用前提、缓存刷新与重启说明；若 Worker/观测链路未就绪，再显式回滚到同步模式
+- 取舍理由：记忆沉淀属于后台副作用，不属于首包回答职责；保持异步主链比继续靠模型切换或 prompt 微调追延迟更符合 feature-flag/后台任务最佳实践，也更容易验证与回滚
+- 影响范围：`memory.intent_async_enabled` 配置口径、`app/core/memory_intent_runtime.py` 启停、`app/services/chat_service.py` 主链表现、运维排障与验证手册
+- 回退/失效条件：若 Worker 未启动、`t_user_memory_intent_job` 持续堆积、删除/更新链路出现一致性问题，可临时回滚为 `memory.intent_async_enabled=false`；待独立 worker 进程替代 lifespan worker 时再重评默认值
+- 关联文档/代码：`docs/开发文档/快速入门/配置说明.md`、`docs/产品文档/聊天系统需求.md`、`app/core/memory_intent_runtime.py`、`app/services/chat_service.py`
 
 ### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治
 - 状态：ACTIVE
