@@ -332,8 +332,8 @@ class FigCodeInput(BaseModel):
 def fig_inter(py_code: str, fname: str, config: RunnableConfig) -> str:
     """
     **重要**：函数返回 JSON 格式结果，包含 'image_url' 字段。
-    你 **必须** 在最终回复中，使用 Markdown 图片语法 `![生成的图表](image_url)` 将该图片展示出来。
-    不要只说"图表已生成"，一定要把图片显示出来。
+    系统会通过结构化 `result(image)` 事件自动展示图片；最终回复里**不要重复输出** Markdown 图片。
+    你可以简短解释图表结论，但不要再写 `![生成的图表](image_url)` 这类重复图片引用。
 
     注意：
     1. 所有绘图代码必须创建一个图像对象，并将其赋值为指定变量名（例如 `fig`）。

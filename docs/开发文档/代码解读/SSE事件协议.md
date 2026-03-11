@@ -32,6 +32,8 @@ data: <json_payload>
 | `done` | 生命周期收口（`thread_id/message_id/final_content?`） | 否 |
 | `error` | 错误收口 | 否 |
 
+> 前端渲染约束：`image/chart/table/todo_list/sql_result` 等结构化产物必须以 `result` / `additional_kwargs.result_events[]` 为单一展示 owner，禁止再把同一产物复制进正文做第二份渲染。
+
 ---
 
 ## 2. 契约源与过渡文档策略
