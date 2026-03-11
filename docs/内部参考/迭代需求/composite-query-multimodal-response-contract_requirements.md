@@ -225,48 +225,48 @@ traceability_matrix:
     feature_id: P1-result-contract-source
     task_id: T-01
     tc_id: TC-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-02
     fr_id: FR-02
     feature_id: P1-frontend-parser-and-registry
     task_id: T-02
     tc_id: TC-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --filter web test -- --runInBand
+    acceptance_cmd_ref: pnpm --filter web test -- --runInBand
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-03
     fr_id: FR-03
     feature_id: P1-replay-canonical-migration
     task_id: T-03
     tc_id: TC-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-04
     fr_id: FR-04
     feature_id: P1-contract-ci-gates
     task_id: T-05
     tc_id: TC-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/contract/check_result_contract.sh
+    acceptance_cmd_ref: bash scripts/contract/check_result_contract.sh
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-05
     fr_id: FR-05
     feature_id: P1-result-contract-source
     task_id: T-01
     tc_id: TC-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-06
     fr_id: FR-06
     feature_id: P1-frontend-parser-and-registry
     task_id: T-02
     tc_id: TC-06
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --filter web test -- --runInBand
+    acceptance_cmd_ref: pnpm --filter web test -- --runInBand
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
   - design_item: D-07
     fr_id: FR-07
     feature_id: P1-streaming-contract-docs
     task_id: T-04
     tc_id: TC-07
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict
+    acceptance_cmd_ref: 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     evidence_entry: docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md
 ```

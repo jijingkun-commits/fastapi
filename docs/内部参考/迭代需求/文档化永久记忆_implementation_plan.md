@@ -461,7 +461,7 @@ planning_contract:
         - two-table schema migrated
         - repo contract tests green
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_schema.py tests/unit/test_document_memory_repo.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_schema.py tests/unit/test_document_memory_repo.py"
       evidence_entry: "schema and repo tests"
 
     - card_id: C02
@@ -471,7 +471,7 @@ planning_contract:
       done_gate:
         - ingest and dedupe stable
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_ingest.py tests/unit/test_document_memory_dedupe.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_ingest.py tests/unit/test_document_memory_dedupe.py"
       evidence_entry: "ingest and dedupe tests"
 
     - card_id: C03
@@ -481,7 +481,7 @@ planning_contract:
       done_gate:
         - search and get available
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_document_memory_get.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_document_memory_get.py"
       evidence_entry: "search and get tests"
 
     - card_id: C04
@@ -491,7 +491,7 @@ planning_contract:
       done_gate:
         - chat injection budget and fallback validated
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory.py tests/unit/test_document_memory_flags.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory.py tests/unit/test_document_memory_flags.py"
       evidence_entry: "chat integration tests"
 
     - card_id: C05
@@ -501,7 +501,7 @@ planning_contract:
       done_gate:
         - KV compatibility migration completed
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_document_memory_migration.py"
+        - "venv/bin/python -m pytest -q tests/integration/test_document_memory_migration.py"
       evidence_entry: "migration compatibility tests"
 
     - card_id: C06
@@ -511,7 +511,7 @@ planning_contract:
       done_gate:
         - rollout and rollback drills completed
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_flags.py tests/unit/test_chat_service_document_memory.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_flags.py tests/unit/test_chat_service_document_memory.py"
       evidence_entry: "rollout drill report"
 
     - card_id: G01
@@ -521,7 +521,7 @@ planning_contract:
       done_gate:
         - user isolation checks pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py -k isolation"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py -k isolation"
       evidence_entry: "isolation gate report"
 
     - card_id: G02
@@ -531,7 +531,7 @@ planning_contract:
       done_gate:
         - fallback behavior pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory.py -k fallback"
+        - "venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory.py -k fallback"
       evidence_entry: "fallback gate report"
 
     - card_id: G03
@@ -541,7 +541,7 @@ planning_contract:
       done_gate:
         - index quality and budget checks pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_chat_service_document_memory.py -k budget"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_chat_service_document_memory.py -k budget"
       evidence_entry: "quality gate report"
 
     - card_id: G04
@@ -551,7 +551,7 @@ planning_contract:
       done_gate:
         - docs and index guard pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+        - "python3 scripts/docs_guard.py --strict"
       evidence_entry: "docs guard report"
 ```
 

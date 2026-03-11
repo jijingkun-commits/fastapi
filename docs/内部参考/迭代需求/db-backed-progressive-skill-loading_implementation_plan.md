@@ -35,7 +35,7 @@ implementation_tasks:
       - MultiAgentState.skill_catalog_context
       - preprocess.skill_catalog_preload
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
+      - PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
 
   - task_id: T-02
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
@@ -57,7 +57,7 @@ implementation_tasks:
       - SkillService.validate_visible_skill_ids
       - ToolMessage.load_skills_result
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
+      - PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
 
   - task_id: T-03
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
@@ -81,7 +81,7 @@ implementation_tasks:
       - build_skill_runtime_additional_kwargs_payload
       - skill_context(deprecated_compat)
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
+      - PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
 
   - task_id: T-04
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[3]
@@ -103,8 +103,8 @@ implementation_tasks:
       - SkillService.resolve_runtime_mode
       - runtime_mode_switch_guard
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      - PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
+      - python3 scripts/docs_guard.py --strict
 
   - task_id: T-05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -131,7 +131,7 @@ implementation_tasks:
       - SkillService.build_catalog_descriptor
       - metadata_truth_source_guard
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
+      - PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
 
   - task_id: T-06
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[5]
@@ -159,8 +159,8 @@ implementation_tasks:
       - test_catalog_metadata_truth_source
       - test_skill_runtime_read_old_write_new
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      - PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
+      - python3 scripts/docs_guard.py --strict
 ```
 
 ## 3. task_to_pr_mapping（机读）
@@ -174,7 +174,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 基础：runtime catalog 与状态壳落地"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
+        - PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
       rollback_point: SKILL_RUNTIME_MODE=hybrid_rag
     - task_id: T-02
       pr_id: PR-01
@@ -182,7 +182,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 基础：load_skills 固定工具与可见性校验"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
+        - PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
       rollback_point: ENABLE_PROGRESSIVE_SKILL_LOADING=false
     - task_id: T-03
       pr_id: PR-01
@@ -190,7 +190,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 基础：session/replay canonical 收敛"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
+        - PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
       rollback_point: ENABLE_SKILL_RUNTIME_TRACE=false
     - task_id: T-04
       pr_id: PR-01
@@ -198,8 +198,8 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 基础：runtime mode 开关与接口文档同步"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+        - PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
+        - python3 scripts/docs_guard.py --strict
       rollback_point: feature.enable_progressive_skill_loading=false
     - task_id: T-05
       pr_id: PR-01
@@ -207,7 +207,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 基础：catalog metadata 真理源与管理面收敛"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
+        - PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
       rollback_point: ENABLE_SKILL_CATALOG_METADATA_NORMALIZATION=false
     - task_id: T-06
       pr_id: PR-01
@@ -215,8 +215,8 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "Phase A 收口：专项测试、文档与规划门禁通过"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/db-backed-progressive-skill-loading_requirements.md --implementation-path docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md --output -
+        - PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/db-backed-progressive-skill-loading_requirements.md --implementation-path docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md --output -
       rollback_point: 回退本次新增测试与文档并恢复 design 基线
   execution_mode: core
   strict_single_active_card: true

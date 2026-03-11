@@ -319,8 +319,9 @@ Expected: PASS.
 
 **Step 4: Run final collection/build sanity check**
 Run:
-```bash
-PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" -m pytest -q tests/unit/test_repo_python_script.py tests/unit/test_pytest_targeted_script.py
+```text
+1. `bash scripts/repo_python.sh`
+2. `<PYTHON_BIN> -m pytest -q tests/unit/test_repo_python_script.py tests/unit/test_pytest_targeted_script.py`
 ```
 Expected: PASS.
 

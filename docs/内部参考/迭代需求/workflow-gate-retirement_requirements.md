@@ -213,7 +213,7 @@ traceability_matrix:
     feature_id: P0-freeze-governance
     task_id: P0-FREEZE-COMMANDS
     tc_id: TC-WG-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+    acceptance_cmd_ref: rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-02 统一门禁入口
@@ -221,7 +221,7 @@ traceability_matrix:
     feature_id: P1-unified-entry
     task_id: P1-UNIFIED-ENTRY
     tc_id: TC-WG-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-03 L1 wrapper 兼容壳
@@ -229,7 +229,7 @@ traceability_matrix:
     feature_id: P1-legacy-wrapper
     task_id: P1-WRAPPER-L1
     tc_id: TC-WG-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-04 引用迁移收敛
@@ -237,7 +237,7 @@ traceability_matrix:
     feature_id: P1-reference-migration
     task_id: P1-REFERENCE-MIGRATION
     tc_id: TC-WG-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+    acceptance_cmd_ref: rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-05 调用观测判定
@@ -245,7 +245,7 @@ traceability_matrix:
     feature_id: P2-usage-observability
     task_id: P2-OBSERVABILITY
     tc_id: TC-WG-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-06 TTL归档边界
@@ -253,7 +253,7 @@ traceability_matrix:
     feature_id: P2-ttl-archive
     task_id: P2-TTL-ARCHIVE
     tc_id: TC-WG-06
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
   - design_item: D-07 删除旧实现并验收
@@ -261,7 +261,7 @@ traceability_matrix:
     feature_id: P3-retire-legacy
     task_id: P3-RETIRE-LEGACY
     tc_id: TC-WG-07
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
     evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 ```
 

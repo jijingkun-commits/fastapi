@@ -198,7 +198,7 @@ traceability_matrix:
     feature_id: P2-01
     task_id: T-04
     tc_id: TC-MSC-002
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
     evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
   - design_item: D-03 ActiveRunsRecovery
@@ -206,7 +206,7 @@ traceability_matrix:
     feature_id: P2-02
     task_id: T-05
     tc_id: TC-MSC-003
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
     evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
   - design_item: D-04 ParallelLimit
@@ -214,7 +214,7 @@ traceability_matrix:
     feature_id: P2-03
     task_id: T-07
     tc_id: TC-MSC-005
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
     evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
   - design_item: D-05 StallWarning
@@ -230,7 +230,7 @@ traceability_matrix:
     feature_id: P3-01
     task_id: T-08
     tc_id: TC-MSC-010
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k observability -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k observability -q
     evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 ```
 

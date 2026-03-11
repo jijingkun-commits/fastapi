@@ -124,7 +124,7 @@
   failure_semantics: 解析失败即阻断交付；禁止通过放宽版本范围继续推进
   observability_fields: [langgraph_version, langchain_version, resolver_python]
   rollback_anchor: ENABLE_LANGGRAPH_1_0_10=true
-  acceptance_cmd_ref: VK_RUNTIME_VENV=/Users/jijingkun/bojxAI/fastapi/venv bash scripts/repo_python.sh && <python> -m pip install --dry-run 'langchain==1.0.8' 'langgraph==1.0.10' 'langchain-openai==1.0.3' 'langgraph-checkpoint-postgres>=2.0.0'
+  acceptance_cmd_ref: 先执行 `VK_RUNTIME_VENV=/Users/jijingkun/bojxAI/fastapi/venv bash scripts/repo_python.sh` 获取解释器，再执行 `<python> -m pip install --dry-run 'langchain==1.0.8' 'langgraph==1.0.10' 'langchain-openai==1.0.3' 'langgraph-checkpoint-postgres>=2.0.0'`
 - design_item: D-02
   fr_id: FR-LG-02
   trigger: 系统构建 `supervisor` 或 `knowledge_agent`
@@ -341,7 +341,7 @@ clarify_handoff_contract:
         failure_semantics: 解析失败即阻断交付；禁止通过放宽版本范围继续推进
         observability_fields: [langgraph_version, langchain_version, resolver_python]
         rollback_anchor: ENABLE_LANGGRAPH_1_0_10=true
-        acceptance_cmd_ref: VK_RUNTIME_VENV=/Users/jijingkun/bojxAI/fastapi/venv bash scripts/repo_python.sh && <python> -m pip install --dry-run 'langchain==1.0.8' 'langgraph==1.0.10' 'langchain-openai==1.0.3' 'langgraph-checkpoint-postgres>=2.0.0'
+        acceptance_cmd_ref: 先执行 `VK_RUNTIME_VENV=/Users/jijingkun/bojxAI/fastapi/venv bash scripts/repo_python.sh` 获取解释器，再执行 `<python> -m pip install --dry-run 'langchain==1.0.8' 'langgraph==1.0.10' 'langchain-openai==1.0.3' 'langgraph-checkpoint-postgres>=2.0.0'`
       - design_item: D-02
         fr_id: FR-LG-02
         trigger: 系统构建 supervisor 或 knowledge_agent

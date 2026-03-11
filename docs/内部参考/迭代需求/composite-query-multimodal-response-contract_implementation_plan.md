@@ -39,7 +39,7 @@ implementation_tasks:
       - envelope_backfill
       - sse_retry_and_heartbeat
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+      - bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
 
   - task_id: T-02
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
@@ -66,7 +66,7 @@ implementation_tasks:
       - resultEventsAccumulator
       - dedupByEventId
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --filter web test -- --runInBand
+      - pnpm --filter web test -- --runInBand
 
   - task_id: T-03
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
@@ -88,7 +88,7 @@ implementation_tasks:
       - compat_source
       - sequence_number_sort
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
+      - bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
 
   - task_id: T-04
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[3]
@@ -112,7 +112,7 @@ implementation_tasks:
       - last_event_id_resume
       - payload_budget_rules
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
 
   - task_id: T-05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -139,9 +139,9 @@ implementation_tasks:
       - sse_resume_dedup_test
       - redaction_whitelist_test
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/contract/check_result_contract.sh
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_requirements.md --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json
+      - bash scripts/contract/check_result_contract.sh
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_requirements.md --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json`
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json`
 ```
 
 ## 3. task_to_pr_mapping（机读）
@@ -155,7 +155,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P1 核心契约源：result union、envelope 与可靠性字段"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
+        - bash scripts/pytest_targeted.sh tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_service_turn_slice.py -q
       rollback_point: ENABLE_RESULT_TYPED_EVENT_V1=false
     - task_id: T-02
       pr_id: PR-02
@@ -163,7 +163,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P2 前端 parser、registry 与 fallback 可见化"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --filter web test -- --runInBand
+        - pnpm --filter web test -- --runInBand
       rollback_point: ENABLE_RESULT_RENDER_REGISTRY_V1=false
     - task_id: T-03
       pr_id: PR-03
@@ -171,7 +171,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P2 回放 canonical 迁移与 result_events[] 保序"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
+        - bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_coverage_reconcile.py -q
       rollback_point: ENABLE_RESULT_REPLAY_CANONICAL_V1=false
     - task_id: T-04
       pr_id: PR-04
@@ -179,7 +179,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P2 流式契约文档收敛与版本口径统一"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict
+        - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
       rollback_point: 回退 docs 变更并恢复 design_source 口径
     - task_id: T-05
       pr_id: PR-05
@@ -187,9 +187,9 @@ planning_contract:
       pr_depends_on: [PR-02, PR-03, PR-04]
       pr_subject: "P3 契约 CI 门禁与重连/脱敏/多结果测试补齐"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/contract/check_result_contract.sh
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_requirements.md --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json
+        - bash scripts/contract/check_result_contract.sh
+        - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_requirements.md --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json`
+        - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md --output docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json`
       rollback_point: ENABLE_RESULT_SCHEMA_GATE_CI=false
   execution_mode: parallel
   strict_single_active_card: false

@@ -251,7 +251,7 @@ traceability_matrix:
     feature_id: F1-main-doc-current-state
     task_id: T01
     tc_id: TC-DSG-01
-    acceptance_cmd_ref: PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+    acceptance_cmd_ref: 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     evidence_entry: docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md
 
   - design_item: D-02-history-layer-isolation
@@ -259,7 +259,7 @@ traceability_matrix:
     feature_id: F2-history-layer-isolation
     task_id: T02
     tc_id: TC-DSG-02
-    acceptance_cmd_ref: PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+    acceptance_cmd_ref: 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     evidence_entry: docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md
 
   - design_item: D-03-touch-once-merge
@@ -275,7 +275,7 @@ traceability_matrix:
     feature_id: F4-role-based-guard
     task_id: T02
     tc_id: TC-DSG-06
-    acceptance_cmd_ref: PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+    acceptance_cmd_ref: 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     evidence_entry: docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md
 
   - design_item: D-05-timestamp-and-traceability
@@ -307,6 +307,6 @@ traceability_matrix:
     feature_id: F8-plan-alignment-gate
     task_id: T06
     tc_id: TC-DSG-07
-    acceptance_cmd_ref: PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json
+    acceptance_cmd_ref: 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json`
     evidence_entry: docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md
 ```

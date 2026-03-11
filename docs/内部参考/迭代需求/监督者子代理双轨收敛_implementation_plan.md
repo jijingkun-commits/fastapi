@@ -24,10 +24,10 @@
 
 | feature_id | 目标 | 代码锚点 | 验证命令 | 回滚锚点 |
 |---|---|---|---|---|
-| P1-01 | Planner 默认 single-call（json_object） | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py -q` | `PLANNER_DISABLE_TOOL_CALL=false` |
-| P1-02 | json_object 失败即 heuristic（默认不走 text_parse） | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q` | `PLANNER_DISABLE_TEXT_PARSE=false` |
-| P1-03 | A1 缺口路由（仅专家目标缺失可收口） | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q` | `ENABLE_COVERAGE_GATE_ENFORCED=false` |
-| P1-04 | 保留 supervisor 直答摘要并入交付物 | `app/ai/workflow/multi_agent_graph.py` `app/ai/prompts/agent_prompts.py` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q` | 回退 prompt 复合问题规则 |
+| P1-01 | Planner 默认 single-call（json_object） | `app/ai/workflow/multi_agent_graph.py` | `PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py -q` | `PLANNER_DISABLE_TOOL_CALL=false` |
+| P1-02 | json_object 失败即 heuristic（默认不走 text_parse） | `app/ai/workflow/multi_agent_graph.py` | `PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q` | `PLANNER_DISABLE_TEXT_PARSE=false` |
+| P1-03 | A1 缺口路由（仅专家目标缺失可收口） | `app/ai/workflow/multi_agent_graph.py` | `PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q` | `ENABLE_COVERAGE_GATE_ENFORCED=false` |
+| P1-04 | 保留 supervisor 直答摘要并入交付物 | `app/ai/workflow/multi_agent_graph.py` `app/ai/prompts/agent_prompts.py` | `PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q` | 回退 prompt 复合问题规则 |
 
 ## 3. implementation_tasks
 
@@ -45,7 +45,7 @@ implementation_tasks:
       - _infer_model_intent_plan_via_tool_call
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
     rollback_point: tool_call default disable rollback
 
   - task_id: T-02
@@ -60,7 +60,7 @@ implementation_tasks:
       - _infer_model_intent_plan_by_strategy
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
     rollback_point: text_parse default disable rollback
 
   - task_id: T-03
@@ -76,7 +76,7 @@ implementation_tasks:
       - MultiAgentState
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: coverage partial gap policy rollback
 
   - task_id: T-04
@@ -92,7 +92,7 @@ implementation_tasks:
       - SUPERVISOR_PROMPT
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: supervisor excerpt deliverable rollback
 ```
 
@@ -106,7 +106,7 @@ task_to_pr_mapping:
     pr_subject: Planner 默认 single-call 收敛
     pr_depends_on: []
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
     rollback_point: tool_call default disable rollback
 
   - task_id: T-02
@@ -115,7 +115,7 @@ task_to_pr_mapping:
     pr_subject: json_object 失败直 heuristic
     pr_depends_on: []
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
     rollback_point: text_parse default disable rollback
 
   - task_id: T-03
@@ -124,7 +124,7 @@ task_to_pr_mapping:
     pr_subject: A1 缺口路由与 composer 收敛
     pr_depends_on: [PR-01]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: coverage partial gap policy rollback
 
   - task_id: T-04
@@ -133,7 +133,7 @@ task_to_pr_mapping:
     pr_subject: supervisor 直答摘要入交付物
     pr_depends_on: [PR-01]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: supervisor excerpt deliverable rollback
 ```
 
@@ -152,7 +152,7 @@ planning_contract:
       done_gate:
         - planner single-call enabled
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
+        - PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md
 
     - card_id: C02
@@ -164,7 +164,7 @@ planning_contract:
         - A1 partial-gap route enabled
         - supervisor excerpt captured
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md
 
     - card_id: G01
@@ -175,7 +175,7 @@ planning_contract:
       done_gate:
         - targeted tests all green
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py tests/unit/test_multi_intent_queue_flow.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者子代理双轨收敛_implementation_plan.md
 ```
 
@@ -200,7 +200,7 @@ pr_ready_manifest:
       - tests/unit/test_planner_strategy_router.py
       - tests/unit/test_planner_tool_call_primary.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_strategy_router.py tests/unit/test_planner_tool_call_primary.py -q
     rollback_point: tool_call default disable rollback
 
   - task_id: T-02
@@ -211,7 +211,7 @@ pr_ready_manifest:
       - tests/unit/test_planner_json_object_fallback.py
       - tests/unit/test_planner_text_parse_fallback.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
+      - PYTHONPATH=. pytest tests/unit/test_planner_json_object_fallback.py tests/unit/test_planner_text_parse_fallback.py -q
     rollback_point: text_parse default disable rollback
 
   - task_id: T-03
@@ -222,7 +222,7 @@ pr_ready_manifest:
       - app/ai/state.py
       - tests/unit/test_multi_intent_queue_flow.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: coverage partial gap policy rollback
 
   - task_id: T-04
@@ -233,6 +233,6 @@ pr_ready_manifest:
       - app/ai/prompts/agent_prompts.py
       - tests/unit/test_multi_intent_queue_flow.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: supervisor excerpt deliverable rollback
 ```

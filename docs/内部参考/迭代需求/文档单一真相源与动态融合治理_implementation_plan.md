@@ -52,7 +52,7 @@ implementation_tasks:
       - touch_once_merge_policy
     acceptance_cmds:
       - rg -n "主文档|当前态|触达即融合|增量需求" .cursor/rules/doc_sync.mdc docs/开发文档/工作流/开发工作流.md
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
 
   - task_id: T02
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
@@ -73,7 +73,7 @@ implementation_tasks:
       - doc_role_manifest
       - legacy_allowlist
     acceptance_cmds:
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
 
   - task_id: T03
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
@@ -120,7 +120,7 @@ implementation_tasks:
     acceptance_cmds:
       - rg -n "增量需求|实现进展" docs/产品文档/聊天系统需求.md docs/产品文档/管理后台需求.md docs/开发文档/架构设计/AI模块设计.md
       - rg -n 更新时间： docs/产品文档 docs/开发文档/架构设计 docs/API文档 --glob \*.md
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
 
   - task_id: T05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -161,8 +161,8 @@ implementation_tasks:
       - clarify_plan_alignment
       - planning_temporal_gate
     acceptance_cmds:
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_planning_temporal_gate.json
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json`
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_planning_temporal_gate.json`
 ```
 
 ## 3. task_to_pr_mapping（机读）
@@ -184,7 +184,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "文档治理核心规则、门禁与主文档融合收口"
     acceptance_cmds:
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     rollback_point: 回退 docs_guard 角色识别与 current_state 检查
 
   - task_id: T03
@@ -202,7 +202,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "文档治理核心规则、门禁与主文档融合收口"
     acceptance_cmds:
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/docs_guard.py --strict
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/docs_guard.py --strict`
     rollback_point: 回退三份主文档融合改写与 SUMMARY 更新
 
   - task_id: T05
@@ -220,8 +220,8 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "文档治理核心规则、门禁与主文档融合收口"
     acceptance_cmds:
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json
-      - PYTHON_BIN=$(bash scripts/repo_python.sh) && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_planning_temporal_gate.json
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_requirements.md --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_clarify_plan_alignment.json`
+      - 先执行 `bash scripts/repo_python.sh` 获取解释器，再执行 `<PYTHON_BIN> scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/文档单一真相源与动态融合治理_implementation_plan.md --output docs/内部参考/迭代需求/文档单一真相源与动态融合治理_planning_temporal_gate.json`
     rollback_point: 删除 planning 对齐与 temporal gate 报告
 ```
 

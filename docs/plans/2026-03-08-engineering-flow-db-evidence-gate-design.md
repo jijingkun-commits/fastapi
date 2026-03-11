@@ -134,7 +134,7 @@ implementation_tasks:
       - kind: chat_db
         cmd: "bash scripts/pytest_targeted.sh app/tests/test_todo_db_integration.py -q"
       - kind: scripted_flow
-        cmd: "PYTHONPATH=. $(bash scripts/repo_python.sh) tests/verify_todo_db_persistence.py"
+        cmd: "先执行 `bash scripts/repo_python.sh` 获取解释器，再以 `PYTHONPATH=.` 运行 `tests/verify_todo_db_persistence.py`"
 ```
 
 ### 6.2 vk_cards.json 扩展字段

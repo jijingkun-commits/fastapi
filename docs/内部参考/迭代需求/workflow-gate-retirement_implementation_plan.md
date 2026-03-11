@@ -56,7 +56,7 @@ implementation_tasks:
       - NO_GO_SECTION
       - phase_plan_table
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+      - rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
   - task_id: P1-UNIFIED-ENTRY
@@ -76,7 +76,7 @@ implementation_tasks:
       - run_mode
       - main
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+      - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
   - task_id: P1-WRAPPER-L1
@@ -101,7 +101,7 @@ implementation_tasks:
       - main
       - parse_args
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+      - python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
     rollback_point: WORKFLOW_GATE_DEPRECATION_ENFORCED=false
 
   - task_id: P1-REFERENCE-MIGRATION
@@ -122,7 +122,7 @@ implementation_tasks:
       - primary_entry
       - deprecation_notice
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+      - rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
     rollback_point: WORKFLOW_GATE_DEPRECATION_ENFORCED=false
 
   - task_id: P2-OBSERVABILITY
@@ -142,7 +142,7 @@ implementation_tasks:
       - usage_record_schema_v1
       - aggregate_usage_window
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
+      - python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
   - task_id: P2-TTL-ARCHIVE
@@ -162,7 +162,7 @@ implementation_tasks:
       - should_archive_entry
       - archive_audit_report
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+      - python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
     rollback_point: WORKFLOW_ARTIFACT_TTL_CLEANUP_ENABLED=false
 
   - task_id: P3-RETIRE-LEGACY
@@ -184,7 +184,7 @@ implementation_tasks:
       - deprecation_wrapper
       - retirement_guard
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+      - python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
     rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 ```
 
@@ -214,7 +214,7 @@ planning_contract:
         - NO-GO 删除口径冻结完成
         - 团队停用 rm scripts/check_*.py
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+        - rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C02
@@ -227,7 +227,7 @@ planning_contract:
         - check_workflow_contract 统一入口可执行
         - clarify_plan 模式输出等价结果
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C03
@@ -240,7 +240,7 @@ planning_contract:
         - 4 个 L1 旧脚本改为 wrapper
         - 旧命令参数兼容且退出码透传
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+        - python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C04
@@ -253,7 +253,7 @@ planning_contract:
         - 命令 技能 文档引用完成迁移
         - 不再直接依赖旧实现脚本
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+        - rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C05
@@ -266,7 +266,7 @@ planning_contract:
         - workflow-gate-usage 日志开始落盘
         - 支持 legacy 调用聚合判定
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
+        - python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C06
@@ -279,7 +279,7 @@ planning_contract:
         - TTL 归档仅作用于 done/archived
         - 活跃任务与真理源文件零误伤
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+        - python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: C07
@@ -292,7 +292,7 @@ planning_contract:
         - 旧实现删除或收敛为极薄兼容壳
         - 删除后 pre-merge 收口门禁通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+        - python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
       evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
 
     - card_id: G01
@@ -305,9 +305,9 @@ planning_contract:
         - clarify->plan->vkplan 三段契约全绿
         - integration_gate 主干可见性校验通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir 2026-03-06_工程减法治理 --output -
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+        - python3 scripts/check_workflow_contract.py --mode plan_vk_coverage --task-split-dir 2026-03-06_工程减法治理 --output -
+        - python3 scripts/check_workflow_contract.py --mode integration_gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
       evidence_entry: docs/内部参考/任务拆解/2026-03-06_工程减法治理/consumption_report.json
 
   task_to_pr_mapping:
@@ -317,7 +317,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P0冻结口径 + P1统一入口骨架"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+        - rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P1-UNIFIED-ENTRY
@@ -326,7 +326,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P0冻结口径 + P1统一入口骨架"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P1-WRAPPER-L1
@@ -335,7 +335,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P1 wrapper兼容与引用迁移"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+        - python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
       rollback_point: WORKFLOW_GATE_DEPRECATION_ENFORCED=false
 
     - task_id: P1-REFERENCE-MIGRATION
@@ -344,7 +344,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P1 wrapper兼容与引用迁移"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+        - rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
       rollback_point: WORKFLOW_GATE_DEPRECATION_ENFORCED=false
 
     - task_id: P2-OBSERVABILITY
@@ -353,7 +353,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "P2调用观测与TTL归档"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
+        - python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 
     - task_id: P2-TTL-ARCHIVE
@@ -362,7 +362,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "P2调用观测与TTL归档"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+        - python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
       rollback_point: WORKFLOW_ARTIFACT_TTL_CLEANUP_ENABLED=false
 
     - task_id: P3-RETIRE-LEGACY
@@ -371,7 +371,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02, PR-03]
       pr_subject: "P3删除旧实现与全量验收"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+        - python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
       rollback_point: WORKFLOW_GATE_UNIFIED_ENABLED=false
 ```
 
@@ -382,31 +382,31 @@ tc_task_mapping:
   - tc_id: TC-WG-01
     task_id: P0-FREEZE-COMMANDS
     pr_id: PR-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
+    acceptance_cmd_ref: rg -n "NO-GO|rm scripts/check_\\*\\.py" docs/内部参考/工程减法体检报告_2026-03-06.md docs/内部参考/工程减法体检报告_2026-03-06_v3.md
   - tc_id: TC-WG-02
     task_id: P1-UNIFIED-ENTRY
     pr_id: PR-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/workflow-gate-retirement_requirements.md --implementation-path docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md --output -
   - tc_id: TC-WG-03
     task_id: P1-WRAPPER-L1
     pr_id: PR-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode legacy_wrapper_compat --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --output -
   - tc_id: TC-WG-04
     task_id: P1-REFERENCE-MIGRATION
     pr_id: PR-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
+    acceptance_cmd_ref: rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
   - tc_id: TC-WG-05
     task_id: P2-OBSERVABILITY
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json
   - tc_id: TC-WG-06
     task_id: P2-TTL-ARCHIVE
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir docs/内部参考/任务拆解 --ttl-days 14 --output -
   - tc_id: TC-WG-07
     task_id: P3-RETIRE-LEGACY
     pr_id: PR-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
+    acceptance_cmd_ref: python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir docs/内部参考/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
 ```
 
 ## 5. execution_contract（机读）

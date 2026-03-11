@@ -58,6 +58,8 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 
 ### 0) 上下文与洁净校验（必做）
 
+补充执行约束：执行命令时统一遵循 `.cursor/rules/core.mdc` 的“命令执行拆分”规则：单步单目标、失败只重跑当前步、长任务只轮询不重启、输出截断时优先拆短当前步。
+
 每轮先执行并记录：
 
 ```bash

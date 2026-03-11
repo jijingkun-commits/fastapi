@@ -102,7 +102,7 @@
 4. 关键字段：`intent_mode`、`control_flags`、`semantic_payload`。
 5. 回滚锚点：`ENABLE_INTENT_LAYERING=false`。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py`
 7. 来源证据：
    - OpenClaw 控制面强调命令授权与普通对话解耦：`../bot/openclaw/src/auto-reply/command-detection.ts`
 8. 最小代码样例：
@@ -127,7 +127,7 @@ return run_semantic_planner(state)
 4. 关键字段：`intent_plan.source`、`goal.confidence`、`planner_error`。
 5. 回滚锚点：`INTENT_MODE=heuristic_only`。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_plan_model_primary.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_intent_plan_model_primary.py`
 7. 来源证据：
    - OpenClaw 主路径由 `session.prompt(...)` 驱动 agent loop：`../bot/openclaw/docs/pi.md`、`../bot/openclaw/src/agents/pi-embedded-runner/run/attempt.ts`
 8. 最小代码样例：
@@ -152,7 +152,7 @@ return normalize_intent_plan(plan, source="model_primary")
 4. 关键字段：`fallback_reason`、`fallback_rule_id`、`intent_plan.source=heuristic_fallback`。
 5. 回滚锚点：`ENABLE_INTENT_FALLBACK_GATE=false`（退回旧行为）。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_fallback_gate.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_intent_fallback_gate.py`
 7. 来源证据：
    - 当前误判根因在关键词泛化命中：`app/ai/workflow/multi_agent_graph.py`
 8. 最小代码样例：
@@ -176,7 +176,7 @@ return planner_plan
 4. 关键字段：`handoff_execution_trace`、`deliverables`、`coverage_report`。
 5. 回滚锚点：`ENABLE_COVERAGE_RECONCILE=false`。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py`
 7. 来源证据：
    - OpenClaw 强调执行循环与生命周期事件作为真实执行依据：`../bot/openclaw/docs/concepts/agent-loop.md`
 8. 最小代码样例：
@@ -202,7 +202,7 @@ return coverage
 4. 关键字段：`goal_count_initial`、`goal_count_confirmed`、`missing_goal_count`。
 5. 回滚锚点：`ENABLE_SSE_INTENT_GOAL_STATUS_V2=false`。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py`
+   - `venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py`
 7. 来源证据：
    - 当前展示口径直接取 goals 长度，容易提前放大误判：`app/ai/workflow/multi_agent_graph.py`
 8. 最小代码样例：
@@ -228,7 +228,7 @@ emit_coverage_check(writer, coverage, meta={"goal_count_confirmed": coverage.cov
    - `INTENT_MODE=heuristic_only`
    - `ENABLE_INTENT_SHADOW_COMPARE=false`
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py`
+   - `venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py`
 7. 来源证据：
    - OpenClaw 队列/控制策略与语义执行分离，便于独立观测与收敛：`../bot/openclaw/docs/concepts/queue.md`
 8. 最小代码样例：
@@ -342,7 +342,7 @@ planning_contract:
         - intent layer boundary tests green
         - model primary planner tests green
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py tests/unit/test_intent_plan_model_primary.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py tests/unit/test_intent_plan_model_primary.py"
       evidence_entry: "intent layering + model primary planner test logs"
 
     - card_id: C02
@@ -352,7 +352,7 @@ planning_contract:
       done_gate:
         - fallback gate enabled and explainable
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_fallback_gate.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_intent_fallback_gate.py"
       evidence_entry: "fallback reason/rule id assertion logs"
 
     - card_id: C03
@@ -363,7 +363,7 @@ planning_contract:
         - coverage reconcile tests green
         - missing goals recovery path verified
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py"
       evidence_entry: "coverage report reconciliation logs"
 
     - card_id: C04
@@ -373,7 +373,7 @@ planning_contract:
       done_gate:
         - sse goal status compatibility tests green
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py"
+        - "venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py"
       evidence_entry: "sse schema compatibility test logs"
 
     - card_id: C05
@@ -384,7 +384,7 @@ planning_contract:
         - shadow metrics tests green
         - rollback switch validated
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"
+        - "venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"
       evidence_entry: "shadow compare metrics report"
 
     - card_id: G01
@@ -395,7 +395,7 @@ planning_contract:
         - docs index updated
         - docs guard strict pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+        - "python3 scripts/docs_guard.py --strict"
       evidence_entry: "docs_guard strict output"
 
     - card_id: G02
@@ -406,7 +406,7 @@ planning_contract:
         - shadow window metrics within threshold
         - rollback drill completed
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"
+        - "venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"
       evidence_entry: "gray rollout metrics and rollback drill record"
 ```
 
@@ -437,12 +437,12 @@ flowchart LR
 
 | feature_id | card_id | 目标摘要 | 代码锚点 | 验证命令 |
 |---|---|---|---|---|
-| P2-01 | C06 | 引入 planner 策略路由器与能力判定 | `app/ai/workflow/multi_agent_graph.py` `app/ai/llm_util.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` |
-| P2-02 | C06 | Tool Calling 作为结构化主路径 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` |
-| P2-03 | C07 | json_object 作为二级路径 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` |
-| P2-04 | C07 | text_parse 作为三级路径并做 schema 校验 | `app/ai/workflow/multi_agent_graph.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` |
-| P2-05 | C08 | fallback reason_code 标准化与观测字段统一 | `app/ai/workflow/multi_agent_graph.py` `app/services/chat_service.py` | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` |
-| P2-06 | G03 | 文档、契约、索引门禁收口 | `docs/开发文档/架构设计/AI模块设计.md` `docs/开发文档/架构设计/防屎山记录手册.md` | `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict` |
+| P2-01 | C06 | 引入 planner 策略路由器与能力判定 | `app/ai/workflow/multi_agent_graph.py` `app/ai/llm_util.py` | `venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` |
+| P2-02 | C06 | Tool Calling 作为结构化主路径 | `app/ai/workflow/multi_agent_graph.py` | `venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` |
+| P2-03 | C07 | json_object 作为二级路径 | `app/ai/workflow/multi_agent_graph.py` | `venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` |
+| P2-04 | C07 | text_parse 作为三级路径并做 schema 校验 | `app/ai/workflow/multi_agent_graph.py` | `venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` |
+| P2-05 | C08 | fallback reason_code 标准化与观测字段统一 | `app/ai/workflow/multi_agent_graph.py` `app/services/chat_service.py` | `venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` |
+| P2-06 | G03 | 文档、契约、索引门禁收口 | `docs/开发文档/架构设计/AI模块设计.md` `docs/开发文档/架构设计/防屎山记录手册.md` | `python3 scripts/docs_guard.py --strict` |
 
 ### 12.3 工单级任务包（implementation_tasks）
 
@@ -459,7 +459,7 @@ implementation_tasks:
       - fallback reason_code contract
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      - python3 scripts/docs_guard.py --strict
     rollback_point: revert D+B doc section commit
 
   - task_id: T-10
@@ -473,7 +473,7 @@ implementation_tasks:
       - planner strategy router
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py
+      - venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py
     rollback_point: PLANNER_STRUCTURED_STRATEGY=legacy_json_object
 
   - task_id: T-11
@@ -485,7 +485,7 @@ implementation_tasks:
       - _infer_model_intent_plan_via_tool_call
     change_type: add
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py
+      - venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py
     rollback_point: PLANNER_DISABLE_TOOL_CALL=true
 
   - task_id: T-12
@@ -497,7 +497,7 @@ implementation_tasks:
       - _infer_model_intent_plan_via_json_object
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py
+      - venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py
     rollback_point: PLANNER_DISABLE_JSON_OBJECT=true
 
   - task_id: T-13
@@ -510,7 +510,7 @@ implementation_tasks:
       - _IntentPlanModel
     change_type: add
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py
+      - venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py
     rollback_point: PLANNER_DISABLE_TEXT_PARSE=true
 
   - task_id: T-14
@@ -524,7 +524,7 @@ implementation_tasks:
       - planner_reason_code
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py
+      - venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py
     rollback_point: PLANNER_REASON_CODE_VERBOSE=false
 ```
 
@@ -556,8 +556,8 @@ planning_contract:
         - strategy router pass
         - tool call primary pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py"
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"
       evidence_entry: "2026-03-01: planner_strategy_router + planner_tool_call_primary pytest 回归通过"
 
     - card_id: C07
@@ -570,8 +570,8 @@ planning_contract:
         - json_object fallback pass
         - text_parse fallback pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py"
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"
       evidence_entry: "2026-03-01: planner_json_object_fallback + planner_text_parse_fallback pytest 回归通过"
 
     - card_id: C08
@@ -583,7 +583,7 @@ planning_contract:
       done_gate:
         - reason_code normalization pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"
       evidence_entry: "2026-03-01: planner_reason_codes pytest 回归通过"
 
     - card_id: G03
@@ -595,7 +595,7 @@ planning_contract:
       done_gate:
         - docs sync and guard pass
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"
+        - "python3 scripts/docs_guard.py --strict"
       evidence_entry: "2026-03-01: docs/SUMMARY.md 补齐模板索引后 docs_guard --strict 通过"
 ```
 
@@ -612,12 +612,12 @@ implementation_readiness:
 
 | 卡片 | 验收命令 | 结果 |
 | --- | --- | --- |
-| C06 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` | PASS |
-| C06 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` | PASS |
-| C07 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` | PASS |
-| C07 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` | PASS |
-| C08 | `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` | PASS |
-| G03 | `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict` | PASS |
+| C06 | `venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py` | PASS |
+| C06 | `venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py` | PASS |
+| C07 | `venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py` | PASS |
+| C07 | `venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py` | PASS |
+| C08 | `venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py` | PASS |
+| G03 | `python3 scripts/docs_guard.py --strict` | PASS |
 
 ### 12.7 看板落卡与状态对账（2026-03-01）
 
