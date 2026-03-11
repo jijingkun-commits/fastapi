@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from task_split_paths import CANONICAL_TASK_SPLIT_BASE, LEGACY_TASK_SPLIT_BASE, resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -307,7 +308,8 @@ def _validate_vkplan_db_evidence_contract(*, repo_root: Path, task_split_dir: Pa
     tasks = _parse_implementation_tasks_contract(implementation_path)
     tasks_by_id = {str(task.get("task_id") or "").upper(): task for task in tasks if task.get("task_id")}
 
-    vk_cards_path = task_split_dir / "vk_cards.json"
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=True)
+    vk_cards_path = locator.vk_cards_file
     vk_cards_payload = _load_json_object(vk_cards_path)
     cards = vk_cards_payload.get("cards") or []
 
@@ -748,7 +750,7 @@ def _run_integration_gate(passthrough_args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="IG01 集成门禁校验")
     parser.add_argument("--task-split-dir", required=True, help="任务拆解目录名或绝对路径")
     parser.add_argument("--baseline", default="master", help="主干基线分支（默认 master）")
-    parser.add_argument("--state-dir", default=str(module.DEFAULT_STATE_DIR), help="状态目录（默认 <task_split_dir>/.state）")
+    parser.add_argument("--state-dir", default=str(module.DEFAULT_STATE_DIR), help="状态目录（默认 .artifacts/states/task_splits/<task_split_dir>）")
     parser.add_argument("--repo-root", default=str(module.ROOT), help="仓库根目录")
     parser.add_argument("--output", default="", help="可选输出 JSON 文件路径，'-' 表示打印 JSON")
     args = parser.parse_args(list(passthrough_args))
@@ -811,13 +813,9 @@ def _resolve_integration_state_dir(*, repo_root: Path, task_split_dir: Path, raw
     if state_dir.is_absolute():
         return state_dir.resolve()
 
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=False)
     if str(raw_state_dir).strip() in {".state", "./.state", ""}:
-        common_repo_root = _detect_common_repo_root(repo_root)
-        try:
-            task_split_relative = task_split_dir.resolve().relative_to(repo_root.resolve())
-        except ValueError:
-            return (task_split_dir / ".state").resolve()
-        return (common_repo_root / task_split_relative / ".state").resolve()
+        return locator.runtime_task_split_dir.resolve()
 
     return (repo_root / state_dir).resolve()
 
@@ -826,21 +824,25 @@ def _resolve_task_split_dir_arg(repo_root: Path, raw_value: str) -> Path:
     raw = str(raw_value or "").strip()
     if not raw:
         raise SystemExit("缺少 --task-split-dir")
+
     direct = Path(raw).expanduser()
-    candidates: list[Path] = []
-    if direct.is_absolute():
-        candidates.append(direct)
-    else:
-        candidates.extend([(repo_root / raw), (repo_root / "docs/内部参考/任务拆解" / raw)])
+    canonical_root = (repo_root / CANONICAL_TASK_SPLIT_BASE).resolve()
+    legacy_root = (repo_root / LEGACY_TASK_SPLIT_BASE).resolve()
+    candidates = [direct] if direct.is_absolute() else [(repo_root / raw), (canonical_root / raw), (legacy_root / raw)]
     for candidate in candidates:
-        if candidate.exists() and candidate.is_dir():
-            return candidate.resolve()
-    joined = " | ".join(str(path) for path in candidates)
-    raise SystemExit(f"无法定位 task_split_dir: {raw}; candidates={joined}")
+        candidate = candidate.resolve()
+        if candidate.exists() and candidate.is_dir() and candidate in {canonical_root, legacy_root}:
+            return canonical_root
+
+    try:
+        return resolve_task_split_paths(repo_root, raw, must_exist=True).canonical_task_split_dir
+    except FileNotFoundError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _load_task_source_files(task_split_dir: Path) -> dict[str, Any]:
-    cards_path = task_split_dir / "vk_cards.json"
+    locator = resolve_task_split_paths(ROOT, task_split_dir.name, must_exist=False)
+    cards_path = locator.vk_cards_file
     payload = json.loads(cards_path.read_text(encoding="utf-8"))
     source_files = payload.get("source_files") or {}
     if not isinstance(source_files, dict):
@@ -1010,7 +1012,7 @@ def archive_audit_report(task_split_root: Path, ttl_days: int) -> dict[str, Any]
     candidates = 0
     protected = 0
     for task_dir in sorted(task_dirs):
-        state_root = task_dir / ".state"
+        state_root = (ROOT / ".artifacts" / "states" / "task_splits" / task_dir.name)
         if not state_root.exists():
             continue
         task_entries: list[dict[str, Any]] = []
@@ -1091,8 +1093,9 @@ def check_temporal_gate_contract(task_split_dir: Path | None, repo_root: Path, i
 
     if task_split_dir is not None:
         task_split_dir = task_split_dir.resolve()
-        files_to_scan.append((task_split_dir / "parallel_plan.md").resolve())
-        files_to_scan.append((task_split_dir / "vk_cards.json").resolve())
+        locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=False)
+        files_to_scan.append(locator.parallel_plan_file.resolve())
+        files_to_scan.append(locator.vk_cards_file.resolve())
         source_files = _load_task_source_files(task_split_dir)
         impl_candidate = _resolve_optional_repo_file(repo_root, source_files.get("implementation_plan"))
         if impl_candidate is not None:

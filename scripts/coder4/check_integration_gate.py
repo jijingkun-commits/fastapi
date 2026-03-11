@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from task_split_paths import resolve_task_split_paths
 
 def detect_repo_root(start: Path) -> Path:
     resolved = start.resolve()
@@ -20,7 +21,6 @@ def detect_repo_root(start: Path) -> Path:
 
 
 ROOT = detect_repo_root(Path(__file__))
-TASK_SPLIT_BASE = Path("docs/内部参考/任务拆解")
 DEFAULT_STATE_DIR = Path(".state")
 
 
@@ -174,7 +174,8 @@ def run_check(
     state_dir: Path,
     baseline: str,
 ) -> dict[str, Any]:
-    vk_cards_path = task_split_dir / "vk_cards.json"
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=True)
+    vk_cards_path = locator.vk_cards_file
     if not vk_cards_path.exists():
         raise IntegrationGateError(f"缺少文件: {vk_cards_path}")
     vk_cards = load_json(vk_cards_path)
@@ -288,7 +289,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="IG01 集成门禁校验")
     parser.add_argument("--task-split-dir", required=True, help="任务拆解目录名或绝对路径")
     parser.add_argument("--baseline", default="master", help="主干基线分支（默认 master）")
-    parser.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR), help="状态目录（默认 <task_split_dir>/.state）")
+    parser.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR), help="状态目录（默认 .artifacts/states/task_splits/<task_split_dir>）")
     parser.add_argument("--repo-root", default=str(ROOT), help="仓库根目录")
     parser.add_argument("--output", default="", help="可选输出 JSON 文件路径，'-' 表示打印 JSON")
     args = parser.parse_args()
@@ -300,7 +301,8 @@ def main() -> int:
         if state_dir.is_absolute():
             resolved_state_dir = state_dir.resolve()
         elif args.state_dir in {".state", "./.state"}:
-            resolved_state_dir = (task_split_dir / ".state").resolve()
+            locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=True)
+            resolved_state_dir = locator.runtime_task_split_dir.resolve()
         else:
             resolved_state_dir = (repo_root / state_dir).resolve()
         result = run_check(

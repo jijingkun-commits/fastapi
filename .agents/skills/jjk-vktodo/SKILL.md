@@ -18,14 +18,14 @@ description: "Use when you need `jjk-vktodo` in this repository. Source intent: 
 ## 输入前置（强制）
 
 1. `task_split_dir` 必须可解析且目录存在：
-   - `docs/内部参考/任务拆解/<task_split_dir>/vk_cards.json`
-   - `docs/内部参考/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览）
+   - `workdocs/任务拆解/<task_split_dir>/contracts/vk_cards.json`
+   - `workdocs/任务拆解/<task_split_dir>/parallel_plan.md`（可选；自动生成总览）
 2. `vk_cards.json` 必须可解析且包含：
    - `task_key`
    - `cards[]`
 3. `project_id` 必须可确定：
    - 优先显式参数 `project`；
-   - 否则读取 `docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`。
+   - 否则读取 `workdocs/任务拆解/<task_split_dir>/contracts/_active_task.json`。
 4. 若无法解析 `project_id`，`FAIL_FAST` 输出 `VKTODO_MISSING_PROJECT_ID`。
 5. 若 `vk_cards.json` 结构非法，`FAIL_FAST` 输出 `VKTODO_INPUT_INVALID`。
 6. 若调用参数包含 `action!=create`，`FAIL_FAST` 输出 `VKTODO_ACTION_NOT_ALLOWED`。

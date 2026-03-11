@@ -64,6 +64,34 @@ WT_FLOW_SESSION_LOCK_DIRNAME=".session-state.lock"
 WT_FLOW_SESSION_STATE_FILE_RESULT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 GIT_DELIVERY_ENGINE_SCRIPT="${SCRIPT_DIR}/git-delivery-engine.sh"
+WT_FLOW_PYTHON_BIN=""
+
+_wt_python_bin() {
+  if [[ -n "$WT_FLOW_PYTHON_BIN" && -x "$WT_FLOW_PYTHON_BIN" ]]; then
+    echo "$WT_FLOW_PYTHON_BIN"
+    return 0
+  fi
+  WT_FLOW_PYTHON_BIN="$(bash "${REPO_ROOT}/scripts/repo_python.sh")"
+  echo "$WT_FLOW_PYTHON_BIN"
+}
+
+_task_split_locator_json() {
+  local raw_value="$1"
+  local task_key="${2:-}"
+  local python_bin
+  python_bin="$(_wt_python_bin)"
+  if [[ -n "$task_key" ]]; then
+    "$python_bin" "${REPO_ROOT}/scripts/task_split_paths.py" locate --repo-root "${REPO_ROOT}" --task-split-dir "$raw_value" --task-key "$task_key" --output -
+    return $?
+  fi
+  "$python_bin" "${REPO_ROOT}/scripts/task_split_paths.py" locate --repo-root "${REPO_ROOT}" --task-split-dir "$raw_value" --output -
+}
+
+_list_active_task_files() {
+  local python_bin
+  python_bin="$(_wt_python_bin)"
+  "$python_bin" "${REPO_ROOT}/scripts/task_split_paths.py" list-active-tasks --repo-root "${REPO_ROOT}" --output - | jq -r '.active_task_files[]?'
+}
 
 # --- 工具函数 ---
 
@@ -118,21 +146,13 @@ _sanitize_task_key_segment() {
 
 _resolve_task_split_file_from_hint() {
   local raw_hint="$1"
-  local normalized_hint candidate
+  local normalized_hint locator_json candidate
   normalized_hint="$(_trim_spaces "$raw_hint")"
   [[ -n "$normalized_hint" ]] || return 1
 
-  if [[ "$normalized_hint" == /* ]]; then
-    candidate="$normalized_hint"
-  elif [[ "$normalized_hint" == *_active_task.json ]]; then
-    candidate="${REPO_ROOT}/${normalized_hint}"
-  elif [[ "$normalized_hint" == docs/内部参考/任务拆解/* ]]; then
-    candidate="${REPO_ROOT}/${normalized_hint}/_active_task.json"
-  else
-    candidate="${REPO_ROOT}/docs/内部参考/任务拆解/${normalized_hint}/_active_task.json"
-  fi
-
-  [[ -f "$candidate" ]] || return 1
+  locator_json="$(_task_split_locator_json "$normalized_hint" 2>/dev/null || true)"
+  candidate="$(printf '%s' "$locator_json" | jq -r '.active_task_file // empty' 2>/dev/null || true)"
+  [[ -n "$candidate" && -f "$candidate" ]] || return 1
   echo "$candidate"
 }
 
@@ -230,25 +250,28 @@ _persist_integration_branch() {
 
 _active_task_file() {
   local explicit_file="${WT_FLOW_ACTIVE_TASK_FILE:-$ACTIVE_TASK_FILE}"
-  if [[ -n "$explicit_file" && -f "$explicit_file" ]]; then
-    echo "$explicit_file"
+  local candidate branch_task_key preview
+  local candidates=()
+
+  if [[ -n "$explicit_file" ]]; then
+    candidate="$(_resolve_task_split_file_from_hint "$explicit_file" || true)"
+    [[ -n "$candidate" ]] || _die "未找到任务级 _active_task.json: ${explicit_file}"
+    echo "$candidate"
     return 0
   fi
 
   local split_dir="${WT_FLOW_TASK_SPLIT_DIR:-}"
-  local split_candidate=""
   if [[ -n "$split_dir" ]]; then
-    split_candidate="$(_resolve_task_split_file_from_hint "$split_dir" || true)"
-    [[ -n "$split_candidate" ]] || _die "未找到任务级 _active_task.json: ${split_dir}"
-    echo "$split_candidate"
+    candidate="$(_resolve_task_split_file_from_hint "$split_dir" || true)"
+    [[ -n "$candidate" ]] || _die "未找到任务级 _active_task.json: ${split_dir}"
+    echo "$candidate"
     return 0
   fi
 
-  local candidate
-  local candidates=()
-  while IFS= read -r -d '' candidate; do
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
     candidates+=("$candidate")
-  done < <(find "${REPO_ROOT}/docs/内部参考/任务拆解" -mindepth 2 -maxdepth 2 -type f -name "_active_task.json" -print0 2>/dev/null)
+  done < <(_list_active_task_files)
 
   if [[ "${#candidates[@]}" -eq 1 ]]; then
     echo "${candidates[0]}"
@@ -256,7 +279,6 @@ _active_task_file() {
   fi
 
   if [[ "${#candidates[@]}" -gt 1 ]]; then
-    local branch_task_key preview
     local matched=()
     branch_task_key="$(_current_branch_task_key_hint)"
     if [[ -n "$branch_task_key" ]]; then
@@ -274,7 +296,8 @@ _active_task_file() {
       fi
     fi
 
-    preview="$(printf '%s\n' "${candidates[@]}" | head -n 5 | paste -sd '; ' -)"
+    preview="$(printf '%s
+' "${candidates[@]}" | head -n 5 | paste -sd '; ' -)"
     _die "检测到多个任务级 _active_task.json（${#candidates[@]} 个），请显式设置 WT_FLOW_ACTIVE_TASK_FILE 或 WT_FLOW_TASK_SPLIT_DIR；候选: ${preview}"
   fi
 
@@ -306,7 +329,7 @@ _active_task_split_dir() {
     return 0
   fi
 
-  echo "$(basename "$(dirname "$active_file")")"
+  echo "$(basename "$(dirname "$(dirname "$active_file")")")"
 }
 
 _task_state_root() {
@@ -481,7 +504,7 @@ _active_task_state_dirty_prefix() {
   [[ -n "$split_dir" ]] || return 0
   [[ -n "$task_key" ]] || return 0
 
-  _normalize_dirty_prefix "docs/内部参考/任务拆解/${split_dir}/.state/${task_key}" || true
+  _normalize_dirty_prefix ".artifacts/states/task_splits/${split_dir}/${task_key}" || true
 }
 
 _dirty_whitelist_csv() {
@@ -593,17 +616,13 @@ _normalize_status() {
 }
 
 _default_state_dir() {
-  local split_dir
+  local split_dir locator_json state_dir
   split_dir="$(_active_task_split_dir)"
   if [[ -n "$split_dir" ]]; then
-    echo "${COMMON_ROOT}/docs/内部参考/任务拆解/${split_dir}/.state"
-    return 0
-  fi
-
-  local active_file
-  active_file="$(_active_task_file)"
-  if [[ -n "$active_file" ]]; then
-    echo "$(dirname "$active_file")/.state"
+    locator_json="$(_task_split_locator_json "$split_dir" 2>/dev/null || true)"
+    state_dir="$(printf '%s' "$locator_json" | jq -r '.runtime_task_split_dir // empty' 2>/dev/null || true)"
+    [[ -n "$state_dir" ]] || _die "无法解析任务级 state 目录: ${split_dir}"
+    echo "$state_dir"
     return 0
   fi
 
@@ -643,25 +662,12 @@ _state_status_value() {
 }
 
 _resolve_cards_file() {
-  local active_file
+  local active_file locator_json cards_file
   active_file="$(_active_task_file)"
   [[ -f "$active_file" ]] || _die "active task 文件不存在: ${active_file}"
 
-  local task_split_dir task_key cards_file
-  task_split_dir="$(jq -r '.task_split_dir // empty' "$active_file")"
-  task_key="$(jq -r '.task_key // empty' "$active_file")"
-
-  cards_file=""
-  if [[ -n "$task_split_dir" ]]; then
-    cards_file="${REPO_ROOT}/docs/内部参考/任务拆解/${task_split_dir}/vk_cards.json"
-  fi
-
-  if [[ -z "$cards_file" || ! -f "$cards_file" ]]; then
-    if [[ -n "$task_key" ]]; then
-      cards_file="${REPO_ROOT}/docs/内部参考/任务拆解/${task_key}/vk_cards.json"
-    fi
-  fi
-
+  locator_json="$(_task_split_locator_json "$active_file" 2>/dev/null || true)"
+  cards_file="$(printf '%s' "$locator_json" | jq -r '.vk_cards_file // empty' 2>/dev/null || true)"
   [[ -f "$cards_file" ]] || _die "无法定位 vk_cards.json，请检查 ${active_file} 的 task_split_dir/task_key"
   echo "$cards_file"
 }

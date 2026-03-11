@@ -1,6 +1,0 @@
-# VK 导入提示（PP-20260228-INTENT-DECOMPOSITION-DB）
-
-1. 使用 `/Users/jijingkun/bojxAI/fastapi/docs/内部参考/任务拆解/2026-02-28_意图目标分解治理/vk_cards.json` 作为唯一导入源。
-2. 确保项目作用域 project_id=`2ea99dca-a111-43bb-ae73-f836bafe0fb0`。
-3. 按 `card_order` 串行推进，不要并发开启多张实现卡。
-4. `C00` 为 preflight 卡，不默认创建到看板。

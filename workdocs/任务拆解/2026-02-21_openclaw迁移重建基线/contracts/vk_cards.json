@@ -1,0 +1,789 @@
+{
+  "task_key": "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+  "task_split_dir": "2026-02-21_openclaw迁移重建基线",
+  "plan_title": "OpenClaw迁移重建基线（串行拆解）",
+  "generated_at": "2026-02-21",
+  "execution_mode": "serial",
+  "single_active_card": true,
+  "auto_done_policy": {
+    "implementation-card": "hard_gate",
+    "inspection/question-card": "policy_gate"
+  },
+  "automation_contract": {
+    "source_of_truth": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/_active_task.json",
+    "required_fields": [
+      "project_id",
+      "task_split_dir",
+      "task_key",
+      "execution_mode",
+      "single_active_card",
+      "auto_done_policy",
+      "preflight_required"
+    ],
+    "scope_match_rule": [
+      "title_contains_[task_key]",
+      "labels_contains_task_key",
+      "card_key_prefix_task_key"
+    ]
+  },
+  "card_order": [
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "G01",
+    "G02",
+    "G03",
+    "G04"
+  ],
+  "preflight": {
+    "card_id": "C00",
+    "feature_ids": [
+      "C00-01"
+    ],
+    "required_done_gate": [
+      "四风险修订口径固化完成",
+      "取消接口统一为 POST /api/v1/chat/runs/{run_id}/cancel",
+      "t_chat_run 草案、SSE 语义、锚点清单三项冻结完成",
+      "python3 scripts/docs_guard.py --strict 通过"
+    ],
+    "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md"
+  },
+  "source_files": {
+    "requirements": "docs/内部参考/迭代需求/openclaw迁移重建基线_requirements.md",
+    "implementation_plan": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+    "parallel_plan": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
+    "workstreams": [
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C01_P1_运行时可取消控制.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C02_P2_工具治理一期.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md",
+      "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md"
+    ]
+  },
+  "validation": {
+    "fail_fast_required_fields": {
+      "required": [
+        "feature_ids",
+        "mechanism_summary",
+        "code_anchor_refs",
+        "acceptance_checks",
+        "rollback_anchors",
+        "evidence_entry",
+        "task_mode",
+        "merge_required"
+      ],
+      "status": "PASS",
+      "missing_by_card": {}
+    },
+    "coverage": {
+      "forward": {
+        "status": "PASS",
+        "detail": "10/10 cards contain >=1 feature_id"
+      },
+      "reverse": {
+        "status": "PASS",
+        "detail": "14/14 features mapped exactly once"
+      },
+      "orphan": {
+        "status": "PASS",
+        "detail": []
+      },
+      "duplicate": {
+        "status": "PASS",
+        "detail": []
+      }
+    }
+  },
+  "cards": [
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C01",
+      "card_id": "C01",
+      "title": "C01 P1 运行时可取消控制 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-backend-runtime"
+      ],
+      "hard_depends_on": [],
+      "soft_depends_on": [],
+      "depends_on": [],
+      "feature_ids": [
+        "P1-01",
+        "P1-02",
+        "P1-03",
+        "P1-04",
+        "P1-05"
+      ],
+      "mechanism_summary": [
+        "run 状态模型、取消控制面与 run_id 全链路接线",
+        "取消后阻断 token 回灌并 drain 队列",
+        "统一 cancel API 并新增 SSE stopped 兼容事件",
+        "补齐 active_run 恢复与 orphan 清理"
+      ],
+      "code_anchor_refs": [
+        "app/services/chat_service.py::stream",
+        "app/services/chat_service.py::sse_stream",
+        "app/services/chat_service.py::sse_resume_stream",
+        "app/api/v1/endpoints/chat_api.py::chat_stream",
+        "app/api/v1/endpoints/chat_api.py::resume_stream",
+        "app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper",
+        "app/ai/events.py::EventType",
+        "app/schemas/chat.py::ChatRequest"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_run_control_service.py",
+        "PYTHONPATH=. pytest tests/unit/test_chat_service_cancel_stream.py",
+        "PYTHONPATH=. pytest tests/unit/test_chat_service_resume_after_cancel.py",
+        "PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel"
+      ],
+      "rollback_anchors": [
+        "ENABLE_RUN_CONTROL",
+        "ENABLE_SSE_STOPPED_EVENT"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.2",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/models/chat_run.py",
+        "app/services/run_control_service.py",
+        "app/services/chat_service.py",
+        "app/api/v1/endpoints/chat_api.py",
+        "app/ai/workflow/multi_agent_graph.py",
+        "app/ai/events.py",
+        "app/schemas/chat.py",
+        "tests/api/test_chat_api.py",
+        "tests/unit/test_run_control_service.py",
+        "tests/unit/test_chat_service_cancel_stream.py",
+        "tests/unit/test_chat_service_resume_after_cancel.py"
+      ],
+      "done_gate": [
+        "P1-01~P1-05 验收命令全部通过",
+        "cancel_after_token_count=0",
+        "多用户并发取消隔离回归通过",
+        "done/stopped/interrupt 终态互斥与顺序语义回归通过",
+        "ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过"
+      ],
+      "dod": [
+        "P1-01~P1-05 验收命令全部通过",
+        "cancel_after_token_count=0",
+        "多用户并发取消隔离回归通过",
+        "done/stopped/interrupt 终态互斥与顺序语义回归通过",
+        "ENABLE_RUN_CONTROL 与 ENABLE_SSE_STOPPED_EVENT 回滚验证通过"
+      ],
+      "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_run_control_service.py",
+        "PYTHONPATH=. pytest tests/unit/test_chat_service_cancel_stream.py",
+        "PYTHONPATH=. pytest tests/unit/test_chat_service_resume_after_cancel.py",
+        "PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C01_P1_运行时可取消控制.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C02",
+      "card_id": "C02",
+      "title": "C02 P2 工具治理一期 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-backend-governance"
+      ],
+      "hard_depends_on": [
+        "C01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01"
+      ],
+      "feature_ids": [
+        "P2-01"
+      ],
+      "mechanism_summary": [
+        "引入 Tool Registry/Policy/Broker 首期治理链路",
+        "按 task_mode/requires_evidence 分层启用证据门禁",
+        "settings 与 DB 策略覆盖一致生效"
+      ],
+      "code_anchor_refs": [
+        "app/ai/workflow/multi_agent_graph.py::_get_common_tools",
+        "app/ai/workflow/multi_agent_graph.py::_get_supervisor_tools",
+        "app/services/config_resolver.py::ConfigResolver",
+        "app/core/config_contract.py::CONFIG_SPECS"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py"
+      ],
+      "rollback_anchors": [
+        "ENABLE_TOOL_GOVERNANCE",
+        "TOOL_POLICY_FAIL_MODE"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.7",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/workflow/multi_agent_graph.py",
+        "app/services/config_resolver.py",
+        "app/core/config_contract.py",
+        "app/ai/tools",
+        "tests/unit/test_multi_agent_streaming_helpers.py"
+      ],
+      "done_gate": [
+        "Tool Registry/Policy/Broker 接线通过",
+        "ENABLE_TOOL_GOVERNANCE 与 TOOL_POLICY_FAIL_MODE 回滚验证通过"
+      ],
+      "dod": [
+        "Tool Registry/Policy/Broker 接线通过",
+        "ENABLE_TOOL_GOVERNANCE 与 TOOL_POLICY_FAIL_MODE 回滚验证通过"
+      ],
+      "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C02_P2_工具治理一期.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C03",
+      "card_id": "C03",
+      "title": "C03 P3 Skill 多用户版本治理 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-backend-skill"
+      ],
+      "hard_depends_on": [
+        "C02"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C02"
+      ],
+      "feature_ids": [
+        "P3-01"
+      ],
+      "mechanism_summary": [
+        "Skill 定义、版本、用户绑定三层解耦",
+        "支持用户级绑定、生效与回滚",
+        "避免跨用户污染"
+      ],
+      "code_anchor_refs": [
+        "app/models/agent_skill.py::AgentSkill",
+        "app/services/skill_service.py::search_skills",
+        "app/api/v1/endpoints/skill_admin_api.py::list_skills"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_skill_service.py -k \"version or binding\"",
+        "PYTHONPATH=. pytest tests/api/test_skill_admin_api.py -k \"binding or rollback\""
+      ],
+      "rollback_anchors": [
+        "ENABLE_SKILL_VERSIONING",
+        "ENABLE_USER_SKILL_BINDING"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.8",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/models/agent_skill.py",
+        "app/services/skill_service.py",
+        "app/api/v1/endpoints/skill_admin_api.py",
+        "tests/unit/test_skill_service.py",
+        "tests/api/test_skill_admin_api.py"
+      ],
+      "done_gate": [
+        "Skill 版本发布/回滚/用户绑定回归通过",
+        "多用户并发绑定与检索隔离回归通过",
+        "ENABLE_SKILL_VERSIONING 与 ENABLE_USER_SKILL_BINDING 回滚验证通过"
+      ],
+      "dod": [
+        "Skill 版本发布/回滚/用户绑定回归通过",
+        "多用户并发绑定与检索隔离回归通过",
+        "ENABLE_SKILL_VERSIONING 与 ENABLE_USER_SKILL_BINDING 回滚验证通过"
+      ],
+      "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_skill_service.py -k \"version or binding\"",
+        "PYTHONPATH=. pytest tests/api/test_skill_admin_api.py -k \"binding or rollback\""
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C03_P3_Skill多用户版本治理.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C04",
+      "card_id": "C04",
+      "title": "C04 P4 记忆检索增强 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-backend-memory"
+      ],
+      "hard_depends_on": [
+        "C03"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C03"
+      ],
+      "feature_ids": [
+        "P4-01"
+      ],
+      "mechanism_summary": [
+        "Hybrid recall + pre-compaction flush 记忆闭环（分阶段）",
+        "C04a: recall MVP（先打通用户隔离与召回接线）",
+        "C04b: pre-compaction flush（在 recall 稳定后增量接入）",
+        "用户隔离与降级路径保底",
+        "记忆异常不阻断主对话"
+      ],
+      "code_anchor_refs": [
+        "app/services/user_preference_memory_service.py::build_user_preference_context",
+        "app/services/user_preference_memory_service.py::persist_explicit_preferences_from_input",
+        "app/services/chat_service.py::stream"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k \"context or persist\"",
+        "PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py"
+      ],
+      "rollback_anchors": [
+        "ENABLE_MEMORY_RECALL",
+        "ENABLE_PRE_COMPACTION_FLUSH"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.9",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/services/user_preference_memory_service.py",
+        "app/services/chat_service.py",
+        "app/models/user_memory.py",
+        "app/repositories/user_memory_repo.py",
+        "alembic/versions",
+        "tests/unit/test_user_preference_memory_service.py",
+        "tests/unit/test_multi_intent_queue_flow.py"
+      ],
+      "done_gate": [
+        "C04a（recall MVP）回归通过",
+        "C04b（flush 增强）回归通过",
+        "记忆异常不阻断主对话"
+      ],
+      "dod": [
+        "C04a（recall MVP）回归通过",
+        "C04b（flush 增强）回归通过",
+        "记忆异常不阻断主对话"
+      ],
+      "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k \"context or persist\"",
+        "PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C04_P4_记忆检索增强.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C05",
+      "card_id": "C05",
+      "title": "C05 P5 稳态增强与插件后置接线 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P1",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-backend-stability"
+      ],
+      "hard_depends_on": [
+        "C02",
+        "C04"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C02",
+        "C04"
+      ],
+      "feature_ids": [
+        "P5-01"
+      ],
+      "mechanism_summary": [
+        "恢复/隔离/观测增强与异常降级",
+        "插件能力后置接线，不阻塞主链",
+        "fallback、队列与子任务稳定化"
+      ],
+      "code_anchor_refs": [
+        "app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff",
+        "app/ai/workflow/multi_agent_graph.py::_execute_streaming_wrapper",
+        "app/ai/state.py::MultiAgentState",
+        "app/services/chat_service.py::sse_stream"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback"
+      ],
+      "rollback_anchors": [
+        "ENABLE_RUNTIME_RECOVERY",
+        "ENABLE_PLUGIN_REGISTRY"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.10",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "app/ai/workflow/multi_agent_graph.py",
+        "app/ai/state.py",
+        "app/services/chat_service.py",
+        "tests/unit/test_multi_agent_streaming_helpers.py"
+      ],
+      "done_gate": [
+        "恢复任务、观测阈值、降级策略验收通过",
+        "多用户并发流式场景下恢复与降级互不干扰",
+        "插件后置接线不阻塞主链"
+      ],
+      "dod": [
+        "恢复任务、观测阈值、降级策略验收通过",
+        "多用户并发流式场景下恢复与降级互不干扰",
+        "插件后置接线不阻塞主链"
+      ],
+      "check_cmd": [
+        "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C05_P5_稳态增强与插件后置.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-C06",
+      "card_id": "C06",
+      "title": "C06 P6 收口与回滚演练 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ],
+      "feature_ids": [
+        "P6-01"
+      ],
+      "mechanism_summary": [
+        "G-1~G-4 门禁收口与证据链复核",
+        "docs/code/test 三线收口",
+        "波次级回滚锚点组合演练"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.2",
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.5",
+        "scripts/docs_guard.py::main"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4"
+      ],
+      "acceptance_checks": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11",
+      "task_mode": "implementation-card",
+      "merge_required": true,
+      "file_scope": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "docs/SUMMARY.md",
+        "scripts/docs_guard.py"
+      ],
+      "done_gate": [
+        "G-1~G-4 全部通过",
+        "docs/code/test 三线收口完成",
+        "各 Wave 回滚锚点组合演练通过"
+      ],
+      "dod": [
+        "G-1~G-4 全部通过",
+        "docs/code/test 三线收口完成",
+        "各 Wave 回滚锚点组合演练通过"
+      ],
+      "check_cmd": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-C06_P6_收口与回滚演练.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G01",
+      "card_id": "G01",
+      "title": "G01 G-1 实测证据闭环 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "C06"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "C06"
+      ],
+      "feature_ids": [
+        "G-1"
+      ],
+      "mechanism_summary": [
+        "固化并核验 evidence 四元组（task_id/turn_id/process_id/status）",
+        "复核证据绑定 target_task_id == evidence_task_id"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::4.11",
+        "docs/开发文档/工作流/Coder4自动执行总控手册.md::7"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11"
+      ],
+      "acceptance_checks": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#4.11",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "docs/开发文档/工作流/Coder4自动执行总控手册.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
+      ],
+      "done_gate": [
+        "G-1 实测证据闭环通过（evidence 四元组可核验）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "G-1 实测证据闭环通过（evidence 四元组可核验）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G02",
+      "card_id": "G02",
+      "title": "G02 G-2 复合任务编排 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "G01"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G01"
+      ],
+      "feature_ids": [
+        "G-2"
+      ],
+      "mechanism_summary": [
+        "复核 hard_depends_on 链路在文档、卡片与看板的一致性",
+        "复核 single_active_card 串行约束未被破坏"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::6",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7"
+      ],
+      "acceptance_checks": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md#7",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
+        "docs/SUMMARY.md"
+      ],
+      "done_gate": [
+        "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
+        "python3 scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "G-2 复合任务编排通过（依赖链与作用域门禁一致）",
+        "python3 scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G03",
+      "card_id": "G03",
+      "title": "G03 G-3 契约一致性 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "G02"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G02"
+      ],
+      "feature_ids": [
+        "G-3"
+      ],
+      "mechanism_summary": [
+        "对齐 planning_contract / gate_contract / card_order",
+        "对齐 parallel_plan 与 vk_cards 的 Gate 卡定义"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::7",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
+      ],
+      "example_refs": [
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md#-1"
+      ],
+      "acceptance_checks": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md#-1",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
+      ],
+      "done_gate": [
+        "G-3 契约一致性通过（planning_contract/vk_cards/cron 口径一致）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "G-3 契约一致性通过（planning_contract/vk_cards/cron 口径一致）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md"
+    },
+    {
+      "id": "PP-20260221-OPENCLAW-REBUILD-BASELINE::WS-G04",
+      "card_id": "G04",
+      "title": "G04 G-4 回滚演练 [PP-20260221-OPENCLAW-REBUILD-BASELINE]",
+      "column": "Backlog",
+      "priority": "P0",
+      "labels": [
+        "PP-20260221-OPENCLAW-REBUILD-BASELINE",
+        "2026-02-21_openclaw迁移重建基线",
+        "serial",
+        "lane-gate-release"
+      ],
+      "hard_depends_on": [
+        "G03"
+      ],
+      "soft_depends_on": [],
+      "depends_on": [
+        "G03"
+      ],
+      "feature_ids": [
+        "G-4"
+      ],
+      "mechanism_summary": [
+        "复核 WAVE_ROLLBACK_DRILL_MATRIX 记录完整性",
+        "复核 Gate 收口后的发布前回滚可执行性"
+      ],
+      "code_anchor_refs": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md::11.6",
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md::4.11"
+      ],
+      "example_refs": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md#11.6"
+      ],
+      "acceptance_checks": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "rollback_anchors": [
+        "WAVE_ROLLBACK_DRILL_MATRIX"
+      ],
+      "evidence_entry": "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md#11.6",
+      "task_mode": "inspection-card",
+      "merge_required": false,
+      "file_scope": [
+        "docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md",
+        "docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
+      ],
+      "done_gate": [
+        "G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "dod": [
+        "G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）",
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict 通过"
+      ],
+      "check_cmd": [
+        "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
+      ],
+      "source_ws_file": "workdocs/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md"
+    }
+  ]
+}

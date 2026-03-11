@@ -146,7 +146,7 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 执行 Gate WS 时，完成门禁命令后必须执行自动回填脚本，禁止手工改数字：
 
 ```bash
-venv/bin/python scripts/backfill_gate_status.py --cards docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/vk_cards.json
+venv/bin/python scripts/backfill_gate_status.py --cards workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/vk_cards.json
 ```
 
 规则：
@@ -197,15 +197,15 @@ venv/bin/python scripts/backfill_gate_status.py --cards docs/内部参考/任务
 ## 使用示例
 
 ```text
-/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md
+/jjk-imp-ws @workdocs/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-01_<并行任务>.md
 ```
 
 ```text
-/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md
+/jjk-imp-ws @workdocs/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G1_集成回归门禁.md
 ```
 
 ```text
-/jjk-imp-ws @docs/内部参考/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md
+/jjk-imp-ws @workdocs/任务拆解/<YYYY-MM-DD_主题>/workstreams/WS-G2_文档终稿门禁.md
 ```
 
 ---
