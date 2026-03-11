@@ -161,6 +161,7 @@ else
         echo ""
         echo "提示："
         echo "  - 文档映射规则见 .cursor/rules/doc_sync.mdc"
+        echo "  - 过程文档（workdocs/、docs/plans/、docs/内部参考/迭代需求/、docs/内部参考/任务拆解/）不能替代稳定真理源"
         echo "  - 建议先执行 /jjk-doc-check 再提交"
         if [[ "$STRICT_MODE" != "true" ]]; then
             echo "  - 当前为非阻断模式：本次仅告警，不阻断提交"
@@ -177,6 +178,12 @@ else
         echo "文档映射检查完成（已提示告警）"
     else
         echo "文档映射检查通过"
+        if [[ -n "${CHANGED_PROCESS_DOCS//$'
+'/}" ]]; then
+            echo "补充说明：检测到过程文档变更，但过程文档不会替代稳定真理源同步。"
+            printf '%s
+' "$CHANGED_PROCESS_DOCS" | sed 's/^/  - /'
+        fi
     fi
 fi
 

@@ -56,14 +56,15 @@ docs/内部参考/任务拆解/
 `_active_task.json` 采用“任务级单一真理源”：
 
 - 任务级真理源：`docs/内部参考/任务拆解/<task_split_dir>/_active_task.json`
-- 运行态目录：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/`
+- 运行态目录（canonical）：`.artifacts/states/task_splits/<task_split_dir>/<task_key>/`
+- 兼容路径（迁移期 symlink）：`docs/内部参考/任务拆解/<task_split_dir>/.state/<task_key>/`
 
 - 必填字段：`project_id/task_split_dir/task_key/execution_mode/single_active_card/auto_done_policy/preflight_required`
 - `task_key` 必须与对应 `vk_cards.json` 顶层 `task_key` 一致。
 - 运行态文件（`task-runner-state/session/ledger/idempotency/run-lock`）统一落在当前任务目录 `.state` 下，避免跨任务串线。
 - 默认最小运行态：`task-runner-state.json` + `task-ledger.jsonl` + `active-session-<session_id>.json`。
-- scope request 默认文件：`docs/内部参考/任务拆解/<task_split_dir>/.state/coder4_scope_request.json`。
-- 幂等与锁文件：`coder4-idempotency.json`、`coder4-run.lock`、`*.lock`、`*.bak` 均位于当前任务目录 `.state/<task_key>/`。
+- scope request 默认文件（canonical）：`.artifacts/states/task_splits/<task_split_dir>/coder4_scope_request.json`。
+- 幂等与锁文件：`coder4-idempotency.json`、`coder4-run.lock`、`*.lock`、`*.bak` 均位于 canonical 运行态目录 `.artifacts/states/task_splits/<task_split_dir>/<task_key>/`；旧 `docs/**/.state/` 路径仅保留迁移期兼容 symlink。
 - 禁止使用仓库根目录 `.state` 或用户主目录全局 state 作为默认回退。
 - `verify/merge` 结果固定内联写入 `task-runner-state.json.gate_results/merge_results`，不再写独立 attempt 文件。
 - 当仓库存在多个任务级 `_active_task.json` 时，必须显式传入 `--active-task`（或设置 `WT_FLOW_ACTIVE_TASK_FILE` / `WT_FLOW_TASK_SPLIT_DIR` / `CODER4_ACTIVE_TASK_FILE`），避免默认推断串线。

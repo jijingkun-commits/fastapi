@@ -4,10 +4,21 @@
 本文件是“人工决策记录”，不等同于自动扫描产物。
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
+- 2026-03-10｜文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）（ACTIVE）→ `docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 - 2026-03-10｜Assistant 空壳文本块在消息契约层清洗，禁止进入 checkpoint（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
+
+### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治
+- 状态：ACTIVE
+- 决策主题：稳定文档、过程文档、运行态产物必须分层；`workdocs/` 与 `.artifacts/` 成为 canonical 根目录，旧 `docs/**` 过程路径只保留迁移期兼容入口
+- 背景与问题：此前 `docs/` 同时承载稳定真理源、迭代需求、任务拆解和 `.state/.jsonl/.lock` 运行态，导致导航、门禁和读者心智都无法区分“当前口径”和“过程/机器产物”
+- 最终决策：`docs/` 终局只保留稳定真理源；`workdocs/` 承接需求/方案/任务拆解；`.artifacts/` 承接 `.state/.jsonl/.lock` 等真实运行态；`README/SUMMARY` 只主推稳定区；本轮 `Phase 1` 保留 `docs/plans/**`、`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**` 迁移期兼容入口，`task_split` 机器契约/过程报告 JSON 先不强迁，`Phase 2` 再整体迁出；`docs_guard/check_doc_sync/doc_sync` 全部对齐该分层
+- 取舍理由：项目未上线，优先从目录边界消除双重职责；但 `jjk-cardrun` / `wt-flow` / `coder4_*` 仍依赖旧 `task_split` 路径，先把真实运行态迁出并冻结兼容边界，比一次性硬迁机器契约更稳、更可验证
+- 影响范围：`docs/README.md`、`docs/SUMMARY.md`、`docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_requirements.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`、`workdocs/**`、`.artifacts/**`、`docs/内部参考/任务拆解/README.md`、`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`、`.cursor/rules/doc_sync.mdc`
+- 回退/失效条件：若未来统一迁移到正式文档站点或独立工作流存储，可由新的目录策略替代；在此之前保持三层分治；`Phase 1` 期间保留旧 `task_split` 兼容路径，待 `Phase 2` 完成脚本切换后再彻底移除
+- 关联文档/代码：`docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_requirements.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 
 ### 2026-03-10 Assistant 空壳文本块在消息契约层清洗
 - 状态：ACTIVE
