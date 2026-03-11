@@ -464,8 +464,8 @@ export function AssistantMessage({
         {contentString.trim().length > 0 && (
           <div
             className={cn(
-              "flex items-center gap-2 transition-opacity",
-              "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+              "chat-message-toolbar flex w-fit items-center gap-1.5 transition-all duration-200",
+              "translate-y-1 opacity-0 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:translate-y-0 group-hover:opacity-100",
             )}
           >
             <BranchSwitcher

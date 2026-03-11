@@ -1,6 +1,9 @@
-import { useState, useRef, useEffect, ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, ChangeEvent } from "react";
 import { toast } from "sonner";
-import { ExtendedContentBlock, fileToContentBlock } from "@/lib/multimodal-utils";
+import {
+  ExtendedContentBlock,
+  fileToContentBlock,
+} from "@/lib/multimodal-utils";
 
 interface UseFileUploadOptions {
   initialBlocks?: ExtendedContentBlock[];
@@ -17,7 +20,7 @@ export function useFileUpload({
 
   const isDuplicate = (file: File, blocks: ExtendedContentBlock[]) => {
     return blocks.some(
-      (b) => b.metadata?.name === file.name && b.mimeType === file.type
+      (b) => b.metadata?.name === file.name && b.mimeType === file.type,
     );
   };
 
@@ -29,34 +32,39 @@ export function useFileUpload({
     e.target.value = "";
   };
 
-  const processFiles = async (files: File[]) => {
-    const uniqueFiles: File[] = [];
-    const duplicateFiles: File[] = [];
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      const uniqueFiles: File[] = [];
+      const duplicateFiles: File[] = [];
 
-    for (const file of files) {
-      if (isDuplicate(file, contentBlocks)) {
-        duplicateFiles.push(file);
-      } else {
-        uniqueFiles.push(file);
+      for (const file of files) {
+        if (isDuplicate(file, contentBlocks)) {
+          duplicateFiles.push(file);
+        } else {
+          uniqueFiles.push(file);
+        }
       }
-    }
 
-    if (duplicateFiles.length > 0) {
-      toast.error(
-        `重复文件：${duplicateFiles.map((f) => f.name).join(", ")}`,
-      );
-    }
-
-    if (uniqueFiles.length > 0) {
-      try {
-        const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
-        setContentBlocks((prev) => [...prev, ...newBlocks]);
-      } catch (e) {
-        // Error is handled in fileToContentBlock (toast)
-        console.error(e);
+      if (duplicateFiles.length > 0) {
+        toast.error(
+          `重复文件：${duplicateFiles.map((f) => f.name).join(", ")}`,
+        );
       }
-    }
-  };
+
+      if (uniqueFiles.length > 0) {
+        try {
+          const newBlocks = await Promise.all(
+            uniqueFiles.map(fileToContentBlock),
+          );
+          setContentBlocks((prev) => [...prev, ...newBlocks]);
+        } catch (e) {
+          // Error is handled in fileToContentBlock (toast)
+          console.error(e);
+        }
+      }
+    },
+    [contentBlocks],
+  );
 
   // Drag and drop handlers
   useEffect(() => {
@@ -135,7 +143,7 @@ export function useFileUpload({
       window.removeEventListener("dragover", handleWindowDragOver);
       dragCounter.current = 0;
     };
-  }, [contentBlocks]);
+  }, [processFiles]);
 
   const removeBlock = (idx: number) => {
     setContentBlocks((prev) => prev.filter((_, i) => i !== idx));

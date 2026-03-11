@@ -1,43 +1,29 @@
+import Image from "next/image";
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
-import { useState, FormEvent } from "react";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 // 内联常量：ID 以此前缀开头的消息不会被渲染
 const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
-import { LangGraphLogoSVG } from "../icons/langgraph";
-import { TooltipIconButton } from "./tooltip-icon-button";
-import {
-  ArrowDown,
-  XIcon,
-} from "lucide-react";
+import { ArrowDown, XIcon } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
-import { GitHubSVG } from "../icons/github";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
 import { useFileUpload } from "@/hooks/use-file-upload";
-import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
   ArtifactContent,
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
-import { CompactApproval } from "./CompactApproval";
 import { ChatHeader } from "./ChatHeader";
 import { ChatInput } from "./ChatInput";
 import { useModels } from "@/lib/model-config";
@@ -83,30 +69,6 @@ function ScrollToBottom(props: { className?: string }) {
   );
 }
 
-function OpenGitHubRepo() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
-            className="flex items-center justify-center"
-          >
-            <GitHubSVG
-              width="24"
-              height="24"
-            />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p>查看代码仓库</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
 export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
@@ -143,11 +105,9 @@ export function Thread() {
   const isLoading = stream.isLoading;
   const currentStatus = stream.currentStatus;
   // 从 Context 获取所有持久化状态
-  const { selectedModel, handleModelChange, thinkingCapability, startNewThread } = stream as any;
+  const { selectedModel, handleModelChange, startNewThread } = stream as any;
 
   const lastError = useRef<string | undefined>(undefined);
-
-
 
   const handleNewThread = () => {
     startNewThread();
@@ -203,7 +163,8 @@ export function Thread() {
     e.preventDefault();
     // 兜底逻辑：优先使用 input state，如果为空则尝试读取 textarea 真实 DOM 值。
     // 这解决了脚本直接设置 value 时（不触发 React 事件），input state 不同步导致无法提交的问题。
-    const actualInput = input.trim() || textareaRef.current?.value?.trim() || '';
+    const actualInput =
+      input.trim() || textareaRef.current?.value?.trim() || "";
 
     if ((actualInput.length === 0 && contentBlocks.length === 0) || isLoading)
       return;
@@ -225,13 +186,13 @@ export function Thread() {
               url: result.url,
               mime_type: result.content_type,
               size: result.size,
-              object_key: result.object_key
+              object_key: result.object_key,
             };
           }
           return null;
         });
         const results = await Promise.all(uploadPromises);
-        attachments = results.filter(r => r !== null);
+        attachments = results.filter((r) => r !== null);
       } catch (err) {
         console.error("附件上传失败:", err);
         toast.error("附件上传失败，请重试");
@@ -243,7 +204,9 @@ export function Thread() {
       id: uuidv4(),
       type: "human",
       content: [
-        ...(actualInput.length > 0 ? [{ type: "text", text: actualInput }] : []),
+        ...(actualInput.length > 0
+          ? [{ type: "text", text: actualInput }]
+          : []),
         ...contentBlocks,
       ] as Message["content"],
     };
@@ -296,10 +259,10 @@ export function Thread() {
   );
 
   return (
-    <div className="flex h-[100dvh] w-full overflow-hidden">
+    <div className="chat-theme-shell flex h-[100dvh] w-full overflow-hidden">
       <div className="relative hidden lg:flex">
         <motion.div
-          className="absolute z-20 h-full overflow-hidden border-r bg-white"
+          className="app-sidebar-surface absolute z-20 h-full overflow-hidden border-r"
           style={{ width: 300 }}
           animate={
             isLargeScreen
@@ -364,31 +327,29 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+                "chat-scrollable absolute inset-0 overflow-y-scroll px-[var(--chat-content-padding)]",
                 !chatStarted && "flex flex-col items-center justify-center", // Center content when chat hasn't started
               )}
               contentClassName={cn(
-                "chat-stream-shell py-8 mx-auto flex flex-col gap-4 transition-all duration-300",
-                !chatStarted ? "items-center justify-center min-h-[50vh]" : ""
+                chatStarted
+                  ? "chat-stream-shell pt-2 pb-6 mx-auto flex flex-col gap-[var(--chat-message-gap)] transition-all duration-300"
+                  : "chat-stream-shell py-8 mx-auto flex flex-col gap-8 transition-all duration-300 items-center justify-center min-h-[50vh]",
               )}
               content={
                 <>
                   {!chatStarted && (
-                    <div className="flex flex-col items-center gap-4 mb-4 text-center">
+                    <div className="mb-4 flex flex-col items-center gap-4 text-center">
                       <div className="flex items-center gap-3">
-                        <img
+                        <Image
                           src="/logo.png"
                           alt="Logo"
+                          width={48}
+                          height={48}
                           className="h-12 w-12 object-contain"
-                          onError={(e) => {
-                            // Fallback to favicon if logo.png is not found
-                            e.currentTarget.src = "/favicon.ico";
-                          }}
+                          priority
                         />
                       </div>
-                      <h1 className="app-page-title">
-                        嘉银助手
-                      </h1>
+                      <h1 className="app-page-title">嘉银助手</h1>
                       <p className="app-page-subtitle max-w-xl">
                         已有：知识库、联网搜索、数据查询、简单的图形（图表）生成
                         能上传文件、展示图片。
@@ -432,13 +393,17 @@ export function Thread() {
                 </>
               }
             />
-            <ScrollToBottom className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-md rounded-full bg-white/90 hover:bg-white" />
+            <ScrollToBottom className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-black/10 bg-white/95 text-black shadow-sm hover:bg-white" />
           </StickToBottom>
 
-          <footer className="w-full bg-white/80 backdrop-blur-md sticky bottom-0 z-10 transition-all duration-300 pb-[env(safe-area-inset-bottom)]">
+          <footer className="chat-footer-surface sticky bottom-0 z-10 w-full pb-[env(safe-area-inset-bottom)] transition-all duration-300">
             <div className="chat-stream-shell relative mx-auto">
               {currentStatus?.message && (
-                <div data-testid="runtime-status" className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                <div
+                  data-testid="runtime-status"
+                  data-phase={currentStatus.phase}
+                  className="chat-runtime-status mb-2"
+                >
                   {currentStatus.message}
                 </div>
               )}

@@ -2,6 +2,7 @@
 
 import "./markdown-styles.css";
 
+import Image from "next/image";
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
@@ -172,9 +173,12 @@ const ImageWithLightbox: FC<ImageWithLightboxProps> = ({
   return (
     <>
       {/* 缩略图 */}
-      <img
+      <Image
         src={src}
         alt={imageName}
+        width={480}
+        height={320}
+        unoptimized
         className={cn(
           "my-2 max-h-48 max-w-xs cursor-pointer rounded-lg border shadow-sm transition-opacity hover:opacity-90",
           loadError && "hidden",

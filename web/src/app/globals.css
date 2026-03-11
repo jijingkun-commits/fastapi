@@ -367,20 +367,29 @@
     padding: 0;
   }
 
-  .chat-empty-card {
-    box-shadow: var(--shadow-soft);
-  }
-
   .chat-footer-surface {
     background: transparent;
     border-top: 0;
     backdrop-filter: none;
   }
 
-  .chat-panel-surface {
-    background: color-mix(in srgb, var(--chat-surface-bg) 96%, #f7f5f0 4%);
-    border: 1px solid rgba(17, 17, 17, 0.055);
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.03);
+  .chat-runtime-status {
+    border: 1px solid rgba(17, 17, 17, 0.06);
+    border-radius: 16px;
+    background: color-mix(in srgb, #ffffff 84%, var(--chat-hover));
+    padding: 10px 14px;
+    color: var(--chat-text-muted);
+    font-size: var(--chat-ui-font-xs);
+    line-height: 1.45;
+  }
+
+  .chat-runtime-status[data-phase="generating"] {
+    border-color: rgba(17, 17, 17, 0.08);
+    color: var(--chat-text);
+  }
+
+  .chat-runtime-status[data-phase="done"] {
+    color: var(--chat-text-soft);
   }
 
   .chat-popover-surface {
