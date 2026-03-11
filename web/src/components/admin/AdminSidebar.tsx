@@ -80,6 +80,11 @@ const navItems = [
         href: "/admin/users",
         icon: Users,
     },
+    {
+        title: "AI 出题",
+        href: "/admin/exam-generation",
+        icon: BrainCircuit,
+    },
 ];
 
 export function AdminSidebar() {
