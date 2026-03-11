@@ -29,6 +29,7 @@ description: "Use when you need `jjk-arch-gate` in this repository. Source inten
 4. 状态归属无法落到单一 owner 或存在多写入口，`FAIL_FAST` 输出 `ARCH_GATE_STATE_OWNER_UNCLEAR`。
 5. 错误处理责任无法落到单一层级，`FAIL_FAST` 输出 `ARCH_GATE_ERROR_OWNER_UNCLEAR`。
 6. 试图以 fallback、兼容层、重复分支、硬编码开关掩盖结构问题，`FAIL_FAST` 输出 `ARCH_GATE_STRUCTURAL_PATCH_FORBIDDEN`。
+7. 涉及 `bugfix/refactor` 或替代旧职责但未输出 `shrink_contract`，`FAIL_FAST` 输出 `ARCH_GATE_SHRINK_CONTRACT_MISSING`。
 
 ## 执行流程（强制顺序）
 
@@ -61,6 +62,13 @@ description: "Use when you need `jjk-arch-gate` in this repository. Source inten
 2. 若问题涉及结构、职责、状态流、错误流任一层，默认判定为 `refactor`；
 3. 若问题本质是新增能力或新增契约，判定为 `new_feature`，并建议进入 `$jjk-plan`。
 
+### 2.5) 冻结瘦身合同（`bugfix/refactor` / 职责替代强制）
+
+1. 若结论属于 `bugfix/refactor`，或本次会以新实现替代旧职责，必须输出 `shrink_contract`。
+2. `shrink_contract` 至少包含：`obsolete_paths`、`retained_paths`、`single_entry_owner`、`line_budget`。
+3. `obsolete_paths` 为空时必须显式写 `none` 与原因，禁止省略。
+4. 若新实现已覆盖旧职责，却仍计划保留旧路径且无唯一理由，`FAIL_FAST` 输出 `ARCH_GATE_OBSOLETE_PATH_UNCLEAR`。
+
 ### 3) 输出 Gate 结论（强制）
 
 必须输出：
@@ -70,7 +78,8 @@ description: "Use when you need `jjk-arch-gate` in this repository. Source inten
 3. `Allowed Change Set`（允许动作）；
 4. `Forbidden Change Set`（禁止动作）；
 5. `GO/NO_GO` 结论；
-6. `next_step`（仅限 `$jjk-plan`、`$jjk-imp`、`$jjk-refactor`、`$jjk-api-doc-sync` 之一或组合）。
+6. `shrink_contract`（命中 `bugfix/refactor` 或职责替代时强制输出）；
+7. `next_step`（仅限 `$jjk-plan`、`$jjk-imp`、`$jjk-refactor`、`$jjk-api-doc-sync` 之一或组合）。
 
 放行规则：
 
@@ -95,7 +104,8 @@ description: "Use when you need `jjk-arch-gate` in this repository. Source inten
 4. `## 错误处理责任`
 5. `## 根因层级`
 6. `## Gate 结论`
-7. `## Next Step`
+7. `## 瘦身合同`
+8. `## Next Step`
 
 ## 禁止项（强制）
 
