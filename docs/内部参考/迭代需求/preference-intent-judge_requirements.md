@@ -219,7 +219,7 @@ traceability_matrix:
     feature_id: P1-01
     task_id: T-01
     tc_id: TC-01
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q'
+    acceptance_cmd_ref: 'venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q'
 
   - design_item: D-02
     fr_id: FR-02
@@ -227,7 +227,7 @@ traceability_matrix:
     feature_id: P2-01
     task_id: T-02
     tc_id: TC-02
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"'
+    acceptance_cmd_ref: 'venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"'
 
   - design_item: D-05
     fr_id: FR-05
@@ -235,7 +235,7 @@ traceability_matrix:
     feature_id: P3-01
     task_id: T-03
     tc_id: TC-03
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q'
+    acceptance_cmd_ref: 'venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q'
 
   - design_item: D-03
     fr_id: FR-03
@@ -243,7 +243,7 @@ traceability_matrix:
     feature_id: P1-02
     task_id: T-04
     tc_id: TC-04
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"'
+    acceptance_cmd_ref: 'venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"'
 
   - design_item: D-04
     fr_id: FR-04
@@ -251,7 +251,7 @@ traceability_matrix:
     feature_id: P1-03
     task_id: T-05
     tc_id: TC-05
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q'
+    acceptance_cmd_ref: 'venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q'
 
   - design_item: D-05
     fr_id: FR-05
@@ -259,5 +259,5 @@ traceability_matrix:
     feature_id: P2-02
     task_id: T-06
     tc_id: TC-06
-    acceptance_cmd_ref: 'cd /Users/jijingkun/bojxAI/fastapi && rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py'
+    acceptance_cmd_ref: 'rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py'
 ```

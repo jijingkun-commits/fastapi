@@ -313,7 +313,7 @@
 1. `logs/workflow-gate-usage.jsonl` 继续只承担运行态观测台账；`usage-report` 新增 `--log-path` 与 `--report-output` 契约，把可提交证据显式导出到 tracked report 文件；
 2. `C05` 契约已改为导出 `docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`，`file_scope` 不再要求提交 ignored `logs/` 文件；
 3. `workflow-gate-retirement` 的设计/需求/实现计划、WS 文档与 `vk_cards.json` 已统一改为同一条导出命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`
+   - `python3 scripts/check_workflow_contract.py --mode usage-report --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json`
 4. 已补最小回归 `tests/unit/test_workflow_gate_usage_report_contract.py`，并联相邻 `tests/unit/test_check_workflow_contract_temporal_rules.py` 当前合计 `5 passed`。
 
 **后续修复建议**
@@ -609,7 +609,7 @@
 **本窗口收尾结果（2026-03-08）**
 1. 已新增 `scripts/repo_python.sh` 作为仓级测试解释器单一入口；解析优先级固定为：`VK_RUNTIME_VENV -> venv -> .venv -> .vibe/venv -> python3 -> python`；
 2. `AGENTS.md` 已新增“测试解释器契约（强制）”，要求测试/验证命令先解析仓库解释器，禁止默认裸用 `python3 -m pytest`；
-3. 测试指南已改为通过 `PYTHON_BIN="$(bash scripts/repo_python.sh)"` 运行 pytest；当前仓库实测解析结果为 `/Users/jijingkun/bojxAI/fastapi/venv/bin/python`；
+3. 测试指南已改为先执行 `bash scripts/repo_python.sh` 解析解释器，再用 `PYTHON_BIN` 运行 pytest；当前仓库实测解析结果为 `/Users/jijingkun/bojxAI/fastapi/venv/bin/python`；
 4. 已补最小回归 `tests/unit/test_repo_python_script.py`，先红灯确认脚本缺位，再验证当前 `3 passed`。
 
 **后续修复建议**

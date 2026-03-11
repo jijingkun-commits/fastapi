@@ -192,7 +192,7 @@ traceability_matrix:
     feature_id: P1-dispatch-executor-routing
     task_id: T-01
     tc_id: TC-CW-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 
   - design_item: D-02 commit 证据门禁
@@ -200,7 +200,7 @@ traceability_matrix:
     feature_id: P1-dispatch-evidence-gate
     task_id: T-02
     tc_id: TC-CW-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 
   - design_item: D-03 单收口 merge
@@ -208,7 +208,7 @@ traceability_matrix:
     feature_id: P1-single-merge-path
     task_id: T-03
     tc_id: TC-CW-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 
   - design_item: D-04 契约源唯一化
@@ -216,7 +216,7 @@ traceability_matrix:
     feature_id: P1-contract-source-singleton
     task_id: T-04
     tc_id: TC-CW-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 
   - design_item: D-05 证据 canonical 迁移
@@ -224,7 +224,7 @@ traceability_matrix:
     feature_id: P1-canonical-evidence-migration
     task_id: T-05
     tc_id: TC-CW-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 
   - design_item: D-06 文档主链口径一致
@@ -232,6 +232,6 @@ traceability_matrix:
     feature_id: P1-doc-chain-sync
     task_id: T-06
     tc_id: TC-CW-06
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
+    acceptance_cmd_ref: python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
     evidence_entry: docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md
 ```

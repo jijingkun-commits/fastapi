@@ -78,10 +78,10 @@
 | P1-01 | 前端会话级 RuntimeRegistry（按 thread 分桶） | submit -> init(run_id) -> token/status -> done/stop -> cleanup | `web/src/providers/StreamContext.tsx` `StreamContextValue`; `web/src/hooks/useSSEStream.ts` `useSSEStream` | `RuntimeBucket{isLoading,currentStatus,messages,interrupt,activeRunId,lastTokenAt}` | `ENABLE_CHAT_MULTI_SESSION_RUNTIME=false` | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.multi-session.test.ts` | 设计文档 3.2 |
 | P1-02 | 输入区停止/提交改为会话作用域 | 当前会话 stop/submit 不影响其他会话 | `web/src/components/chat/ChatInput.tsx` `onStop`; `web/src/components/chat/index.tsx` `handleSubmit` | `submit(threadId, payload)` `stop(threadId)` | `ENABLE_CHAT_MULTI_SESSION_RUNTIME=false` | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/__tests__/chat-input-thread-scope.test.tsx` | 设计文档 3.2.4 |
 | P1-03 | 侧边栏运行态徽标 + 卡死预警 | active会话显示绿点；30秒无token且满足阶段条件显示黄点 | `web/src/components/chat/history/index.tsx` `ThreadItem`; `web/src/hooks/useSSEStream.ts` `lastTokenAt` | `badge_state`, `lastTokenAt`, `status_phase` | `ENABLE_CHAT_STALL_WARNING=false` | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/history/__tests__/thread-runtime-badge.test.tsx` | 设计文档 3.2.4 |
-| P2-01 | cancel 接口 thread_guard 兼容增强 | cancel(run_id) -> optional thread_id校验 -> 幂等返回 | `app/api/v1/endpoints/chat_api.py` `CancelRunRequest/cancel_run`; `app/services/run_control_service.py` `cancel_run` | `run_id(path)`, `thread_id?(body)`, `cancel_mode` | `ENABLE_CHAT_RUN_THREAD_GUARD=false` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` | 设计文档 3.4 |
-| P2-02 | active runs 查询面补齐 | 页面加载 -> GET active runs -> 合并侧边栏状态 | `app/services/run_control_service.py` `list_active_runs_by_user`; `app/api/v1/endpoints/chat_api.py` `get_active_runs` | `run_id,thread_id,status,cancel_reason,cancel_mode,updated_at` | `ENABLE_CHAT_ACTIVE_RUN_RECOVERY=false` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q` | 设计文档 3.3 |
-| P2-03 | 并发上限原子门禁 | create_run 前先做同用户互斥 + 活跃计数判定 | `app/services/run_control_service.py` `create_run`; `app/api/v1/endpoints/chat_api.py` 错误映射 | `MAX_PARALLEL_STREAMS_PER_USER` `active_count` | `ENABLE_CHAT_PARALLEL_LIMIT=false` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q` | 设计文档 3.5 |
-| P3-01 | 可观测与降级闭环 | cancel失败/并发拒绝/恢复失败均产生日志和指标 | `app/api/v1/endpoints/chat_api.py`; `web/src/hooks/useSSEStream.ts` | `trace_id,user_id,thread_id,run_id,error_code,retry_count` | `ENABLE_CHAT_MULTI_SESSION_OBSERVABILITY=false` | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k observability -q` | 设计文档 3.4.3/3.5.4 |
+| P2-01 | cancel 接口 thread_guard 兼容增强 | cancel(run_id) -> optional thread_id校验 -> 幂等返回 | `app/api/v1/endpoints/chat_api.py` `CancelRunRequest/cancel_run`; `app/services/run_control_service.py` `cancel_run` | `run_id(path)`, `thread_id?(body)`, `cancel_mode` | `ENABLE_CHAT_RUN_THREAD_GUARD=false` | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` | 设计文档 3.4 |
+| P2-02 | active runs 查询面补齐 | 页面加载 -> GET active runs -> 合并侧边栏状态 | `app/services/run_control_service.py` `list_active_runs_by_user`; `app/api/v1/endpoints/chat_api.py` `get_active_runs` | `run_id,thread_id,status,cancel_reason,cancel_mode,updated_at` | `ENABLE_CHAT_ACTIVE_RUN_RECOVERY=false` | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q` | 设计文档 3.3 |
+| P2-03 | 并发上限原子门禁 | create_run 前先做同用户互斥 + 活跃计数判定 | `app/services/run_control_service.py` `create_run`; `app/api/v1/endpoints/chat_api.py` 错误映射 | `MAX_PARALLEL_STREAMS_PER_USER` `active_count` | `ENABLE_CHAT_PARALLEL_LIMIT=false` | `PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q` | 设计文档 3.5 |
+| P3-01 | 可观测与降级闭环 | cancel失败/并发拒绝/恢复失败均产生日志和指标 | `app/api/v1/endpoints/chat_api.py`; `web/src/hooks/useSSEStream.ts` | `trace_id,user_id,thread_id,run_id,error_code,retry_count` | `ENABLE_CHAT_MULTI_SESSION_OBSERVABILITY=false` | `PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k observability -q` | 设计文档 3.4.3/3.5.4 |
 
 ## 5. 最小代码样例（约束实现形态）
 
@@ -173,7 +173,7 @@ implementation_tasks:
       - RunControlService.cancel_run
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
+      - PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
     rollback_point: ENABLE_CHAT_RUN_THREAD_GUARD=false
 
   - task_id: T-05
@@ -188,7 +188,7 @@ implementation_tasks:
       - get_active_runs
     change_type: add
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
+      - PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
     rollback_point: ENABLE_CHAT_ACTIVE_RUN_RECOVERY=false
 
   - task_id: T-06
@@ -220,7 +220,7 @@ implementation_tasks:
       - test_parallel_limit
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
+      - PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
     rollback_point: ENABLE_CHAT_PARALLEL_LIMIT=false
 
   - task_id: T-08
@@ -237,7 +237,7 @@ implementation_tasks:
       - test_cancel_retry_and_toast_contract
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q
+      - PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q
     rollback_point: ENABLE_CHAT_MULTI_SESSION_OBSERVABILITY=false
 ```
 
@@ -246,15 +246,15 @@ implementation_tasks:
 | tc_id | feature_id | task_id | acceptance_cmd |
 |---|---|---|---|
 | TC-MSC-001 | P1-01 | T-01 | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/hooks/__tests__/useSSEStream.multi-session.test.ts` |
-| TC-MSC-002 | P2-01 | T-04 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` |
-| TC-MSC-003 | P2-02 | T-05 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q` |
+| TC-MSC-002 | P2-01 | T-04 | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` |
+| TC-MSC-003 | P2-02 | T-05 | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q` |
 | TC-MSC-004 | P1-02 | T-02 | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/__tests__/chat-input-thread-scope.test.tsx` |
-| TC-MSC-005 | P2-03 | T-07 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q` |
+| TC-MSC-005 | P2-03 | T-07 | `PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q` |
 | TC-MSC-006 | P1-03 | T-03 | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/history/__tests__/thread-runtime-badge.test.tsx` |
 | TC-MSC-007 | P1-02 | T-02 | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/__tests__/chat-input-thread-scope.test.tsx` |
 | TC-MSC-008 | P2-02 | T-06 | `cd /Users/jijingkun/bojxAI/fastapi/web && pnpm exec vitest run src/components/chat/history/__tests__/thread-history-active-runs.test.tsx` |
-| TC-MSC-009 | P2-01 | T-04 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` |
-| TC-MSC-010 | P3-01 | T-08 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q` |
+| TC-MSC-009 | P2-01 | T-04 | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q` |
+| TC-MSC-010 | P3-01 | T-08 | `PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q` |
 
 ## 8. 并行拆解种子（card_seed）
 
@@ -302,7 +302,7 @@ card_seed:
       - app/schemas/chat.py
     owner_fields: [backend, run-control]
     check_cmd:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k "cancel_run_thread_guard or active_runs" -q
+      - PYTHONPATH=. pytest tests/api/test_chat_api.py -k "cancel_run_thread_guard or active_runs" -q
     done_gate:
       - 停止隔离和恢复查询可用
 
@@ -317,7 +317,7 @@ card_seed:
       - tests/unit/test_run_control_service.py
     owner_fields: [backend, observability]
     check_cmd:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k "parallel_limit or observability" -q
+      - PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k "parallel_limit or observability" -q
     done_gate:
       - 并发上限与日志观测闭环完成
 ```
@@ -371,7 +371,7 @@ planning_contract:
       done_gate:
         - cancel thread_guard 与 active runs API 完成
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k "cancel_run_thread_guard or active_runs" -q
+        - PYTHONPATH=. pytest tests/api/test_chat_api.py -k "cancel_run_thread_guard or active_runs" -q
       evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
     - card_id: C04
@@ -383,7 +383,7 @@ planning_contract:
       done_gate:
         - 并发上限与观测闭环通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k "parallel_limit or observability" -q
+        - PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k "parallel_limit or observability" -q
       evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
     - card_id: G01
@@ -395,7 +395,7 @@ planning_contract:
       done_gate:
         - 文档索引与门禁检查通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+        - python3 scripts/docs_guard.py --strict
       evidence_entry: docs/内部参考/迭代需求/聊天多会话并发重分析_implementation_plan.md
 
   task_to_pr_mapping:
@@ -432,7 +432,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P2 cancel thread_guard 兼容增强"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
+        - PYTHONPATH=. pytest tests/api/test_chat_api.py -k cancel_run_thread_guard -q
       rollback_point: ENABLE_CHAT_RUN_THREAD_GUARD=false
 
     - task_id: T-05
@@ -441,7 +441,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P2 active runs 查询接口"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
+        - PYTHONPATH=. pytest tests/api/test_chat_api.py -k active_runs -q
       rollback_point: ENABLE_CHAT_ACTIVE_RUN_RECOVERY=false
 
     - task_id: T-06
@@ -459,7 +459,7 @@ planning_contract:
       pr_depends_on: [PR-03]
       pr_subject: "P2 并发上限原子门禁"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
+        - PYTHONPATH=. pytest tests/unit/test_run_control_service.py -k parallel_limit -q
       rollback_point: ENABLE_CHAT_PARALLEL_LIMIT=false
 
     - task_id: T-08
@@ -468,7 +468,7 @@ planning_contract:
       pr_depends_on: [PR-04]
       pr_subject: "P3 可观测与降级闭环"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q
+        - PYTHONPATH=. pytest tests/api/test_chat_api.py -k observability -q
       rollback_point: ENABLE_CHAT_MULTI_SESSION_OBSERVABILITY=false
 ```
 

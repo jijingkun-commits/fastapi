@@ -90,7 +90,7 @@
 4. 关键字段：`table_count`、`config_snapshot`、`test_snapshot`。
 5. 回滚锚点：无（纯观测）。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/alembic current`
+   - `venv/bin/alembic current`
 7. 最小代码样例：
 
 ```python
@@ -114,8 +114,8 @@ snapshot = {"ts": now_iso(), "tables": counts, "flags": config_values}
    - `ENABLE_RUN_CONTROL=false`
    - `ENABLE_SSE_STOPPED_EVENT=false`
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel`
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_run_control_service.py tests/unit/test_chat_service_cancel_stream.py tests/unit/test_chat_service_resume_after_cancel.py`
+   - `venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel`
+   - `venv/bin/python -m pytest -q tests/unit/test_run_control_service.py tests/unit/test_chat_service_cancel_stream.py tests/unit/test_chat_service_resume_after_cancel.py`
 7. 最小代码样例：
 
 ```python
@@ -139,7 +139,7 @@ return {"accepted": result.accepted, "status": result.status}
    - `ENABLE_SKILL_VERSIONING=false`
    - 保留 `t_agent_skills` 兼容路径
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_skill_service.py -k "version or binding"`
+   - `venv/bin/python -m pytest -q tests/unit/test_skill_service.py -k "version or binding"`
 7. 最小代码样例：
 
 ```python
@@ -163,7 +163,7 @@ publish_version(skill_id, version="v1", status="published")
 5. 回滚锚点：
    - 关闭 `ENABLE_SKILL_VERSIONING` 回退旧路径。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_agent_skill_workflow.py tests/api/test_skill_admin_api.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_multi_agent_skill_workflow.py tests/api/test_skill_admin_api.py`
 7. 最小代码样例：
 
 ```python
@@ -186,7 +186,7 @@ debug_payload = SkillService.search_skills_debug(query, user_id=state.get("user_
    - `ENABLE_TOOL_GOVERNANCE=false`
    - `TOOL_POLICY_FAIL_MODE=compat`
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py`
 7. 最小代码样例：
 
 ```python
@@ -211,7 +211,7 @@ tools = _apply_tool_governance_policy(entries, agent_name="supervisor")
    - `ENABLE_MEMORY_RECALL=false`
    - `ENABLE_PRE_COMPACTION_FLUSH=false`
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_user_preference_memory_service.py tests/unit/test_chat_service_memory_flags.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_user_preference_memory_service.py tests/unit/test_chat_service_memory_flags.py`
 7. 最小代码样例：
 
 ```python
@@ -232,7 +232,7 @@ if _is_memory_feature_enabled("ENABLE_MEMORY_RECALL", False):
 4. 关键字段：`handoff_queue/completed_handoffs/handoff_execution_trace`
 5. 回滚锚点：关闭相关实验路径（回退到单路由响应）。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_queue_flow.py`
+   - `venv/bin/python -m pytest -q tests/unit/test_multi_intent_queue_flow.py`
 7. 最小代码样例：
 
 ```python
@@ -253,9 +253,9 @@ if handoff_queue:
 4. 关键字段：`pass/warn/fail`、`new_issue vs legacy_issue`
 5. 回滚锚点：所有能力开关独立回退。
 6. 验证命令：
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py tests/unit/test_chat_service_memory_flags.py tests/unit/test_multi_agent_skill_workflow.py tests/unit/test_multi_intent_queue_flow.py`
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel`
-   - `cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python scripts/docs_guard.py --strict`
+   - `venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py tests/unit/test_chat_service_memory_flags.py tests/unit/test_multi_agent_skill_workflow.py tests/unit/test_multi_intent_queue_flow.py`
+   - `venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel`
+   - `venv/bin/python scripts/docs_guard.py --strict`
 7. 最小代码样例：
 
 ```python
@@ -350,7 +350,7 @@ planning_contract:
         - baseline snapshot generated
         - migration head confirmed
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/alembic current"
+        - "venv/bin/alembic current"
       evidence_entry: "baseline snapshot"
 
     - card_id: C01
@@ -361,8 +361,8 @@ planning_contract:
         - cancel API idempotent
         - stopped/done semantics validated
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel"
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_run_control_service.py tests/unit/test_chat_service_cancel_stream.py tests/unit/test_chat_service_resume_after_cancel.py"
+        - "venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel"
+        - "venv/bin/python -m pytest -q tests/unit/test_run_control_service.py tests/unit/test_chat_service_cancel_stream.py tests/unit/test_chat_service_resume_after_cancel.py"
       evidence_entry: "run lifecycle and cancel tests"
 
     - card_id: C02
@@ -373,7 +373,7 @@ planning_contract:
         - skill data migrated
         - retrieval switched with user binding support
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_skill_service.py tests/unit/test_multi_agent_skill_workflow.py tests/api/test_skill_admin_api.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_skill_service.py tests/unit/test_multi_agent_skill_workflow.py tests/api/test_skill_admin_api.py"
       evidence_entry: "skill migration and binding tests"
 
     - card_id: C03
@@ -383,7 +383,7 @@ planning_contract:
       done_gate:
         - tool policy from config takes effect
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py"
       evidence_entry: "tool governance runtime tests"
 
     - card_id: C04
@@ -393,7 +393,7 @@ planning_contract:
       done_gate:
         - recall and flush behavior validated
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_user_preference_memory_service.py tests/unit/test_chat_service_memory_flags.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_user_preference_memory_service.py tests/unit/test_chat_service_memory_flags.py"
       evidence_entry: "memory service tests"
 
     - card_id: C05
@@ -403,7 +403,7 @@ planning_contract:
       done_gate:
         - multi-intent queue summarize path stable
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_queue_flow.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_multi_intent_queue_flow.py"
       evidence_entry: "queue and summary tests"
 
     - card_id: C06
@@ -413,8 +413,8 @@ planning_contract:
       done_gate:
         - verify report generated
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py tests/unit/test_chat_service_memory_flags.py tests/unit/test_multi_agent_skill_workflow.py tests/unit/test_multi_intent_queue_flow.py"
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel"
+        - "venv/bin/python -m pytest -q tests/unit/test_multi_agent_tool_governance_runtime.py tests/unit/test_chat_service_memory_flags.py tests/unit/test_multi_agent_skill_workflow.py tests/unit/test_multi_intent_queue_flow.py"
+        - "venv/bin/python -m pytest -q tests/api/test_chat_api.py -k cancel"
       evidence_entry: "auto verify report"
 
     - card_id: G01
@@ -434,7 +434,7 @@ planning_contract:
       done_gate:
         - end-to-end smoke and rollback drill passed
       acceptance_checks:
-        - "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python scripts/docs_guard.py --strict"
+        - "venv/bin/python scripts/docs_guard.py --strict"
       evidence_entry: "release gate report"
 ```
 

@@ -63,7 +63,7 @@ implementation_tasks:
     symbols:
       - _resolve_active_goals
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
 
   - task_id: T02
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
@@ -80,7 +80,7 @@ implementation_tasks:
     symbols:
       - _apply_router_contract_guard
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
 
   - task_id: T03
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
@@ -97,7 +97,7 @@ implementation_tasks:
     symbols:
       - _dispatch_values_mode_chunk
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
 
   - task_id: T04
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[3]
@@ -114,7 +114,7 @@ implementation_tasks:
     symbols:
       - SUPERVISOR_PROMPT
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
 
   - task_id: T05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -132,8 +132,8 @@ implementation_tasks:
     symbols:
       - planner_regression_tests
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+      - PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
 
   - task_id: T06
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[5]
@@ -150,7 +150,7 @@ implementation_tasks:
     symbols:
       - runtime_contract_regression
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+      - PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
 
   - task_id: T07
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[6]
@@ -167,7 +167,7 @@ implementation_tasks:
     symbols:
       - intent_routing_sections
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
+      - rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
 ```
 
 ## 4. task_to_pr_mapping
@@ -180,7 +180,7 @@ task_to_pr_mapping:
     pr_subject: "运行态目标源单轨化"
     pr_depends_on: []
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     rollback_point: revert:T01~T03
 
   - task_id: T02
@@ -189,7 +189,7 @@ task_to_pr_mapping:
     pr_subject: "handoff 合同强校验与 supervisor 收口"
     pr_depends_on: [PR-01]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: revert:T02
 
   - task_id: T03
@@ -198,7 +198,7 @@ task_to_pr_mapping:
     pr_subject: "values 分发只认 canonical 运行态输入"
     pr_depends_on: [PR-02]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: revert:T01~T03
 
   - task_id: T04
@@ -207,7 +207,7 @@ task_to_pr_mapping:
     pr_subject: "supervisor 语义优先级校准"
     pr_depends_on: [PR-03]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     rollback_point: revert:T03~T04
 
   - task_id: T05
@@ -216,8 +216,8 @@ task_to_pr_mapping:
     pr_subject: "planner 回归与最小输入视图验证"
     pr_depends_on: [PR-03]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
+      - PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+      - PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
     rollback_point: revert:planner-preservation-delta
 
   - task_id: T06
@@ -226,7 +226,7 @@ task_to_pr_mapping:
     pr_subject: "canonical-only 回归锁定"
     pr_depends_on: [PR-03]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+      - PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
     rollback_point: revert:canonical-router-result-v2
 
   - task_id: T07
@@ -235,7 +235,7 @@ task_to_pr_mapping:
     pr_subject: "架构文档同步 canonical-only 口径"
     pr_depends_on: [PR-01, PR-02, PR-03, PR-04, PR-05, PR-06]
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
+      - rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
     rollback_point: revert:T07
 ```
 
@@ -252,44 +252,44 @@ planning_contract:
       depends_on: []
       done_gate: [T01 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+        - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     - card_id: C02
       feature_ids: [P1-02]
       depends_on: [C01]
       done_gate: [T02 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     - card_id: C03
       feature_ids: [P1-03]
       depends_on: [C02]
       done_gate: [T03 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     - card_id: C04
       feature_ids: [P1-04]
       depends_on: [C03]
       done_gate: [T04 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+        - PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     - card_id: C05
       feature_ids: [P1-05]
       depends_on: [C03]
       done_gate: [T05 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
+        - PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+        - PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q
     - card_id: C06
       feature_ids: [P1-06]
       depends_on: [C03]
       done_gate: [T06 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+        - PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
     - card_id: C07
       feature_ids: [P1-07]
       depends_on: [C01, C02, C03, C04, C05, C06]
       done_gate: [T07 done]
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
+        - rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
 ```
 
 ## 6. execution_contract

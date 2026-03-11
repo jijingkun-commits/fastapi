@@ -49,6 +49,8 @@ description: VK 建卡入口（create-only）：消费 /jjk-vkplan 契约并幂�
 
 ### 0) 上下文解析
 
+补充执行约束：执行命令时统一遵循 `.cursor/rules/core.mdc` 的“命令执行拆分”规则：单步单目标、失败只重跑当前步、长任务只轮询不重启、输出截断时优先拆短当前步。
+
 1. 解析 `task_split_dir` 与 `project_id`。
 2. 读取 `vk_cards.json` 与任务级 `_active_task.json`，校验 `task_key/task_split_dir` 一致性。
 3. 若冲突，`FAIL_FAST` 输出 `VKTODO_ACTIVE_TASK_MISMATCH`。

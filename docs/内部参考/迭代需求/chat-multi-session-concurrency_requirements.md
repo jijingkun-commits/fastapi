@@ -256,7 +256,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-01
     tc_id: MSC-CL-001
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-001
+    acceptance_cmd_ref: pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-001
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-001
@@ -264,7 +264,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-02
     tc_id: MSC-CL-008
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-008
+    acceptance_cmd_ref: pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-008
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-003
@@ -272,7 +272,7 @@ traceability_matrix:
     feature_id: F1-front-session-runtime
     task_id: T-03
     tc_id: MSC-CL-006
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-002
+    acceptance_cmd_ref: pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs --grep MSC-CL-002
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-002
@@ -280,7 +280,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-04
     tc_id: MSC-CL-003
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-004
@@ -288,7 +288,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-05
     tc_id: MSC-CL-005
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-002
@@ -296,7 +296,7 @@ traceability_matrix:
     feature_id: F2-active-runs-backend
     task_id: T-06
     tc_id: MSC-CL-009
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-003
@@ -304,7 +304,7 @@ traceability_matrix:
     feature_id: F3-backend-test-closure
     task_id: T-07
     tc_id: MSC-CL-004
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
   - design_item: RS-001
@@ -312,6 +312,6 @@ traceability_matrix:
     feature_id: F4-frontend-e2e
     task_id: T-08
     tc_id: MSC-CL-001
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+    acceptance_cmd_ref: pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
     evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 ```

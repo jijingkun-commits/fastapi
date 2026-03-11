@@ -54,7 +54,7 @@ implementation_tasks:
       - apply_action
       - _derive_attempt_result
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
+      - venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
     rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
   - task_id: T-02
@@ -75,7 +75,7 @@ implementation_tasks:
       - execution_evidence
       - CARDRUN_NO_COMMIT_EVIDENCE
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
+      - venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
     rollback_point: ENABLE_CARDRUN_DISPATCH_AUTORUN=false
 
   - task_id: T-03
@@ -96,7 +96,7 @@ implementation_tasks:
       - executor_mode
       - cmd_merge
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
+      - venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
     rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
   - task_id: T-04
@@ -117,7 +117,7 @@ implementation_tasks:
       - resolve_active_task_path
       - run_alignment_check
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
+      - venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
     rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
   - task_id: T-05
@@ -137,7 +137,7 @@ implementation_tasks:
       - commit_sha
       - merge_sha
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
+      - venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
     rollback_point: ENABLE_CARDRUN_EXECUTION_EVIDENCE_V2=false
 
   - task_id: T-06
@@ -159,7 +159,7 @@ implementation_tasks:
       - 输入前置
       - 推荐链路
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
+      - python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
     rollback_point: 回退上述文档到迁移前版本
 ```
 
@@ -174,8 +174,8 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "dispatch 执行器路由 + commit 证据门禁"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
       rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
     - task_id: T-02
@@ -184,8 +184,8 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "dispatch 执行器路由 + commit 证据门禁"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
       rollback_point: ENABLE_CARDRUN_DISPATCH_AUTORUN=false
 
     - task_id: T-03
@@ -194,7 +194,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "wtimp executor mode 与单 merge 收口"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
       rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
     - task_id: T-04
@@ -203,7 +203,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "wtimp executor mode 与单 merge 收口"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
       rollback_point: ENABLE_CARDRUN_WTIMP_EXECUTOR=false
 
     - task_id: T-05
@@ -212,7 +212,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "证据 canonical 迁移 + 文档链路同步"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
+        - venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
       rollback_point: ENABLE_CARDRUN_EXECUTION_EVIDENCE_V2=false
 
     - task_id: T-06
@@ -221,7 +221,7 @@ planning_contract:
       pr_depends_on: [PR-01, PR-02]
       pr_subject: "证据 canonical 迁移 + 文档链路同步"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
+        - python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
       rollback_point: 回退文档链路口径变更
 ```
 
@@ -232,27 +232,27 @@ tc_task_mapping:
   - tc_id: TC-CW-01
     task_id: T-01
     pr_id: PR-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_dispatch_executor.py -q
   - tc_id: TC-CW-02
     task_id: T-02
     pr_id: PR-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_commit_evidence_gate.py -q
   - tc_id: TC-CW-03
     task_id: T-03
     pr_id: PR-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_single_merge_path.py -q
   - tc_id: TC-CW-04
     task_id: T-04
     pr_id: PR-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_executor_config_source.py -q
   - tc_id: TC-CW-05
     task_id: T-05
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
+    acceptance_cmd_ref: venv/bin/python -m pytest tests/unit/test_coder4_execution_evidence_migration.py -q
   - tc_id: TC-CW-06
     task_id: T-06
     pr_id: PR-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
+    acceptance_cmd_ref: python3 scripts/check_clarify_plan_alignment.py --requirements-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_requirements.md --implementation-path docs/内部参考/迭代需求/cardrun内置wtimp执行器_implementation_plan.md --output -
 ```
 
 ## 5. execution_contract（机读）

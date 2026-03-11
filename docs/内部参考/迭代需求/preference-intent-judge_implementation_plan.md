@@ -33,8 +33,8 @@ implementation_tasks:
       - decide
       - flush_canonical_memory
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q
 
   - task_id: T-04
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[3]
@@ -56,7 +56,7 @@ implementation_tasks:
       - test_*_identity_semantic_should_accept_without_trigger
       - test_*_multi_memory_items_should_return_array
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"
 
   - task_id: T-05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -81,8 +81,8 @@ implementation_tasks:
       - test_*_multi_preference_sentence_should_emit_two_memories
       - test_*_atomic_batch_should_reject_partial_invalid_memories
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q
+      - venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch
 
   - task_id: T-02
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[1]
@@ -103,8 +103,8 @@ implementation_tasks:
       - search_memories
       - MemoryQueryItem
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "decision_id|confidence|reason_code" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
+      - venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"
+      - rg -n "decision_id|confidence|reason_code" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
 
   - task_id: T-06
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[5]
@@ -127,8 +127,8 @@ implementation_tasks:
       - MemoryListItem
       - MemoryDetailResponse
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q
+      - rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
+      - venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q
 
   - task_id: T-03
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[2]
@@ -150,9 +150,9 @@ implementation_tasks:
       - test_*_identity_semantic_should_accept_without_trigger
       - test_*_atomic_batch_should_reject_partial_invalid_memories
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/preference-intent-judge_requirements.md --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_clarify_plan_alignment.json
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_planning_temporal_gate.json
+      - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q
+      - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/preference-intent-judge_requirements.md --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_clarify_plan_alignment.json
+      - python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_planning_temporal_gate.json
 ```
 
 ## 3. task_to_pr_mapping（机读）
@@ -166,7 +166,7 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "P1 主判定链重构：DecisionContract + 主链编排"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q
+        - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_chat_service_memory_flags.py -q
       rollback_point: feature.memory_llm_primary_pipeline_enabled=false
 
     - task_id: T-04
@@ -175,7 +175,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P1 身份语义直判与 memories[] 合同化"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"
+        - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q -k "identity_semantic or multi_memory_items"
       rollback_point: feature.memory_identity_semantic_judge_enabled=false
 
     - task_id: T-05
@@ -184,8 +184,8 @@ planning_contract:
       pr_depends_on: [PR-04]
       pr_subject: "P1 风格槽位归一与 atomic_batch 校验"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch
+        - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_memory_slot_governance_service.py -q
+        - venv/bin/python -m pytest tests/unit/test_document_memory_service.py -q -k atomic_batch
       rollback_point: feature.memory_style_semantic_judge_enabled=false
 
     - task_id: T-02
@@ -194,7 +194,7 @@ planning_contract:
       pr_depends_on: [PR-01]
       pr_subject: "P2 后台查询审计口径收敛"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"
+        - venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q -k "memories_list or memory_detail"
       rollback_point: feature.memory_admin_decision_observability=false
 
     - task_id: T-06
@@ -203,7 +203,7 @@ planning_contract:
       pr_depends_on: [PR-02, PR-05]
       pr_subject: "P2 admin 审计字段合同化与 atomic_batch 拒绝可见化"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
+        - rg -n "rejected_items_count|item_errors|decision_id|confidence" app/schemas/memory_admin.py app/services/memory_admin_service.py app/api/v1/endpoints/memory_admin_api.py
       rollback_point: feature.memory_admin_decision_observability=false
 
     - task_id: T-03
@@ -212,9 +212,9 @@ planning_contract:
       pr_depends_on: [PR-01, PR-04, PR-05, PR-06]
       pr_subject: "P3 误记/漏记质量门禁与规划门禁收口"
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/preference-intent-judge_requirements.md --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_clarify_plan_alignment.json
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_planning_temporal_gate.json
+        - venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py tests/unit/test_user_preference_memory_service.py tests/unit/test_document_memory_service.py -q
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/preference-intent-judge_requirements.md --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_clarify_plan_alignment.json
+        - python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/preference-intent-judge_implementation_plan.md --output docs/内部参考/迭代需求/preference-intent-judge_planning_temporal_gate.json
       rollback_point: revert:test-memory-quality-gates
   execution_mode: serial
   strict_single_active_card: true

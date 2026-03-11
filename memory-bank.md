@@ -6,6 +6,7 @@
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
+- 2026-03-11｜JJK 命令执行统一采用单步单目标，禁止长链整串重跑（ACTIVE）→ `.cursor/rules/core.mdc`、`.cursor/commands/jjk-verify.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
 - 2026-03-10｜文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）（ACTIVE）→ `docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
 - 2026-03-10｜Assistant 空壳文本块在消息契约层清洗，禁止进入 checkpoint（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`app/ai/message_utils.py`
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
@@ -22,25 +23,37 @@
 - 回退/失效条件：若后续执行链改为脚本自动生成 shrink contract，或存在更高优先级治理文件统一承接同一 contract，可将本记录标记为 `SUPERSEDED`；在此之前保持启用
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 
-### 2026-03-11 文档记忆常态运行默认异步入队
+### 2026-03-11 文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启
 - 状态：ACTIVE
-- 决策主题：当 `feature.enable_document_memory=true` 且 `memory_intent_runtime` Worker 已接通时，开发/日常交互环境默认保持 `memory.intent_async_enabled=true`，禁止让聊天主链继续同步执行记忆判定
-- 背景与问题：日志已证明一句“你好”也会先走 `memory_intent resolver`，把首包阻塞到 30+ 秒；当前项目未上线，应优先收敛主链职责，避免把可后置的记忆判定塞进用户可见响应路径
-- 最终决策：`chat_service` 主链在文档记忆启用场景默认走“只入队、不阻塞响应”；运维文档补充启用前提、缓存刷新与重启说明；若 Worker/观测链路未就绪，再显式回滚到同步模式
-- 取舍理由：记忆沉淀属于后台副作用，不属于首包回答职责；保持异步主链比继续靠模型切换或 prompt 微调追延迟更符合 feature-flag/后台任务最佳实践，也更容易验证与回滚
-- 影响范围：`memory.intent_async_enabled` 配置口径、`app/core/memory_intent_runtime.py` 启停、`app/services/chat_service.py` 主链表现、运维排障与验证手册
-- 回退/失效条件：若 Worker 未启动、`t_user_memory_intent_job` 持续堆积、删除/更新链路出现一致性问题，可临时回滚为 `memory.intent_async_enabled=false`；待独立 worker 进程替代 lifespan worker 时再重评默认值
-- 关联文档/代码：`docs/开发文档/快速入门/配置说明.md`、`docs/产品文档/聊天系统需求.md`、`app/core/memory_intent_runtime.py`、`app/services/chat_service.py`
+- 决策主题：只要文档记忆 runtime worker 已就绪且 `ENABLE_DOC_MEMORY_ASYNC_DELETE=true`，配置默认值 `memory.intent_async_enabled` 必须保持开启，不再允许通过默认关闭把“只入队不消费”伪装成同步链路正常
+- 背景与问题：此前为绕过 runtime 缺口，配置曾长期保持“默认关闭”；worker 与删除链路补齐后，若仍默认关闭，会让真实能力长期停留在文档/代码不一致状态，也会误导后续实现继续围绕 fallback 打补丁
+- 最终决策：在配置说明、实现与测试口径中统一把 `memory.intent_async_enabled` 视为默认开启；回退方式统一为显式关闭该开关或停用 async delete，而不是再把默认值改回关闭
+- 取舍理由：项目未上线，优先让真实主链默认可用，而不是继续保留“为了历史不稳定先默认关掉”的过渡语义；这比保留双口径更简单、更符合当前治理目标
+- 影响范围：`docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`、相关记忆链路测试与运行时说明
+- 回退/失效条件：若未来 runtime worker 被整体移除，或 async intent 主链被新的执行架构替代，可由新的运行时真理源接管默认值语义；在此之前保持默认开启
+- 关联文档/代码：`docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`、相关记忆链路实现与测试
 
-### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治
+### 2026-03-10 文档治理收敛为 `docs/workdocs/.artifacts` 三层分治（Phase 1 保留 task_split 契约兼容路径）
 - 状态：ACTIVE
-- 决策主题：稳定文档、过程文档、运行态产物必须分层；`workdocs/` 与 `.artifacts/` 成为 canonical 根目录，旧 `docs/**` 过程路径只保留迁移期兼容入口
-- 背景与问题：此前 `docs/` 同时承载稳定真理源、迭代需求、任务拆解和 `.state/.jsonl/.lock` 运行态，导致导航、门禁和读者心智都无法区分“当前口径”和“过程/机器产物”
-- 最终决策：`docs/` 终局只保留稳定真理源；`workdocs/` 承接需求/方案/任务拆解；`.artifacts/` 承接 `.state/.jsonl/.lock` 等真实运行态；`README/SUMMARY` 只主推稳定区；本轮 `Phase 1` 保留 `docs/plans/**`、`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**` 迁移期兼容入口，`task_split` 机器契约/过程报告 JSON 先不强迁，`Phase 2` 再整体迁出；`docs_guard/check_doc_sync/doc_sync` 全部对齐该分层
+- 决策主题：文档体系收敛为 `docs/`（长期真理源）+ `workdocs/`（进行中工作文档）+ `.artifacts/`（运行/产物快照）三层结构；`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**` 在 Phase 1 仅作为兼容入口
+- 背景与问题：当前 `docs/plans/`、`docs/内部参考/迭代需求/`、`docs/内部参考/任务拆解/`、各类报告与中间 JSON 混杂，真理源、工作稿与机器产物边界不清，`doc_sync` / `docs_guard` / 执行链都在同一层目录相互踩踏
+- 最终决策：长期真理源集中到 `docs/`；过程性工作文档迁到 `workdocs/`；机器产物迁到 `.artifacts/`；`docs/内部参考/迭代需求/**`、`docs/内部参考/任务拆解/**` 迁移期兼容入口，`task_split` 机器契约/过程报告 JSON 先不强迁，`Phase 2` 再整体迁出；`docs_guard/check_doc_sync/doc_sync` 全部对齐该分层
 - 取舍理由：项目未上线，优先从目录边界消除双重职责；但 `jjk-cardrun` / `wt-flow` / `coder4_*` 仍依赖旧 `task_split` 路径，先把真实运行态迁出并冻结兼容边界，比一次性硬迁机器契约更稳、更可验证
 - 影响范围：`docs/README.md`、`docs/SUMMARY.md`、`docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_requirements.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`、`workdocs/**`、`.artifacts/**`、`docs/内部参考/任务拆解/README.md`、`scripts/docs_guard.py`、`scripts/check_doc_sync.sh`、`.cursor/rules/doc_sync.mdc`
 - 回退/失效条件：若未来统一迁移到正式文档站点或独立工作流存储，可由新的目录策略替代；在此之前保持三层分治；`Phase 1` 期间保留旧 `task_split` 兼容路径，待 `Phase 2` 完成脚本切换后再彻底移除
 - 关联文档/代码：`docs/plans/2026-03-10-docs-governance-layering-design.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_requirements.md`、`docs/内部参考/迭代需求/文档分层治理与信息架构收敛_implementation_plan.md`
+
+### 2026-03-11 JJK 命令执行统一采用单步单目标
+- 状态：ACTIVE
+- 决策主题：`/jjk-*` 命令执行 shell / Git / 测试 / 验证步骤时，统一采用“单步单目标”，禁止把基础观测、期望比对、解释器解析、测试执行、统计汇总拼成一条长链
+- 背景与问题：超长 one-liner 一旦失败或输出被截断，很难判断是哪一步失效，执行者容易整串重跑，既浪费时间，也会制造“同一命令反复调用”的糟糕体验
+- 最终决策：把执行节奏收敛到 `.cursor/rules/core.mdc`；高频 `/jjk-*` 命令文档与工作流手册只做轻量引用，统一要求失败只重跑当前步、长任务只轮询不重启
+- 取舍理由：这是执行契约问题，不是某一条 `/jjk-verify` 的局部 bug；放到总规则层比逐命令各写一套更简洁、更稳定，也更符合仓内“未上线先修结构”的原则
+- 影响范围：`.cursor/rules/core.mdc`、高频 `.cursor/commands/jjk-*.md`、`.agents/skills/jjk-*/SKILL.md` 镜像、工作流/速查文档
+- 回退/失效条件：若未来命令执行统一收敛到可复用脚本编排器，并由工具层天然提供单步状态与轮询协议，可把文档约束降级为实现说明；在此之前保持当前规则
+- 关联文档/代码：`.cursor/rules/core.mdc`、`.cursor/commands/jjk-verify.md`、`.cursor/commands/jjk-test.md`、`.cursor/commands/jjk-review.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
+
+
 
 ### 2026-03-10 Assistant 空壳文本块在消息契约层清洗
 - 状态：ACTIVE

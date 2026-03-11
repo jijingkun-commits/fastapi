@@ -235,7 +235,7 @@ traceability_matrix:
     feature_id: P1-01
     task_id: T01
     tc_id: TC-IO-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-02 handoff_contract_guard
@@ -243,7 +243,7 @@ traceability_matrix:
     feature_id: P1-02
     task_id: T02
     tc_id: TC-IO-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-03 dispatch_single_track
@@ -251,7 +251,7 @@ traceability_matrix:
     feature_id: P1-03
     task_id: T03
     tc_id: TC-IO-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-04 supervisor_prompt_priority
@@ -259,7 +259,7 @@ traceability_matrix:
     feature_id: P1-04
     task_id: T04
     tc_id: TC-IO-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-05 planner_regression_and_input_view
@@ -267,7 +267,7 @@ traceability_matrix:
     feature_id: P1-05
     task_id: T05
     tc_id: TC-IO-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-06 canonical_runtime_contract_regression
@@ -275,7 +275,7 @@ traceability_matrix:
     feature_id: P1-06
     task_id: T06
     tc_id: TC-IO-06
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 
   - design_item: D-07 architecture_doc_sync
@@ -283,6 +283,6 @@ traceability_matrix:
     feature_id: P1-07
     task_id: T07
     tc_id: TC-IO-07
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
+    acceptance_cmd_ref: rg -n "decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md
     evidence_entry: docs/内部参考/迭代需求/意图优化_implementation_plan.md
 ```

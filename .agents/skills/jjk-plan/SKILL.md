@@ -79,6 +79,8 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 
 ### 0) 上下文校验（必做）
 
+补充执行约束：执行命令时统一遵循 `.cursor/rules/core.mdc` 的“命令执行拆分”规则：单步单目标、失败只重跑当前步、长任务只轮询不重启、输出截断时优先拆短当前步。
+
 至少检查：
 
 1. 当前代码与文档上下文（`git status`、相关 docs）。

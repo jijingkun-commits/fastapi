@@ -30,7 +30,7 @@ implementation_tasks:
     symbols:
       - StreamContextValue
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-001
 
   - task_id: T-02
@@ -48,7 +48,7 @@ implementation_tasks:
     symbols:
       - useSSEStream
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep "MSC-CL-008|MSC-CL-010|MSC-CL-011"
 
   - task_id: T-03
@@ -68,7 +68,7 @@ implementation_tasks:
       - cancelRun
       - stop
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-002
 
   - task_id: T-04
@@ -87,7 +87,7 @@ implementation_tasks:
       - list_active_runs
       - CancelRunRequest
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
+      - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
 
   - task_id: T-05
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[4]
@@ -106,7 +106,7 @@ implementation_tasks:
       - create_run
       - cancel_run
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
+      - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
 
   - task_id: T-06
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[5]
@@ -125,7 +125,7 @@ implementation_tasks:
       - ChatRun.last_activity_at
       - ChatRun.__table_args__
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
+      - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
 
   - task_id: T-07
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[6]
@@ -145,7 +145,7 @@ implementation_tasks:
       - test_parallel_limit
       - test_cancel_thread_mismatch
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
+      - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
 
   - task_id: T-08
     source_seed_ref: clarify_handoff_contract.required.implementation_seeds[7]
@@ -167,7 +167,7 @@ implementation_tasks:
       - MSC-CL-010
       - MSC-CL-011
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截
 ```
 
@@ -181,7 +181,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "前端会话级 RuntimeBucket 基座"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-001
     rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
 
@@ -191,7 +191,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "前端 active 条件轮询与会话级流状态"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-008
     rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
 
@@ -201,7 +201,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "前端 cancel 强制 thread_id 契约"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-002
     rollback_point: ENABLE_THREAD_ID_MATCH_CHECK=false
 
@@ -211,7 +211,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "active runs API 响应契约"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
+      - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
     rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
 
   - task_id: T-05
@@ -220,7 +220,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "RunControlService active 查询与并发门禁"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
+      - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
     rollback_point: ENABLE_PER_USER_PARALLEL_GATE=false
 
   - task_id: T-06
@@ -229,7 +229,7 @@ task_to_pr_mapping:
     pr_depends_on: []
     pr_subject: "chat_run last_activity_at 与 active 索引迁移"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
+      - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
     rollback_point: ENABLE_ACTIVE_RUNS_QUERY=false
 
   - task_id: T-07
@@ -238,7 +238,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-02]
     pr_subject: "后端契约回归矩阵补齐"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
+      - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
     rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
 
   - task_id: T-08
@@ -247,7 +247,7 @@ task_to_pr_mapping:
     pr_depends_on: [PR-01, PR-02]
     pr_subject: "前端多会话并发 E2E"
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+      - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截
     rollback_point: ENABLE_CHAT_MULTI_SESSION_CONCURRENCY=false
 ```
@@ -282,11 +282,11 @@ planning_contract:
       done_gate:
         - 前端运行态按 thread_id 分桶，submit/stop 均绑定会话作用域
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+        - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-001
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+        - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-008
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+        - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截 --grep MSC-CL-002
       evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
@@ -300,9 +300,9 @@ planning_contract:
       done_gate:
         - `/chat/runs/active`、并发门禁、`last_activity_at` 与 active 索引全部收口到 `t_chat_run`
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
+        - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k active_runs_contract
+        - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k run_control_active_query_gate
+        - bash scripts/pytest_targeted.sh tests/unit/test_run_control_service.py -k last_activity_persistence_and_sort
       evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
     - card_id: C03
@@ -315,8 +315,8 @@ planning_contract:
       done_gate:
         - API / service / E2E 回归矩阵覆盖设计验收门禁
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
+        - bash scripts/pytest_targeted.sh tests/api/test_chat_api.py -k multi_session_contract_matrix
+        - pnpm --dir web exec playwright test e2e/chat-multi-session-concurrency.spec.cjs
       - 真实链路 UAT：stop 后立即新开第 4 会话，不得出现 `3/3` 误拦截
       evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 
@@ -330,9 +330,9 @@ planning_contract:
       done_gate:
         - clarify->plan 对齐校验、temporal gate 校验、docs 索引校验全部通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/chat-multi-session-concurrency_requirements.md --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_clarify_plan_alignment.json
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_planning_temporal_gate.json
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+        - python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/chat-multi-session-concurrency_requirements.md --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_clarify_plan_alignment.json
+        - python3 scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md --output docs/内部参考/迭代需求/chat-multi-session-concurrency_planning_temporal_gate.json
+        - python3 scripts/docs_guard.py --strict
       evidence_entry: docs/内部参考/迭代需求/chat-multi-session-concurrency_implementation_plan.md
 ```
 

@@ -46,12 +46,12 @@
 
 | feature_id | 目标与边界 | 触发与状态流转 | 代码锚点 | 关键契约字段 | 回滚锚点 | 验证命令 | 来源证据 |
 |---|---|---|---|---|---|---|---|
-| P1-01 | 移除 `planner` 节点，仅保留 `preprocess -> supervisor`；不改 expert 子图 | 应用启动时构图生效；运行时不再进入 planner 节点 | `app/ai/workflow/multi_agent_graph.py` | `workflow edges` | 回退到保留 planner 的旧拓扑分支 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q` | 设计文档 2.1/3.1 |
-| P1-02 | 目标主状态迁移到 `decomposed_goals`，兼容期提供统一读取入口 | preprocess/supervisor 写入 goals；router/coverage/final 统一读取 | `app/ai/state.py`, `app/ai/workflow/multi_agent_graph.py` | `decomposed_goals`, `_resolve_active_goals` | 保留兼容读回退（只读）直到清理完成 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q` | 设计文档 3.2/3.4 |
-| P1-03 | Supervisor 按需调用 `decompose_goals`；简单请求不拆解 | 复合请求 -> 调用拆解 -> 目标写入状态；拆解失败 -> `general.reply` | `app/ai/workflow/multi_agent_graph.py`, `app/ai/prompts/agent_prompts.py` | `goals[*].kind/order/allowed_agents` | 关闭拆解路径并降级单目标 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q` | 设计文档 3.3 |
-| P1-04 | Router/Coverage/Final 全链迁移到 active goals；不允许漏项收口 | handoff -> guarded dispatch -> coverage gate -> final answer | `app/ai/workflow/multi_agent_graph.py` | `goal_count_initial`, `missing_goals`, `goal_results` | 关闭强门禁开关回到保守策略 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q` | 设计文档 3.4 |
-| P1-05 | `plan_ready` 事件双阶段迁移：兼容期开关保留，最终移除 | compat=true: 继续发；compat=false: 不发 | `app/ai/events.py`, `app/services/chat_service.py`, `web/src/types/message.ts` | `ENABLE_PLAN_READY_COMPAT` | 设置 compat=true 并回滚分支 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q` | 设计文档 3.5 |
-| P1-06 | 测试体系重构：删除 planner 强耦合旧测，补齐新合同测试 | unit->integration->api 分层收敛 | `tests/unit/**`, `tests/integration/**`, `tests/api/**` | 测试矩阵与断言口径 | 回退到迁移前测试清单 | `cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "intent or planner or coverage or sse" -q` | 并行调研输出（team） |
+| P1-01 | 移除 `planner` 节点，仅保留 `preprocess -> supervisor`；不改 expert 子图 | 应用启动时构图生效；运行时不再进入 planner 节点 | `app/ai/workflow/multi_agent_graph.py` | `workflow edges` | 回退到保留 planner 的旧拓扑分支 | `PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q` | 设计文档 2.1/3.1 |
+| P1-02 | 目标主状态迁移到 `decomposed_goals`，兼容期提供统一读取入口 | preprocess/supervisor 写入 goals；router/coverage/final 统一读取 | `app/ai/state.py`, `app/ai/workflow/multi_agent_graph.py` | `decomposed_goals`, `_resolve_active_goals` | 保留兼容读回退（只读）直到清理完成 | `PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q` | 设计文档 3.2/3.4 |
+| P1-03 | Supervisor 按需调用 `decompose_goals`；简单请求不拆解 | 复合请求 -> 调用拆解 -> 目标写入状态；拆解失败 -> `general.reply` | `app/ai/workflow/multi_agent_graph.py`, `app/ai/prompts/agent_prompts.py` | `goals[*].kind/order/allowed_agents` | 关闭拆解路径并降级单目标 | `PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q` | 设计文档 3.3 |
+| P1-04 | Router/Coverage/Final 全链迁移到 active goals；不允许漏项收口 | handoff -> guarded dispatch -> coverage gate -> final answer | `app/ai/workflow/multi_agent_graph.py` | `goal_count_initial`, `missing_goals`, `goal_results` | 关闭强门禁开关回到保守策略 | `PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q` | 设计文档 3.4 |
+| P1-05 | `plan_ready` 事件双阶段迁移：兼容期开关保留，最终移除 | compat=true: 继续发；compat=false: 不发 | `app/ai/events.py`, `app/services/chat_service.py`, `web/src/types/message.ts` | `ENABLE_PLAN_READY_COMPAT` | 设置 compat=true 并回滚分支 | `PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q` | 设计文档 3.5 |
+| P1-06 | 测试体系重构：删除 planner 强耦合旧测，补齐新合同测试 | unit->integration->api 分层收敛 | `tests/unit/**`, `tests/integration/**`, `tests/api/**` | 测试矩阵与断言口径 | 回退到迁移前测试清单 | `PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "intent or planner or coverage or sse" -q` | 并行调研输出（team） |
 
 ### 每个 feature 的最小代码样例（伪代码）
 
@@ -122,7 +122,7 @@ implementation_tasks:
       - workflow.add_edge
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: 恢复 planner 节点与边定义
 
   - task_id: T-02
@@ -137,7 +137,7 @@ implementation_tasks:
       - _resolve_active_goals
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: 仅保留只读兼容层，不删除旧字段
 
   - task_id: T-03
@@ -152,7 +152,7 @@ implementation_tasks:
       - SUPERVISOR_PROMPT
     change_type: add
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: 关闭 decompose_goals 调用并降级单目标
 
   - task_id: T-04
@@ -167,7 +167,7 @@ implementation_tasks:
       - _dispatch_values_mode_chunk
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: router 读取回退到兼容入口
 
   - task_id: T-05
@@ -182,7 +182,7 @@ implementation_tasks:
       - _render_coverage_blocked_message
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_coverage_reconcile.py tests/unit/test_multi_intent_queue_flow.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_coverage_reconcile.py tests/unit/test_multi_intent_queue_flow.py -q
     rollback_point: coverage_gate 强门禁降级
 
   - task_id: T-06
@@ -199,7 +199,7 @@ implementation_tasks:
       - build_contract_validation_meta
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
+      - PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
     rollback_point: 合同层保留旧入口兼容
 
   - task_id: T-07
@@ -216,7 +216,7 @@ implementation_tasks:
       - sse_resume_stream
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
+      - PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
     rollback_point: ENABLE_PLAN_READY_COMPAT=true
 
   - task_id: T-08
@@ -231,7 +231,7 @@ implementation_tasks:
       - dispatchSSEEvent
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm -C web test -- --runInBand
+      - pnpm -C web test -- --runInBand
     rollback_point: 恢复 plan_ready 类型定义兼容
 
   - task_id: T-09
@@ -248,7 +248,7 @@ implementation_tasks:
       - test_*
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
+      - PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
     rollback_point: 回退到迁移前测试集合
 
   - task_id: T-10
@@ -263,7 +263,7 @@ implementation_tasks:
       - intent_plan
     change_type: delete
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
+      - rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
     rollback_point: 恢复兼容分支并撤销删除提交
 
   - task_id: T-11
@@ -279,7 +279,7 @@ implementation_tasks:
       - planning_contract
     change_type: modify
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      - python3 scripts/docs_guard.py --strict
     rollback_point: 回退文档索引与计划文档版本
 ```
 
@@ -309,7 +309,7 @@ planning_contract:
       done_gate:
         - 拓扑切换完成且active_goals入口可用
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_multi_intent_queue_flow.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
 
     - card_id: C02
@@ -322,7 +322,7 @@ planning_contract:
         - decompose_goals 生效
         - router/coverage 使用统一目标口径
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_intent_coverage_reconcile.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
 
     - card_id: C03
@@ -334,7 +334,7 @@ planning_contract:
       done_gate:
         - 合同校验入口完成迁移并可兼容
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
+        - PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
 
     - card_id: C04
@@ -347,7 +347,7 @@ planning_contract:
         - plan_ready 兼容开关可控
         - 分层测试口径更新完成
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
+        - PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
       evidence_entry: docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
 
     - card_id: G01
@@ -359,8 +359,8 @@ planning_contract:
       done_gate:
         - 关键链路测试通过且文档门禁通过
       acceptance_checks:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "intent or planner or coverage or sse" -q
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+        - PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "intent or planner or coverage or sse" -q
+        - python3 scripts/docs_guard.py --strict
       evidence_entry: docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
 
   task_to_pr_mapping:
@@ -370,7 +370,7 @@ planning_contract:
       pr_subject: 图拓扑与状态入口迁移（第一阶段）
       pr_depends_on: []
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_multi_intent_queue_flow.py -q
       rollback_point: 恢复 planner 节点接线
 
     - task_id: T-02
@@ -379,7 +379,7 @@ planning_contract:
       pr_subject: 图拓扑与状态入口迁移（第一阶段）
       pr_depends_on: []
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
       rollback_point: 保留 intent_plan 只读回退
 
     - task_id: T-03
@@ -388,7 +388,7 @@ planning_contract:
       pr_subject: Supervisor 拆解与Router链路迁移
       pr_depends_on: [PR-01]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
       rollback_point: 关闭 decompose_goals 路径
 
     - task_id: T-04
@@ -397,7 +397,7 @@ planning_contract:
       pr_subject: Supervisor 拆解与Router链路迁移
       pr_depends_on: [PR-01]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
       rollback_point: router 回退兼容入口
 
     - task_id: T-05
@@ -406,7 +406,7 @@ planning_contract:
       pr_subject: Coverage/Final/Contracts 合同迁移
       pr_depends_on: [PR-02]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_coverage_reconcile.py tests/unit/test_multi_intent_queue_flow.py -q
+        - PYTHONPATH=. pytest tests/unit/test_multi_intent_coverage_reconcile.py tests/unit/test_multi_intent_queue_flow.py -q
       rollback_point: 降级 coverage 门禁策略
 
     - task_id: T-06
@@ -415,7 +415,7 @@ planning_contract:
       pr_subject: Coverage/Final/Contracts 合同迁移
       pr_depends_on: [PR-02]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
+        - PYTHONPATH=. pytest tests/unit/test_delivery_contract_validators.py -q
       rollback_point: 保留旧合同校验入口
 
     - task_id: T-07
@@ -424,7 +424,7 @@ planning_contract:
       pr_subject: SSE plan_ready 兼容开关与下线
       pr_depends_on: [PR-03]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
+        - PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
       rollback_point: ENABLE_PLAN_READY_COMPAT=true
 
     - task_id: T-08
@@ -433,7 +433,7 @@ planning_contract:
       pr_subject: SSE plan_ready 兼容开关与下线
       pr_depends_on: [PR-03]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && pnpm -C web test -- --runInBand
+        - pnpm -C web test -- --runInBand
       rollback_point: 前端类型回退 plan_ready 声明
 
     - task_id: T-09
@@ -442,7 +442,7 @@ planning_contract:
       pr_subject: 测试矩阵收敛与旧路径清理
       pr_depends_on: [PR-04]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
+        - PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
       rollback_point: 回退测试迁移提交
 
     - task_id: T-10
@@ -451,7 +451,7 @@ planning_contract:
       pr_subject: 测试矩阵收敛与旧路径清理
       pr_depends_on: [PR-04]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
+        - rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
       rollback_point: 恢复兼容代码分支
 
     - task_id: T-11
@@ -460,7 +460,7 @@ planning_contract:
       pr_subject: 测试矩阵收敛与旧路径清理
       pr_depends_on: [PR-04]
       acceptance_cmds:
-        - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+        - python3 scripts/docs_guard.py --strict
       rollback_point: 恢复文档索引变更
 ```
 
@@ -496,7 +496,7 @@ pr_ready_manifest:
       - app/ai/workflow/multi_agent_graph.py
       - app/ai/prompts/agent_prompts.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: 关闭 decompose_goals 路径
 
   - task_id: T-04
@@ -505,7 +505,7 @@ pr_ready_manifest:
     changed_files:
       - app/ai/workflow/multi_agent_graph.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
+      - PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py tests/unit/test_multi_agent_streaming_helpers.py -q
     rollback_point: router 回退兼容入口
 
   - task_id: T-07
@@ -515,7 +515,7 @@ pr_ready_manifest:
       - app/ai/events.py
       - app/services/chat_service.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
+      - PYTHONPATH=. pytest tests/api/test_chat_sse_intent_goal_status.py -q
     rollback_point: ENABLE_PLAN_READY_COMPAT=true
 
   - task_id: T-08
@@ -525,7 +525,7 @@ pr_ready_manifest:
       - web/src/types/message.ts
       - web/src/lib/backend.ts
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && pnpm -C web test -- --runInBand
+      - pnpm -C web test -- --runInBand
     rollback_point: 前端类型回退 plan_ready 声明
 
   - task_id: T-09
@@ -538,7 +538,7 @@ pr_ready_manifest:
       - tests/integration/test_intent_shadow_metrics.py
       - tests/api/test_chat_sse_intent_goal_status.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
+      - PYTHONPATH=. pytest tests/unit tests/integration tests/api -k "planner or intent or coverage or sse" -q
     rollback_point: 回退测试迁移提交
 
   - task_id: T-10
@@ -548,7 +548,7 @@ pr_ready_manifest:
       - app/ai/workflow/multi_agent_graph.py
       - app/ai/state.py
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
+      - rg -n "intent_plan|_planner_node|emit_plan_ready" app/ai app/services web/src tests
     rollback_point: 恢复兼容代码分支
 
   - task_id: T-11
@@ -559,6 +559,6 @@ pr_ready_manifest:
       - docs/内部参考/迭代需求/监督者移除Planner重构_requirements.md
       - docs/内部参考/迭代需求/监督者移除Planner重构_implementation_plan.md
     acceptance_cmds:
-      - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
+      - python3 scripts/docs_guard.py --strict
     rollback_point: 恢复文档索引变更
 ```

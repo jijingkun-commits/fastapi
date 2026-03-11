@@ -95,22 +95,18 @@ python scripts/db/schema_sync.py                 # 元数据同步
 
 ### 记忆链路排查
 
-```bash
+```text
 # 删除单个 thread 的 LangGraph checkpoint（不删聊天消息表）
-$(bash scripts/repo_python.sh) scripts/debug/delete_thread_checkpoint.py \
-  --thread-id visual-evidence-1773109675
+1. `bash scripts/repo_python.sh`
+2. `<PYTHON_BIN> scripts/debug/delete_thread_checkpoint.py --thread-id visual-evidence-1773109675`
 
 # 按用户名 + 槽位键诊断
-$(bash scripts/repo_python.sh) scripts/debug/check_memory_flow.py \
-  --username jjk \
-  --slot-key user.profile.fact.favorite.color
+1. `bash scripts/repo_python.sh`
+2. `<PYTHON_BIN> scripts/debug/check_memory_flow.py --username jjk --slot-key user.profile.fact.favorite.color`
 
 # 按线程 + 关键字诊断
-$(bash scripts/repo_python.sh) scripts/debug/check_memory_flow.py \
-  --username jjk \
-  --thread-id b7d622bf-350d-4dc6-bd3b-7f8b314ef58b \
-  --thread-id 65829c70-0f9e-4d22-8cb9-8232a3a16660 \
-  --keyword 蓝色
+1. `bash scripts/repo_python.sh`
+2. `<PYTHON_BIN> scripts/debug/check_memory_flow.py --username jjk --thread-id b7d622bf-350d-4dc6-bd3b-7f8b314ef58b --thread-id 65829c70-0f9e-4d22-8cb9-8232a3a16660 --keyword 蓝色`
 ```
 
 脚本会统一输出 `t_chat_message`、`t_user_memory_document`、`t_user_memory_chunk`、`t_user_memory_intent_job`、`t_user_memory` 的只读诊断结果，并给出“当前是否 active / 是否 archived / 可能走了哪条持久化路径”的推导结论。
@@ -147,7 +143,7 @@ python scripts/codex_app_monitor.py \
 
 示例（cron）：
 ```bash
-*/3 * * * * cd /Users/jijingkun/bojxAI/fastapi && scripts/cron/codex_app_monitor.sh >> logs/codex-monitor.log 2>&1
+*/3 * * * * <repo_root>/scripts/cron/codex_app_monitor.sh >> <repo_root>/logs/codex-monitor.log 2>&1
 ```
 
 ### Codex 对话监督（长输出压缩 + 可续聊）

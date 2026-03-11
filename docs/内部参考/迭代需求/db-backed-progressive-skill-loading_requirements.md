@@ -226,7 +226,7 @@ traceability_matrix:
     feature_id: P1-runtime-catalog
     task_id: T-01
     tc_id: TC-01
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 
   - design_item: D-02
@@ -234,7 +234,7 @@ traceability_matrix:
     feature_id: P1-skill-loader-tool
     task_id: T-02
     tc_id: TC-02
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_loader_tool.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 
   - design_item: D-03
@@ -242,7 +242,7 @@ traceability_matrix:
     feature_id: P1-session-canonical-trace
     task_id: T-03
     tc_id: TC-03
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_runtime_replay.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 
   - design_item: D-04
@@ -250,7 +250,7 @@ traceability_matrix:
     feature_id: P1-runtime-mode-switch
     task_id: T-04
     tc_id: TC-04
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_runtime_mode_switch.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 
   - design_item: D-05
@@ -258,7 +258,7 @@ traceability_matrix:
     feature_id: P1-catalog-metadata-contract
     task_id: T-05
     tc_id: TC-05
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_admin_catalog_metadata.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 
   - design_item: D-03
@@ -266,6 +266,6 @@ traceability_matrix:
     feature_id: P1-tests-and-docs
     task_id: T-06
     tc_id: TC-06
-    acceptance_cmd_ref: cd /Users/jijingkun/bojxAI/fastapi && PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
+    acceptance_cmd_ref: PYTHONPATH=. pytest app/tests/test_skill_catalog_manifest.py app/tests/test_skill_loader_tool.py app/tests/test_skill_runtime_replay.py app/tests/test_skill_runtime_mode_switch.py app/tests/test_skill_admin_catalog_metadata.py -q
     evidence_entry: docs/内部参考/迭代需求/db-backed-progressive-skill-loading_implementation_plan.md
 ```
