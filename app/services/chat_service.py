@@ -12,7 +12,7 @@ from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
 from fastapi.encoders import jsonable_encoder
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from app.ai.utils.message_factory import create_human_message
 
 from app.ai.events import stopped_event
@@ -33,7 +33,6 @@ from app.core.config import (
     ENABLE_DOCUMENT_MEMORY,
     MEMORY_INTENT_ASYNC_ENABLED,
 )
-from app.core.constants import TOOL_OUTPUT_PREVIEW_LEN, TOOL_OUTPUT_STORAGE_LEN
 from app.core.message_content import normalize_message_content
 from app.core.utils import content_hash as _content_hash
 from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
@@ -48,6 +47,7 @@ from app.services.user_memory_intent_job_service import (
     enqueue_from_chat_message as enqueue_memory_intent_job,
 )
 from app.services.run_control_service import get_run_control_service
+from app.ai.workflow.attachment_planning import build_attachment_manifest, build_lightweight_probe
 
 
 logger = logging.getLogger(__name__)
@@ -644,34 +644,6 @@ def _build_done_payload(
     return payload
 
 
-def _build_control_flags(
-    *,
-    run_control_enabled: bool,
-    attachments: Optional[list],
-    current_todo_id: Optional[int],
-) -> dict[str, Any]:
-    """构建控制面标记，供下游节点识别控制上下文。"""
-    return {
-        "run_control_enabled": bool(run_control_enabled),
-        "has_attachments": bool(attachments),
-        "has_current_todo_anchor": current_todo_id is not None,
-    }
-
-
-def _build_semantic_payload(
-    *,
-    user_query: str,
-    composed_query: str,
-    human_message_id: Optional[str],
-) -> dict[str, Any]:
-    """构建语义面载荷，避免控制层直接改写语义目标。"""
-    return {
-        "user_query": str(user_query or "").strip(),
-        "composed_query": str(composed_query or "").strip(),
-        "human_message_id": human_message_id,
-    }
-
-
 def _build_stopped_payload(*, thread_id: str, run_id: str, reason: str) -> dict[str, Any]:
     """构造 stopped 事件载荷。"""
 
@@ -792,57 +764,15 @@ class ChatService:
         else:
             resolved_run_id = resolved_run_id or f"run_{uuid4().hex}"
 
-        # 构建输入
-        # 如果有附件，将信息追加到 prompt 中，供 Agent 通过工具调用
-        final_prompt = prompt
-        if attachments:
-            # 辅助函数：安全提取附件信息
-            def _parse_attachment(att):
-                if isinstance(att, dict):
-                    return (
-                        str(att.get("mime_type") or "unknown"),
-                        str(att.get("name") or "unknown"),
-                        str(att.get("url") or "")
-                    )
-                return (
-                    str(getattr(att, "mime_type", None) or "unknown"),
-                    str(getattr(att, "name", None) or "unknown"),
-                    str(getattr(att, "url", None) or "")
-                )
-
-            # 分离图片和其他文件
-            image_attachments = []
-            other_attachments = []
-            for att in attachments:
-                mime, _, _ = _parse_attachment(att)
-                if "image" in mime:
-                    image_attachments.append(att)
-                else:
-                    other_attachments.append(att)
-            
-            # 图片使用 Markdown 格式
-            if image_attachments:
-                final_prompt += "\n\n"
-                for att in image_attachments:
-                    _, name, url = _parse_attachment(att)
-                    if url:
-                        final_prompt += f"![{name}]({url})\n"
-                        final_prompt += f"(请使用 analyze_image 工具分析此图片: {url})\n\n"
-            
-            # 非图片文件使用原有格式
-            if other_attachments:
-                final_prompt += "\n\nUser uploaded files:"
-                for att in other_attachments:
-                    mime, name, url = _parse_attachment(att)
-                    
-                    final_prompt += f"\n- [{mime}] {name} (URL: {url})"
-                    
-                    if url and any(t in mime for t in ["csv", "spreadsheet", "excel"]):
-                        final_prompt += "\n  (Hint: Use the read_uploaded_file tool to read this file)"
-            
-            logger.info("已将附件信息追加到 Prompt: %d 个附件 (%d 图片, %d 其他)", 
-                       len(attachments), len(image_attachments), len(other_attachments))
-
+        # 构建输入：保留用户原始 query，附件改走结构化合同
+        attachment_manifest = build_attachment_manifest(attachments)
+        lightweight_probe = build_lightweight_probe(attachment_manifest)
+        if attachment_manifest:
+            logger.info(
+                "已构建附件合同: count=%d, ids=%s",
+                len(attachment_manifest),
+                [item.get("attachment_id") for item in attachment_manifest],
+            )
         document_memory_enabled = _is_document_memory_enabled(ENABLE_DOCUMENT_MEMORY)
         document_memory_recall_enabled = (
             document_memory_enabled
@@ -895,19 +825,8 @@ class ChatService:
         memory_context = document_memory_context
         response_guidance_contract: dict[str, Any] | None = None
 
-        human_message = create_human_message(final_prompt)
+        human_message = create_human_message(prompt)
         input_messages = [human_message]
-        current_human_message_id = getattr(human_message, "id", None)
-        control_flags = _build_control_flags(
-            run_control_enabled=run_control_enabled,
-            attachments=attachments,
-            current_todo_id=current_todo_id,
-        )
-        semantic_payload = _build_semantic_payload(
-            user_query=prompt,
-            composed_query=final_prompt,
-            human_message_id=current_human_message_id,
-        )
 
         if memory_context:
             logger.info(
@@ -931,8 +850,17 @@ class ChatService:
             "model_id": model_id,
             "current_todo_id": current_todo_id,
             "run_id": resolved_run_id,
-            "control_flags": control_flags,
-            "semantic_payload": semantic_payload,
+            "control_flags": {
+                "run_control_enabled": bool(run_control_enabled),
+                "has_attachments": bool(attachments),
+                "has_current_todo_anchor": current_todo_id is not None,
+            },
+            "semantic_payload": {
+                "user_query": str(prompt or "").strip(),
+                "human_message_id": getattr(human_message, "id", None),
+            },
+            "attachment_manifest": attachment_manifest,
+            "lightweight_probe": lightweight_probe,
         }
         
         # 用于收集完整回复

@@ -544,44 +544,6 @@ def _get_user_id_from_state(state: TodoAgentState) -> Optional[int]:
     return get_user_id_optional(state, config=None)
 
 
-def _get_user_todo_context(user_id: int, config: dict = None) -> str:
-    """获取用户现有待办上下文字符串。
-    
-    Args:
-        user_id: 用户 ID
-        config: LangGraph 运行配置（用于依赖注入）
-    """
-    if not user_id:
-        return ""
-    
-    # 使用依赖注入
-    deps = get_todo_dependencies(config)
-        
-    try:
-        with deps.get_db_context() as db:
-            repo = deps.get_repository()
-            existing_todos = repo.list_by_user(db, user_id, status="pending")
-            if not existing_todos:
-                return ""
-                
-            # 构建简洁的任务列表上下文
-            limit = todo_config.context_todos_limit
-            # 数字到中文优先级映射
-            priority_num_to_cn = {1: "高", 2: "中", 3: "低"}
-            todo_list = []
-            for t in existing_todos[:limit]:
-                due_str = t.due_date.strftime("%m月%d日") if t.due_date else "无截止"
-                priority_str = priority_num_to_cn.get(t.priority, "中")
-                todo_list.append(f"- {t.title} (截止:{due_str}, 优先级:{priority_str})")
-            
-            context = f"\n\n## 用户现有待办 ({len(existing_todos)}项)\n" + "\n".join(todo_list)
-            logger.info(f"加载用户现有待办: {len(existing_todos)} 项")
-            return context
-    except Exception as e:
-        logger.warning(f"查询历史任务失败: {e}")
-        return ""
-
-
 def _find_todo_candidates_by_keyword(user_id: int, keyword: str, limit: int = 5) -> List[Dict]:
     """根据关键词查询用户待办候选。"""
     if not user_id or not keyword:
@@ -853,7 +815,8 @@ def analyze_intent(state: TodoAgentState, config: Optional[RunnableConfig] = Non
     # Step 1: 消息过滤与 Handoff 上下文构建
     pending_handoff = state.get("pending_handoff")
     filtered_messages, handoff_context, pre_extracted_info = filter_messages_for_todo(messages, pending_handoff)
-    recent_messages = filtered_messages[-5:] if filtered_messages else []
+    use_contract_first_messages = bool(pending_handoff)
+    recent_messages = list(filtered_messages if use_contract_first_messages else (filtered_messages[-5:] if filtered_messages else []))
     
     logger.info(f"分析用户消息 (Original: {len(messages)}, Filtered: {len(filtered_messages)}, Use: {len(recent_messages)})")
     if pre_extracted_info:

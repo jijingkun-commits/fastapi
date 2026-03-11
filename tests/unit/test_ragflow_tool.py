@@ -3,6 +3,7 @@
 验证检索参数、候选去重、证据卡片与图片占位符契约。
 """
 
+import json
 import requests
 
 from app.ai.tools import ragflow_tool
@@ -741,3 +742,23 @@ def test_knowledge_search_retrieval_log_should_track_gray_metrics(monkeypatch, c
     assert complete_log["metrics"]["selected_chunks"] == 1
     assert complete_log["metrics"]["selected_document_ids"] == ["doc-a"]
     assert complete_log["metrics"]["kb_image_count"] == 0
+
+
+def test_knowledge_research_should_wrap_atomic_lookup_as_stateless_contract(monkeypatch) -> None:
+    """knowledge_research 应保留 knowledge_search 为原子 tool，并输出 stateless research contract。"""
+    monkeypatch.setattr(
+        ragflow_tool.knowledge_search,
+        "func",
+        lambda query, dataset_id=None: "制度摘要：报销需部门审批。\n证据1：差旅报销需发票。\n证据2：超标部分不予报销。",
+        raising=False,
+    )
+
+    result = ragflow_tool.knowledge_research.func(query="整理报销制度重点", dataset_id=None)
+    payload = json.loads(result)
+
+    assert payload["research_mode"] == "knowledge"
+    assert payload["contract_version"] == "v1"
+    assert payload["summary"]
+    assert payload["source_count"] >= 1
+    assert payload["insufficiency"] == ""
+    assert payload["evidence"]

@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.ai.state import BaseAgentState, DataAgentState, MultiAgentState, TodoAgentState
+
 from app.ai.protocol import (
     AgentOutputParser,
     build_operation_additional_kwargs_payload,
@@ -24,8 +26,10 @@ from app.ai.workflow.multi_agent_graph import (
     StreamingContext,
     _apply_router_contract_guard,
     _build_direct_lookup_findings,
+    _build_router_result_v2_payload,
     _build_streaming_delta_return,
     _compile_data_goal_query_text,
+    _create_ai_message_with_skill_runtime,
     _create_streaming_agent_wrapper,
     _dispatch_custom_mode_chunk,
     _dispatch_messages_mode_chunk,
@@ -46,6 +50,11 @@ from app.ai.workflow.multi_agent_graph import (
     _prepare_streaming_inference_state,
 )
 from app.services.chat_service import degrade_on_plugin_failure
+from app.ai.workflow.attachment_planning import (
+    build_attachment_manifest,
+    build_attachment_planning_contract,
+    build_lightweight_probe,
+)
 
 
 def _make_ctx(
@@ -99,6 +108,73 @@ def test_streaming_context_holds_shared_state() -> None:
     assert ctx.kb_images == {"img-1": "url"}
     assert ctx.emitted_message_ids == {"msg-1"}
     assert ctx.sent_tool_call_ids == {"tc-1"}
+
+
+def test_agent_state_layers_define_single_owner_boundaries() -> None:
+    """state 分层应体现 supervisor / workflow 的单一 owner。"""
+    base_fields = set(BaseAgentState.__annotations__)
+    assert {"messages", "user_id", "thread_id", "enable_thinking", "model_id"}.issubset(base_fields)
+    assert "session_frame" not in base_fields
+    assert "pending_operation" not in base_fields
+    assert "pending_sql" not in base_fields
+
+    supervisor_fields = set(MultiAgentState.__annotations__)
+    assert {"session_frame", "turn_act", "clarify_fsm_state", "clarify_round", "frame_source_map"}.issubset(supervisor_fields)
+
+    todo_fields = set(TodoAgentState.__annotations__)
+    assert {"pending_operation", "user_confirmed", "pending_clarifications", "draft_todos", "response_message"}.issubset(todo_fields)
+    assert "pending_sql" not in todo_fields
+
+    data_fields = set(DataAgentState.__annotations__)
+    assert {"query_context", "generated_sql", "pending_sql", "sql_history"}.issubset(data_fields)
+    assert "pending_operation" not in data_fields
+
+
+def test_build_router_result_v2_payload_keeps_existing_conversation_state() -> None:
+    """router_result_v2 重建时不应丢失既有 conversation_state snapshot。"""
+    payload = _build_router_result_v2_payload(
+        existing_payload={
+            "route_decisions": [],
+            "conversation_state": {
+                "owner": "supervisor",
+                "turn_act": "NEW_QUERY",
+                "active_goal_ids": ["GOAL-01"],
+                "active_workflow": "supervisor",
+                "pending_user_action": "none",
+                "session_frame_slots": ["metric"],
+                "snapshot_version": "v1",
+            },
+        },
+        event="intent_router_replay",
+    )
+
+    assert payload["conversation_state"]["turn_act"] == "NEW_QUERY"
+    assert payload["conversation_state"]["active_goal_ids"] == ["GOAL-01"]
+
+
+def test_create_ai_message_with_skill_runtime_writes_conversation_state_snapshot() -> None:
+    """supervisor 对外 AIMessage 应写入唯一 replay snapshot。"""
+    message = _create_ai_message_with_skill_runtime(
+        "ok",
+        {
+            "router_result_v2": {"route_decisions": []},
+            "turn_id": "turn-1",
+            "turn_act": "SUPPLEMENT",
+            "clarify_fsm_state": "idle",
+            "clarify_round": 1,
+            "session_frame": {"metric": "贷款余额", "time_range": "2025-06-30"},
+            "decomposed_goals": [{"goal_id": "GOAL-01"}],
+            "pending_handoff": {"target_agent": "data_expert", "goal_id": "GOAL-01"},
+        },
+    )
+
+    snapshot = message.additional_kwargs["router_result_v2"]["conversation_state"]
+    assert snapshot["owner"] == "supervisor"
+    assert snapshot["turn_act"] == "SUPPLEMENT"
+    assert snapshot["active_goal_ids"] == ["GOAL-01"]
+    assert snapshot["active_workflow"] == "data_workflow"
+    assert snapshot["pending_user_action"] == "workflow_dispatch"
+    assert set(snapshot["session_frame_slots"]) == {"metric", "time_range"}
 
 
 def test_build_streaming_tool_start_payload_normalizes_invalid_args() -> None:
@@ -1469,6 +1545,13 @@ def test_prepare_streaming_inference_state_should_isolate_data_expert_subquery()
     assert "嘉兴的天气" not in human_messages[0].content
     assert "贷款余额前10名" in human_messages[0].content
     assert human_messages[0].name == "__internal_data_handoff__"
+    assert human_messages[0].additional_kwargs["expert_input_contract"] == {
+        "contract_id": "data_handoff_query_text",
+        "contract_version": "v1",
+        "target_agent": "data_expert",
+        "state_owner": "supervisor",
+        "source_fields": ["pending_handoff.frame.query_text"],
+    }
 
 
 def test_maybe_compile_supervisor_data_handoff_after_stream_emits_partial_preview() -> None:
@@ -1517,3 +1600,150 @@ def test_maybe_compile_supervisor_data_handoff_after_stream_emits_partial_previe
     assert handoff_return["pending_handoff"]["direct_answer_markdown"] == "嘉兴天气：\n- 明天：多云，3~11℃"
     assert [event["type"] for event in emitted_events] == ["status", "token"]
     assert emitted_events[1]["data"]["content"] == "嘉兴天气：\n- 明天：多云，3~11℃"
+
+
+def test_build_attachment_manifest_and_probe_should_keep_structured_contract() -> None:
+    """chat_service 应把附件输入收口为 manifest + lightweight_probe。"""
+    attachments = [
+        {
+            "name": "report.xlsx",
+            "url": "/api/v1/assets/report.xlsx",
+            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "size": 1024,
+            "object_key": "obj-report",
+        },
+        {
+            "name": "invoice.png",
+            "url": "/api/v1/assets/invoice.png",
+            "mime_type": "image/png",
+            "size": 2048,
+            "object_key": "obj-image",
+        },
+    ]
+
+    manifest = build_attachment_manifest(attachments)
+    probe = build_lightweight_probe(manifest)
+
+    assert manifest == [
+        {
+            "attachment_id": "obj-report",
+            "name": "report.xlsx",
+            "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "size_bytes": 1024,
+            "uri": "/api/v1/assets/report.xlsx",
+            "derived_kind": "tabular",
+        },
+        {
+            "attachment_id": "obj-image",
+            "name": "invoice.png",
+            "mime": "image/png",
+            "size_bytes": 2048,
+            "uri": "/api/v1/assets/invoice.png",
+            "derived_kind": "image",
+        },
+    ]
+    assert probe[0]["attachment_id"] == "obj-report"
+    assert probe[0]["probe_status"] == "ready"
+    assert probe[1]["vision_hint"] == "analyze_image"
+
+
+def test_build_attachment_planning_contract_should_route_single_image_to_direct_tool() -> None:
+    """单张图片默认应先走 direct_tool，而不是直接进入 workflow。"""
+    payload = build_attachment_planning_contract(
+        user_query="帮我看一下这张图",
+        goal_buckets=["general"],
+        active_goal_count=1,
+        has_explicit_multi_goal=False,
+        has_todo_context=False,
+        attachment_manifest=[
+            {
+                "attachment_id": "img-1",
+                "name": "chart.png",
+                "mime": "image/png",
+                "size_bytes": 123,
+                "uri": "/img.png",
+                "derived_kind": "image",
+            }
+        ],
+        lightweight_probe=[
+            {"attachment_id": "img-1", "probe_status": "ready", "summary": "chart.png（kind=image）"}
+        ],
+    )
+
+    assert payload is not None
+    assert payload["planning_route"] == "direct_tool"
+    assert payload["selected_attachment_ids"] == ["img-1"]
+    assert payload["attachment_roles"] == [{"attachment_id": "img-1", "role": "image_input"}]
+
+
+def test_build_attachment_planning_contract_should_route_multi_goal_to_mixed() -> None:
+    """多目标 + 多附件场景应先由 supervisor 持有 mixed 计划。"""
+    payload = build_attachment_planning_contract(
+        user_query="先根据附件整理待办，再分析表格数据",
+        goal_buckets=["todo", "data"],
+        active_goal_count=2,
+        has_explicit_multi_goal=True,
+        has_todo_context=False,
+        attachment_manifest=[
+            {
+                "attachment_id": "doc-1",
+                "name": "todo.txt",
+                "mime": "text/plain",
+                "size_bytes": 12,
+                "uri": "/todo.txt",
+                "derived_kind": "document",
+            },
+            {
+                "attachment_id": "xls-1",
+                "name": "report.xlsx",
+                "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "size_bytes": 12,
+                "uri": "/report.xlsx",
+                "derived_kind": "tabular",
+            },
+        ],
+        lightweight_probe=[
+            {"attachment_id": "doc-1", "probe_status": "ready", "summary": "todo.txt（kind=document）"},
+            {"attachment_id": "xls-1", "probe_status": "ready", "summary": "report.xlsx（kind=tabular）"},
+        ],
+    )
+
+    assert payload is not None
+    assert payload["planning_route"] == "mixed"
+    assert len(payload["execution_items"]) >= 2
+    assert {item["planning_route"] for item in payload["execution_items"]} >= {"todo_workflow", "data_workflow"}
+
+
+def test_build_attachment_planning_contract_should_not_let_todo_anchor_override_explicit_data_goal() -> None:
+    """存在 current_todo_id 时，明确的数据分析目标仍应优先走 data_workflow。"""
+    payload = build_attachment_planning_contract(
+        user_query="帮我分析这个报表，统计贷款余额趋势",
+        goal_buckets=["data"],
+        active_goal_count=1,
+        has_explicit_multi_goal=False,
+        has_todo_context=True,
+        attachment_manifest=[
+            {
+                "attachment_id": "xls-1",
+                "name": "report.xlsx",
+                "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "size_bytes": 12,
+                "uri": "/report.xlsx",
+                "derived_kind": "tabular",
+            }
+        ],
+        lightweight_probe=[
+            {
+                "attachment_id": "xls-1",
+                "probe_status": "ready",
+                "summary": "report.xlsx（kind=tabular）",
+                "sheet_names": ["Sheet1"],
+                "column_names": ["贷款余额"],
+            }
+        ],
+    )
+
+    assert payload is not None
+    assert payload["planning_route"] == "data_workflow"
+    assert payload["attachment_roles"] == [{"attachment_id": "xls-1", "role": "data_source"}]
+    assert payload["requires_user_confirmation"] is False

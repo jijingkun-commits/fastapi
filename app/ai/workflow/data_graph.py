@@ -50,6 +50,7 @@ from app.ai.workflow.data_query_contract import (
 )
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.protocol import (
+    build_expert_input_contract_payload,
     build_streaming_result_payload_from_fields,
     build_result_additional_kwargs_payload,
 )
@@ -989,12 +990,6 @@ def _requires_detail_query(question: str, dimensions: Optional[List[str]] = None
     return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in detail_patterns)
 
 
-def _is_topn_intent(question: str) -> bool:
-    """判断是否为 TopN/排名意图。"""
-    normalized = re.sub(r"\s+", "", question or "")
-    return bool(re.search(r"前\d+|top\d+|排名|排行", normalized, re.IGNORECASE))
-
-
 def _is_total_aggregate_sql(sql: str) -> bool:
     """判断 SQL 是否为“总量聚合”模板。"""
     lowered = f" {sql.lower()} "
@@ -1514,6 +1509,7 @@ def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
         "query_shape": "",
         "ranking": {},
         "turn_act_hint": "",
+        "expert_input_contract": None,
     }
 
     pending_handoff = state.get("pending_handoff")
@@ -1557,6 +1553,12 @@ def _extract_handoff_context(state: DataAgentState) -> Dict[str, Any]:
         or handoff_frame.get("turn_act_hint")
         or ""
     ).strip()
+    context["expert_input_contract"] = build_expert_input_contract_payload(
+        contract_id="data_handoff_query_text",
+        target_agent="data_expert",
+        state_owner="supervisor",
+        source_fields=["pending_handoff.frame.query_text"],
+    )
     return context
 
 
@@ -2255,6 +2257,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "intent_policy_cache_hit": policy_meta.get("cache_hit"),
                 "intent_policy_cache_age_sec": policy_meta.get("cache_age_sec"),
                 "handoff_turn_act_hint": handoff_turn_act_hint or None,
+                "expert_input_contract": handoff_context.get("expert_input_contract"),
             }
         }
 

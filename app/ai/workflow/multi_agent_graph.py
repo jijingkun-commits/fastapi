@@ -21,11 +21,10 @@ from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, trim_messages
 from langchain_core.messages.utils import count_tokens_approximately
 from app.ai.utils.message_factory import create_ai_message
-from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.tools import InjectedToolCallId, tool
-from langgraph.types import Command, Send, interrupt
+from langgraph.types import Command
 from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
@@ -55,9 +54,8 @@ from app.ai.events import (
 from app.ai.protocol import (
     AgentOutputParser,
     HandoffResult,
-    StreamingToolStartPayload,
-    StreamingResultPayload,
-    StreamingKbImagesPayload,
+    build_conversation_state_snapshot_payload,
+    build_expert_input_contract_payload,
     build_skill_runtime_additional_kwargs_payload,
     build_streaming_tool_start_payload,
     build_streaming_result_payload,
@@ -79,10 +77,15 @@ from app.services import response_policy_service
 from app.ai.workflow.session_intent_kernel import TURN_ACT_SUPPLEMENT, classify_turn_act_from_text
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
-    validate_active_goals_contract,
     validate_coverage_report_contract,
 )
 from app.ai.workflow.tool_observation_normalizer import summarize_tavily_tool_output
+from app.ai.workflow.attachment_planning import (
+    build_attachment_planning_contract,
+    normalize_attachment_manifest_entries,
+    normalize_lightweight_probe_entries,
+    render_attachment_planning_context,
+)
 
 # Schema 路由增强（借鉴 TypeAgent Dispatcher）
 from app.ai.schema.agent_schema import route_by_schema
@@ -134,10 +137,8 @@ class StreamingContext:
     sent_tool_call_ids: set
 
 
-# AgentType, AGENT_DESCRIPTIONS, MultiAgentState 已迁移到 app/ai/state.py
 
 
-# SUPERVISOR_PROMPT 已迁移到 app/ai/prompts/agent_prompts.py
 
 
 ROUTER_RESULT_V2_VERSION = "v2"
@@ -444,12 +445,10 @@ def _resolve_semantic_user_query(state: MultiAgentState) -> str:
     """优先读取语义层载荷，缺失时回退到消息切片。"""
     semantic_payload = state.get("semantic_payload")
     if isinstance(semantic_payload, dict):
-        candidate_keys = ("user_query", "composed_query")
-        for key in candidate_keys:
-            value = semantic_payload.get(key)
-            text = _normalize_text_content(value)
-            if text and text.strip():
-                return text.strip()
+        value = semantic_payload.get("user_query")
+        text = _normalize_text_content(value)
+        if text and text.strip():
+            return text.strip()
 
     messages = _slice_messages_from_latest_human(state.get("messages", []))
     return _extract_latest_human_content(messages)
@@ -495,10 +494,12 @@ def _build_router_result_v2_payload(
     turn_id: str = "",
     event: str = "",
     reason: str = "",
+    runtime_state: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """构建运行态 canonical Router 结果（additional_kwargs.router_result_v2）。"""
     existing = dict(existing_payload or {})
+    normalized_state = runtime_state if isinstance(runtime_state, dict) else {}
     existing_decisions = [
         dict(item)
         for item in list(existing.get("route_decisions") or [])
@@ -522,6 +523,83 @@ def _build_router_result_v2_payload(
         for goal in list(pending_goals or [])
         if isinstance(goal, dict)
     ]
+    existing_conversation_state = (
+        dict(existing.get("conversation_state"))
+        if isinstance(existing.get("conversation_state"), dict)
+        else {}
+    )
+
+    active_goal_ids: List[str] = []
+    for goal in list(normalized_state.get("decomposed_goals") or []):
+        if not isinstance(goal, dict):
+            continue
+        goal_id = str(goal.get("goal_id") or "").strip()
+        if goal_id and goal_id not in active_goal_ids:
+            active_goal_ids.append(goal_id)
+
+    pending_handoff = normalized_state.get("pending_handoff")
+    if not active_goal_ids and isinstance(pending_handoff, dict):
+        goal_id = str(pending_handoff.get("goal_id") or "").strip()
+        if goal_id:
+            active_goal_ids.append(goal_id)
+
+    if not active_goal_ids:
+        for item in list(existing_conversation_state.get("active_goal_ids") or []):
+            goal_id = str(item or "").strip()
+            if goal_id and goal_id not in active_goal_ids:
+                active_goal_ids.append(goal_id)
+
+    active_workflow = str(existing_conversation_state.get("active_workflow") or "supervisor").strip() or "supervisor"
+    pending_user_action = str(existing_conversation_state.get("pending_user_action") or "none").strip() or "none"
+
+    if isinstance(pending_handoff, dict):
+        target_agent = str(pending_handoff.get("target_agent") or "").strip()
+        if target_agent == AgentType.DATA:
+            active_workflow = "data_workflow"
+            pending_user_action = "workflow_dispatch"
+        elif target_agent == AgentType.TODO:
+            active_workflow = "todo_workflow"
+            pending_user_action = "workflow_dispatch"
+
+    pending_operation = normalized_state.get("pending_operation")
+    if isinstance(pending_operation, dict) and pending_operation:
+        active_workflow = "todo_workflow"
+        pending_user_action = "todo_clarify" if pending_operation.get("needs_clarification") else "todo_confirm"
+    elif str(normalized_state.get("pending_sql") or "").strip():
+        active_workflow = "data_workflow"
+        pending_user_action = "data_sql_confirm"
+    elif str(normalized_state.get("clarification_needed") or "").strip():
+        active_workflow = "data_workflow"
+        pending_user_action = "data_clarify"
+
+    session_frame_slots: List[str] = []
+    session_frame = normalized_state.get("session_frame")
+    if isinstance(session_frame, dict):
+        for key, value in session_frame.items():
+            slot_name = str(key or "").strip()
+            if not slot_name:
+                continue
+            if value is None or value == "" or value == [] or value == {}:
+                continue
+            if slot_name not in session_frame_slots:
+                session_frame_slots.append(slot_name)
+    if not session_frame_slots:
+        for item in list(existing_conversation_state.get("session_frame_slots") or []):
+            slot_name = str(item or "").strip()
+            if slot_name and slot_name not in session_frame_slots:
+                session_frame_slots.append(slot_name)
+
+    conversation_state = build_conversation_state_snapshot_payload(
+        owner="supervisor",
+        turn_act=normalized_state.get("turn_act") or existing_conversation_state.get("turn_act") or "UNKNOWN",
+        active_goal_ids=active_goal_ids,
+        active_workflow=active_workflow,
+        pending_user_action=pending_user_action,
+        session_frame_slots=session_frame_slots,
+        snapshot_version=existing_conversation_state.get("snapshot_version") or "v1",
+        clarify_fsm_state=normalized_state.get("clarify_fsm_state") or existing_conversation_state.get("clarify_fsm_state"),
+        clarify_round=normalized_state.get("clarify_round") if normalized_state.get("clarify_round") is not None else existing_conversation_state.get("clarify_round"),
+    )
 
     payload: Dict[str, Any] = {
         "version": ROUTER_RESULT_V2_VERSION,
@@ -531,6 +609,8 @@ def _build_router_result_v2_payload(
         "pending_goals": pending,
         "field_version": ROUTER_RESULT_V2_VERSION,
     }
+    if conversation_state is not None:
+        payload["conversation_state"] = conversation_state
     if turn_id:
         payload["turn_id"] = turn_id
     if event:
@@ -545,6 +625,7 @@ def _build_router_result_v2_payload(
             payload[key] = value
 
     return payload
+
 
 
 def _first_hint_position(text: str, hints: Sequence[str]) -> int:
@@ -1325,17 +1406,6 @@ def _resolve_planner_reason_code(
     if normalized_rule.endswith(".legacy_catch_all"):
         return "legacy"
     return "unknown"
-
-
-def _extract_planner_fallback_meta(*intent_plans: Any) -> Dict[str, Any]:
-    """从候选 intent_plan 中提取 fallback_meta（按传入顺序优先）。"""
-    for plan in intent_plans:
-        if not isinstance(plan, dict):
-            continue
-        fallback_meta = plan.get("fallback_meta")
-        if isinstance(fallback_meta, dict):
-            return dict(fallback_meta)
-    return {}
 
 
 def _build_planner_status_message(
@@ -2958,6 +3028,25 @@ def _build_compiled_data_goal_handoff(
     return _augment_data_handoff_payload(compiled, state)
 
 
+def _resolve_dispatch_queue_with_query_fallback(
+    state: Optional[Dict[str, Any]],
+) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]], str]:
+    """优先用现有 active_goals，缺失时再用最近用户 query 回推 dispatch queue。"""
+
+    normalized_state = dict(state or {})
+    active_goals = _resolve_active_goals(normalized_state)
+    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+    if dispatch_queue:
+        return active_goals, dispatch_queue, ""
+
+    latest_user_text = _extract_latest_human_content(normalized_state.get("messages", []))
+    if not latest_user_text:
+        return active_goals, [], ""
+
+    fallback_goals = _build_decomposed_goals_for_query(latest_user_text)
+    return fallback_goals, _build_router_dispatch_goal_queue(fallback_goals), latest_user_text
+
+
 def _inject_compiled_data_handoff_for_supervisor(
     handoffs: Sequence[Dict[str, Any]],
     *,
@@ -3108,13 +3197,7 @@ def _apply_router_contract_guard(
         pending = _build_router_dispatch_goal_queue(_resolve_active_goals(state))
         return [], blocked, pending
 
-    active_goals = _resolve_active_goals(state)
-    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
-    if not dispatch_queue:
-        latest_user_text = _extract_latest_human_content(state.get("messages", []))
-        if latest_user_text:
-            active_goals = _build_decomposed_goals_for_query(latest_user_text)
-            dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
+    active_goals, dispatch_queue, _latest_user_text = _resolve_dispatch_queue_with_query_fallback(state)
 
     normalized_handoffs = _inject_compiled_data_handoff_for_supervisor(
         normalized_handoffs,
@@ -4253,7 +4336,6 @@ async def _prefill_emitted_message_ids(
             if subgraph_messages:
                 logger.debug("[%s] 从子图 checkpoint 预填充 %s 条消息 ID", node_name, len(subgraph_messages))
     except Exception as exc:
-        # 子图可能没有 checkpoint（首次调用），这是正常情况
         logger.debug("[%s] 无法获取子图状态（可能是首次调用）: %s", node_name, exc)
 
 
@@ -4426,7 +4508,19 @@ def _build_expert_inference_messages(
     if not query_text:
         return list(original_messages or [])
 
-    return [HumanMessage(content=query_text, name="__internal_data_handoff__")]
+    expert_input_contract = build_expert_input_contract_payload(
+        contract_id="data_handoff_query_text",
+        target_agent=AgentType.DATA,
+        state_owner="supervisor",
+        source_fields=["pending_handoff.frame.query_text"],
+    )
+    return [
+        HumanMessage(
+            content=query_text,
+            name="__internal_data_handoff__",
+            additional_kwargs={"expert_input_contract": expert_input_contract} if expert_input_contract else None,
+        )
+    ]
 
 
 def _prepare_streaming_inference_state(
@@ -4726,6 +4820,7 @@ def _maybe_compile_supervisor_data_handoff_after_stream(
         turn_id=str(guard_state.get("turn_id") or ""),
         event="intent_router_dispatch_ready",
         reason="",
+        runtime_state=guard_state,
     )
     first_handoff = dict(guarded_batch[0])
     direct_answer_markdown = _sanitize_direct_answer_markdown(
@@ -4789,12 +4884,9 @@ def _dispatch_values_mode_chunk(
         handoff_batch = AgentOutputParser.extract_all_handoffs_from_messages(delta_messages_for_scan)
 
         runtime_goals = final_state.get("decomposed_goals")
-        if not isinstance(runtime_goals, list):
-            runtime_goals = ctx.state.get("decomposed_goals")
-
         active_goals = _resolve_active_goals(
             ctx.state,
-            runtime_goals=runtime_goals if isinstance(runtime_goals, list) else None,
+            runtime_goals=runtime_goals if isinstance(runtime_goals, list) else ctx.state.get("decomposed_goals"),
         )
 
         if handoff_batch and _should_backfill_runtime_goals_for_handoff(active_goals, handoff_batch):
@@ -4806,11 +4898,14 @@ def _dispatch_values_mode_chunk(
                 active_goals = _normalize_active_goals(backfilled_goals)
                 final_state["decomposed_goals"] = list(active_goals)
 
-        guard_state = dict(ctx.state)
-        guard_state.update({k: v for k, v in final_state.items() if k != "messages"})
-        guard_state["messages"] = list(final_state.get("messages") or ctx.state.get("messages") or [])
-        final_state["decomposed_goals"] = list(active_goals)
-        guard_state["decomposed_goals"] = list(active_goals)
+        normalized_active_goals = list(active_goals)
+        guard_state = {
+            **dict(ctx.state),
+            **{k: v for k, v in final_state.items() if k != "messages"},
+            "messages": list(messages),
+            "decomposed_goals": normalized_active_goals,
+        }
+        final_state["decomposed_goals"] = normalized_active_goals
 
         if handoff_batch:
             normalized_batch = _normalize_handoff_batch_for_supervisor(
@@ -4874,14 +4969,13 @@ def _dispatch_values_mode_chunk(
                     node=ctx.node_name,
                 )
 
-            router_event = "intent_router_dispatch_ready"
-            router_reason = ""
-            if blocked_handoffs:
-                router_event = "intent_router_handoff_blocked"
-                router_reason = "router_contract_blocked"
-            if legacy_fields:
-                router_event = "intent_router_legacy_field_detected"
-                router_reason = "legacy_field_detected"
+            router_event, router_reason = (
+                ("intent_router_legacy_field_detected", "legacy_field_detected")
+                if legacy_fields
+                else ("intent_router_handoff_blocked", "router_contract_blocked")
+                if blocked_handoffs
+                else ("intent_router_dispatch_ready", "")
+            )
 
             existing_router_result = _extract_router_result_v2(final_state, guard_state)
             final_state["router_result_v2"] = _build_router_result_v2_payload(
@@ -4892,6 +4986,7 @@ def _dispatch_values_mode_chunk(
                 turn_id=str(guard_state.get("turn_id") or ""),
                 event=router_event,
                 reason=router_reason,
+                runtime_state=guard_state,
                 extra={
                     "legacy_fields": list(legacy_fields) if legacy_fields else None,
                 },
@@ -5368,7 +5463,6 @@ def _get_common_tool_entries() -> list[Dict[str, Any]]:
     """构建共享工具候选条目（未应用治理策略）。"""
     entries: list[Dict[str, Any]] = []
 
-    # 图片分析工具
     try:
         from app.ai.tools.vision_tool import analyze_image, is_vision_configured
         if is_vision_configured():
@@ -5377,7 +5471,6 @@ def _get_common_tool_entries() -> list[Dict[str, Any]]:
     except Exception as e:
         logger.warning("Vision 工具加载失败: %s", e)
 
-    # 文件读取工具
     try:
         from app.ai.tools.file_tools import read_uploaded_file, read
 
@@ -5530,16 +5623,9 @@ def _is_handoff_entry_goal_visible(entry: Dict[str, Any], state: Optional[Dict[s
     if not target_agent:
         return True
 
-    normalized_state = dict(state or {})
-    active_goals = _resolve_active_goals(normalized_state)
-    dispatch_queue = _build_router_dispatch_goal_queue(active_goals)
-    if not dispatch_queue:
-        latest_user_text = _extract_latest_human_content(normalized_state.get("messages", []))
-        if latest_user_text:
-            dispatch_queue = _build_router_dispatch_goal_queue(_build_decomposed_goals_for_query(latest_user_text))
-        else:
-            return True
-
+    _active_goals, dispatch_queue, latest_user_text = _resolve_dispatch_queue_with_query_fallback(state)
+    if not dispatch_queue and not latest_user_text:
+        return True
     if not dispatch_queue:
         return False
 
@@ -5812,6 +5898,7 @@ def _create_ai_message_with_skill_runtime(content: str, state: Dict[str, Any]):
             existing_payload=router_result_v2,
             event=str(router_result_v2.get("event") or "intent_router_replay"),
             reason=str(router_result_v2.get("reason") or ""),
+            runtime_state=state,
         )
 
     return create_ai_message(content, additional_kwargs=additional_kwargs or None)
@@ -5908,7 +5995,7 @@ def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
         logger.warning("Supervisor 绘图工具加载失败: %s", exc)
 
     try:
-        from app.ai.tools.ragflow_tool import knowledge_search, is_ragflow_configured
+        from app.ai.tools.ragflow_tool import knowledge_search, knowledge_research, is_ragflow_configured
 
         if is_ragflow_configured():
             entries.append(
@@ -5918,16 +6005,25 @@ def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
                     runtime_visibility="catalog_after_load" if progressive_mode else "always",
                 )
             )
-            logger.debug("Supervisor 工具: 已加载 knowledge_search")
+            entries.append(
+                _build_tool_entry(
+                    knowledge_research,
+                    {"group:research", "research:knowledge"},
+                    runtime_visibility="catalog_after_load" if progressive_mode else "always",
+                    required_runtime_tools={"knowledge_search"},
+                )
+            )
+            logger.debug("Supervisor 工具: 已加载 knowledge_search / knowledge_research")
     except Exception as exc:
         logger.warning("Supervisor 知识库工具加载失败: %s", exc)
 
     try:
-        from app.ai.tools.chatTools import search_tool
+        from app.ai.tools.chatTools import search_tool, web_research
 
         if search_tool is not None:
             entries.append(_build_tool_entry(search_tool, {"group:web"}))
-            logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索")
+            entries.append(_build_tool_entry(web_research, {"group:research", "research:web"}))
+            logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索 / web_research")
         else:
             logger.info(
                 "联网搜索未加入 Supervisor: search_tool 未加载（请检查 TAVILY_API_KEY 或安装 langchain-tavily）"
@@ -6404,21 +6500,13 @@ def _create_task_handoff_tool(agent_name: str, description: str):
 
 
 async def _preprocess_multimodal(state: MultiAgentState) -> dict:
-    """预处理节点：1. 验证消息序列 2. 分析图片/文件内容。
-    
-    职责：
-    - 验证消息完整性，移除不完整的 tool_calls
-    - 修复 DeepSeek reasoning_content（如果启用思考模式）
-    - 分析用户上传的图片和文件，为 Supervisor 路由提供上下文
-    """
+    """预处理节点：验证消息、执行输入护栏、注入系统上下文。"""
     messages = state.get("messages", [])
     if not messages:
         return {}
     
-    # 获取 StreamWriter 用于发送自定义事件
     writer = get_stream_writer()
-    
-    # 显式标记 Graph 类型，用于 resume 时检测
+
     updates = {
         "_graph_type": "multi_agent",
         "runtime_recovery_state": _build_runtime_recovery_state(
@@ -6430,26 +6518,15 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         "turn_id": f"{state.get('thread_id') or 'thread'}:{datetime.now(timezone.utc).isoformat(timespec='seconds')}",
     }
     
-    # 注意：临时状态（pending_handoff 等）在 postprocess 节点统一清理
-    # 详见：_postprocess 函数的状态清理逻辑
-    
-    # ========== 1. 消息验证与修复 ==========
-    # 【补丁代码】修复 DeepSeek Reasoner 的 reasoning_content 缺失问题
-    # 详见: app.ai.message_utils.fix_deepseek_reasoning
-    # 原因: DeepSeek R1 要求历史消息必须包含 reasoning_content 字段
-    # 方案: 已将修复逻辑封装为独立函数 validate_messages，保持代码整洁
-    # 兼容策略：待 DeepSeek 官方修复 reasoning_content 历史消息校验后再评估移除
     from app.ai.message_utils import validate_messages
     
     enable_thinking = state.get("enable_thinking", False)
     model_id = state.get("model_id")
     
-    # 判断是否需要执行 DeepSeek 补丁
     should_fix_reasoning = enable_thinking
     if model_id and ("deepseek" in model_id.lower() or "reasoner" in model_id.lower()):
         should_fix_reasoning = True
     
-    # 执行消息验证（包括 DeepSeek 修复）
     original_count = len(messages)
     validated = validate_messages(messages, fix_reasoning=should_fix_reasoning)
     
@@ -6459,13 +6536,11 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
             should_fix_reasoning, original_count, len(validated)
         )
         updates["messages"] = validated
-        messages = validated  # 使用验证后的消息继续处理
-    
-    # ========== 2. 护栏验证（借鉴 OpenAI Agents SDK Guardrails） ==========
+        messages = validated
+
     last_msg = messages[-1]
     content = str(getattr(last_msg, "content", ""))
     
-    # 只对用户消息执行护栏验证
     from langchain_core.messages import HumanMessage
     if isinstance(last_msg, HumanMessage):
         from app.ai.guardrails import guardrail_runner
@@ -6475,15 +6550,10 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         if not passed:
             logger.warning("护栏拦截: %s", reason)
             emit_status(writer, message=f"安全检查: {reason}", node="preprocess")
-            # 返回拒绝消息（可以选择直接拦截或继续处理）
-            # 这里选择记录日志但继续处理，让 LLM 自行决定
-        
         if sanitized_content and sanitized_content != content:
             logger.info("护栏: 输入已脱敏处理")
             content = sanitized_content
     
-    # ========== 3. 系统上下文注入 ==========
-    # 为所有 Agent 提供当前时间与待办锚点等系统级信息
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
     context_parts = [f"当前时间: {current_time}"]
 
@@ -6583,8 +6653,6 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
                 except Exception as exc:
                     logger.warning("预处理 fast lane 外部预取失败，已回退主链: %s", exc)
     
-    # ========== 4. Skill Runtime 预装载 ==========
-    # progressive_loader: 预装 catalog；hybrid_rag: 保留旧检索链路作为显式切换路径
     updates["skill_candidates"] = []
     updates["selected_skill_ids"] = []
     updates["skill_context"] = None
@@ -6714,80 +6782,60 @@ async def _preprocess_multimodal(state: MultiAgentState) -> dict:
         else:
             logger.warning("预处理节点: 技能检索失败 - %s", e)
     
-    # 检测是否包含图片 URL（Markdown 格式）
-    image_urls = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', content)
-    
-    if image_urls:
-        logger.info("预处理节点: 检测到 %d 张图片，开始分析...", len(image_urls))
-        
-        # 发送分析状态给前端
-        emit_status(
-            writer,
-            message=f"正在分析 {len(image_urls)} 张图片...",
-            node="preprocess",
-            phase="processing",
+    attachment_manifest = normalize_attachment_manifest_entries(state.get("attachment_manifest"))
+    lightweight_probe = normalize_lightweight_probe_entries(state.get("lightweight_probe"))
+    attachment_planning = None
+    if attachment_manifest:
+        user_query = _resolve_semantic_user_query(state)
+        active_goals = [
+            goal
+            for goal in _build_decomposed_goals_for_query(user_query)
+            if isinstance(goal, dict) and bool(goal.get("must_answer", True))
+        ]
+        goal_buckets = list(dict.fromkeys(
+            _goal_kind_bucket(str(goal.get("kind") or "general.reply"))
+            for goal in active_goals
+        ))
+        attachment_planning = build_attachment_planning_contract(
+            user_query=user_query,
+            goal_buckets=goal_buckets,
+            active_goal_count=len(active_goals),
+            has_explicit_multi_goal=_has_explicit_multi_goal_markers(user_query),
+            has_todo_context=state.get("current_todo_id") is not None or bool(state.get("pending_operation")),
+            attachment_manifest=attachment_manifest,
+            lightweight_probe=lightweight_probe,
         )
-        
-        try:
-            from app.ai.tools.vision_tool import analyze_image, is_vision_configured
-            if is_vision_configured():
-                # 分析第一张图片
-                analysis_result = analyze_image.invoke({"image_url": image_urls[0]})
-                logger.info("预处理节点: 图片分析完成 - %s", str(analysis_result)[:100])
-                updates["attachment_analysis"] = f"[图片分析结果] {analysis_result}"
-                
-                # 进入回答生成阶段
-                emit_status(
-                    writer,
-                    message="正在生成回答...",
-                    node="preprocess",
-                    phase="generating",
-                )
-        except Exception as e:
-            logger.warning("预处理节点: 图片分析失败 - %s", e)
-    
-    # 检测是否包含文件 URL
-    file_patterns = re.findall(r'\[([^\]]+)\]\s+([^\s]+)\s+\(URL:\s*([^)]+)\)', content)
-    if file_patterns:
-        file_info = [(name, url) for _, name, url in file_patterns]
-        logger.info("预处理节点: 检测到 %d 个文件", len(file_info))
-        updates["attachment_analysis"] = f"[文件信息] 用户上传了文件: {', '.join([f[0] for f in file_info])}"
+    if attachment_planning:
+        planning_context = render_attachment_planning_context(
+            attachment_manifest,
+            lightweight_probe,
+            attachment_planning,
+        )
+        updates["attachment_manifest"] = attachment_manifest
+        updates["lightweight_probe"] = lightweight_probe
+        updates["attachment_planning"] = attachment_planning
+        context_parts.append(planning_context)
+        updates["system_context"] = "\n".join(context_parts)
     logger.info("jjk-multi-agent: 预处理节点: 更新状态 - %s", updates)
     return updates
 
 
 async def create_multi_agent_graph(
-    checkpointer=None, 
-    enable_thinking: bool = False, 
+    checkpointer=None,
+    enable_thinking: bool = False,
     model_id: str = None
 ):
-    """创建多智能体 Supervisor 图（手动构建）。
-    
-    架构：
-        START -> preprocess -> supervisor -> [data_expert  | todo_expert]
-                                      |
-                                      +-> Postprocess -> END
-                                      
-    注意：专家执行完后会直接返回 END（或者是返回结果给 Supervisor，这里使用 Command(graph=Command.PARENT) 跳转）
-    实际上，由于 Handoff 工具使用了 Send()，子 Agent 执行完后，LangGraph 默认行为是结束当前步骤。
-    我们需要确保子 Agent 的结果能被 postprocess 捕获（或者直接保存）。
-    
-    调整：
-    专家 Agent 执行完毕后，流程应该汇聚到 postprocess。
-    """
-    
-    # 获取 Supervisor LLM（主对话）
+    """创建多智能体 Supervisor 图。"""
+
     llm = get_scene_llm(
         scene_key=SCENE_KEY_MULTI_AGENT_SUPERVISOR,
         force_thinking=enable_thinking,
         model_id=model_id,
     )
 
-    # 1. 创建 Handoff 工具（执行全集 + 运行时可见子集）
     handoff_tool_entries = _get_supervisor_handoff_tool_entries()
     handoff_tools = _apply_tool_governance_policy(handoff_tool_entries, agent_name="supervisor")
 
-    # 2. 获取 Supervisor 的简单工具（执行全集 + 运行时可见子集）
     supervisor_simple_tool_entries = _get_supervisor_tool_entries()
     supervisor_simple_tools = _apply_tool_governance_policy(supervisor_simple_tool_entries, agent_name="supervisor")
     decompose_goals_tool = _create_decompose_goals_tool(llm)
@@ -6817,8 +6865,6 @@ async def create_multi_agent_graph(
         )
         return llm.bind_tools(bound_tools)
 
-    # 3. 创建 Supervisor Agent（handoff 工具 + 简单工具）
-    # 模型侧按会话态动态裁剪可见工具，执行侧也统一经过 runtime gating 拦截
     supervisor_agent = create_react_agent(
         _resolve_supervisor_model,
         supervisor_tool_node,
@@ -6826,7 +6872,6 @@ async def create_multi_agent_graph(
         name="supervisor",
     )
     
-    # 4. 创建 data_expert（使用 DataGraph）
     from app.ai.workflow.data_graph import create_data_graph
     data_graph_app = create_data_graph(
         model=llm,
@@ -6835,7 +6880,6 @@ async def create_multi_agent_graph(
         checkpointer=checkpointer
     )
     
-    # 5. 创建 todo_expert（使用 TodoGraph）
     from app.ai.workflow.todo_graph import create_todo_graph
     todo_graph_app = create_todo_graph(
         model=llm, 
@@ -6843,28 +6887,14 @@ async def create_multi_agent_graph(
         checkpointer=checkpointer 
     )
 
-    # 6. 为专家节点创建流式包装器（模块级工厂）
-    # wrapper 内部通过统一 orchestrator 运行流循环并发射事件。
-
-    # 7. 定义后处理节点
     def _postprocess(state: MultiAgentState) -> dict:
         """后处理节点：调试日志 + 保存对话到数据库 + 清理缓存。"""
         messages = state.get("messages", [])
         user_id = state.get("user_id")
         thread_id = state.get("thread_id")
         
-        # 橙色 ANSI 颜色代码（便于调试）
-        ORANGE = "\033[38;5;208m"
-        RESET = "\033[0m"
-        
-        # 打印调试日志
-        logger.info(f"{ORANGE}{'='*60}{RESET}")
-        logger.info(f"{ORANGE}[多智能体-消息列表] 共 {len(messages)} 条消息:{RESET}")
-        for i, msg in enumerate(messages):
-            logger.info(f"{ORANGE}  [{i}] {msg}{RESET}")
-        logger.info(f"{ORANGE}{'='*60}{RESET}")
-        
-        # 验证必要参数
+        logger.debug("多智能体后处理: messages=%d, thread_id=%s, user_id=%s", len(messages), thread_id, user_id)
+
         if not thread_id:
             logger.warning("后处理节点: 缺少 thread_id，跳过保存")
             return {}
@@ -6873,13 +6903,11 @@ async def create_multi_agent_graph(
             logger.warning("后处理节点: 消息为空，跳过保存")
             return {}
         
-        # 保存对话到数据库（使用智能图片补充逻辑）
         try:
             from app.db.session import get_db_context
             from app.repositories import chat_repo
             from langchain_core.messages import HumanMessage, AIMessage
             
-            # 过滤掉内部 Handoff 消息 (name 不为空的 HumanMessage)
             filtered_messages = [
                 msg for msg in messages 
                 if not (isinstance(msg, HumanMessage) and msg.name)
@@ -6898,43 +6926,31 @@ async def create_multi_agent_graph(
         except Exception as e:
             logger.error("多智能体后处理-保存失败: %s", e, exc_info=True)
         
-        # 清理 DataFrame 缓存
-        if thread_id:
-            try:
-                from app.ai.tools.chatTools import cleanup_thread_dataframes
-                cleanup_thread_dataframes(thread_id)
-                logger.debug("多智能体后处理: DataFrame 缓存已清理")
-            except Exception as e:
-                logger.warning("多智能体后处理-清理缓存失败: %s", e)
+        try:
+            from app.ai.tools.chatTools import cleanup_thread_dataframes
+            cleanup_thread_dataframes(thread_id)
+            logger.debug("多智能体后处理: DataFrame 缓存已清理")
+        except Exception as e:
+            logger.warning("多智能体后处理-清理缓存失败: %s", e)
         
-        # 统一清理临时状态字段，确保下一轮从干净状态开始
-        # 设计原则：出口清理，符合"资源在哪里分配就在哪里释放"
-        # 详见：docs/开发文档/架构设计/AI模块设计.md - 状态生命周期管理
         return {
-            # === 委派控制 ===
             "pending_handoff": None,
             "handoff_queue": [],
             "completed_handoffs": [],
             "handoff_execution_trace": [],
             "multi_intent_mode": False,
-            
-            # === 操作状态 ===
             "pending_operation": None,
             "user_confirmed": None,
             "quick_mode": None,
-            
-            # === 评估状态 ===
             "evaluation": None,
             "evaluation_route": "postprocess",
-            "iteration_count": 0,  # 重置为 0，而非 None
-            
-            # === 意图识别 ===
+            "iteration_count": 0,
             "detected_intent": None,
             "intent_route": None,
             "intent_mode": "model_primary",
-            
-            # === 预处理结果（下一轮会重新生成）===
-            "attachment_analysis": None,
+            "attachment_manifest": [],
+            "lightweight_probe": [],
+            "attachment_planning": None,
             "skill_candidates": [],
             "selected_skill_ids": [],
             "skill_context": None,
@@ -6945,8 +6961,6 @@ async def create_multi_agent_graph(
             "visible_skill_count": 0,
             "allowed_tool_registry": {},
             "turn_id": None,
-
-            # === 交付导向状态 ===
             "decomposed_goals": [],
             "task_graph": None,
             "task_runs": [],
@@ -6959,7 +6973,6 @@ async def create_multi_agent_graph(
             "coverage_partial_gap_allowed": False,
             "router_result_v2": {},
 
-            # === 稳态恢复观测 ===
             "runtime_recovery_state": _build_runtime_recovery_state(
                 state,
                 fallback_route="none",
@@ -6968,7 +6981,6 @@ async def create_multi_agent_graph(
             ),
         }
 
-    # 8. 定义评估节点（判断专家工作是否完成）
     def _evaluate_expert_work(state: MultiAgentState) -> dict:
         """评估专家工作节点：支持 handoff 队列串行消费与复合任务汇总收口。"""
         decision = _evaluate_handoff_progress(state)
@@ -7091,13 +7103,17 @@ async def create_multi_agent_graph(
             "coverage_partial_gap_allowed": partial_gap_allowed,
         }
 
+        base_state = {
+            "decomposed_goals": list(active_goals),
+            "deliverables": deliverables,
+            "coverage_report": coverage_report,
+            "delivery_meta": delivery_meta,
+            "coverage_retry_count": coverage_retry_count,
+        }
+
         if route == "supervisor":
             return {
-                "decomposed_goals": list(active_goals),
-                "deliverables": deliverables,
-                "coverage_report": coverage_report,
-                "delivery_meta": delivery_meta,
-                "coverage_retry_count": coverage_retry_count,
+                **base_state,
                 "coverage_gate_route": "supervisor",
                 "coverage_partial_gap_allowed": False,
                 "evaluation": "continue",
@@ -7114,13 +7130,9 @@ async def create_multi_agent_graph(
         if route == "postprocess":
             blocked_answer = _render_coverage_blocked_message(active_goals, coverage_report)
             return {
+                **base_state,
                 "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
-                "decomposed_goals": list(active_goals),
-                "deliverables": deliverables,
-                "coverage_report": coverage_report,
                 "final_answer": blocked_answer,
-                "delivery_meta": delivery_meta,
-                "coverage_retry_count": coverage_retry_count,
                 "coverage_gate_route": "postprocess",
                 "coverage_partial_gap_allowed": False,
                 "evaluation": "complete",
@@ -7128,11 +7140,7 @@ async def create_multi_agent_graph(
             }
 
         return {
-            "decomposed_goals": list(active_goals),
-            "deliverables": deliverables,
-            "coverage_report": coverage_report,
-            "delivery_meta": delivery_meta,
-            "coverage_retry_count": coverage_retry_count,
+            **base_state,
             "coverage_gate_route": "final_composer",
             "coverage_partial_gap_allowed": partial_gap_allowed,
         }
@@ -7150,20 +7158,25 @@ async def create_multi_agent_graph(
             state.get("coverage_partial_gap_allowed")
             or delivery_meta.get("coverage_partial_gap_allowed")
         )
+        base_state = {
+            "decomposed_goals": list(active_goals),
+            "deliverables": deliverables,
+            "coverage_report": coverage_report,
+        }
+        missing_goal_count = len(coverage_report.get("missing_goals") or [])
+
         if _is_coverage_gate_enforced() and not bool(coverage_report.get("pass")) and not partial_gap_allowed:
             blocked_answer = _render_coverage_blocked_message(active_goals, coverage_report)
             writer = get_stream_writer()
             emit_status(writer, message="覆盖门禁未通过，已阻止最终结论输出。", node="final_composer")
             return {
+                **base_state,
                 "messages": [_create_ai_message_with_skill_runtime(blocked_answer, state)],
-                "decomposed_goals": list(active_goals),
-                "deliverables": deliverables,
-                "coverage_report": coverage_report,
                 "final_answer": blocked_answer,
                 "delivery_meta": {
                     **delivery_meta,
                     "coverage_pass": False,
-                    "missing_goal_count": len(coverage_report.get("missing_goals") or []),
+                    "missing_goal_count": missing_goal_count,
                     "composer_guard_blocked": True,
                 },
                 "evaluation": "complete",
@@ -7179,7 +7192,6 @@ async def create_multi_agent_graph(
         emit_status(writer, message=status_message, node="final_composer")
         if _is_sse_delivery_events_v2_enabled():
             goal_count_initial = len(active_goals)
-            missing_goal_count = len(coverage_report.get("missing_goals") or [])
             goal_count_confirmed = _parse_non_negative_int(
                 coverage_report.get("answered_goals"),
                 default=max(goal_count_initial - missing_goal_count, 0),
@@ -7201,15 +7213,13 @@ async def create_multi_agent_graph(
             emit_token(writer, final_answer, node="final_composer")
 
         return {
+            **base_state,
             "messages": [_create_ai_message_with_skill_runtime(final_answer, state)],
-            "decomposed_goals": list(active_goals),
-            "deliverables": deliverables,
-            "coverage_report": coverage_report,
             "final_answer": final_answer,
             "delivery_meta": {
                 **delivery_meta,
                 "coverage_pass": bool(coverage_report.get("pass")),
-                "missing_goal_count": len(coverage_report.get("missing_goals") or []),
+                "missing_goal_count": missing_goal_count,
                 "coverage_partial_gap_allowed": partial_gap_allowed,
             },
             "coverage_gate_route": "final_composer",
@@ -7239,7 +7249,6 @@ async def create_multi_agent_graph(
             "evaluation_route": "postprocess",
         }
 
-    # 10. 条件路由函数
     def should_continue_routing(
         state: MultiAgentState,
     ) -> Literal[
@@ -7273,12 +7282,9 @@ async def create_multi_agent_graph(
             return "supervisor"
         return "final_composer"
 
-    # 11. 构建 StateGraph（简化架构：移除 knowledge_expert）
     workflow = StateGraph(MultiAgentState)
 
-    # 添加节点
     workflow.add_node("preprocess", _preprocess_multimodal)
-    # 修复: Supervisor 也需要流式包装器,确保 LLM 输出是流式的
     workflow.add_node("supervisor", _create_streaming_agent_wrapper(supervisor_agent, "supervisor"))
     workflow.add_node("data_expert", _create_streaming_agent_wrapper(data_graph_app, "data_expert"))
     workflow.add_node("todo_expert", _create_streaming_agent_wrapper(todo_graph_app, "todo_expert"))
@@ -7288,9 +7294,6 @@ async def create_multi_agent_graph(
     workflow.add_node("summarize", _summarize_multi_intent)
     workflow.add_node("postprocess", _postprocess)
 
-    # 架构规则：不使用独立的 intent_classify 节点，由 Supervisor 统一处理意图路由
-    
-    # 添加边
     workflow.add_edge(START, "preprocess")
 
     def preprocess_should_continue(state: MultiAgentState) -> Literal["supervisor", "data_expert", "todo_expert"]:
@@ -7309,79 +7312,40 @@ async def create_multi_agent_graph(
             "todo_expert": "todo_expert",
         },
     )
-    
-    # 专家执行完 -> 评估节点
     workflow.add_edge("data_expert", "evaluate")
     workflow.add_edge("todo_expert", "evaluate")
-    
-    # Supervisor 条件路由：检查 pending_handoff 或工具调用
     def supervisor_should_continue(state: MultiAgentState) -> str:
-        """判断 Supervisor 下一步路由。
-        
-        路由逻辑（增强版 - 借鉴 TypeAgent Dispatcher）：
-        1. 如果有 pending_handoff → 使用 Schema 路由到对应专家
-        2. 如果有其他 tool_calls → 路由到 evaluate
-        3. 否则 → 路由到 postprocess
-        
-        增强：
-        - 使用 route_by_schema 进行 Schema 匹配路由
-        - 添加 Handoff 校验，记录无效目标并重新路由
-        """
+        """判断 Supervisor 下一步路由。"""
         from app.ai.exceptions import HandoffValidationError
-        
-        # 优先检查 pending_handoff（由 handoff 工具设置）
+
         pending_handoff = state.get("pending_handoff")
         if pending_handoff:
             target_agent = pending_handoff.get("target_agent")
-            detected_intent = pending_handoff.get("detected_intent", "unknown")
-            
-            logger.info(f"Supervisor 检测到 pending_handoff，目标: {target_agent}, 意图: {detected_intent}")
-            
-            # 有效的 Agent 列表（与图内实际可路由节点保持一致）
             valid_targets = set(WORKFLOW_AGENT_NODE_BY_TYPE.keys())
-            
-            # 使用 Schema 路由增强（借鉴 TypeAgent Dispatcher）
-            # 如果 target_agent 无效但有 detected_intent，尝试使用 Schema 路由
-            if target_agent not in valid_targets and detected_intent:
+            if target_agent in valid_targets:
+                return WORKFLOW_AGENT_NODE_BY_TYPE[target_agent]
+
+            detected_intent = pending_handoff.get("detected_intent", "unknown")
+            if detected_intent:
                 schema_route = route_by_schema(detected_intent)
                 if schema_route in WORKFLOW_AGENT_NODES:
-                    logger.info(f"Schema 路由增强: intent={detected_intent} -> {schema_route}")
                     return schema_route
-            
-            if target_agent in valid_targets:
-                # 有效的 Handoff
-                return WORKFLOW_AGENT_NODE_BY_TYPE[target_agent]
-            else:
-                # 无效的 target_agent - 记录错误并处理
-                error = HandoffValidationError(
-                    f"无效的 Handoff 目标 Agent: {target_agent}，"
-                    f"有效值为 {list(valid_targets)}",
-                    invalid_target=target_agent
-                )
-                logger.error(str(error))
 
-                # 策略：直接结束（也可以选择重新路由回 Supervisor 让 LLM 重试）
-                # 这里选择直接结束，避免无限循环
-                logger.warning("清除无效 Handoff，直接进入 postprocess")
-                return "postprocess"
-        
-        # 检查是否有其他工具调用
-        messages = state.get("messages", [])
+            logger.error(
+                str(
+                    HandoffValidationError(
+                        f"无效的 Handoff 目标 Agent: {target_agent}，有效值为 {list(valid_targets)}",
+                        invalid_target=target_agent,
+                    )
+                )
+            )
+            return "postprocess"
+
+        messages = state.get("messages") or []
         if not messages:
             return "postprocess"
-        
-        last_msg = messages[-1]
-        has_tool_calls = hasattr(last_msg, 'tool_calls') and last_msg.tool_calls
-        
-        if has_tool_calls:
-            logger.debug("Supervisor 有工具调用，路由到 evaluate")
+        if getattr(messages[-1], "tool_calls", None) or bool(state.get("multi_intent_mode")):
             return "evaluate"
-
-        if bool(state.get("multi_intent_mode")):
-            logger.debug("Supervisor 处于复合任务模式，路由到 evaluate 进行覆盖检查")
-            return "evaluate"
-
-        logger.debug("Supervisor 直接回复，路由到 postprocess")
         return "postprocess"
     
     workflow.add_conditional_edges(
@@ -7395,17 +7359,16 @@ async def create_multi_agent_graph(
         }
     )
     
-    # 评估节点 -> 条件路由
     workflow.add_conditional_edges(
         "evaluate",
         should_continue_routing,
         {
-            "postprocess": "postprocess",  # 任务完成
-            "supervisor": "supervisor",    # 返回 Supervisor 重新评估
-            "data_expert": "data_expert",  # 队列中下一位专家
-            "todo_expert": "todo_expert",  # 队列中下一位专家
-            "coverage_gate": "coverage_gate",  # 完整性门禁
-            "summarize": "summarize",      # 复合任务统一汇总
+            "postprocess": "postprocess",
+            "supervisor": "supervisor",
+            "data_expert": "data_expert",
+            "todo_expert": "todo_expert",
+            "coverage_gate": "coverage_gate",
+            "summarize": "summarize",
         }
     )
 
@@ -7421,20 +7384,11 @@ async def create_multi_agent_graph(
     workflow.add_edge("final_composer", "postprocess")
     workflow.add_edge("summarize", "postprocess")
     
-    # Postprocess -> END
     workflow.add_edge("postprocess", END)
 
-    # 6. 设置 Checkpointer
     if checkpointer is None:
         checkpointer = await get_checkpointer()
     
-    # 7. 编译
     graph = workflow.compile(checkpointer=checkpointer)
-    
-    logger.info(
-        "多智能体图编译完成（Manual Graph + Custom Handoff，启用思考: %s，模型: %s）", 
-        enable_thinking, 
-        model_id or "默认"
-    )
-    
+    logger.info("多智能体图编译完成（启用思考: %s，模型: %s）", enable_thinking, model_id or "默认")
     return graph

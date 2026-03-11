@@ -1,13 +1,14 @@
 # 待办 Agent 设计详解
 
-> **状态**: 已更新 (LLM驱动版)
-> **更新日期**: 2026-02-04
-> **版本**: 3.0
+> **状态**: 已更新（contract-first + state owner 收口）
+> 更新时间：2026-03-11
+> **版本**: 3.1
 >
-> **重要更新 v3.0 (2026-02-04)**:
-> - 移除硬编码关键词规则，采用 LLM 驱动的意图识别
-> - 新增 `action_state` 和 `response_message` 机制
-> - 简化 `clarify_node`，直接使用 LLM 生成的回复
+> **重要更新 v3.1 (2026-03-10)**:
+> - `todo_expert` 的能力语义收口为 `todo_workflow`，不再按通用长生命周期 subagent 理解
+> - `TodoAgentState` 改为组合状态：`Base + Anchor + Routing + SupervisorConversation + TodoWorkflow`
+> - 命中 handoff 时优先消费 `pending_handoff.frame + expert_input_contract`，`task_description` 只做回退
+> - 主会话 `conversation_state` owner 固定为 `supervisor`，Todo workflow 只读投影，不接管主会话
 
 
 ## 文档导航
@@ -55,6 +56,7 @@ Todo Agent 是一个基于 LangGraph 的**意图驱动型** AI Agent，专门处
 | **渐进式策略** | 多轮对话后自动给出默认方案，避免无限追问 | 轮次检测 + 策略注入 |
 | **逻辑删除** | 所有删除操作为软删除，数据可追溯 | `is_deleted` 字段 |
 | **增量更新** | 所有节点返回 Dict 而非修改 state | LangGraph 最佳实践 |
+| **状态单写** | 主会话状态只允许 `supervisor` 持有与回放 | `TodoAgentState` 只读 `SupervisorConversationState`，只写 `TodoWorkflowState` |
 
 ### 1.2 代码结构
 
@@ -84,13 +86,16 @@ app/
 
 ### 1.3 与 MultiAgentGraph 的关系
 
-Todo Agent 作为**子图**被 `MultiAgentGraph` 的 Supervisor 调用：
+Todo Graph 在当前架构里属于 **`todo_workflow` 子图**，由 `MultiAgentGraph` 的 `supervisor` 统一编排：
 
 ```
-用户消息 → Supervisor → [handoff to todo_expert] → Todo Graph → 返回结果
+用户消息 → supervisor planning/route → [assign_to_todo_expert] → todo_workflow → supervisor 汇总返回
 ```
 
-Supervisor 通过 `assign_to_todo_expert` 工具触发委派，`pending_handoff` 字段传递任务上下文。
+当前边界如下：
+- `supervisor` 负责维护主会话 `conversation_state`、规划 `direct_tool/data_workflow/research_subagent/todo_workflow/mixed` 路由、统一用户可见错误。
+- `todo_workflow` 只消费 `pending_handoff.frame + expert_input_contract` 与最新用户补充输入，负责待办确认闭环。
+- `assign_to_todo_expert` 仍是图内历史节点名；能力语义应理解为 workflow，而不是通用 stateless tool，也不是可持有主会话的 subagent。
 
 ---
 
@@ -208,89 +213,86 @@ class Todo(Base):
 
 **文件**: `app/ai/state.py`
 
-### 3.1 TodoAgentState
+### 3.1 TodoAgentState（组合态，2026-03-10）
 
 ```python
-class TodoAgentState(TypedDict, total=False):
-    """待办 Agent 状态 - 多轮对话增强版。"""
-    
-    # ========== 核心字段 ==========
-    messages: Annotated[Sequence[BaseMessage], add_messages]  # 消息历史
-    user_id: int                    # 用户 ID
-    thread_id: str                  # 对话线程 ID
-    
-    # ========== 操作控制 ==========
-    pending_operation: Dict         # 待执行的操作
-    user_confirmed: bool            # 用户确认状态
-    quick_mode: bool                # 快速模式（跳过确认）
-    
-    # ========== 对话管理 ==========
-    conversation_context: Dict      # 当前对话上下文
-    current_focus: str              # 当前焦点任务
-    active_projects: List[str]      # 正在讨论的项目列表
-    
-    # ========== 澄清追问 ==========
-    pending_clarifications: List[str]  # 待澄清的问题列表
-    project_queue: List[str]           # 待处理项目队列
-    current_project_index: int         # 当前处理的项目索引
-    
-    # ========== 冲突检测 ==========
-    detected_conflicts: List[Dict]     # 检测到的冲突
-    time_constraints: Dict             # 时间约束
-    
-    # ========== 信息提取 ==========
-    extracted_info: Dict               # LLM 提取的信息
-    draft_todos: List[Dict]            # 草稿待办（未确认）
+class TodoAgentState(
+    BaseAgentState,
+    TodoAnchorState,
+    RoutingTransientState,
+    SupervisorConversationState,
+    TodoWorkflowState,
+    total=False,
+):
+    """待办 workflow 状态定义。"""
 ```
 
-### 3.2 字段详解
+这表示 Todo 不再自己维护一份“完整主会话状态”，而是把状态拆成 5 层：
 
-#### pending_operation
+| 状态层 | owner | 代表字段 | 说明 |
+|------|-------|----------|------|
+| `BaseAgentState` | graph runtime | `messages/user_id/thread_id` | 所有图共享的基础传输字段 |
+| `TodoAnchorState` | control plane 注入 | `current_todo_id` | 当前选中待办锚点 |
+| `RoutingTransientState` | `supervisor` | `pending_handoff/handoff_queue` | 当前轮路由瞬态，Todo 只读 |
+| `SupervisorConversationState` | `supervisor` | `session_frame/turn_act/clarify_fsm_state` | 主会话真理源，Todo 只消费投影 |
+| `TodoWorkflowState` | `todo_workflow` | `pending_operation/response_message/draft_todos` | 待办确认闭环自己的局部状态 |
 
-待执行操作的完整描述：
+### 3.2 关键字段详解
+
+#### `pending_operation`
+
+待执行操作的 canonical 描述，供 `confirm / wait_confirm / execute` 共用：
 
 ```python
 {
-    "action": "create",              # 操作类型: create/update/delete/complete/query/...
-    "data": {                        # 操作数据
+    "action": "create",
+    "data": {
         "title": "明天开会",
         "due_date": "2026-01-31T09:00:00",
         "priority": 2,
-        "todo_id": 123,              # update/delete/complete 时必填
-        "resolved_title": "周一项目会议"  # resolve 节点填充
+        "todo_id": 123,
+        "resolved_title": "周一项目会议"
     },
-    "needs_clarification": False,    # 是否需要澄清
-    "skip_confirmation": False,      # 是否跳过确认
-    "summary": "**创建待办**\n..."   # 用于前端显示
+    "needs_clarification": False,
+    "skip_confirmation": False,
+    "summary": "**创建待办**\n..."
 }
 ```
 
-#### extracted_info
+#### `response_message`
 
-LLM 从用户消息中提取的信息：
+`analyze_intent` 生成、`clarify_node` / `ask_confirmation` 直接复用的用户可见文案。它已纳入 `TodoWorkflowState`，避免 `analyze -> clarify` 链路丢字段。
+
+#### `extracted_info`
+
+LLM 与 handoff frame 汇合后的 canonical 信息槽位。当前链路会优先把 `target_ref/new_*` 归一到 `title/due_date/priority/category/description`，再交给后续节点消费。
+
+#### `pending_handoff.frame + expert_input_contract`
+
+命中 Supervisor 委派时，Todo workflow 的第一输入不再是历史 `recent_messages`，而是：
 
 ```python
 {
-    "title": "去上海开会",
-    "time": "明天下午3点",           # 原始时间表达
-    "due_date": "2026-01-31T15:00:00",  # 解析后的 ISO 格式
-    "original_time": "明天下午3点", # 保留原始表达
-    "priority": "高",               # 可能是中文
-    "category": "工作",
-    "location": "上海",
-    "description": "讨论Q1计划",
-    "is_urgent": True,              # 紧急标记
-    "affected_tasks": ["任务A", "任务B"]  # 受影响的任务
+    "frame": {"todo_action": "create", "todo_fields": {...}},
+    "expert_input_contract": {
+        "contract_id": "todo_handoff_v1",
+        "contract_version": "v1",
+        "target_agent": "todo_expert",
+        "state_owner": "supervisor",
+        "source_fields": ["pending_handoff.frame", "latest_user_message"]
+    }
 }
 ```
 
-#### time_constraints
+其中 `task_description` 只在 `frame` 缺失时作为回退文本；它不再是 Todo 子图的主真理源。
+
+#### `time_constraints`
 
 时间约束（用于冲突检测）：
 
 ```python
 {
-    "blocked_weekdays": [6, 7],  # 周六、周日不可用
+    "blocked_weekdays": [6, 7],
     "working_hours": {"start": 9, "end": 18}
 }
 ```
@@ -422,7 +424,8 @@ def create_todo_graph(model=None, enable_thinking=False, model_id=None, checkpoi
 1. 消息过滤与 Handoff 上下文构建
    │
    ├── filter_messages_for_todo()
-   └── 解析 pending_handoff 中的预提取信息
+   ├── 命中 handoff 时优先投影 `pending_handoff.frame + expert_input_contract(state_owner=supervisor)` 为内部 contract 消息
+   └── `task_description` 只作为 frame 缺失时的回退文本
 
 2. 历史任务查询
    │
@@ -460,6 +463,8 @@ def analyze_intent(state: TodoAgentState) -> Dict:
     filtered_messages, handoff_context, pre_extracted_info = filter_messages_for_todo(
         messages, state.get("pending_handoff")
     )
+    # 命中 Supervisor handoff 时，filtered_messages 已收敛为 contract-first 输入，
+    # 并显式保留 state_owner=supervisor，不再默认把 recent_messages[-5:] 当成 todo expert 真理源。
     
     # Step 4: LLM 调用（完全依赖 LLM 决策）
     parser = JsonOutputParser(pydantic_object=IntentResult)
@@ -1512,13 +1517,16 @@ export const DEFAULT_MODEL_ID: string | undefined = undefined;
 
 ---
 
-## 2026-02 实现状态（会话意图内核 V2）
+## 2026-03 实现状态（contract-first + state owner 收口）
 
-- `todo_graph.analyze_intent` 已接入统一会话意图内核，输出 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`。
+- `todo_expert` 在图内仍保留历史节点名，但能力语义已收口为 `todo_workflow`；它不是通用长生命周期 subagent。
+- `TodoAgentState` 已改为 `Base + Anchor + Routing + SupervisorConversation + TodoWorkflow` 组合态；`conversation_state` owner 固定为 `supervisor`。
+- `todo_graph.analyze_intent` 已接入统一会话意图内核，持续消费 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`。
 - `todo_intent_helpers` 已实现提取字段归一化（`target_ref/new_* -> canonical`），并优先消费 `pending_handoff.frame`。
+- 命中 handoff 时，Todo workflow 会把 `pending_handoff.frame` 投影成 `__internal_todo_handoff__ + expert_input_contract(state_owner=supervisor)`，仅保留最新用户输入作为补充，不再默认透传历史 `recent_messages`。
+- 上传附件后的第一轮规划仍由 `supervisor` 完成；Todo workflow 只在“从附件提炼待办 / 进入确认闭环”场景消费附件结果，不接管附件规划。
 - `resolve_entity` 已支持多候选二次消歧选择（`第 X 个 / ID 为 XX / 标题片段`），降低重复追问。
 - 待办链路已加入超范围输入能力边界兜底（天气/新闻/问数/绘图等场景返回能力提示，不触发待办查询）。
-- 回滚口径：Todo 侧当前默认启用 V2 内核（无独立运行时开关）；故障时优先降级 handoff 为纯文本，再视情况回退发布版本。
 
 ## 相关文档
 
