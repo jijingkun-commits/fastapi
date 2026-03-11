@@ -34,7 +34,6 @@ import { useThreads } from "@/providers/Thread";
 import { StateType, StreamContextValue, MessageMetadata, StreamStatus } from "@/providers/StreamContext";
 import {
     addToolCallToMessages,
-    appendImageToMessages,
     appendThinkingToMessages,
     appendTokenToMessages,
 } from "@/hooks/use-message-updater";
@@ -50,7 +49,6 @@ import {
     DRAFT_THREAD_KEY,
     isDraftThreadKey,
     getErrorMessageFromResult,
-    getImageUrlFromResult,
     getThreadKey,
     getToolOutputPreview,
     normalizeClarificationQuestions,
@@ -616,18 +614,13 @@ export function useSSEStream(): StreamContextValue {
             retry: data.retry ?? meta?.retryMs,
         };
 
-        const imageUrl = getImageUrlFromResult(normalizedResultData);
-        if (imageUrl) {
-            updateThreadMessages(threadKey, (prev) => appendImageToMessages(prev, aiId, imageUrl));
-        }
-
         storeStructuredResultToMessage(threadKey, aiId, normalizedResultData);
         if (isResume) {
             console.log(`恢复流收到结构化结果: ${normalizedResultData.data_type}`);
             return;
         }
         console.log(`收到结构化结果: ${normalizedResultData.data_type}`);
-    }, [storeStructuredResultToMessage, updateThreadMessages]);
+    }, [storeStructuredResultToMessage]);
 
     /**
      * 加载历史消息

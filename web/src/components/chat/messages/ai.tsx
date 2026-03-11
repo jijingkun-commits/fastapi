@@ -131,6 +131,8 @@ function asSqlResultChartData(value: unknown): SqlResultChartData | undefined {
   return value as unknown as SqlResultChartData;
 }
 
+const MARKDOWN_IMAGE_REGEX = /!\[[^\]]*\]\(([^)]+)\)/g;
+
 function getResultEventsFromAdditionalKwargs(additionalKwargs: unknown): ResultEventData[] {
   if (!isRecord(additionalKwargs)) {
     return [];
@@ -169,6 +171,45 @@ function getResultEventsFromAdditionalKwargs(additionalKwargs: unknown): ResultE
       message: typeof additionalKwargs.message === "string" ? additionalKwargs.message : undefined,
     },
   ];
+}
+
+function contentHasMarkdownImageUrl(content: string, imageUrl: string): boolean {
+  if (!content || !imageUrl) {
+    return false;
+  }
+  return Array.from(content.matchAll(MARKDOWN_IMAGE_REGEX)).some(([, matchedUrl]) => {
+    return typeof matchedUrl === "string" && matchedUrl.trim() === imageUrl;
+  });
+}
+
+function getResultImageUrls(resultEvents: ResultEventData[]): string[] {
+  const urls: string[] = [];
+  for (const resultEvent of resultEvents) {
+    if (!isRecord(resultEvent.data) || resultEvent.data_type !== "image") {
+      continue;
+    }
+    const url = typeof resultEvent.data.url === "string" ? resultEvent.data.url.trim() : "";
+    if (url && !urls.includes(url)) {
+      urls.push(url);
+    }
+  }
+  return urls;
+}
+
+function stripDuplicateResultImageMarkdown(content: string, resultEvents: ResultEventData[]): string {
+  const imageUrls = getResultImageUrls(resultEvents);
+  if (!content || imageUrls.length === 0 || !content.includes("![")) {
+    return content;
+  }
+
+  const stripped = content.replace(MARKDOWN_IMAGE_REGEX, (fullMatch, url: string) => {
+    if (!url) {
+      return fullMatch;
+    }
+    return imageUrls.includes(url.trim()) ? "" : fullMatch;
+  });
+
+  return stripped.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 type ResultRendererProps = {
@@ -266,7 +307,7 @@ const imageRenderer: ResultRenderer = ({ resultEvent, displayContent }) => {
     return null;
   }
 
-  if (displayContent.includes(imageUrl)) {
+  if (contentHasMarkdownImageUrl(displayContent, imageUrl)) {
     return null;
   }
 
@@ -331,8 +372,15 @@ export function AssistantMessage({
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const kbImages = thread.kbImages;
 
-  // 应用图片占位符替换
-  const displayContent = replaceImagePlaceholders(contentString, kbImages);
+  const aiMessage = message as AIMessage | undefined;
+  const additionalKwargs = aiMessage?.additional_kwargs;
+  const resultEvents = getResultEventsFromAdditionalKwargs(additionalKwargs);
+
+  // 应用图片占位符替换，并移除已由 result_events 承担展示职责的重复 Markdown 图片
+  const displayContent = stripDuplicateResultImageMarkdown(
+    replaceImagePlaceholders(contentString, kbImages),
+    resultEvents,
+  );
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
@@ -347,13 +395,23 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
-  const aiMessage = message as AIMessage | undefined;
-  const additionalKwargs = aiMessage?.additional_kwargs;
-  const resultEvents = getResultEventsFromAdditionalKwargs(additionalKwargs);
-
   const handleAction = (command: string) => {
     thread.submit({ messages: command });
   };
+
+  const renderedResultEvents = resultEvents.map((resultEvent, index) => {
+    const renderer = rendererRegistry[resultEvent.data_type] ?? fallbackRenderer;
+    return (
+      <div key={resolveResultEventKey(resultEvent, index)}>
+        {renderer({
+          resultEvent,
+          displayContent,
+          isLatestMessage,
+          onAction: handleAction,
+        })}
+      </div>
+    );
+  });
 
   // 如果是工具结果消息，渲染 ToolResult 组件
   if (isToolResult) {
@@ -372,10 +430,13 @@ export function AssistantMessage({
   if (isLoading) {
     return (
       <div className="chat-content-shell mx-auto flex flex-col gap-2">
+        {displayContent.length > 0 && (
+          <MarkdownText className="markdown-content-readable">
+            {displayContent}
+          </MarkdownText>
+        )}
+        {renderedResultEvents}
         {hasToolCalls && <ToolCalls toolCalls={message.tool_calls} isComplete={!isLoading} />}
-        <MarkdownText className="markdown-content-readable">
-          {displayContent}
-        </MarkdownText>
       </div>
     );
   }
@@ -389,19 +450,7 @@ export function AssistantMessage({
           </div>
         )}
 
-        {resultEvents.map((resultEvent, index) => {
-          const renderer = rendererRegistry[resultEvent.data_type] ?? fallbackRenderer;
-          return (
-            <div key={resolveResultEventKey(resultEvent, index)}>
-              {renderer({
-                resultEvent,
-                displayContent,
-                isLatestMessage,
-                onAction: handleAction,
-              })}
-            </div>
-          );
-        })}
+        {renderedResultEvents}
 
         {!hideToolCalls && (
           <>
