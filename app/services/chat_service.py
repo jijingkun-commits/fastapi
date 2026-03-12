@@ -825,6 +825,7 @@ class ChatService:
         response_guidance_contract: dict[str, Any] | None = None
 
         human_message = create_human_message(payload.model_input)
+        current_human_message_id = getattr(human_message, "id", None)
         input_messages = [human_message]
 
         if memory_context:
