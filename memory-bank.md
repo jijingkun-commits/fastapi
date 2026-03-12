@@ -7,6 +7,7 @@
 
 - 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
+- 2026-03-11｜JJK 工程流重构为 `clarify(requirements) -> design -> plan(UAT) -> imp -> verify`，正式产品/设计文档改为 `--doc` 显式发布，API 文档继续自动同步（ACTIVE）→ `.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`memory-bank.md`
 - 2026-03-11｜task_split 机器契约/过程报告从 docs 彻底收口到 `workdocs/任务拆解/contracts|reports`，真实运行态只认 `.artifacts/states/task_splits`（ACTIVE）→ `docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
@@ -38,6 +39,17 @@
 - 影响范围：`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`、`web/src/components/chat/messages/{ai,human,shared}.tsx`、聊天 UI/架构文档、相关 E2E testid 契约
 - 回退/失效条件：若未来聊天页彻底迁移到另一套 design system 或 CSS-in-JS 方案，可由新的样式入口替代；在此之前保持 `chat-*` 为唯一皮肤 owner，不恢复 inline 双轨
 - 关联文档/代码：`docs/开发文档/架构设计/前端架构.md`、`docs/开发文档/架构设计/前端UI设计方案.md`、`docs/内部参考/迭代需求/refactor_report_chat-shell-style-unification.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
+
+
+### 2026-03-11 JJK 工程流分层重构为 requirements -> design -> plan(UAT) -> imp -> verify
+- 状态：ACTIVE
+- 决策主题：将 `jjk-*` 主工程流收敛为五阶段：`jjk-clarify` 只产出需求，新增 `jjk-design` 承接技术方案与 shrink contract，`jjk-plan` 只产出实施计划与完整 UAT 用例，`jjk-imp` 严格消费计划执行实现，`jjk-verify` 只消费既有合同判定结果
+- 背景与问题：现有 `jjk-clarify` 直接产出 `design.md`、`jjk-plan` 仍同时产出 `requirements`、`jjk-verify` 仍保留临场 UAT 判定，导致需求/方案/计划/验收边界混杂，用户难以稳定判断每个阶段的唯一职责
+- 最终决策：需求真理源收敛为 `requirements.md`，技术真理源收敛为 `design.md`，实施真理源收敛为 `implementation_plan.md` 与 `uat_cases.md`；正式产品文档与正式设计文档仅在 `--doc` 显式开启时发布；命中接口变化时 API 文档继续自动同步，不受 `--doc` 影响；命中 DB 结构变化时，开发态默认执行 `bash scripts/db/run_dev_migration.sh`，发布态通过 `bash scripts/db/run_release_migration.sh --message "<message>"` 与 `bash scripts/db/run_release_migration.sh --upgrade-only` 进入 Alembic 版本化迁移
+- 取舍理由：项目未上线，优先把认知主链分层做对，而不是继续靠一个命令兼做需求、方案和验收；相比再堆更多工作流命令，新增 `jjk-design` 并缩减 `clarify/plan/verify` 职责更简洁、更可验证，也更符合需求-设计-验证分层的最佳实践；同时复用仓内统一的开发态 / 发布态 DB migration 入口，而不是继续暴露底层脚本给上层工作流
+- 影响范围：`.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`.claude/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、相关工作流与速查文档
+- 回退/失效条件：若未来统一工程流编排器把 requirements/design/plan/UAT 收敛到更高层单一协议，可将本记录标记为 `SUPERSEDED`；在此之前保持五阶段分层与 `--doc` 发布语义
+- 关联文档/代码：`.cursor/commands/jjk-clarify.md`、`.cursor/commands/jjk-design.md`、`.cursor/commands/jjk-plan.md`、`.cursor/commands/jjk-imp.md`、`.cursor/commands/jjk-verify.md`、`.cursor/commands/jjk-api-doc-sync.md`、`.cursor/commands/jjk-arch-gate.md`
 
 ### 2026-03-11 task_split 机器契约与过程报告收口到 `workdocs/任务拆解`
 

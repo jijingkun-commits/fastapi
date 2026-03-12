@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""校验 /jjk-clarify -> /jjk-plan 产物承接是否完整。"""
+"""校验 requirements / design / implementation_plan 承接是否完整。"""
 
 from __future__ import annotations
 
@@ -1399,7 +1399,7 @@ def run_alignment_check(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="校验 /jjk-clarify -> /jjk-plan 产物承接完整性")
+    parser = argparse.ArgumentParser(description="校验 requirements / design / implementation_plan 承接完整性")
     parser.add_argument("--task-split-dir", help="任务拆解目录（名称或路径）")
     parser.add_argument("--requirements-path", help="requirements 文档路径")
     parser.add_argument("--implementation-path", help="implementation_plan 文档路径")

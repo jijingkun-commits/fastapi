@@ -8,6 +8,7 @@
 本目录承载“项目覆盖模板（轻量差异）”，避免复制全量模板导致漂移。
 
 当前覆盖模板：
+0. `jjk_design_templates.md`
 1. `jjk_clarify_templates.md`
 2. `jjk_plan_templates.md`
 3. `jjk_debug_templates.md`

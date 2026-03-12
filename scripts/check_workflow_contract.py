@@ -1353,7 +1353,7 @@ def _run_usage_report(passthrough_args: Sequence[str]) -> int:
 MODE_REGISTRY: dict[str, ModeSpec] = {
     "clarify_plan": ModeSpec(
         mode="clarify_plan",
-        description="校验 /jjk-clarify -> /jjk-plan 产物承接完整性",
+        description="校验 requirements / design / implementation_plan 承接完整性",
         runner=_run_clarify_plan,
     ),
     "clarify_consistency": ModeSpec(

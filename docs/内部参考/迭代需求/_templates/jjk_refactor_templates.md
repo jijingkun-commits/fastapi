@@ -3,10 +3,15 @@
 > 仅用于覆盖全局模板差异：
 > `/Users/jijingkun/.codex/engineering/templates/jjk_refactor_templates.md`
 
-## 项目覆盖段（按需填写）
+## 收口报告补充段
 
-```markdown
-### 覆盖: <topic-or-domain>
-- 覆盖原因:
-- 输出模板差异:
+```yaml
+shrink_contract_result:
+  obsolete_paths_removed: []
+  retained_paths_with_reason: []
+  single_entry_owner_confirmed: true|false
+
+db_migration_result:
+  required: true|false
+  evidence_present: true|false
 ```
