@@ -407,16 +407,6 @@ def _fetch_lookup_value_map(
     return merged
 
 
-def apply_lookup_enrichment_rule(
-    rows: List[Dict[str, Any]],
-    columns: List[str],
-    rule: ResultLookupEnrichmentRuleConfig,
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """对结果应用单条查表补齐规则。"""
-    enriched_rows, enriched_columns, _ = apply_lookup_enrichment_rule_with_status(rows, columns, rule)
-    return enriched_rows, enriched_columns
-
-
 def apply_lookup_enrichment_rule_with_status(
     rows: List[Dict[str, Any]],
     columns: List[str],

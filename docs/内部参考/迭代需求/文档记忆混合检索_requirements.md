@@ -21,7 +21,7 @@
 
 1. 两表存储（`t_user_memory_document` + `t_user_memory_chunk`）
 2. FTS 文本检索（`chunk_tsv`）
-3. `memory_search -> memory_get` 双阶段召回
+3. `memory_search -> chunk_text/citation 注入` 单阶段召回
 
 但仍有关键缺口：
 

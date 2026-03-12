@@ -39,13 +39,13 @@
 
 1. **文档主契约**：`user_id/doc_kind/doc_key/content_md/revision/status`。
 2. **分块契约**：`user_id/doc_id/chunk_no/chunk_text/embedding/source`。
-3. **召回契约**：`query -> snippets[] -> citation -> memory_get`。
+3. **召回契约**：`query -> snippets[] -> citation -> direct inject`。
 4. **迁移契约**：`KV(control) + Document(knowledge)` 双层共存。
 
 ### 1.3 路由闭环
 
 1. 写入闭环：`chat_service -> document_memory_service.ingest -> repo -> chunk refresh`。
-2. 召回闭环：`chat_service -> memory_search -> memory_get -> budget trim -> system message inject`。
+2. 召回闭环：`chat_service -> memory_search -> chunk_text/citation trim -> system message inject`。
 3. 失败闭环：文档链路异常时回退 KV 控制层，不阻断主流程。
 
 ### 1.4 端到端链路
@@ -58,8 +58,7 @@ I --> D["t_user_memory_document"]
 D --> K["chunk refresh"]
 K --> H["t_user_memory_chunk"]
 C --> S["memory_search (hybrid)"]
-S --> G["memory_get (target read)"]
-G --> B["budget trim & inject"]
+S --> B["chunk_text/citation trim & inject"]
 B --> LLM["模型推理"]
 LLM --> O["SSE 输出"]
 ```
@@ -157,8 +156,8 @@ LLM --> O["SSE 输出"]
 
 ### 4.2 召回策略（recall）
 
-1. `memory_search`：hybrid 检索返回 `snippet + score + citation`。
-2. `memory_get`：按引用精读局部内容（禁止全量文档注入）。
+1. `memory_search`：hybrid 检索返回 `chunk_text + score + citation`。
+2. `recall`：直接基于 `chunk_text + citation` 注入上下文，禁止再走整文或局部全文读取。
 3. 注入前执行预算裁剪（字符/片段/token 预算）。
 4. 召回顺序：文档记忆优先；未命中或失败时回退 KV 控制层。
 
@@ -177,7 +176,7 @@ LLM --> O["SSE 输出"]
 ### 4.5 引用策略
 
 1. 统一引用：`memory://user/{user_id}/{doc_kind}/{doc_key}#L{start}-L{end}`。
-2. `memory_search` 输出引用标识，`memory_get` 仅按引用读取局部内容。
+2. `memory_search` 直接输出 `chunk_text + citation`，注入链路不再维护独立 `memory_get`。
 3. 可通过开关决定是否在用户可见回复中显式展示引用文本。
 
 ---
@@ -218,7 +217,7 @@ LLM --> O["SSE 输出"]
 | P2-01 | C02 | 文档 ingest 与分块刷新 | `app/services/document_memory_service.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_ingest.py` | OpenClaw pre-compaction flush 思路 |
 | P2-02 | C02 | 去重与冲突折叠策略 | `app/services/document_memory_service.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_dedupe.py` | OpenClaw MMR/去冗余策略 |
 | P3-01 | C03 | memory_search（hybrid） | `app/services/document_memory_recall_service.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py` | OpenClaw hybrid search |
-| P3-02 | C03 | memory_get（局部精读）与引用 | `app/services/document_memory_recall_service.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_get.py` | OpenClaw memory_get |
+| P3-02 | C03 | chunk_text/citation 直接注入与元数据清洗 | `app/services/document_memory_service.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_service_hybrid.py` | 当前 recall 注入链路 |
 | P4-01 | C04 | chat_service 注入预算与降级 | `app/services/chat_service.py` | `venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory.py` | 当前 chat_service 注入链路 |
 | P4-02 | C04 | 配置契约与动态解析 | `app/core/config_contract.py`、`app/services/config_resolver.py` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_flags.py` | 现有 feature 开关治理 |
 | P5-01 | C05 | KV 控制层迁移与双轨兼容 | `app/services/user_preference_memory_service.py`、迁移脚本 | `venv/bin/python -m pytest -q tests/integration/test_document_memory_migration.py` | 现有 KV 服务逻辑 |
@@ -299,15 +298,15 @@ if doc.content_hash == new_hash:
 score = vector_weight * vector_score + text_weight * text_score
 ```
 
-### 7.6 P3-02 memory_get
+### 7.6 P3-02 chunk_text/citation 直接注入
 
 1. 目标与边界：
-   - 做：按引用读取局部片段，控制注入体积。
-   - 不做：整文原样返回。
+   - 做：直接使用检索返回的 `chunk_text + citation` 生成上下文，并控制注入体积。
+   - 不做：整文原样返回或额外局部全文读取。
 2. 最小代码样例：
 
 ```python
-segment = reader.read_lines(doc.content_md, from_line=start_line, lines=40)
+line = f"- {snippet}\\n  引用: {citation}"
 ```
 
 ### 7.7 P4-01 chat 注入预算与降级
@@ -481,7 +480,7 @@ planning_contract:
       done_gate:
         - search and get available
       acceptance_checks:
-        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_document_memory_get.py"
+        - "venv/bin/python -m pytest -q tests/unit/test_document_memory_search.py tests/unit/test_document_memory_service_hybrid.py"
       evidence_entry: "search and get tests"
 
     - card_id: C04
@@ -554,4 +553,3 @@ planning_contract:
         - "python3 scripts/docs_guard.py --strict"
       evidence_entry: "docs guard report"
 ```
-

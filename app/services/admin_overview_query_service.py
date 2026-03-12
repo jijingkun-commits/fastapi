@@ -110,18 +110,6 @@ class _AggregateStats:
     latency_histogram: dict[str, Any]
 
 
-def _empty_stats() -> _AggregateStats:
-    return _AggregateStats(
-        request_count=0,
-        success_count=0,
-        error_4xx_count=0,
-        error_5xx_count=0,
-        cost_total=Decimal("0"),
-        latest_event_at=None,
-        latency_histogram={"count": 0, "total_ms": 0.0, "min_ms": 0.0, "max_ms": 0.0, "buckets": {}},
-    )
-
-
 def _merge_histograms(histograms: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     count = 0
     total_ms = 0.0

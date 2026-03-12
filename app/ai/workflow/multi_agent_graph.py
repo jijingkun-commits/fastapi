@@ -145,10 +145,6 @@ class StreamingContext:
     sent_tool_call_ids: set
 
 
-
-
-
-
 ROUTER_RESULT_V2_VERSION = "v2"
 LEGACY_ROUTER_RESULT_FIELDS = ("route_decisions", "router_result", "router_result_v1")
 DECOMPOSE_GOALS_RECENT_TURN_LIMIT = 5
@@ -556,7 +552,6 @@ def _build_router_result_v2_payload(
             payload[key] = value
 
     return payload
-
 
 
 def _first_hint_position(text: str, hints: Sequence[str]) -> int:
@@ -1650,7 +1645,6 @@ def _resolve_replay_result_events(additional_kwargs: Dict[str, Any]) -> tuple[li
     return [], "none"
 
 
-
 def _result_event_sort_key(event: Dict[str, Any], index: int) -> tuple[int, int, int]:
     """生成回放 result_event 稳定排序键。"""
 
@@ -1719,7 +1713,6 @@ def _extract_latest_structured_result(
     return None
 
 
-
 def _ensure_active_goals_covers_runtime(
     state: MultiAgentState,
     base_goals: Optional[Sequence[Dict[str, Any]]] = None,
@@ -1764,24 +1757,6 @@ def _ensure_active_goals_covers_runtime(
         return [_build_default_general_goal()]
 
     return _normalize_active_goals(goals)
-
-
-def _ensure_intent_plan_covers_runtime(
-    state: MultiAgentState,
-    base_plan: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """根据运行时产物补齐活动目标，避免遗漏必答项。"""
-    base_goals = None
-    if isinstance(base_plan, dict):
-        base_goals = [goal for goal in list(base_plan.get("goals") or []) if isinstance(goal, dict)]
-    goals = _ensure_active_goals_covers_runtime(state, base_goals=base_goals)
-
-    return _build_active_goal_plan(
-        state,
-        runtime_goals=goals,
-        source=str((base_plan or {}).get("source") or "runtime"),
-    )
-
 
 
 def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
@@ -2441,7 +2416,6 @@ def fallback_router(node_name: str, state: MultiAgentState, error_text: str) -> 
             plugin_lifecycle_status=_resolve_plugin_lifecycle_status(state, error_text),
         ),
     }
-
 
 
 def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
@@ -3247,7 +3221,6 @@ def _sanitize_direct_answer_markdown(markdown: Any, *, handoff_display_text: str
 def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: int = 220) -> str:
     """提取最近一条可展示的 AI 输出摘要。"""
     return _normalize_tool_summary_text(_extract_latest_visible_ai_markdown(messages), limit=limit)
-
 
 
 def _build_external_lookup_display_markdown_from_findings(findings: Sequence[Dict[str, Any]]) -> str:
@@ -4561,7 +4534,6 @@ def _collect_custom_mode_text_segments(chunk: Any) -> list[str]:
     return deduped
 
 
-
 def _remember_custom_mode_text(chunk: Any, ctx: StreamingContext) -> None:
     """custom 文本透传后同步登记，避免 values 模式重复补发。"""
     if not ctx.collected_content:
@@ -4574,7 +4546,6 @@ def _remember_custom_mode_text(chunk: Any, ctx: StreamingContext) -> None:
             continue
         ctx.collected_content.append(text)
         collected_text += text
-
 
 
 def _dispatch_custom_mode_chunk(
@@ -5372,13 +5343,6 @@ def _get_common_tool_entries() -> list[Dict[str, Any]]:
     return entries
 
 
-def _get_common_tools():
-    """获取所有专家共享的工具（图片分析、文件读取）。"""
-    return _apply_tool_governance_policy(_get_common_tool_entries(), agent_name="common")
-
-
-
-
 def _normalize_allowed_tool_registry(raw_value: Any) -> Dict[str, Dict[str, Any]]:
     """标准化会话级领域工具授权状态。"""
 
@@ -5504,7 +5468,6 @@ def _resolve_handoff_target_agent_from_entry(entry: Dict[str, Any]) -> str:
     return ""
 
 
-
 def _is_handoff_entry_goal_visible(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> bool:
     """按当前活动目标约束 handoff 工具可见性。"""
 
@@ -5524,7 +5487,6 @@ def _is_handoff_entry_goal_visible(entry: Dict[str, Any], state: Optional[Dict[s
         for agent in _normalize_goal_allowed_agents(goal.get("allowed_agents"), str(goal.get("kind") or ""))
     }
     return target_agent in allowed_agents
-
 
 
 def _is_tool_entry_runtime_visible(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> bool:
@@ -5705,7 +5667,6 @@ def _restore_loaded_skill_registry_from_messages(
     return {}
 
 
-
 def _resolve_skill_runtime_replay_source(state: Dict[str, Any]) -> str:
     """判断当前轮 skill_runtime 的 replay_source。"""
 
@@ -5719,7 +5680,6 @@ def _resolve_skill_runtime_replay_source(state: Dict[str, Any]) -> str:
     if state.get("loaded_skill_registry") or state.get("loaded_skill_context"):
         return "rehydrated"
     return "live"
-
 
 
 def _build_skill_runtime_state_payload(
@@ -5772,7 +5732,6 @@ def _build_skill_runtime_state_payload(
     )
 
 
-
 def _create_ai_message_with_skill_runtime(content: str, state: Dict[str, Any]):
     """创建带 canonical skill_runtime/router_result_v2 的 AIMessage。"""
 
@@ -5791,7 +5750,6 @@ def _create_ai_message_with_skill_runtime(content: str, state: Dict[str, Any]):
         )
 
     return create_ai_message(content, additional_kwargs=additional_kwargs or None)
-
 
 
 def _create_load_skills_tool():
@@ -5977,7 +5935,6 @@ def _get_runtime_visible_supervisor_handoff_tools(
     entries = list(tool_entries) if tool_entries is not None else _get_supervisor_handoff_tool_entries()
     runtime_visible_entries = _apply_runtime_tool_visibility_policy(entries, state, agent_name="supervisor")
     return _apply_tool_governance_policy(runtime_visible_entries, agent_name="supervisor")
-
 
 
 def _get_supervisor_tools():

@@ -96,7 +96,7 @@ def test_memory_search_should_downgrade_when_embedding_fails(monkeypatch) -> Non
 
 
 def test_recall_should_inject_chunk_text_with_citation(monkeypatch) -> None:  # noqa: ANN001
-    """检索注入应以 chunk_text 与 citation 为准，不回源 memory_get。"""
+    """检索注入应以 chunk_text 与 citation 为准，不回源旧文档全文读取。"""
 
     monkeypatch.setattr(memory_service, "_build_preference_context", lambda *args, **kwargs: "")
     monkeypatch.setattr(
@@ -117,9 +117,9 @@ def test_recall_should_inject_chunk_text_with_citation(monkeypatch) -> None:  # 
     )
 
     monkeypatch.setattr(
-        memory_service,
-        "memory_get",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call memory_get")),
+        memory_service.document_memory_repo,
+        "get_document_excerpt",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call get_document_excerpt")),
     )
 
     context = memory_service.recall(

@@ -444,27 +444,6 @@ def memory_search(
     return output
 
 
-def memory_get(
-    db: Session,
-    *,
-    user_id: int,
-    doc_id: int,
-    from_line: int = 1,
-    lines: int = 40,
-) -> dict[str, Any] | None:
-    """按文档局部读取记忆。"""
-
-    if not user_id or not doc_id:
-        return None
-    return document_memory_repo.get_document_excerpt(
-        db,
-        user_id=user_id,
-        doc_id=doc_id,
-        from_line=from_line,
-        lines=lines,
-    )
-
-
 def _build_preference_context(
     db: Session,
     *,

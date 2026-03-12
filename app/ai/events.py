@@ -446,23 +446,6 @@ def emit_final_answer(
     })
 
 
-def emit_confirmation(
-    writer: StreamWriter,
-    operation: dict,
-    message: str,
-    node: str = ""
-) -> None:
-    """发送确认请求事件。"""
-    writer({
-        "type": "confirmation",
-        "data": {
-            "operation": operation,
-            "message": message
-        },
-        "node": node
-    })
-
-
 def emit_clarification(
     writer: StreamWriter,
     questions: list,
@@ -506,23 +489,6 @@ def stopped_event(
     }
 
 
-def emit_stopped(
-    writer: StreamWriter,
-    *,
-    thread_id: str,
-    run_id: str,
-    reason: str = "user_cancelled",
-    node: str = "",
-) -> None:
-    """发送 stopped 事件。"""
-
-    writer({
-        "type": "stopped",
-        "data": stopped_event(thread_id=thread_id, run_id=run_id, reason=reason),
-        "node": node,
-    })
-
-
 def emit_error(writer: StreamWriter, message: str, node: str = "") -> None:
     """发送错误事件。
     
@@ -534,14 +500,5 @@ def emit_error(writer: StreamWriter, message: str, node: str = "") -> None:
     writer({
         "type": "error",
         "data": {"message": message},
-        "node": node
-    })
-
-
-def emit_done(writer: StreamWriter, thread_id: str = "", node: str = "") -> None:
-    """发送流结束事件。"""
-    writer({
-        "type": "done",
-        "data": {"thread_id": thread_id},
         "node": node
     })
