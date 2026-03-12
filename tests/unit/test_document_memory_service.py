@@ -34,48 +34,6 @@ class _DummySession:
         self.rollback_called = True
 
 
-def test_recall_builds_context_with_citation(monkeypatch):
-    """recall 应输出片段与引用。"""
-
-    monkeypatch.setattr(memory_service, "_build_preference_context", lambda *args, **kwargs: "")
-    monkeypatch.setattr(
-        memory_service,
-        "memory_search",
-        lambda *args, **kwargs: [
-            {
-                "doc_id": 7,
-                "doc_kind": "daily",
-                "doc_key": "2026-02-28",
-                "start_line": 3,
-                "end_line": 5,
-                "chunk_text": "用户陈述：请记住使用中文",
-                "score": 0.8,
-                "citation": "memory://user/2/daily/2026-02-28#L3-L5",
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        memory_service,
-        "memory_get",
-        lambda *args, **kwargs: {
-            "text": "用户陈述：请记住使用中文\n- 来源线程：thread-3\n- 来源消息：123",
-        },
-    )
-
-    context = memory_service.recall(
-        _DummySession(),
-        user_id=2,
-        query_text="以后都用中文",
-        max_results=3,
-        max_injected_chars=800,
-    )
-
-    assert "用户长期记忆片段" in context
-    assert "引用: memory://user/2/daily/2026-02-28#L3-L5" in context
-    assert "来源线程" not in context
-    assert "来源消息" not in context
-
-
 def test_recall_should_include_preference_even_without_query_hit(monkeypatch):
     """稳定偏好应常驻注入，不依赖 query 召回命中。"""
 

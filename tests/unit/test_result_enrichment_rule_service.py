@@ -6,7 +6,6 @@ from unittest.mock import patch
 from app.services.result_enrichment_rule_service import (
     ResultEnrichmentRuleService,
     ResultLookupEnrichmentRuleConfig,
-    apply_lookup_enrichment_rule,
     apply_lookup_enrichment_rule_with_status,
 )
 
@@ -128,40 +127,6 @@ def test_validate_rule_payload_normalizes_values():
     assert normalized["key_column_candidates"] == ["ecif_cust_no"]
     assert normalized["result_date_column_candidates"] == ["data_dt"]
     assert normalized["source_table"] == "fdmdata.f_mid_dep_tb"
-
-
-def test_apply_lookup_enrichment_rule_inserts_target_column_after_key():
-    rule = _build_rule("customer_name")
-    rows = [
-        {"ecif_cust_no": "1001", "贷款余额": 88.0, "data_dt": "2025-06-30"},
-        {"ecif_cust_no": "1002", "贷款余额": 66.0, "data_dt": "2025-06-30"},
-    ]
-    columns = ["ecif_cust_no", "贷款余额", "data_dt"]
-
-    with patch(
-        "app.services.result_enrichment_rule_service._fetch_lookup_value_map",
-        return_value={"1001": "张三", "1002": "李四"},
-    ):
-        new_rows, new_columns = apply_lookup_enrichment_rule(rows, columns, rule)
-
-    assert new_columns == ["ecif_cust_no", "客户名称", "贷款余额", "data_dt"]
-    assert new_rows[0]["客户名称"] == "张三"
-    assert new_rows[1]["客户名称"] == "李四"
-
-
-def test_apply_lookup_enrichment_rule_returns_original_when_target_exists():
-    rule = _build_rule("customer_name")
-    rows = [{"ecif_cust_no": "1001", "客户名称": "张三", "贷款余额": 88.0}]
-    columns = ["ecif_cust_no", "客户名称", "贷款余额"]
-
-    with patch(
-        "app.services.result_enrichment_rule_service._fetch_lookup_value_map",
-        side_effect=AssertionError("不应触发查表"),
-    ):
-        new_rows, new_columns = apply_lookup_enrichment_rule(rows, columns, rule)
-
-    assert new_rows == rows
-    assert new_columns == columns
 
 
 def test_apply_lookup_enrichment_rule_with_status_marks_no_data_when_lookup_empty():

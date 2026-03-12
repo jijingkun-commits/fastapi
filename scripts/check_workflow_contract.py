@@ -23,7 +23,6 @@ USAGE_OBSERVED_MODES = {"clarify_plan", "clarify_consistency", "plan_vk_coverage
 TRUTH_SOURCE_FILENAMES = {"_active_task.json", "task-ledger.jsonl", "coder4-idempotency.json", "task-runner-state.json", "task-runner-state.json.lock"}
 
 
-
 TEMPORAL_GATE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("temporal_zero_call_requirement", re.compile(r"(?:连续|删除前)?\s*7\s*天.*零调用|7\s*天.*零调用")),
     ("temporal_window_hint", re.compile(r"观测窗口|时间窗")),
@@ -787,25 +786,6 @@ def _run_integration_gate(passthrough_args: Sequence[str]) -> int:
         print(f"- {issue}", file=sys.stderr)
     module._write_output(args.output, result)
     return 1
-
-
-def _detect_common_repo_root(repo_root: Path) -> Path:
-    completed = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    raw = str(completed.stdout or "").strip()
-    if completed.returncode != 0 or not raw:
-        return repo_root.resolve()
-
-    common_dir = Path(raw).expanduser()
-    if not common_dir.is_absolute():
-        common_dir = (repo_root / common_dir).resolve()
-    if common_dir.name == ".git":
-        return common_dir.parent.resolve()
-    return common_dir.resolve()
 
 
 def _resolve_integration_state_dir(*, repo_root: Path, task_split_dir: Path, raw_state_dir: str) -> Path:

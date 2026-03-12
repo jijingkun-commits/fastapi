@@ -8,14 +8,9 @@ import app.ai.events as events
 
 
 def test_events_stop_contract_exports_are_stable():
-    """stopped 相关兼容导出必须稳定存在。"""
+    """chat_service 依赖的 stopped_event 导出必须稳定存在。"""
 
-    required_symbols = (
-        "stopped_event",
-        "emit_confirmation",
-        "emit_stopped",
-        "emit_done",
-    )
+    required_symbols = ("stopped_event",)
 
     for symbol in required_symbols:
         assert hasattr(events, symbol), f"缺少导出: {symbol}"

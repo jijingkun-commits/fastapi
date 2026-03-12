@@ -99,14 +99,3 @@ def build_multi_intent_recovery_system_context(
     if marker_idx >= 0:
         normalized_base = normalized_base[:marker_idx].rstrip()
     return normalized_base
-
-
-def build_router_blocked_system_context(
-    *,
-    base_context: str,
-    active_plan: Dict[str, Any] | None,
-    pending_goals: Sequence[Dict[str, Any]],
-) -> str:
-    """Router blocked 不再向 system_context 注入自然语言补齐提示。"""
-    del active_plan, pending_goals
-    return build_multi_intent_recovery_system_context(base_context, None, ())

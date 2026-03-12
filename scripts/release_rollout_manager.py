@@ -126,12 +126,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _normalize_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
-
-
 def _read_env_file(path: Path) -> Dict[str, str]:
     if not path.exists():
         return {}

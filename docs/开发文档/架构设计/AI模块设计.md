@@ -62,7 +62,6 @@ app/ai/
 ├── utils/                      # 工具函数
 │   ├── __init__.py
 │   ├── state_helpers.py        # 状态辅助函数 (user_id/todo_id 统一获取)
-│   ├── image_fixer.py          # 图片链接修复逻辑
 │   ├── embedding_util.py       # 嵌入向量生成工具
 │   ├── sql_parser.py           # [New] SQL 解析工具（sqlglot）
 │   └── sql_safety.py           # [New] SQL 安全检查工具
@@ -619,10 +618,10 @@ def my_node(state):
 | `emit_thinking` | `thinking` | 思考过程 |
 | `emit_status` | `status` | 状态更新（`message + phase`，如 `processing/generating/done`） |
 | `emit_result` | `result` | 结构化结果（卡片数据） |
-| `emit_confirmation` | `confirmation` | 确认请求 |
+| `-` | `confirmation` | 确认请求（按统一 stream contract 发送） |
 | `emit_clarification` | `clarification` | 澄清问题 |
 | `emit_error` | `error` | 错误信息 |
-| `emit_done` | `done` | 流结束 |
+| `AgentEvent.done()` | `done` | 流结束 |
 
 ### AgentEvent 模型 (2026-01 新增)
 
@@ -914,11 +913,11 @@ graph TD
 | `tool_end` | `emit_tool_end` | `AgentEvent.tool_end()` | 工具调用结束 | 检测到 ToolMessage 时 (on_tool_end) |
 | `status` | `emit_status` | `AgentEvent.status()` | 状态更新 | 长时间操作时 |
 | `result` | `emit_result` | - | 结构化结果 | 返回卡片数据时 |
-| `confirmation` | `emit_confirmation` | - | 确认请求 | 需要用户确认时 |
+| `confirmation` | `-` | - | 确认请求（按统一 stream contract 发送） | 需要用户确认时 |
 | `clarification` | `emit_clarification` | - | 澄清问题 | 需要补充信息时 |
 | `handoff` | - | `AgentEvent.handoff()` | 专家切换 | Supervisor 切换专家时 |
 | `error` | `emit_error` | `AgentEvent.error()` | 错误 | 发生异常时 |
-| `done` | `emit_done` | `AgentEvent.done()` | 流结束（仅生命周期） | 处理完成时 |
+| `done` | `-` | `AgentEvent.done()` | 流结束（仅生命周期） | 处理完成时 |
 
 > [!IMPORTANT]
 > 协议约束（2026-02）：结构化数据仅允许通过 `result` 事件发送，`done` 不再承载 `additional_kwargs`。
@@ -1123,7 +1122,11 @@ if (isLoading) {
 
 4. **确认请求** (`todo_tools`)
    ```python
-   emit_confirmation(writer, operation_data, message)
+   writer({
+       "type": "confirmation",
+       "data": {"operation": operation_data, "message": message},
+       "node": "ask_confirmation",
+   })
    ```
 
 ---
@@ -1224,7 +1227,7 @@ sequenceDiagram
 ```
 
 **实现**:
-- `fig_inter`: 返回 `{"image_url": url}`, LLM 输出 Markdown 或 `image_fixer` 补充
+- `fig_inter`: 返回 `{"image_url": url}`，图表图片由统一保存/渲染链路处理
 - `knowledge_search`: 返回 `[IMG-N]` + `KB_IMAGES` 注释，保存前替换成 Markdown
 - `save_conversation_from_messages` 统一提取 Tool 消息中的 Markdown/JSON 图片 URL 并补充图表图片
 

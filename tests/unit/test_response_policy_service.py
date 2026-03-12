@@ -62,15 +62,3 @@ def test_build_multi_intent_recovery_system_context_should_not_append_legacy_rec
     assert "【交付补齐提示】" not in rendered
     assert "assign_to_todo_expert" not in rendered
     assert "tavily_search" not in rendered
-
-
-def test_build_router_blocked_system_context_should_not_append_recovery_prompt() -> None:
-    rendered = response_policy_service.build_router_blocked_system_context(
-        base_context="当前时间: 2026-02-28",
-        active_plan={"goals": [{"goal_id": "GOAL-1", "kind": "todo.query"}]},
-        pending_goals=[{"goal_id": "GOAL-1", "title": "待办事项"}],
-    )
-
-    assert rendered == "当前时间: 2026-02-28"
-    assert "【交付补齐提示】" not in rendered
-    assert "assign_to_todo_expert" not in rendered

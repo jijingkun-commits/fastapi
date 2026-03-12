@@ -79,8 +79,6 @@ _DISPLAY_MAPPING = {
     },
 }
 
-_FETCH_MULTIPLIER = 3
-_DEFAULT_MAX_CONTEXT_CHARS = 320
 USER_PREFERENCE_BOOTSTRAP_TEMPLATE_CONFIG_KEY = "memory.user_preference_bootstrap_template"
 DEFAULT_USER_PREFERENCE_BOOTSTRAP_TEMPLATE = {"assistant.persona": "小嘉"}
 _BOOTSTRAP_SOURCE_THREAD_ID = "system.user_bootstrap"
@@ -284,30 +282,6 @@ def extract_explicit_preference_candidates(user_text: str) -> list[PreferenceMem
     return list(candidates.values())
 
 
-def _format_memory_line(memory_key: str, memory_value: str) -> str:
-    """将键值格式化为可读文本。"""
-
-    mapping = _DISPLAY_MAPPING.get(memory_key)
-    if not mapping:
-        return f"- {memory_key}: {memory_value}"
-
-    label = mapping["label"]
-    readable = mapping.get("values", {}).get(memory_value, memory_value)
-    return f"- {label}: {readable}"
-
-
-def _format_memory_pair(memory_key: str, memory_value: str) -> str:
-    """将键值格式化为摘要短语。"""
-
-    mapping = _DISPLAY_MAPPING.get(memory_key)
-    if not mapping:
-        return f"{memory_key}={memory_value}"
-
-    label = mapping["label"]
-    readable = mapping.get("values", {}).get(memory_value, memory_value)
-    return f"{label}={readable}"
-
-
 def _dedupe_latest_memories(memories: Iterable, max_items: int) -> list:
     """按顺序去重，保留同 key 的第一条（最新）记录。"""
 
@@ -325,138 +299,6 @@ def _dedupe_latest_memories(memories: Iterable, max_items: int) -> list:
             break
 
     return deduped
-
-
-def _build_compressed_context(memories: list, max_context_chars: int) -> str:
-    """当上下文过长时生成压缩摘要。"""
-
-    if not memories:
-        return ""
-
-    pairs = [
-        _format_memory_pair(
-            str(getattr(item, "memory_key", "") or ""),
-            str(getattr(item, "memory_value", "") or ""),
-        )
-        for item in memories
-    ]
-
-    kept = len(pairs)
-    while kept > 0:
-        omitted = len(pairs) - kept
-        suffix = f"；其余{omitted}项已省略" if omitted > 0 else ""
-        text = f"用户偏好摘要（按最近更新去重）：{'；'.join(pairs[:kept])}{suffix}。"
-        if len(text) <= max_context_chars:
-            return text
-        kept -= 1
-
-    suffix = f"；其余{len(pairs) - 1}项已省略" if len(pairs) > 1 else ""
-    prefix = "用户偏好摘要（按最近更新去重）："
-    min_budget = 12
-    budget = max(min_budget, max_context_chars - len(prefix) - len(suffix) - 1)
-    first_pair = pairs[0]
-    clipped = first_pair[:budget]
-    if len(first_pair) > budget:
-        clipped += "…"
-    return f"{prefix}{clipped}{suffix}。"
-
-
-def _load_deduped_memories(
-    db: Session,
-    *,
-    user_id: int,
-    max_items: int,
-) -> list:
-    """加载并去重活跃记忆。"""
-
-    if not user_id or max_items <= 0:
-        return []
-
-    fetch_limit = max(max_items, max_items * _FETCH_MULTIPLIER)
-    memories = user_memory_repo.list_active_memories(
-        db,
-        user_id=user_id,
-        scope="global",
-        limit=fetch_limit,
-    )
-    if not memories:
-        return []
-
-    return _dedupe_latest_memories(memories, max_items=max_items)
-
-
-def _render_context(memories: list, max_context_chars: int) -> str:
-    """将记忆列表渲染为可注入上下文。"""
-
-    if not memories:
-        return ""
-
-    lines = [
-        "以下是用户已确认的跨会话偏好（仅在不与本轮明确指令冲突时生效）：",
-    ]
-    lines.extend(
-        _format_memory_line(
-            str(getattr(item, "memory_key", "") or ""),
-            str(getattr(item, "memory_value", "") or ""),
-        )
-        for item in memories
-    )
-    if any(str(getattr(item, "memory_key", "") or "") == "assistant.persona" for item in memories):
-        lines.append("执行要求：当用户未另行指定时，按 AI 人设进行自称。")
-        lines.append("说明要求：该 AI 人设已写入跨会话记忆；除非用户要求删除，不要回答“无法跨会话记住该称呼”。")
-
-    context = "\n".join(lines)
-    if max_context_chars > 0 and len(context) > max_context_chars:
-        return _build_compressed_context(memories, max_context_chars=max_context_chars)
-
-    return context
-
-
-def recall(
-    db: Session,
-    *,
-    user_id: int,
-    max_items: int = 8,
-    max_context_chars: int = _DEFAULT_MAX_CONTEXT_CHARS,
-    refresh_last_seen: bool = True,
-) -> str:
-    """召回用户偏好并构建上下文。"""
-
-    memories = _load_deduped_memories(
-        db,
-        user_id=user_id,
-        max_items=max_items,
-    )
-    if not memories:
-        return ""
-
-    if refresh_last_seen:
-        try:
-            user_memory_repo.touch_last_seen(db, memories)
-            db.commit()
-        except Exception as memory_error:
-            logger.warning("刷新记忆命中时间失败，已降级: user_id=%s, error=%s", user_id, memory_error)
-            rollback = getattr(db, "rollback", None)
-            if callable(rollback):
-                rollback()
-
-    return _render_context(memories, max_context_chars=max_context_chars)
-
-
-def build_user_preference_context(
-    db: Session,
-    user_id: int,
-    max_items: int = 8,
-    max_context_chars: int = _DEFAULT_MAX_CONTEXT_CHARS,
-) -> str:
-    """构建用户偏好上下文。"""
-
-    deduped_memories = _load_deduped_memories(
-        db,
-        user_id=user_id,
-        max_items=max_items,
-    )
-    return _render_context(deduped_memories, max_context_chars=max_context_chars)
 
 
 def persist_explicit_preferences_from_input(
@@ -490,41 +332,6 @@ def persist_explicit_preferences_from_input(
 
     db.commit()
     return len(candidates)
-
-
-def bootstrap_user_preferences(
-    db: Session,
-    *,
-    user_id: int,
-    template: dict[str, Any] | None = None,
-) -> int:
-    """为新用户初始化受控记忆模板。"""
-
-    if not user_id:
-        return 0
-
-    template_payload = (
-        load_bootstrap_template_from_config()
-        if template is None
-        else normalize_controlled_memory_template(template)
-    )
-    if not template_payload:
-        return 0
-
-    for memory_key, memory_value in template_payload.items():
-        user_memory_repo.upsert_active_memory(
-            db,
-            user_id=user_id,
-            scope="global",
-            memory_key=memory_key,
-            memory_value=memory_value,
-            confidence=Decimal("1.000"),
-            source_thread_id=_BOOTSTRAP_SOURCE_THREAD_ID,
-            source_message_id=None,
-        )
-
-    db.commit()
-    return len(template_payload)
 
 
 def flush(

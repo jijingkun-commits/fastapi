@@ -53,7 +53,7 @@
 
 ### 1.3 路由闭环
 
-1. 对话召回：`chat_service -> memory_search(hybrid) -> memory_get -> 注入`
+1. 对话召回：`chat_service -> memory_search(hybrid) -> chunk_text/citation 注入`
 2. 写入闭环：`flush -> replace_chunks -> mark pending -> async embedding`
 3. 失败闭环：向量不可用时自动回退纯 FTS，主对话不失败。
 
@@ -67,8 +67,7 @@ S --> F["FTS 召回"]
 S --> V["向量召回"]
 F --> H["融合排序"]
 V --> H
-H --> G["memory_get 局部精读"]
-G --> B["预算裁剪+注入"]
+H --> B["chunk_text/citation 预算裁剪+注入"]
 B --> LLM["模型回复"]
 
 W["flush 文档记忆"] --> P["chunk 标记 pending"]
