@@ -75,6 +75,14 @@ from app.ai.runtime.recovery_policy import (
 from app.ai.state import AgentType, AGENT_DESCRIPTIONS, MultiAgentState
 from app.services import response_policy_service
 from app.ai.workflow.session_intent_kernel import TURN_ACT_SUPPLEMENT, classify_turn_act_from_text
+from app.ai.intent.goal_resolver import (
+    infer_primary_goal_bucket_from_text,
+    is_todo_external_enrichment_request as intent_is_todo_external_enrichment_request,
+    resolve_runtime_goal_specs,
+    should_attach_todo_observations,
+    should_compile_data_handoff_from_task_description,
+    split_composite_query,
+)
 from app.ai.contracts.delivery_contract_validators import (
     build_contract_validation_meta,
     validate_coverage_report_contract,
@@ -162,83 +170,6 @@ MODEL_ACCESS_ERROR_HINTS = (
     "request was blocked",
     "forbidden",
     "quota",
-)
-
-TODO_DOMAIN_HINTS = (
-    "待办",
-    "任务",
-    "提醒",
-    "清单",
-    "todo",
-)
-
-TODO_QUERY_HINTS = (
-    "查询",
-    "查看",
-    "列出",
-    "列表",
-    "清单",
-    "有哪些",
-    "显示",
-    "看看",
-)
-
-TODO_CREATE_HINTS = (
-    "创建",
-    "新建",
-    "新增",
-    "添加",
-    "记录",
-    "记一下",
-)
-
-TODO_ENRICHMENT_HINTS = (
-    "补充",
-    "添加",
-    "加上",
-    "写入",
-    "写到",
-    "备注",
-    "描述",
-    "追加",
-)
-
-EXTERNAL_INFO_HINTS = (
-    "天气",
-    "气温",
-    "股价",
-    "股票",
-    "指数",
-    "汇率",
-    "黄金",
-    "油价",
-    "行情",
-    "基金",
-)
-
-DATA_DOMAIN_HINTS = (
-    "数据",
-    "指标",
-    "报表",
-    "统计",
-    "数据库",
-    "sql",
-    "分析",
-    "贷款",
-    "存款",
-    "余额",
-)
-
-DATA_STRONG_HINTS = (
-    "sql",
-    "报表",
-    "数据库",
-    "指标",
-    "字段",
-    "表",
-    "贷款",
-    "存款",
-    "余额",
 )
 
 DELIVERY_RECOVERY_MARKER = "【交付补齐提示】"
@@ -649,13 +580,16 @@ def _normalize_model_goal_kind(raw_kind: str) -> str:
             return "todo.create"
         return "todo.query"
 
-    if (
-        compact.startswith("external")
-        or "weather" in compact
-        or "lookup" in compact
-        or "search" in compact
-        or "web" in compact
-    ):
+    if compact.startswith("chart") or any(token in compact for token in ("draw", "plot", "figure", "diagram")):
+        return "chart.render"
+
+    if compact.startswith("knowledge") or any(token in compact for token in ("rag", "document", "manual")):
+        return "knowledge.lookup"
+
+    if compact.startswith("weather") or "forecast" in compact:
+        return "weather.lookup"
+
+    if compact.startswith("external") or "lookup" in compact or "search" in compact or "web" in compact:
         return "external.lookup"
 
     if (
@@ -672,6 +606,13 @@ def _normalize_model_goal_kind(raw_kind: str) -> str:
 
 def _default_goal_title(kind: str) -> str:
     """根据标准 kind 提供默认标题。"""
+    normalized = str(kind or "").strip().lower()
+    if normalized.startswith("weather"):
+        return "天气信息"
+    if normalized.startswith("knowledge"):
+        return "知识库检索"
+    if normalized.startswith("chart"):
+        return "图表结果"
     bucket = _goal_kind_bucket(kind)
     if bucket == "todo":
         return "待办事项"
@@ -1433,53 +1374,8 @@ def _build_planner_status_message(
 def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
     """从用户输入推断初始问题合同（intent_plan）。"""
     user_text = _resolve_semantic_user_query(state)
-    normalized = user_text.lower()
+    goals = resolve_runtime_goal_specs(user_text)
 
-    has_todo = any(hint in normalized for hint in TODO_DOMAIN_HINTS)
-    has_external = any(hint in normalized for hint in EXTERNAL_INFO_HINTS)
-    has_data = any(hint in normalized for hint in DATA_DOMAIN_HINTS)
-    has_data_strong = any(hint in normalized for hint in DATA_STRONG_HINTS)
-
-    goals: list[Dict[str, Any]] = []
-    if has_todo:
-        goals.append(
-            {
-                "kind": "todo.query",
-                "title": "待办事项",
-                "must_answer": True,
-                "order_hint": _first_hint_position(user_text, TODO_DOMAIN_HINTS),
-            }
-        )
-    if has_external:
-        goals.append(
-            {
-                "kind": "external.lookup",
-                "title": "外部信息",
-                "must_answer": True,
-                "order_hint": _first_hint_position(user_text, EXTERNAL_INFO_HINTS),
-            }
-        )
-    if has_data and (not has_todo or has_data_strong):
-        goals.append(
-            {
-                "kind": "data.query",
-                "title": "数据查询",
-                "must_answer": True,
-                "order_hint": _first_hint_position(user_text, DATA_DOMAIN_HINTS),
-            }
-        )
-
-    if not goals:
-        goals.append(
-            {
-                "kind": "general.reply",
-                "title": "问题回复",
-                "must_answer": True,
-                "order_hint": 0,
-            }
-        )
-
-    goals = sorted(goals, key=lambda item: int(item.get("order_hint", 10**9)))
     normalized_goals: list[Dict[str, Any]] = []
     for index, goal in enumerate(goals, start=1):
         goal_kind = str(goal.get("kind") or "general.reply")
@@ -1488,7 +1384,7 @@ def _infer_initial_intent_plan(state: MultiAgentState) -> Dict[str, Any]:
                 "goal_id": f"GOAL-{index:02d}",
                 "order": index,
                 "kind": goal_kind,
-                "title": goal["title"],
+                "title": str(goal.get("title") or _default_goal_title(goal_kind)),
                 "must_answer": bool(goal.get("must_answer", True)),
                 "allowed_agents": _normalize_goal_allowed_agents(goal.get("allowed_agents"), goal_kind),
             }
@@ -1663,10 +1559,12 @@ def _goal_kind_bucket(kind: str) -> str:
     normalized = str(kind or "").strip().lower()
     if normalized.startswith("todo"):
         return "todo"
-    if normalized.startswith("external"):
-        return "external"
     if normalized.startswith("data"):
         return "data"
+    if normalized.startswith("chart"):
+        return "chart"
+    if normalized.startswith(("weather", "knowledge", "external")):
+        return "external"
     return "general"
 
 
@@ -1892,7 +1790,15 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
     trace = list(state.get("handoff_execution_trace") or [])
     deliverables: list[Dict[str, Any]] = []
 
+    active_goals = _coerce_active_goals_input(state.get("decomposed_goals") or [])
     direct_findings = _build_direct_lookup_findings(turn_messages)
+    weather_findings = [dict(item) for item in direct_findings if str(item.get("kind") or "") == "external.lookup"]
+    knowledge_findings = [dict(item) for item in direct_findings if str(item.get("kind") or "") == "knowledge.lookup"]
+    has_atomic_direct_goals = any(
+        str(goal.get("kind") or "") in {"external.lookup", "knowledge.lookup", "chart.render"}
+        for goal in active_goals
+    )
+
     direct_answer_markdowns = [
         _sanitize_direct_answer_markdown(
             item.get("direct_answer_markdown"),
@@ -1905,7 +1811,61 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
         )
     ]
     consumed_direct_answer_markdowns: set[str] = set()
-    if direct_findings:
+
+    image_structured = _extract_latest_structured_result(turn_messages, data_type="image")
+    if has_atomic_direct_goals:
+        image_payload = dict((image_structured or {}).get("data") or {})
+        image_url = str(image_payload.get("url") or "").strip()
+        image_markdown = f"![生成的图表]({image_url})" if image_url else ""
+        image_summary = _normalize_tool_summary_text((image_structured or {}).get("message"), limit=220) or "图表已生成"
+
+        for goal in active_goals:
+            goal_id = str(goal.get("goal_id") or "")
+            goal_kind = str(goal.get("kind") or "")
+            if goal_kind == "external.lookup" and weather_findings:
+                finding = weather_findings.pop(0)
+                payload = {"findings": [finding]}
+                display_markdown = str(finding.get("display_markdown") or "").strip()
+                if display_markdown:
+                    payload["display_markdown"] = display_markdown
+                deliverables.append(
+                    {
+                        "kind": goal_kind,
+                        "goal_id": goal_id,
+                        "status": "success",
+                        "summary": str(finding.get("summary") or "").strip(),
+                        "payload": payload,
+                    }
+                )
+                continue
+
+            if goal_kind == "knowledge.lookup" and knowledge_findings:
+                finding = knowledge_findings.pop(0)
+                deliverables.append(
+                    {
+                        "kind": goal_kind,
+                        "goal_id": goal_id,
+                        "status": "success",
+                        "summary": str(finding.get("summary") or "").strip(),
+                        "payload": {"findings": [finding]},
+                    }
+                )
+                continue
+
+            if goal_kind == "chart.render" and (image_markdown or image_summary):
+                payload = dict(image_payload)
+                if image_markdown:
+                    payload["display_markdown"] = image_markdown
+                deliverables.append(
+                    {
+                        "kind": goal_kind,
+                        "goal_id": goal_id,
+                        "status": "success",
+                        "summary": image_summary,
+                        "payload": payload,
+                    }
+                )
+    elif direct_findings:
         direct_answer_markdown = direct_answer_markdowns[-1] if direct_answer_markdowns else ""
         display_markdown = direct_answer_markdown or _build_external_lookup_display_markdown_from_findings(direct_findings)
         summary = _normalize_tool_summary_text(display_markdown, limit=220) if display_markdown else "；".join(
@@ -2397,10 +2357,9 @@ def _augment_data_handoff_payload(
     enriched["turn_act_hint"] = turn_act_hint
 
     query_text = _normalize_text_content(frame.get("query_text"))
-    if not query_text:
-        query_text = _normalize_text_content(enriched.get("task_description"))
-    if not query_text:
-        query_text = _normalize_text_content(_resolve_semantic_user_query(state))
+    task_description = _normalize_text_content(enriched.get("task_description"))
+    if not query_text and should_compile_data_handoff_from_task_description(task_description):
+        query_text = task_description
 
     if query_text:
         try:
@@ -2716,13 +2675,7 @@ def _extract_supervisor_tool_observations(messages: Sequence[BaseMessage]) -> li
 
 def _is_todo_external_enrichment_request(user_text: str) -> bool:
     """判断是否是“待办补充外部信息”的表达。"""
-    normalized = str(user_text or "").strip().lower()
-    if not normalized:
-        return False
-
-    has_enrichment = any(hint in normalized for hint in TODO_ENRICHMENT_HINTS)
-    has_external = any(hint in normalized for hint in EXTERNAL_INFO_HINTS)
-    return has_enrichment and has_external
+    return intent_is_todo_external_enrichment_request(user_text)
 
 
 def _augment_todo_handoff_with_observations(
@@ -2752,6 +2705,18 @@ def _augment_todo_handoff_with_observations(
 
     if current_todo_id and not str(frame.get("todo_action") or "").strip():
         frame["todo_action"] = "update"
+
+    user_text = _extract_latest_human_content(state.get("messages", []))
+    todo_action = str(frame.get("todo_action") or "").strip()
+    has_todo_target = bool(current_todo_id or todo_fields.get("todo_id") or frame.get("todo_target_id"))
+    should_attach_observations = should_attach_todo_observations(
+        user_text,
+        str(enriched.get("task_description") or ""),
+        todo_action=todo_action,
+        has_todo_target=has_todo_target,
+    )
+    if not should_attach_observations:
+        return handoff_data
 
     frame["tool_observations"] = observations
 
@@ -2883,36 +2848,14 @@ def _normalize_handoff_batch_for_supervisor(
         normalized.append(handoff_data)
     return normalized
 
-_COMPOSITE_GOAL_SPLIT_PATTERN = re.compile(
-    r"(?:\n+|(?:另外|然后|顺便|并且|以及|同时)\s*[，,、 ]*|再(?=(?:查|看|帮|创建|新建|加|补|问)))"
-)
-
-
 def _infer_primary_goal_bucket_from_query_text(query_text: str) -> str:
-    """用与 decompose_goals 同源的启发式，粗判片段主目标桶。"""
-    normalized = _normalize_text_content(query_text)
-    if not normalized:
-        return "general"
-
-    plan = _infer_initial_intent_plan({"messages": [HumanMessage(content=normalized)]})
-    goals = [goal for goal in list(plan.get("goals") or []) if isinstance(goal, dict)]
-    if not goals:
-        return "general"
-    return _goal_kind_bucket(str(goals[0].get("kind") or "general.reply"))
+    """粗判片段主目标桶。"""
+    return infer_primary_goal_bucket_from_text(query_text)
 
 
 def _split_user_query_for_goal_compile(user_query: str) -> list[str]:
     """按复合请求连接词切分用户问题，供 goal compiler 选择子任务文本。"""
-    normalized = _normalize_text_content(user_query)
-    if not normalized:
-        return []
-
-    parts = [
-        part.strip(" ，,。；;	")
-        for part in _COMPOSITE_GOAL_SPLIT_PATTERN.split(normalized)
-        if str(part).strip(" ，,。；;	")
-    ]
-    return parts or [normalized]
+    return split_composite_query(user_query)
 
 
 def _compile_data_goal_query_text(
@@ -3310,25 +3253,25 @@ def _extract_latest_visible_ai_excerpt(messages: Sequence[BaseMessage], limit: i
 def _build_external_lookup_display_markdown_from_findings(findings: Sequence[Dict[str, Any]]) -> str:
     """根据外部查询 findings 构建用户可见富文本。"""
     rich_blocks: list[str] = []
+    plain_summaries: list[str] = []
     for item in findings or []:
         if not isinstance(item, dict):
             continue
         display_markdown = str(item.get("display_markdown") or "").strip()
+        summary = str(item.get("summary") or "").strip()
         if display_markdown:
             rich_blocks.append(display_markdown)
+            continue
+        if summary:
+            plain_summaries.append(summary)
 
+    blocks: list[str] = []
     if rich_blocks:
-        return "\n\n".join(rich_blocks)
-
-    summaries = [
-        str(item.get("summary") or "").strip()
-        for item in findings or []
-        if isinstance(item, dict) and str(item.get("summary") or "").strip()
-    ]
-    if len(summaries) > 1:
-        return "\n".join(f"- {summary}" for summary in summaries)
-    if summaries:
-        return summaries[0]
+        blocks.extend(rich_blocks)
+    if plain_summaries:
+        blocks.append("\n".join(f"- {summary}" for summary in plain_summaries) if len(plain_summaries) > 1 else plain_summaries[0])
+    if blocks:
+        return "\n\n".join(blocks)
     return ""
 
 
@@ -3373,6 +3316,7 @@ def _sanitize_tavily_text(tool_content: str) -> str:
     text = re.sub(r"\b(?:alt|style|class|id|src|href)\s*=\s*'[^']*'", ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'\b(?:alt|style|class|id|src|href)\s*=\s*\S+', ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'(?:首页|国内天气|空气质量|全国天气网)', ' ', text)
     text = text.replace('#', ' ').replace('【', ' ').replace('】', ' ')
     text = text.replace('>', ' ').replace('"', ' ').replace('_', ' ')
     text = re.sub(r'\s+', ' ', text).strip(' ：:；;,，')
@@ -3826,13 +3770,16 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
             continue
 
         display_markdown = ""
+        kind = "external.lookup"
         if "tavily" in lowered_name:
             display_markdown = _extract_tavily_display_markdown(content)
-            summary = _normalize_tool_summary_text(display_markdown, limit=220) if display_markdown else summarize_tavily_tool_output(content)
+            summary = _normalize_tool_summary_text(display_markdown, limit=220) if display_markdown else _summarize_tavily_tool_output(content)
             label = "天气/实时信息"
+            kind = "external.lookup"
         elif "knowledge_search" in lowered_name:
             summary = _normalize_tool_summary_text(content, limit=220)
             label = "知识库检索"
+            kind = "knowledge.lookup"
         else:
             continue
 
@@ -3843,7 +3790,7 @@ def _build_direct_lookup_findings(messages: Sequence[BaseMessage]) -> list[Dict[
         if key in seen:
             continue
         seen.add(key)
-        finding: Dict[str, Any] = {"label": label, "summary": summary}
+        finding: Dict[str, Any] = {"label": label, "summary": summary, "kind": kind, "tool_name": tool_name}
         if display_markdown:
             finding["display_markdown"] = display_markdown
         findings.append(finding)
@@ -6275,7 +6222,7 @@ def _should_reconcile_data_supplement_goal(
 
     primary_bucket = _goal_kind_bucket(str(normalized_primary[0].get("kind") or "general.reply"))
     fallback_bucket = _goal_kind_bucket(str(normalized_fallback[0].get("kind") or "general.reply"))
-    if primary_bucket != "general" or fallback_bucket != "general":
+    if primary_bucket != "general" or fallback_bucket not in {"general", "chart"}:
         return False
 
     if not _history_has_recent_data_query_context(history_messages):
@@ -6349,9 +6296,6 @@ def _resolve_decomposed_goals_for_query(
         reconciled_goals = _merge_goal_candidates(normalized_plan_goals, fallback_goals)
         return reconciled_goals, f"{source}+rule_reconcile"
 
-    if _should_reconcile_single_goal(normalized_plan_goals, fallback_goals):
-        return _normalize_active_goals(fallback_goals), f"{source}+single_goal_reconcile"
-
     if _should_reconcile_data_supplement_goal(
         normalized_query,
         primary_goals=normalized_plan_goals,
@@ -6359,6 +6303,9 @@ def _resolve_decomposed_goals_for_query(
         history_messages=history_messages,
     ):
         return _build_single_data_query_goal(), f"{source}+supplement_data_reconcile"
+
+    if _should_reconcile_single_goal(normalized_plan_goals, fallback_goals):
+        return _normalize_active_goals(fallback_goals), f"{source}+single_goal_reconcile"
 
     return normalized_plan_goals, source
 

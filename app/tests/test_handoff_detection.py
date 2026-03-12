@@ -138,3 +138,36 @@ def test_augment_data_handoff_payload_should_normalize_existing_frame():
     assert normalized["frame"]["query_shape"] == "top_n"
     assert normalized["frame"]["ranking"]["limit"] == 10
     assert normalized["turn_act_hint"] == "NEW_QUERY"
+
+
+
+def test_augment_todo_handoff_with_observations_should_skip_query_goal() -> None:
+    """todo.query 不应混入 Supervisor 外部观察，否则会把查询待办误伤成 out_of_scope。"""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from app.ai.state import AgentType
+    from app.ai.workflow.multi_agent_graph import _augment_todo_handoff_with_observations
+
+    handoff = {
+        "action": "handoff",
+        "target_agent": AgentType.TODO,
+        "task_description": "查询待办",
+        "frame": {"todo_action": "query"},
+    }
+    state = {
+        "messages": [HumanMessage(content="先查天气，再查询一下我的待办")],
+        "current_todo_id": None,
+    }
+    delta_messages = [
+        ToolMessage(
+            content='{"results":[{"title":"嘉兴天气预报","content":"今天 晴到多云 明天 晴到多云 5℃~13℃"}]}',
+            tool_call_id="t-weather",
+            name="tavily_search",
+        )
+    ]
+
+    normalized = _augment_todo_handoff_with_observations(handoff, delta_messages, state)
+
+    assert normalized["task_description"] == "查询待办"
+    assert normalized.get("frame", {}).get("tool_observations") in (None, [])
+    assert "todo_fields" not in normalized.get("frame", {})

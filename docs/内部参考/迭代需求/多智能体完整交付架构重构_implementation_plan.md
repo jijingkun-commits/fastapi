@@ -210,17 +210,11 @@ flowchart TD
 
 | feature_id | 目标与边界 | 触发与状态流转 | 代码锚点 | 回滚锚点 | 验证命令 | 来源证据 |
 |---|---|---|---|---|---|---|
-| P1-01 | 引入 Intent Planner 合同层；不改现有专家业务能力 | preprocess 后进入 planner，写入 goals | `app/ai/workflow/multi_agent_graph.py`（拆分后 planner 节点） | `ENABLE_DELIVERY_ORCHESTRATOR_V2=false` | `PYTHONPATH=. pytest tests/unit/test_delivery_planner.py` | `multi_agent_graph` 当前仅基于 handoff 无显式问题合同 |
-| P1-02 | 引入 Task Graph Builder 与调度器；不暴露给用户 | planner->task_graph->executor | `app/ai/workflow/multi_agent_graph.py`、`app/ai/state.py` | 同上 | `PYTHONPATH=. pytest tests/unit/test_delivery_task_graph.py` | 当前 `handoff_queue` 仅线性，不支持合同化任务依赖 |
-| P1-03 | Worker 输出统一为 Deliverable Envelope；不允许自由文本作为最终结果 | worker 完成后 normalize | `app/ai/workflow/todo_graph.py`、`app/ai/workflow/data_graph.py`、`app/ai/protocol.py` | `ENABLE_DELIVERABLE_ENVELOPE_V2=false` | `PYTHONPATH=. pytest tests/unit/test_delivery_envelope.py` | `todo_graph._execute_query` 结构化能力已存在但汇总未消费 |
-| P1-04 | 覆盖率门禁（Coverage Gate）；不做 UI 展示策略 | normalize 后 coverage_check，fail 则 recovery | `app/ai/workflow/multi_agent_graph.py` | `ENABLE_COVERAGE_GATE_V2=false` | `PYTHONPATH=. pytest tests/unit/test_coverage_gate.py` | 当前 `_evaluate_handoff_progress` 不校验 must_answer 覆盖 |
-| P2-01 | 单一最终答复节点 Composer；不允许 worker 直出终态 | coverage pass -> composer -> postprocess | `app/ai/workflow/multi_agent_graph.py`、`app/ai/protocol.py` | `ENABLE_SINGLE_COMPOSER_V2=false` | `PYTHONPATH=. pytest tests/unit/test_final_composer.py` | 当前 `_build_multi_intent_summary_content` 暴露内部执行痕迹 |
-| P2-02 | SSE V2 事件层（plan/task/coverage/final）；不破坏旧字段 | graph custom event -> chat_service -> frontend | `app/ai/events.py`、`app/services/chat_service.py`、`web/src/lib/backend.ts` | `ENABLE_SSE_DELIVERY_EVENTS_V2=false` | `PYTHONPATH=. pytest tests/unit/test_chat_service_delivery_events.py` | 当前仅 token/result，缺 final_answer 语义 |
-| P2-03 | 前端渲染分层：过程事件与最终正文解耦 | SSE 消费 final_answer 优先 | `web/src/hooks/useSSEStream.ts`、`web/src/components/chat/messages/ai.tsx` | `ENABLE_FRONTEND_FINAL_ANSWER_V2=false` | `cd web && pnpm test -- useSSEStream.delivery` | 当前过程文本与最终正文混写 |
-| P3-01 | 交付账本持久化（plan/task/deliverable/coverage） | postprocess 写入 ledger | `app/repositories/chat_repo.py`、新增 repository/model | `ENABLE_DELIVERY_LEDGER_V2=false` | `PYTHONPATH=. pytest tests/unit/test_delivery_ledger_repo.py` | 当前仅 `t_chat_message.metadata`，缺可回放链路 |
-| P3-02 | 回放与离线评测框架（完整率/顺序/去重） | 每日回放样本并产指标 | `tests/scenarios/`、`scripts/`、`docs/开发文档/测试管理` | `ENABLE_DELIVERY_REPLAY_EVAL=false` | `PYTHONPATH=. pytest tests/scenarios/test_delivery_full_answer_flow.py` | 现有测试未覆盖“完整交付率” |
-| P4-01 | 兼容迁移与灰度回滚（双栈） | 旧链路与新链路可切换 | `app/services/chat_service.py`、`app/ai/workflow/__init__.py` | `ENABLE_DELIVERY_ORCHESTRATOR_V2=false` | `PYTHONPATH=. pytest tests/integration/test_delivery_v2_compat.py` | 全局重构必须可一键回退 |
-| P4-02 | 观测与告警指标（coverage/internal leak/重复率） | 运行时埋点 + 管理端可视化 | `app/services/runtime_request_metrics.py`、admin API/UI | `ENABLE_DELIVERY_METRICS_V2=false` | `PYTHONPATH=. pytest tests/unit/test_delivery_metrics.py` | 当前缺“答复完整度”指标 |
+| P1-01 | 运行态 Goal Resolver 原子化；把天气/知识库/画图/待办拆成独立 goal | preprocess 后进入 `decompose_goals`，写入原子 goals | `app/ai/workflow/multi_agent_graph.py` | 回退旧单 bucket 拆解 | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py -q` | 当前 `explicit_multi_goal_fast_path` 会把 4 个问题压成 2 个 goal |
+| P1-02 | 清理 direct tool 到 deliverable 的映射；一 goal 一 deliverable | tool/expert 完成后 normalize | `app/ai/workflow/multi_agent_graph.py`、`app/ai/protocol.py` | 回退旧 direct finding 聚合 | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py -q` | 当前天气富文本会吞掉知识库摘要，图表也未进入最终正文 |
+| P1-03 | Coverage Gate 按 `goal_id` 校验，不再按 kind bucket 猜测覆盖 | normalize 后 coverage_check，fail 则 recovery | `app/ai/workflow/multi_agent_graph.py` | 回退旧 coverage 匹配策略 | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py -q` | 当前 `_evaluate_handoff_progress` 与 `_compute_coverage_report` 会在 goal 粒度过粗时误报全覆盖 |
+| P1-04 | 收紧 todo handoff 观察注入；`todo.query` 默认禁止消费外部工具摘要，仅在 handoff 明确要求“结合外部结果回复/汇总”时附带结构化 observation | handoff 编译后进入 todo_expert 前过滤 | `app/ai/workflow/multi_agent_graph.py`、`app/ai/workflow/todo_graph.py` | 回退旧 handoff augmentation | `bash scripts/pytest_targeted.sh app/tests/test_handoff_detection.py tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_multi_intent_queue_flow.py -q` | 当前简单 `todo.query` 会被天气摘要污染并触发 out_of_scope 拒答，但合法的“查询待办并结合天气结果回复用户”不能被误杀 |
+| P2-01 | Final Composer 仅按 `goal_id/order` 收口；图表正文与 result 卡片一致 | coverage pass -> composer -> postprocess | `app/ai/workflow/multi_agent_graph.py`、`app/services/chat_service.py`、`web/src/components/chat/messages/ai.tsx` | 回退旧 final answer 渲染 | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py tests/unit/test_chat_service_done_payload.py -q` | 当前 `_build_multi_intent_summary_content` 暴露内部执行痕迹且遗漏 chart/knowledge goal |
 
 ---
 
@@ -318,16 +312,16 @@ pass_flag = len(missing) == 0 and len(failed) == 0
 ### 7.5 P2-01 Final Composer（唯一对外出口）
 
 1. 目标与边界：
-   - 做：仅基于 `intent_plan + deliverables + coverage_report` 生成最终答复。
-   - 不做：展示内部 task_description / target_agent。
+   - 做：仅基于 `intent_plan + deliverables + coverage_report` 生成最终答复，且 `deliverable_map` 必须按原子 `goal_id` 建立。
+   - 不做：展示内部 task_description / target_agent；不把 `result(image)` 仅当作前端附加卡片而脱离最终正文。
 2. 触发条件与状态流转：`coverage.pass -> final_answer.ready`。
 3. 代码锚点：
-   - 新增：`app/ai/workflow/nodes/final_composer_node.py`
-   - 调整：`app/ai/workflow/multi_agent_graph.py`（替换 summarize）
-4. 关键契约字段：`final_answer`、`final_answer_meta(order_used, source_count)`。
-5. 回滚锚点：`ENABLE_SINGLE_COMPOSER_V2=false`。
-6. 验证命令：`PYTHONPATH=. pytest tests/unit/test_final_composer.py`。
-7. 来源证据：当前 summarize 直接拼 trace，存在内部语义泄露。
+   - 调整：`app/ai/workflow/multi_agent_graph.py`（替换 summarize / direct finding 聚合）
+   - 联动：`app/services/chat_service.py`、`web/src/components/chat/messages/ai.tsx`
+4. 关键契约字段：`final_answer`、`final_answer_meta(order_used, source_count, matched_goal_ids)`。
+5. 回滚锚点：回退旧 final answer 渲染与图表正文策略。
+6. 验证命令：`bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py tests/unit/test_chat_service_done_payload.py -q`。
+7. 来源证据：当前 summarize 直接拼 trace，chart/knowledge 结果没有稳定进入最终正文。
 8. 最小代码样例：
 
 ```python
@@ -459,26 +453,21 @@ metrics.record("answer_coverage_rate", coverage_rate, tags={"mode": "v2"})
 
 ### Phase 0：契约冻结与基线门禁
 
-1. 冻结 `intent_plan/deliverable/coverage/final_answer` schema。
-2. 冻结 SSE 增量字段与兼容策略。
-3. 建立 C00 基线回归（旧链路不退化）。
+1. 冻结原子 goal 合同：`web.lookup / knowledge.lookup / chart.render / todo.query / data.query`。
+2. 冻结 `deliverable(goal_id)`、`coverage_report(goal_results/goal_attempts)` 与最终正文口径。
+3. 建立 C00 基线回归（四目标混合请求不再被压成两目标）。
 
-### Phase 1：Planner + Task Graph + Envelope
+### Phase 1：Goal Resolver + Deliverable Adapter
 
-1. 落地 P1-01/P1-02/P1-03。
-2. worker 输出统一 envelope。
-3. 保留旧 summarize，仅在内部旁路验证。
+1. 落地 P1-01/P1-02。
+2. direct tool 与 expert 统一输出绑定 `goal_id` 的 envelope。
+3. 删除旧 `explicit_multi_goal_fast_path` 与 bucket 级聚合分支。
 
-### Phase 2：Coverage Gate + Composer
+### Phase 2：Coverage Gate + Todo Handoff Purify + Composer
 
-1. 落地 P1-04/P2-01。
-2. 在灰度流量启用最终交付门禁。
-3. 针对复合请求做回放比对。
-
-### Phase 3：SSE/前端分层 + Ledger
-
-1. 落地 P2-02/P2-03/P3-01。
-2. 建立可回放账本与链路一致性校验。
+1. 落地 P1-03/P1-04/P2-01。
+2. `todo.query` 默认不消费外部工具观察；只有 handoff 明确要求结合外部结果回复时才附带 `tool_observations`，Composer 只按 `goal_id/order` 收口。
+3. 针对复合请求做定向回放比对。
 
 ### Phase 4：评测、观测、双栈收口
 
@@ -712,4 +701,3 @@ planning_contract:
         - python3 scripts/docs_guard.py --strict
       evidence_entry: docs/SUMMARY.md
 ```
-
