@@ -11,7 +11,6 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 
 `$jjk-debug` 是 `jjk-*` 体系里的修复入口，目标是**先根因后修复**，并以验证证据收口。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 执行模式
 

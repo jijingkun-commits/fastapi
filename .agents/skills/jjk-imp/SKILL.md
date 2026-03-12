@@ -1,94 +1,99 @@
 ---
 name: jjk-imp
-description: "Use when you need `jjk-imp` in this repository. Source intent: 代码实现入口：严格消费 implementation_plan 与 uat_cases，执行实现、验证与文档回填"
+description: "Use when you need `jjk-imp` in this repository. Source intent: 实现入口：按照 implementation_plan 执行任务、删除旧代码、跑验收命令并回填证据"
 ---
 <!-- AUTO-GENERATED: jjk-skill-mirror -->
 <!-- source: .cursor/commands/jjk-imp.md -->
 
-# 实现工作流（Implementation Workflow）
+# 实现工作流（Implementation）
 
-`$jjk-imp` 负责把已审批的需求、方案与计划落到代码、测试和文档证据。
+`$jjk-imp` 的任务很直接：按计划把代码做出来，并把证据留完整。
 
-> **中文主导**：思考与输出统一中文。
+## 你现在扮演谁
 
-## 输入前置（强制）
+你是实现负责人 + 重构执行者 + 证据回填人。
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
-2. `docs/plans/YYYY-MM-DD-<topic>-design.md`
-3. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
-4. `docs/内部参考/迭代需求/<topic>_uat_cases.md`
+你的工作不是重新定义需求，也不是现场改方案，而是沿着计划把事情做干净。
 
-失败时：
+## 先看什么
 
-1. 缺少计划：`IMP_PLAN_REQUIRED`
-2. 缺少 UAT：`IMP_UAT_CASES_REQUIRED`
-3. 缺少 shrink contract：`IMP_SHRINK_CONTRACT_MISSING`
-4. 工单字段不全：`IMP_INPUT_TOO_COARSE`
+先读：
 
-## 执行流程（四步）
+1. `requirements.md`
+2. `design.md`
+3. `implementation_plan.md`
+4. `uat_cases.md`
 
-### 0) 上下文校验
+重点只抓当前任务相关内容：
 
-至少检查：
+1. `task_id`
+2. `requirement_ids`
+3. `design_item_refs`
+4. `module_changes`
+5. `deletion_actions`
+6. `acceptance_cmds`
 
-1. 当前任务对应哪些 `task_id`；
-2. 相关 `acceptance_cmds` 与最小回归范围；
-3. 是否命中 API 文档自动同步；
-4. 是否命中 `db_migration_required=true`。
+## 你要怎么做
 
-### 1) 按 `implementation_plan` 执行任务
+### 1. 先对齐任务范围
 
-1. 每次只实现当前 `task_id` 声明的职责；
-2. 命中 `obsolete_paths` 时，必须同步执行删除或收口；
-3. 若发现设计漂移，输出 `IMP_PLAN_DRIFT_DETECTED`，回退 `$jjk-design` 或 `$jjk-plan`；
-4. 禁止在实现阶段私自改需求或改技术方案。
+开始实现前，先用一句话确认：
 
-### 1.5) 自动执行 DB Migration（命中时强制）
+1. 当前任务解决哪条需求
+2. 当前任务落哪条设计项
+3. 当前任务改哪些模块
+4. 当前任务要不要删旧代码
 
-1. 当 `db_migration_required=true` 时，必须自动解析仓库 Python：`PYTHON_BIN=$(bash scripts/repo_python.sh)`；
-2. 开发态默认执行：`bash scripts/db/run_dev_migration.sh`；
-3. 若 `release_migration_required=true`，还必须自动生成 Alembic 迁移草稿并复核，再执行 `bash scripts/db/run_release_migration.sh --upgrade-only`；
-4. 必须把迁移文件路径、执行命令、退出码和摘要一并回填证据；
-5. 命中 DB 结构变化却未执行 migration，直接失败：`IMP_DB_MIGRATION_MISSING`。
+### 2. 只做当前任务该做的事
 
-### 2) 测试与验证
+实现时请保持聚焦：
 
-1. 必须执行当前任务对应的 `acceptance_cmds`；
-2. 必须回填 `mandatory_evidence`；
-3. 命中 DB migration 时，必须回填 `db_migration_evidence`；
-4. 可用时执行 `verification-before-completion`；
-5. 无新鲜命令证据，不得宣称完成。
+1. 只改当前任务相关文件
+2. 优先沿着 `module_changes` 落地
+3. 该删的旧路径及时删，不要先留着
+4. 如果发现方案明显不成立，先回写偏差说明，再决定是否回到设计或计划
 
-### 3) 文档回填与同步
+### 3. 证据要边做边留
 
-1. 命中 API 变化时，API 文档必须自动同步；
-2. 仅当 `publish_product_doc=true` 时，才回填正式产品/需求文档；
-3. 仅当 `publish_design_doc=true` 时，才回填正式设计/架构文档；
-4. 测试行为变化时，回填测试资产。
+每完成一个任务，至少回填：
 
-### 4) 交接给 `$jjk-verify`
+1. 改了哪些文件
+2. 改了哪些模块
+3. 删了哪些旧代码
+4. 跑了哪些验收命令
+5. 命令结果如何
 
-至少交付：
+### 4. 数据库变更单独处理
 
-1. 改动文件清单；
-2. `acceptance_cmds` 结果；
-3. `mandatory_evidence`；
-4. 文档同步状态；
-5. `obsolete_paths` 执行结果；
-6. `db_migration_evidence`。
+如果这次动数据库，请单独补：
 
-## 禁止项（强制）
+1. 执行了哪些迁移命令
+2. 生成了哪些迁移文件
+3. 结果摘要是什么
 
-1. 禁止跳过 `acceptance_cmds`；
-2. 禁止缺少 `uat_cases` 就宣称“可验收”；
-3. 禁止命中 API 同步规则却不更新 API 文档；
-4. 禁止私自发布正式产品/设计文档；
-5. 禁止保留已被新实现覆盖的旧路径且不给理由；
-6. 禁止命中 DB 变化却把 migration 留给人工手补。
+## 写作风格
 
-## 推荐链路
+请用“任务完成记录”的方式写证据：
 
-`$jjk-plan -> $jjk-imp -> $jjk-verify`
+1. 做了什么
+2. 为什么这一步够了
+3. 证据在哪里
+
+## 不要做什么
+
+不要在实现阶段：
+
+1. 偷改需求
+2. 偷改设计目标
+3. 留下已经被替代的旧入口
+4. 只说“已完成”，不贴证据
+
+## 完成后交给谁
+
+完成后，下一步建议进入：
+
+1. `$jjk-review`
+2. 或直接 `$jjk-verify`
 
 ---
-*使用 `$jjk-imp` 触发。目标是“按计划落地并回传证据”，不是“边做边改真理源”。*
+*目标不是“把代码改完”，而是“把任务做完并让别人看得懂你做完了什么”。*

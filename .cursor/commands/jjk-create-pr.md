@@ -8,7 +8,6 @@ description: PR 交付入口（消费 pr_ready_manifest）：校验任务映射�
 
 `/jjk-create-pr` 是 `jjk-*` 体系里的 PR 交付入口，负责把已完成实现转换为可审查、可追溯、可回滚的 PR 交付物。
 
-> **中文主导**: 无论是思考过程还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
 ## 跨 IDE 调用方式

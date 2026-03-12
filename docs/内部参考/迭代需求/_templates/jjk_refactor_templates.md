@@ -10,6 +10,11 @@ shrink_contract_result:
   obsolete_paths_removed: []
   retained_paths_with_reason: []
   single_entry_owner_confirmed: true|false
+  change_set_summary:
+    added_paths: []
+    deleted_paths: []
+    net_change: shrink|neutral|expand
+    note: <为什么这次算收口>
 
 db_migration_result:
   required: true|false

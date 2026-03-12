@@ -1,155 +1,165 @@
 ---
 name: jjk-plan
-description: "Use when you need `jjk-plan` in this repository. Source intent: 实施规划入口：消费 requirements 与 design，产出 implementation_plan 与完整 UAT cases"
+description: "Use when you need `jjk-plan` in this repository. Source intent: 实施规划入口：把 requirements 和 design 变成 implementation_plan、uat_cases 和完整追溯矩阵"
 ---
 <!-- AUTO-GENERATED: jjk-skill-mirror -->
 <!-- source: .cursor/commands/jjk-plan.md -->
 
 # 实施规划工作流（Execution Planning）
 
-`$jjk-plan` 负责把已审批的需求与方案，转成**可执行任务**和**可消费的 UAT 用例**。
+`$jjk-plan` 的任务是把“想法”和“方案”变成一张能施工的单子。
 
-> **中文主导**：思考与输出统一中文。
->
-> **唯一目标**：回答“先做什么、怎么做完、怎么验收”。
+你写完之后，别人应该能直接知道：
 
-## 产物与边界
+1. 先做什么
+2. 每个任务改哪里
+3. 每个任务怎么验
+4. 每条需求最后由谁承接
 
-必须产出：
+## 你现在扮演谁
+
+你是项目经理 + 技术规划师 + 交付文档作者。
+
+你的工作不是继续讨论需求，也不是继续改方案，而是把上游内容拆成可执行计划。
+
+## 先读什么
+
+先读：
+
+1. `requirements.md`
+2. `design.md`
+3. 历史 `implementation_plan.md`
+4. 相关代码与测试
+
+重点看三块：
+
+1. `fr_contract_matrix`
+2. `module_change_plan / change_map / deletion_plan`
+3. `implementation_seeds / clarify_handoff_contract`
+
+## 产物
+
+输出到：
 
 1. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
 2. `docs/内部参考/迭代需求/<topic>_uat_cases.md`
 
-本命令不做：
+同时原位回填：
 
-1. 不再产出 `requirements.md`；
-2. 不再拍板架构方案；
-3. 不直接改业务代码。
+3. `docs/内部参考/迭代需求/<topic>_requirements.md` 的 `traceability_matrix`
 
-## 输入前置（强制）
+## 你要怎么写
 
-1. 已审批的 `requirements.md`；
-2. 已审批的 `design.md`；
-3. 若命中 API 变化，应已明确 `api_doc_required`；
-4. 若命中 refactor，应已明确 `shrink_contract`；
-5. 若命中 DB 变化，应已明确 `db_migration_contract`。
+### 1. 先写执行策略
 
-失败时：
+先用短段落回答：
 
-1. 缺少已审批需求：`PLAN_REQUIREMENTS_REQUIRED`
-2. 缺少已审批方案：`PLAN_DESIGN_REQUIRED`
-3. 缺少 shrink contract：`PLAN_SHRINK_CONTRACT_MISSING`
-4. 方案与需求映射不完整：`PLAN_TRACEABILITY_MISSING`
-5. UAT 不可消费：`PLAN_UAT_CASES_INCOMPLETE`
-6. DB migration 合同缺失：`PLAN_DB_MIGRATION_CONTRACT_MISSING`
+1. 这次为什么这样拆任务
+2. 任务之间怎么依赖
+3. 哪几项能并行
+4. 哪几项必须先收口再往下走
 
-## 执行流程（强制顺序）
+### 2. 任务要写到“工程师能直接接”
 
-### 0) 上下文检查
+`implementation_tasks` 不要只写任务名。
 
-至少检查：
-
-1. `requirements.md` 与 `design.md` 是否同主题；
-2. 设计中的 `change_map` 与 `shrink_contract` 是否可被拆成任务；
-3. 是否存在同主题旧计划需原位更新；
-4. 命中 DB 变化时，迁移步骤是否可被拆成独立任务与证据。
-
-### 1) 输出 `implementation_plan.md`
-
-至少包含：
-
-1. `execution_strategy`
-2. `task_breakdown`
-3. `task_dependencies`
-4. `acceptance_cmds`
-5. `risk_and_rollback`
-6. `db_migration_plan`
-7. `done_criteria`
-
-`task_breakdown[*]` 必填：
+每个任务至少说清：
 
 1. `task_id`
-2. `goal`
-3. `file_paths`
-4. `symbols`
-5. `depends_on`
-6. `change_type`
-7. `acceptance_cmds`
-8. `rollback_point`
-9. `risk_tags`
-10. `mandatory_evidence`
-11. `db_migration_cmds`
+2. `feature_id`
+3. `design_item_refs`
+4. `requirement_ids`
+5. `goal`
+6. `file_paths`
+7. `symbols`
+8. `module_changes`
+9. `deletion_actions`
+10. `acceptance_cmds`
+11. `mandatory_evidence`
 
-强约束：
+写法重点：
 
-1. 每个 `task_id` 都要能回溯到需求和设计；
-2. 命中 `obsolete_paths` 的任务必须显式写删除或收口动作；
-3. `acceptance_cmds[*]` 必须是对象，至少包含 `kind/cmd`；
-4. `mandatory_evidence` 不能为空；
-5. 命中 `db_migration_required=true` 时，必须新增专属 migration task；
-6. 开发态默认 migration task 必须包含 `bash scripts/db/run_dev_migration.sh`；
-7. 若 `release_migration_required=true`，还必须补 Alembic 任务，至少包含 `bash scripts/db/run_release_migration.sh --message "<message>"`。
+1. `goal` 说清这个任务完成后系统会变成什么样
+2. `module_changes` 说清到底动哪个模块
+3. `deletion_actions` 说清这步要不要删旧代码
+4. `acceptance_cmds` 给真实命令，不写空话
 
-### 2) 输出 `uat_cases.md`
+### 3. UAT 写给人看，不写给代码看
 
-至少包含：
+`uat_cases.md` 的每条用例都要像真实验收步骤。
 
-1. `case_id`
-2. `requirement_ids`
-3. `user_role`
-4. `preconditions`
-5. `steps`
-6. `expected_results`
-7. `evidence_type`
-8. `blocking_level`
+请写清：
 
-强约束：
+1. 谁来验
+2. 前置条件是什么
+3. 用户怎么操作
+4. 应该看到什么结果
+5. 证据是什么
 
-1. 每条 `functional_requirements` 至少对应一条 UAT；
-2. `steps` 必须是用户可执行步骤，而不是代码实现步骤；
-3. `expected_results` 必须可验证；
-4. 不允许把“后续临场确认”当成默认 UAT 策略；
-5. 命中 DB 变化时，UAT 前置条件必须写明迁移已执行。
+不要把“改某个函数”这种实现动作写进 UAT。
 
-### 3) 对齐实现与验收合同
+### 4. 回填追溯矩阵
 
-必须明确：
+回填 `requirements.md.traceability_matrix` 时，请把这条链补完整：
 
-1. 哪些 `acceptance_cmds` 对应自动验证；
-2. 哪些 `uat_cases` 对应人工/UAT 验收；
-3. 哪些需求由命令证据覆盖，哪些需求由 UAT 覆盖；
-4. API 文档是否需要自动同步；
-5. DB migration 由 `bash scripts/db/run_dev_migration.sh`、`bash scripts/db/run_release_migration.sh --message "<message>"` 还是两者组合完成。
+1. `fr_id`
+2. `design_item`
+3. `feature_id`
+4. `task_id`
+5. `tc_id`
+6. `acceptance_cmd_ref`
 
-## 输出要求（强制）
+目标很简单：
 
-至少输出：
+1. 任何一条需求，最后都能顺着矩阵找到对应设计、任务、测试和验收
 
-1. `implementation_plan.md` 路径；
-2. `uat_cases.md` 路径；
-3. 任务数与依赖摘要；
-4. UAT 覆盖摘要；
-5. `db_migration_required` / `release_migration_required` 状态；
-6. `api_doc_required` 状态；
-7. 下一步建议（仅限 `$jjk-imp` 或 `$jjk-vkplan`）。
+### 5. 数据库变化单独写清楚
 
-## 禁止项（强制）
+如果设计里涉及数据库，请在 `implementation_plan.md` 里单独补 `db_migration_plan`。
 
-1. 禁止继续产出 `requirements.md`；
-2. 禁止在计划阶段新增架构决策；
-3. 禁止让 `$jjk-verify` 临场发明 UAT；
-4. 禁止缺少 `uat_cases.md` 就进入 `$jjk-imp`；
-5. 禁止把实现步骤伪装成 UAT。
+请写：
 
-## 推荐链路
+1. 哪一步执行迁移
+2. 开发态命令是什么
+3. 发布态命令是什么
+4. 需要什么证据
 
-`$jjk-clarify -> $jjk-design -> $jjk-plan -> $jjk-imp -> $jjk-verify`
+## 写作风格
 
-## 使用示例
+请按这个风格写：
 
-```text
-$jjk-plan
-```
+1. 短句
+2. 具体
+3. 一行一个动作
+4. 一项一个责任
+5. 少空话，多路径、多命令、多结果
+
+## 不要写成什么样
+
+不要把计划写成：
+
+1. 只有任务标题，没有文件和模块
+2. 只有验收口号，没有命令
+3. 只有任务，没有需求映射
+4. 只有测试，没有 UAT
+5. 只写新增，不写删除
+
+## 完成后顺手检查
+
+写完后快速检查：
+
+1. 每条 FR 是否至少被一个任务承接
+2. 每个任务是否知道自己改哪个模块
+3. 每个任务是否知道自己要不要删旧代码
+4. 每个任务是否有可执行验收命令
+5. `traceability_matrix` 是否能从需求一路走到测试
+
+## 下一步
+
+完成后，下一步建议进入：
+
+1. `$jjk-imp`
+2. 需要并行拆解时，进入 `$jjk-vkplan`
 
 ---
-*使用 `$jjk-plan` 触发。目标是“生成施工单与验收单”，不是“继续补需求或改方案”。*
+*目标不是“把任务写满”，而是“把任务写到别人接手就能开工”。*

@@ -11,7 +11,6 @@ description: "Use when you need `jjk-vkplan` in this repository. Source intent: 
 
 `$jjk-vkplan` 负责把规划产物转换为“可落卡、可执行、可追溯”的并行拆解产物。
 
-> **中文主导**：思考与输出统一中文。
 
 ---
 

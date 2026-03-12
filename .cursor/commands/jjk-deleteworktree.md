@@ -6,7 +6,6 @@ description: 生命周期清理入口：删除当前分支及其 worktree（含�
 
 `/jjk-deleteworktree` 是 `jjk-*` 体系里的 Git 生命周期清理入口，负责在当前 worktree 任务已完成后，安全删除“当前分支 + 当前 worktree”。
 
-> **中文主导**：无论是思考过程还是最终输出，**永远使用中文**。
 
 ## 输入前置（强制）
 

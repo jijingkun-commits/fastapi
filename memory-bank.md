@@ -9,6 +9,7 @@
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
+- 2026-03-12｜瘦身判断收敛为“职责收口优先 + whole-change-set 统计”，新增文件与 helper 同样计入增长（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
 - 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `docs/plans/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
@@ -113,6 +114,17 @@
 - 影响范围：`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_uat_cases.md`
 - 回退/失效条件：若局部重构版 B 完成后仍无法显著改善 `first_visible_at_ms` 或仍存在串行瓶颈，再升级到 LangGraph `Send` 并行方案；在此之前不提前进入全量并行重构
 - 关联文档/代码：`docs/plans/2026-03-10-composite-chat-latency-design.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
+
+### 2026-03-12 瘦身判断收敛为“职责收口优先 + whole-change-set 统计”
+
+- 状态：ACTIVE
+- 决策主题：瘦身不再以“当前文件删了几行”或全局 `added<=deleted` 口号判断，而是优先看旧职责是否退役、唯一 owner 是否收口，并按整个变更集统计增长
+- 背景与问题：原有 `obsolete_paths/retained_paths/single_entry_owner/line_budget` 规则在 `AGENTS.md`、`core.mdc`、`lean-guard.md`、bugfix 规则中重复出现，但产物里几乎不稳定落 `line_budget`；AI 也容易把“当前文件净删行”误判成“已经瘦身”，忽略新增文件、helper 文件和外移模块
+- 最终决策：Layer1 只保留“职责替换先收口、默认先收口再扩写”原则；技术细则统一落到 Layer2/Lean Guard；`line_budget` 明确按 whole-change-set 统计，新增文件、外移模块、helper 文件同样计入 added；只有同步删除旧路径/旧职责，才算真正收口
+- 取舍理由：项目未上线，真正想要的是结构收敛，而不是表面删行；相比继续用抽象口号或单文件视角，whole-change-set 统计更接近真实复杂度变化，也更能约束 AI 常见的“拆新文件但不算增长”与“多造 helper/fallback”倾向
+- 影响范围：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、设计/重构模板，以及后续所有 bugfix/refactor/替代实现任务
+- 失效条件：若未来由脚本自动生成完整 replacement contract 与 whole-change-set 报告，并成为更高优先级真理源，可将本决策标记为 `SUPERSEDED`
+- 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`docs/内部参考/迭代需求/_templates/jjk_design_templates.md`、`docs/内部参考/迭代需求/_templates/jjk_refactor_templates.md`
 
 ### 2026-03-11 聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class
 

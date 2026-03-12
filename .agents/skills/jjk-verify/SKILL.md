@@ -1,142 +1,101 @@
 ---
 name: jjk-verify
-description: "Use when you need `jjk-verify` in this repository. Source intent: 验收入口：消费 requirements、design、implementation_plan、uat_cases 与证据，给出最终判定"
+description: "Use when you need `jjk-verify` in this repository. Source intent: 验收入口：按需求、设计、任务、UAT 和证据做最终验收，给出 PASS、WARN 或 FAIL"
 ---
 <!-- AUTO-GENERATED: jjk-skill-mirror -->
 <!-- source: .cursor/commands/jjk-verify.md -->
 
-# 组合验收工作流（Verify Workflow）
+# 组合验收工作流（Verify）
 
-`$jjk-verify` 负责基于已冻结的需求、方案、计划和证据，给出最终可执行判定（`PASS|WARN|FAIL`）。
+`$jjk-verify` 的任务不是“看起来差不多就通过”，而是把这次交付按追溯链完整验一遍。
 
-> **中文主导**：思考与输出统一中文。
->
-> **唯一目标**：判卷，不出题。
+## 你现在扮演谁
 
-## 输入前置（强制）
+你是最终验收人。
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
-2. `docs/plans/YYYY-MM-DD-<topic>-design.md`
-3. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
-4. `docs/内部参考/迭代需求/<topic>_uat_cases.md`
-5. 实现阶段产出的命令证据、测试证据、文档同步证据
+你要回答的核心问题是：
 
-失败时：
+1. 需求有没有落地
+2. 方案有没有跑偏
+3. 任务有没有做完
+4. UAT 和证据能不能对上
 
-1. 缺少需求真理源：`VERIFY_REQUIREMENTS_MISSING`
-2. 缺少方案真理源：`VERIFY_DESIGN_MISSING`
-3. 缺少计划真理源：`VERIFY_PLAN_MISSING`
-4. 缺少 UAT 真理源：`VERIFY_UAT_CASES_MISSING`
-5. 缺少可复核证据：`VERIFY_EVIDENCE_MISSING`
-6. 试图临场发明 UAT：`VERIFY_UAT_STAGE_OWNERSHIP_VIOLATION`
+## 先看什么
 
-## 执行硬约束（强制）
+先读：
 
-1. 先做期望上下文比对；
-2. 验收只消费既有 `uat_cases`，不临场新建 UAT；
-3. 仅当 `uat_cases` 明确标记需要人工确认时，才允许进入交互确认；
-4. 命中 DB migration 时，迁移证据必须纳入验收；
-5. API 文档同步状态必须纳入验收；
-6. 正式产品/设计文档是否发布，只按 `publish_product_doc` / `publish_design_doc` 判定。
+1. `requirements.md`
+2. `design.md`
+3. `implementation_plan.md`
+4. `uat_cases.md`
+5. 实现证据
 
-## 执行流程（强制顺序）
+## 你要怎么验
 
-### 0) 上下文校验
+### 1. 先按需求验
 
-至少输出并比对：
+逐条看 `functional_requirements`。
 
-1. 目标上下文：`task_id/pr_id/branch/worktree/SHA`（能拿到什么就写什么）；
-2. 实际上下文：`pwd`、`git rev-parse --show-toplevel`、`git branch --show-current`、`git rev-parse HEAD`；
-3. 结论：`PASS|FAIL`；
-4. 阻断或放行原因。
+每条都要回答：
 
-### 1) Requirement Coverage
+1. 对应了哪个设计项
+2. 对应了哪个任务
+3. 对应了哪个 UAT
+4. 对应了哪份证据
 
-1. 对照 `functional_requirements` 检查覆盖情况；
-2. 标记每条需求的 `pass|warn|fail`；
-3. 若存在未覆盖需求，直接失败。
+### 2. 再按设计验
 
-### 2) Design Conformance
+重点看：
 
-至少检查：
+1. 模块改造是不是按设计做的
+2. 旧代码是不是按删除计划收掉了
+3. 单入口是不是收拢了
 
-1. `module_boundaries`
-2. `dependency_direction`
-3. `state_ownership`
-4. `error_handling`
-5. `shrink_contract`
-6. `db_migration_contract`
+### 3. 最后按证据验
 
-强约束：
+请对齐三类证据：
 
-1. `obsolete_paths` 未执行且无理由，直接失败；
-2. `retained_paths` 无唯一保留理由，直接失败；
-3. 命中 `db_migration_required=true` 却无迁移证据，直接失败。
+1. `acceptance_cmds`
+2. `UAT`
+3. 文档同步或迁移记录
 
-### 3) Acceptance Commands
+如果三者对不上，不要糊弄过去，直接在报告里写清楚是哪一段断了。
 
-1. 执行或复核 `acceptance_cmds` 结果；
-2. 汇总 `exit_code`、结果摘要与证据；
-3. `mandatory_evidence` 缺失，直接失败。
+## 输出怎么写
 
-### 4) DB Migration Evidence
+最终报告至少写：
 
-1. 命中 `db_migration_required=true` 时，必须复核 `db_migration_evidence`；
-2. 开发态至少要有 `run_dev_migration.sh` 执行证据；
-3. 若 `release_migration_required=true`，还必须有 Alembic migration 文件与 `bash scripts/db/run_release_migration.sh --upgrade-only` 证据；
-4. 迁移证据缺失时，输出 `VERIFY_DB_MIGRATION_UNPROVEN`。
+1. 总结结论：`PASS / WARN / FAIL`
+2. 需求覆盖情况
+3. 设计符合情况
+4. 追溯链是否闭合
+5. UAT 结果
+6. 残余风险
 
-### 5) UAT Cases
+## 什么时候给 `WARN`
 
-1. 逐条消费 `uat_cases.md`；
-2. 每条 UAT 至少回填：`case_id/result/evidence/notes`；
-3. 若某条 UAT 需要人工确认，必须基于该用例既有字段确认，不得现场扩写新的验收规则。
+适合 `WARN` 的情况通常是：
 
-### 6) 文档同步状态
+1. 主功能已落地
+2. 证据大体齐
+3. 还有非阻断风险或后续清理项
 
-1. 命中 API 变化时，API 文档必须已同步；
-2. 若 `publish_product_doc=true`，正式产品/需求文档必须已发布；
-3. 若 `publish_design_doc=true`，正式设计/架构文档必须已发布；
-4. 未发布但也未要求发布，不算失败。
+## 什么时候给 `FAIL`
 
-### 7) 报告输出与结论
+适合 `FAIL` 的情况通常是：
 
-结论规则：
+1. 有需求没有落地
+2. 设计明显跑偏
+3. 旧代码没收口，造成双入口或职责重复
+4. UAT 和证据对不上
 
-1. `PASS`：需求覆盖完整 + 方案收敛完成 + 命令证据通过 + DB migration 证据完整（命中时）+ UAT 通过 + 文档状态一致；
-2. `WARN`：仅允许非阻断性残余风险；
-3. `FAIL`：任一需求/UAT/收口合同/mandatory evidence/DB migration/API 文档同步失败。
+## 下一步
 
-必须输出：
+验收结束后，给出建议：
 
-1. `verify_report.md` 路径；
-2. 总结（`PASS|WARN|FAIL`）；
-3. requirement coverage；
-4. design conformance；
-5. acceptance command 结果；
-6. DB migration 结果；
-7. UAT 结果；
-8. 文档同步状态；
-9. 下一步建议（`merge|fix|replan`）。
-
-## 禁止项（强制）
-
-1. 禁止把 `$jjk-verify` 变成“补需求/补方案/补 UAT”的阶段；
-2. 禁止没有 `uat_cases` 就做验收结论；
-3. 禁止用“测试都过了”代替需求和 UAT 覆盖；
-4. 禁止忽略 DB migration 证据；
-5. 禁止忽略 API 文档同步状态；
-6. 禁止把未要求发布的正式文档缺失误判为失败，也禁止把要求发布却未发布放过。
-
-## 推荐链路
-
-`$jjk-imp -> $jjk-verify -> 合并/修复/回退`
-
-## 使用示例
-
-```text
-$jjk-verify
-```
+1. `merge`
+2. `fix`
+3. `replan`
 
 ---
-*使用 `$jjk-verify` 触发。目标是“按既有合同判定”，不是“现场补合同”。*
+*目标不是“给一个态度”，而是“给一个别人看了能直接行动的验收结论”。*

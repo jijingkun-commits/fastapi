@@ -9,8 +9,6 @@ description: "Use when you need `jjk-refactor` in this repository. Source intent
 
 `$jjk-refactor` 负责在**需求不变**前提下完成结构治理，核心是按既有方案收口旧路径，而不是继续叠加兼容层。
 
-> **中文主导**：思考与输出统一中文。
->
 > **唯一目标**：结构升级且行为等价。
 
 ## 输入前置（强制）
