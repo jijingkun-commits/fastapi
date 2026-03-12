@@ -8,7 +8,6 @@ description: VK 建卡入口（create-only）：消费 /jjk-vkplan 契约并幂�
 
 `/jjk-vktodo` 是 `jjk-*` 体系里的建卡入口，职责仅限把 `jjk-vkplan` 产出的 `vk_cards.json` 幂等落到 Vibe Kanban。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
 ## 跨 IDE 调用方式

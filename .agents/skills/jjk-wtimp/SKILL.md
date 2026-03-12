@@ -11,7 +11,6 @@ description: "Use when you need `jjk-wtimp` in this repository. Source intent: W
 
 `$jjk-wtimp` 是 `jjk-*` 体系里的隔离实现入口，负责把“可追溯任务”放到独立 worktree 执行，并以可验证证据合并回主线。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
 ## 跨 IDE 调用方式

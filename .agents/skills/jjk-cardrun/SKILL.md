@@ -13,7 +13,6 @@ description: "Use when you need `jjk-cardrun` in this repository. Source intent:
 
 `$jjk-plan -> $jjk-vkplan -> $jjk-cardrun(loop) -> $jjk-wtimp(executor_mode=cardrun_dispatch)`
 
-> **中文主导**：思考与输出统一中文。
 
 ---
 

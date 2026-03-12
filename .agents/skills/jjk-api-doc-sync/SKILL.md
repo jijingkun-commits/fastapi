@@ -9,7 +9,6 @@ description: "Use when you need `jjk-api-doc-sync` in this repository. Source in
 
 `$jjk-api-doc-sync` 负责在接口契约变化时，先把**API 文档同步清单**说清楚。
 
-> **中文主导**：思考与输出统一中文。
 
 ## 核心规则
 

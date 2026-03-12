@@ -11,7 +11,6 @@ description: "Use when you need `jjk-imp-ws` in this repository. Source intent: 
 
 `$jjk-imp-ws` 是 `jjk-*` 体系里的 WS 级实现入口，负责把单个 `WS-*.md` 按契约落到代码、测试和回填文档。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
 ## 跨 IDE 调用方式
