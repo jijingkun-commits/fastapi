@@ -5,6 +5,8 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 
+- 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
+- 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
@@ -30,6 +32,28 @@
 - 影响范围：`web/package.json`、`web/eslint.config.js`、前端 lint 工作流、后续 warning 基线
 - 回退/失效条件：若未来升级到新的官方 lint 集成方案并明确替代 `eslint .`，可由新的入口替代；在此之前保持当前配置
 - 关联文档/代码：`web/package.json`、`web/eslint.config.js`、`docs/内部参考/迭代需求/refactor_report_chat-shell-style-unification.md`
+
+### 2026-03-12 日志已足够定责时先报告根因，禁止默认进入修复闭环
+
+- 状态：ACTIVE
+- 决策主题：调试/排障场景中，只要日志、报错栈、运行态证据或最小复现已足以锁定根因，必须先同步结论和证据，再由用户决定是否继续改代码
+- 背景与问题：排障流程容易被 system debugging、TDD、文档回填和“顺手收口”惯性带着往下走；如果代理在根因已经清楚时仍默认进入修复/优化闭环，用户会失去对节奏和范围的控制
+- 最终决策：在 `AGENTS.md` 增加治理口径，在 `.cursor/rules/core.mdc` 增加执行细则；统一要求先输出“根因结论 + 证据位置 + 是否继续改动”，未经用户明确同意，不得默认进入修复、优化、重构、补测或文档回填
+- 取舍理由：这类问题不是技术难题，而是协作边界问题；相比继续依赖代理自觉，直接把沟通节点写成硬规则更简单，也更符合“结论先行、说人话、用户掌握决策权”的项目治理目标
+- 影响范围：所有调试、日志排查、线上/本地异常定位类任务；尤其影响 `jjk-debug`、systematic debugging 相关执行节奏
+- 回退/失效条件：若未来仓库引入更高优先级的统一协作协议并覆盖同一约束，可标记为 `SUPERSEDED`；在此之前保持该规则有效
+- 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`
+
+### 2026-03-12 聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer
+
+- 状态：ACTIVE
+- 决策主题：聊天运行态状态条 `runtime-status` 固定展示在消息流尾部，并与消息内容列宽对齐；footer 只承载输入区，不再承载运行态状态提示
+- 背景与问题：2026-03-11 的聊天壳层统一重构把 `runtime-status` 重新挂进了 footer，导致状态条落在输入框上方、宽度走 `chat-stream-shell` 宽轨，和排版设计里“状态行与消息内容列对齐”的口径冲突
+- 最终决策：`Thread` 继续保留 `runtime-status` 测试节点，但挂载位置改回消息流尾部；`chat-runtime-status` 保持 `chat-*` 主题 owner，同时收口为内容列内的 inline bubble，并补齐 `role="status"` / `aria-live="polite"`
+- 取舍理由：短生命周期状态应贴近相关内容，而不是塞进输入区；相比继续在 footer 做视觉补丁，把 owner 收回消息流更简单，也更符合内容邻近性和可访问性最佳实践
+- 影响范围：`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`、`tests/unit/test_chat_runtime_status_layout_guard.py`
+- 回退/失效条件：若未来运行态状态被彻底并入 `AssistantMessage` 内部状态卡，且消息流仍是唯一展示 owner，可由新的消息级承载方案替代；在此之前禁止恢复 footer 挂载
+- 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`、`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 
 ### 2026-03-12 聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖
 
