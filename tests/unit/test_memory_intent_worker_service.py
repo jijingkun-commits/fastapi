@@ -172,6 +172,79 @@ def test_run_once_should_return_idle_when_no_job(monkeypatch) -> None:  # noqa: 
     assert db.commit_called == 0
 
 
+def test_run_once_should_reuse_observability_snapshot_within_sample_window(monkeypatch) -> None:  # noqa: ANN001
+    """同一 worker 的短窗口空轮询应复用观测快照，避免重复统计整表。"""
+
+    now = datetime(2026, 3, 12, 10, 0, 0)
+    observed = {"calls": 0}
+
+    def _fake_collect(db):  # noqa: ANN001
+        observed["calls"] += 1
+        return {
+            "queue_len": observed["calls"],
+            "dead_letter_rate": 0.0,
+            "latency_p95_ms": None,
+        }
+
+    monkeypatch.setattr(worker_service, "user_memory_intent_job_repo", _NoJobRepo)
+    monkeypatch.setattr(worker_service, "collect_memory_intent_observability", _fake_collect)
+    worker_service._OBSERVABILITY_CACHE_BY_WORKER.clear()
+    db = _Session(_ClaimQuery(None))
+
+    first = worker_service.run_once(
+        db,
+        worker_id="worker-cache",
+        process_job=lambda job: None,
+        now=now,
+    )
+    second = worker_service.run_once(
+        db,
+        worker_id="worker-cache",
+        process_job=lambda job: None,
+        now=now + timedelta(seconds=5),
+    )
+
+    assert observed["calls"] == 1
+    assert first["backpressure"]["queue_len"] == 1
+    assert second["backpressure"]["queue_len"] == 1
+
+
+def test_run_once_should_refresh_observability_snapshot_after_sample_window(monkeypatch) -> None:  # noqa: ANN001
+    """超出采样窗口后，应重新采集一次背压观测。"""
+
+    now = datetime(2026, 3, 12, 10, 10, 0)
+    observed = {"calls": 0}
+
+    def _fake_collect(db):  # noqa: ANN001
+        observed["calls"] += 1
+        return {
+            "queue_len": observed["calls"],
+            "dead_letter_rate": 0.0,
+            "latency_p95_ms": None,
+        }
+
+    monkeypatch.setattr(worker_service, "user_memory_intent_job_repo", _NoJobRepo)
+    monkeypatch.setattr(worker_service, "collect_memory_intent_observability", _fake_collect)
+    worker_service._OBSERVABILITY_CACHE_BY_WORKER.clear()
+    db = _Session(_ClaimQuery(None))
+
+    worker_service.run_once(
+        db,
+        worker_id="worker-cache",
+        process_job=lambda job: None,
+        now=now,
+    )
+    refreshed = worker_service.run_once(
+        db,
+        worker_id="worker-cache",
+        process_job=lambda job: None,
+        now=now + timedelta(seconds=35),
+    )
+
+    assert observed["calls"] == 2
+    assert refreshed["backpressure"]["queue_len"] == 2
+
+
 def test_run_once_should_mark_succeeded_when_handler_ok(monkeypatch) -> None:  # noqa: ANN001
     """任务处理成功后应流转到 succeeded 并提交事务。"""
 

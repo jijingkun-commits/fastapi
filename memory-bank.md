@@ -7,6 +7,7 @@
 
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
+- 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
 - 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `docs/plans/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
@@ -78,6 +79,17 @@
 - 影响范围：`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`、`tests/unit/test_chat_runtime_status_layout_guard.py`
 - 回退/失效条件：若未来运行态状态被彻底并入 `AssistantMessage` 内部状态卡，且消息流仍是唯一展示 owner，可由新的消息级承载方案替代；在此之前禁止恢复 footer 挂载
 - 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`、`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
+
+### 2026-03-12 `DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪
+
+- 状态：ACTIVE
+- 决策主题：数据库原始 SQL 回显不再随 dev 环境默认开启；`memory_intent_runtime` 空闲时采用退避轮询，`memory_intent_worker_service` 的背压观测按 worker 本地短窗口复用快照
+- 背景与问题：`logs/assistant.log` 被 `t_user_memory_intent_job` 的空轮询 SQL 持续刷大；根因是 `DB_ECHO=true` 放大了后台 worker 的空转查询，而 worker 空闲时固定每 `0.5s` 执行一轮整表观测
+- 最终决策：`DB_ECHO` 默认值统一收口为 `false`，仅在显式排障窗口临时开启；`memory_intent_runtime` 的 idle/circuit_open 轮询节奏改为 `0.5s -> 1s -> 2s -> 5s` 退避；观测采样缓存窗口收口到 worker 本地 30 秒
+- 取舍理由：项目未上线，优先消除日志噪音和无效热轮询，而不是引入更重的消息队列/事件驱动改造；相比继续依赖 SQLAlchemy `echo` 或保持每轮整表统计，这个方案更简单、边界更清晰
+- 影响范围：`app/core/config.py`、`app/db/session.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`、`.env.example`、记忆运行时与配置文档
+- 回退/失效条件：若未来需要长期保留 SQL 级审计，应通过独立日志器/采样链路承接，而不是恢复 `DB_ECHO` 默认开启；若 memory intent runtime 被新的事件驱动执行器替代，可删除当前退避和缓存实现
+- 关联文档/代码：`docs/开发文档/快速入门/配置说明.md`、`docs/开发文档/架构设计/用户个性化永久记忆.md`、`app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
 
 ### 2026-03-12 聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖
 

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _RUNTIME_TASK_ATTR = "memory_intent_runtime_task"
 _RUNTIME_STOP_ATTR = "memory_intent_runtime_stop_event"
-_IDLE_POLL_SECONDS = 0.5
+_IDLE_POLL_MIN_SECONDS = 0.5
+_IDLE_POLL_MAX_SECONDS = 5.0
+_IDLE_POLL_BACKOFF_MULTIPLIER = 2.0
 _ERROR_RETRY_SECONDS = 1.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
@@ -135,8 +137,16 @@ async def _sleep_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
         return
 
 
+def _next_idle_poll_delay(current_delay: float) -> float:
+    """空闲轮询退避，避免后台 worker 在无任务时持续热轮询。"""
+
+    safe_current = max(_IDLE_POLL_MIN_SECONDS, float(current_delay))
+    return min(_IDLE_POLL_MAX_SECONDS, safe_current * _IDLE_POLL_BACKOFF_MULTIPLIER)
+
+
 async def _run_memory_intent_runtime_loop(stop_event: asyncio.Event) -> None:
     worker_id = _build_worker_id()
+    idle_delay = _IDLE_POLL_MIN_SECONDS
     while not stop_event.is_set():
         try:
             result = await asyncio.to_thread(run_memory_intent_worker_once, worker_id=worker_id)
@@ -147,9 +157,11 @@ async def _run_memory_intent_runtime_loop(stop_event: asyncio.Event) -> None:
 
         status = str(result.get("status") or "").strip().lower()
         if status in {"idle", "circuit_open"}:
-            await _sleep_or_stop(stop_event, _IDLE_POLL_SECONDS)
+            await _sleep_or_stop(stop_event, idle_delay)
+            idle_delay = _next_idle_poll_delay(idle_delay)
             continue
 
+        idle_delay = _IDLE_POLL_MIN_SECONDS
         await asyncio.sleep(0)
 
 
