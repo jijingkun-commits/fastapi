@@ -1,5 +1,5 @@
 # AI 模块详解
-> 更新时间：2026-03-10
+> 更新时间：2026-03-12
 
 > **用途**: 作为 AI 架构设计权威源，定义模块边界、关键决策与状态契约，并提供实现落点索引。
 > **文档边界**: `架构设计/` 负责“为什么这样设计”；`代码解读/` 负责“代码如何运行与调试”。
@@ -26,6 +26,9 @@
 
 ```
 app/ai/
+├── intent/
+│   ├── __init__.py           # 运行态意图/goal 解析入口
+│   └── goal_resolver.py      # 多意图原子 goal 与 handoff 判定
 ├── workflow/
 │   ├── multi_agent_graph.py   # 多智能体 Supervisor 图
 │   ├── exam_generation_workflow.py # AI 出题独立工作流（2026-03 新增）
@@ -766,6 +769,15 @@ llm = get_scene_llm(
 3. 公开事实查询统一归入 `public_structured_fact` 能力层：它负责识别事实类型、抽取槽位（如地点/日期/指标）、选择对应事实源并返回统一 contract；天气只是其中一个实例，不再作为编排层专用特判继续扩散。
 4. 编排层只消费 `decomposed_goals`、`pending_handoff` 与统一 tool payload 做路由和收口，不在 `chat_service`、router/controller 层追加“天气/汇率/股价”等关键词分支。
 5. fast lane 只优化首事件与总耗时，不改变最终收口责任：最终用户可见正文仍由 `final_answer` 唯一收敛；若 fast lane 命中失败，回退既有 Supervisor 规划链路。
+
+### 运行态 Goal Resolver 与原子交付（2026-03-12）
+
+`multi_agent_graph` 当前把运行态语义识别收敛到 `app/ai/intent/goal_resolver.py`，避免继续在编排层堆叠关键词分支：
+
+1. `split_composite_query`、`infer_primary_goal_kind`、`resolve_runtime_goal_specs` 负责把天气、知识库、图表、待办、问数拆成原子 goal；运行态交付、coverage 与最终答复统一按 `goal_id` 收口，不再按粗粒度 bucket 猜测“是否答全”。
+2. direct tool 与 expert 结果必须一 goal 一 deliverable；`external.lookup` 的天气结果、`knowledge.lookup`、`chart.render`、`todo.query` 彼此独立，图表类 `result(image)` 与最终正文使用同一份 goal 结果，不允许只出卡片不进正文。
+3. `todo.query` 默认不携带 Supervisor 的外部 observation；只有 handoff `task_description` 明确表达“结合/参考/汇总/回复用户”等组合语义时，才允许附带结构化 `tool_observations`，避免普通待办查询被天气/知识库摘要污染成 `out_of_scope`。
+4. `data.query` handoff 的真理源仍是 `frame.query_text`；当 `frame` 缺失时，只允许从“自身就是 data query 的 `task_description`”补编译，不再从整句用户原问题回填，防止天气等外部子句重新污染问数子任务。
 
 ### 意图运行态契约收敛（v2，2026-03-07）
 

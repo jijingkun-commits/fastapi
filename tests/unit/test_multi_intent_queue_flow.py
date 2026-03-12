@@ -12,6 +12,7 @@ from app.ai.workflow.multi_agent_graph import (
     _render_coverage_blocked_message,
     _render_final_answer,
     _resolve_coverage_gate_route,
+    _resolve_decomposed_goals_for_query,
 )
 
 
@@ -751,3 +752,136 @@ def test_render_final_answer_should_preserve_external_lookup_markdown_format() -
     assert "    当前嘉兴天气总体**晴到多云，气温温和**。" in answer
     assert "    - 日间：12-13℃" in answer
     assert "    - 风险：早晨局部有霜冻预警" in answer
+
+
+def test_resolve_decomposed_goals_should_split_weather_chart_knowledge_and_todo() -> None:
+    """混合直连工具 + 待办请求应拆成 4 个原子 goal，而不是压成 2 个桶。"""
+    query = """查询一下明天嘉兴的天气
+再帮我画一个圆
+然后去知识库找找，电子渠道开户怎么开
+再查询一下我的待办"""
+
+    goals, _source = _resolve_decomposed_goals_for_query(query, llm=None, runtime_state=None)
+
+    assert [goal["kind"] for goal in goals] == [
+        "external.lookup",
+        "chart.render",
+        "knowledge.lookup",
+        "todo.query",
+    ]
+    assert [goal["title"] for goal in goals] == ["天气信息", "图表结果", "知识库检索", "待办事项"]
+
+
+def test_build_delivery_artifacts_should_bind_direct_results_to_atomic_goal_ids() -> None:
+    """天气/知识库/图表/待办的结果应各自落到独立 goal_id，不得被聚合吞并。"""
+    state = {
+        "decomposed_goals": [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "external.lookup", "title": "天气信息", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "chart.render", "title": "图表结果", "must_answer": True},
+            {"goal_id": "GOAL-03", "order": 3, "kind": "knowledge.lookup", "title": "知识库检索", "must_answer": True},
+            {"goal_id": "GOAL-04", "order": 4, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+        ],
+        "messages": [
+            HumanMessage(content="查询一下明天嘉兴的天气，再帮我画一个圆，然后去知识库找找电子渠道开户怎么开，再查询一下我的待办"),
+            ToolMessage(
+                content='{"results":[{"title":"嘉兴天气预报","content":"今天 晴到多云 明天 晴到多云 5℃~13℃"}]}',
+                tool_call_id="t-weather",
+                name="tavily_search",
+            ),
+            ToolMessage(
+                content="电子渠道开户：可通过柜面发起开户注册，随后在电子渠道签约页面完成开通。",
+                tool_call_id="t-kb",
+                name="knowledge_search",
+            ),
+            AIMessage(
+                content="图表已生成\n查到 2 条待办",
+                additional_kwargs={
+                    "result_events": [
+                        {
+                            "data_type": "image",
+                            "data": {"url": "/api/v1/assets/proxy/demo/chart-circle.png"},
+                            "message": "图表已生成",
+                            "sequence_number": 1,
+                        },
+                        {
+                            "data_type": "todo_list",
+                            "data": {"todos": [{"title": "提交周报", "status": "todo"}, {"title": "拜访客户", "status": "doing"}]},
+                            "message": "查到 2 条待办",
+                            "sequence_number": 2,
+                        },
+                    ]
+                },
+            ),
+        ],
+        "handoff_execution_trace": [
+            {"target_agent": AgentType.TODO, "goal_id": "GOAL-04", "task_description": "查询待办", "result_excerpt": "查到 2 条待办"}
+        ],
+    }
+
+    deliverables = _build_delivery_artifacts(state)
+    goal_map = {item.get("goal_id"): item for item in deliverables if item.get("goal_id")}
+
+    assert goal_map["GOAL-01"]["kind"] == "external.lookup"
+    assert "嘉兴天气" in goal_map["GOAL-01"]["payload"]["display_markdown"]
+    assert goal_map["GOAL-02"]["kind"] == "chart.render"
+    assert goal_map["GOAL-02"]["payload"]["display_markdown"] == "![生成的图表](/api/v1/assets/proxy/demo/chart-circle.png)"
+    assert goal_map["GOAL-03"]["kind"] == "knowledge.lookup"
+    assert "电子渠道开户" in goal_map["GOAL-03"]["summary"]
+    assert goal_map["GOAL-04"]["kind"] == "todo.query"
+    assert goal_map["GOAL-04"]["payload"]["todos"][0]["title"] == "提交周报"
+
+
+def test_build_multi_intent_summary_content_should_render_four_atomic_goals() -> None:
+    """最终正文应把 4 个原子 goal 全部写出来，不能只剩天气和待办。"""
+    state = {
+        "decomposed_goals": [
+            {"goal_id": "GOAL-01", "order": 1, "kind": "external.lookup", "title": "天气信息", "must_answer": True},
+            {"goal_id": "GOAL-02", "order": 2, "kind": "chart.render", "title": "图表结果", "must_answer": True},
+            {"goal_id": "GOAL-03", "order": 3, "kind": "knowledge.lookup", "title": "知识库检索", "must_answer": True},
+            {"goal_id": "GOAL-04", "order": 4, "kind": "todo.query", "title": "待办事项", "must_answer": True},
+        ],
+        "messages": [
+            HumanMessage(content="查询一下明天嘉兴的天气，再帮我画一个圆，然后去知识库找找电子渠道开户怎么开，再查询一下我的待办"),
+            ToolMessage(
+                content='{"results":[{"title":"嘉兴天气预报","content":"今天 晴到多云 明天 晴到多云 5℃~13℃"}]}',
+                tool_call_id="t-weather",
+                name="tavily_search",
+            ),
+            ToolMessage(
+                content="电子渠道开户：可通过柜面发起开户注册，随后在电子渠道签约页面完成开通。",
+                tool_call_id="t-kb",
+                name="knowledge_search",
+            ),
+            AIMessage(
+                content="图表已生成\n查到 1 条待办",
+                additional_kwargs={
+                    "result_events": [
+                        {
+                            "data_type": "image",
+                            "data": {"url": "/api/v1/assets/proxy/demo/chart-circle.png"},
+                            "message": "图表已生成",
+                            "sequence_number": 1,
+                        },
+                        {
+                            "data_type": "todo_list",
+                            "data": {"todos": [{"title": "提交周报", "status": "todo"}]},
+                            "message": "查到 1 条待办",
+                            "sequence_number": 2,
+                        },
+                    ]
+                },
+            ),
+        ],
+        "handoff_execution_trace": [
+            {"target_agent": AgentType.TODO, "goal_id": "GOAL-04", "task_description": "查询待办", "result_excerpt": "查到 1 条待办"}
+        ],
+    }
+
+    summary = _build_multi_intent_summary_content(state)
+
+    assert "1. 天气信息：" in summary
+    assert "2. 图表结果：" in summary
+    assert "![生成的图表](/api/v1/assets/proxy/demo/chart-circle.png)" in summary
+    assert "3. 知识库检索：电子渠道开户" in summary
+    assert "4. 待办事项：共 1 项待办。" in summary
+    assert "以上问题已全部覆盖。" in summary

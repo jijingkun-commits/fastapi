@@ -93,23 +93,24 @@
 
 | AC 编号 | 验收标准 |
 |---|---|
-| AC-FULL-001 | 对复合请求（至少 2 个目标）生成有序 `intent_plan`，每个目标有唯一 `goal_id` 与 `must_answer` 标记 |
-| AC-FULL-002 | 每个目标执行完成后产出结构化 `deliverable`，禁止只保留自由文本 |
-| AC-FULL-003 | `coverage_report.pass=true` 前不得发送最终 `done` 完成态 |
-| AC-FULL-004 | 最终用户可见答复严格按 `intent_plan.order` 输出，不受内部执行顺序影响 |
-| AC-FULL-005 | 最终答复中不得出现内部调度词（`handoff`、`*_expert`、`assign_to_*`） |
-| AC-FULL-006 | `todo.query` 场景最终答复可回溯到 `todos` 结构化数据（含数量与条目摘要） |
-| AC-FULL-007 | `weather.current` 场景最终答复包含城市、日期、天气、温度范围与数据时间戳 |
+| AC-FULL-001 | 对复合请求（至少 2 个目标）生成有序且原子化的 `intent_plan`；天气、知识库、画图、待办等独立诉求不得再合并成同一个粗粒度 goal |
+| AC-FULL-002 | 每个 goal 执行完成后必须产出绑定 `goal_id` 的结构化 `deliverable`，禁止用 bucket 级汇总结果代替多个独立 goal 的交付 |
+| AC-FULL-003 | `coverage_report.pass=true` 前不得发送最终 `done` 完成态；`coverage_report` 只允许按 `goal_id` 判定，不得按 `kind bucket` 猜测覆盖 |
+| AC-FULL-004 | 最终用户可见答复严格按 `intent_plan.order` 输出，不受内部执行顺序影响；图表型 goal 的正文与结构化 `result(image)` 必须一致 |
+| AC-FULL-005 | 最终答复中不得出现内部调度词（`handoff`、`*_expert`、`assign_to_*`）；不得出现“已全部覆盖”但实际仍有原子 goal 缺失的误报 |
+| AC-FULL-006 | `todo.query` 场景最终答复可回溯到 `todos` 结构化数据（含数量与条目摘要）；`todo.query` handoff 默认不得混入天气/知识库等外部观察摘要，只有 handoff 任务描述明确要求“结合外部结果回复/汇总”时，才允许以结构化 `tool_observations` 附带必要观察 |
+| AC-FULL-007 | `weather.current` 场景最终答复包含城市、日期、天气、温度范围与数据时间戳；若同轮还包含知识库检索，不得因天气富文本存在而吞掉知识库结果 |
+| AC-FULL-008 | `knowledge.lookup` 与 `chart.render` 必须作为独立 goal 进入最终答复，不能只停留在过程事件或前端附加卡片中 |
 
 ### 3.2 异常/边界
 
 | AC 编号 | 验收标准 |
 |---|---|
-| AC-EDGE-001 | 单目标失败时，`coverage_report.pass=false`，系统进入恢复规划或输出“部分完成”并显式列出缺项 |
-| AC-EDGE-002 | 同类工具结果重复输入时，最终答复只保留一条去重结果 |
-| AC-EDGE-003 | 跨轮会话下，当前轮交付计算不得误用历史轮次 deliverables |
+| AC-EDGE-001 | 单个原子 goal 失败时，`coverage_report.pass=false`，系统进入恢复规划或输出“部分完成”并显式列出缺项 |
+| AC-EDGE-002 | 同类工具结果重复输入时，最终答复只保留一条去重结果，但不得误伤其他 goal 的独立结果 |
+| AC-EDGE-003 | 跨轮会话下，当前轮交付计算不得误用历史轮次 deliverables，也不得把上一轮 result 卡片误算为本轮 goal 已完成 |
 | AC-EDGE-004 | 用户取消 run 后，不得继续发出新的最终答案事件 |
-| AC-EDGE-005 | `current_todo_id` 缺失时，待办补充类请求须走澄清，不得误改任务 |
+| AC-EDGE-005 | `current_todo_id` 缺失时，待办补充类请求须走澄清，不得误改任务；`todo.query` 默认不得因外部问题混入而退化为 out_of_scope 拒答，但在明确“结合外部结果回复”的查询场景下仍应保留必要 observation |
 
 ### 3.3 性能/稳定性
 
@@ -165,9 +166,9 @@
 
 | TC 编号 | 目标 |
 |---|---|
-| TC-FULL-UT-001 | Planner 能把复合问题拆为有序 `intent_plan` |
-| TC-FULL-UT-002 | Worker 结果归一化为 `deliverable envelope` |
-| TC-FULL-UT-003 | Coverage Gate 能识别 missing/failed goals |
+| TC-FULL-UT-001 | Planner 能把“天气 + 画图 + 知识库 + 待办”拆为 4 个有序原子 goal |
+| TC-FULL-UT-002 | Direct tool 与 expert 结果都能归一化为绑定 `goal_id` 的 `deliverable envelope` |
+| TC-FULL-UT-003 | Coverage Gate 能识别 missing/failed goals，且不再因粗粒度 bucket 误判全覆盖 |
 | TC-FULL-UT-004 | Composer 输出顺序严格遵循 `goal.order` |
 | TC-FULL-UT-005 | Composer 输出不含内部术语 |
 
@@ -206,4 +207,3 @@
 3. 现有基线：
    - `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
    - `docs/内部参考/迭代需求/迁移执行波次_implementation_plan.md`
-
