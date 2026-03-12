@@ -1133,96 +1133,60 @@ if (isLoading) {
 
 ## 🖼️ 图片流式传输机制
 
-### 统一的双路径架构
+### 统一的 ordered content blocks 架构
 
-**目标**: 确保所有图片来源（Agent 生成 / 知识库检索）在实时对话和历史加载中 URL 完全一致。
+**目标**：让 live 展示和 history 回放共享同一套 canonical blocks，不再由正文字符串、`kb_images`、`result_events` 三路共同决定 UI。
 
-#### 图片来源统一处理
+#### 图片与结构化结果统一处理
 
-| 来源 | 工具 | 返回值 | 事件推送 |
-|------|------|--------|---------|
-| Agent 生成 | `fig_inter` | `{"image_url": proxy_url}` | `emit_result("image", {url})` |
-| 知识库检索 | `knowledge_search` | 文本含 `[IMG-N]` + `<!--KB_IMAGES:{...}-->` | `emit_kb_images({images})` |
+| 来源 | 上游产物 | 编译输入 | 最终展示 |
+|------|----------|----------|----------|
+| Agent 生成图片 | `result.data_type=image` | `result_events` | `image(source=tool)` block |
+| 知识库图片 | `[IMG-N]` + `kb_images` | `final_text + kb_images` | `image(source=knowledge)` block |
+| SQL / Todo / fallback | `result.data_type=sql_result/todo_list/...` | `result_events` | 对应 typed block |
 
-两种来源共享统一的图片 URL 规范（均为代理路径），但实时协议分为两类：
-1. **block 图片**（图表生成）: `result.data_type=image` → 前端追加 Markdown 图片
-2. **inline 图片**（知识库）: `kb_images` 映射 + `[IMG-N]` 占位符替换
+统一规则：
+1. **live**：`app/services/chat_service.py` 在 stream / resume 收口阶段编译 `display_blocks` 并通过 SSE 下发；
+2. **history**：`app/repositories/chat_repo.py` 优先持久化 `content_type="multimodal" + content=blocks[]`；
+3. **legacy**：旧消息只在 `app/api/v1/endpoints/chat_api.py` 做一次兼容编译，前端不再现场猜结构。
 
-#### 路径 1: 实时流式显示
-
-```mermaid
-sequenceDiagram
-    participant Tool as 工具 (fig_inter)
-    participant Frontend as 前端
-    
-    Tool->>Tool: 获取/生成图片 URL
-    Tool->>Frontend: emit_result("image", {"url": proxy_url})
-    Note over Frontend: appendImageToAiMessage()
-    Frontend->>Frontend: 追加 ![...](url) 到消息
-    Note over Frontend: ✅ 实时显示图片
-```
-
-**实现**:
-- 工具调用 `emit_result()` 发送 `result` 事件
-- 前端 `onResult` 回调调用 `appendImageToAiMessage()` 追加图片 Markdown
-- `appendToAiMessage()` 会过滤重复图片 token（按 URL 去重）
-
-#### 路径 1B: 知识库 inline 混排显示
-
-```mermaid
-sequenceDiagram
-    participant Tool as 工具 (knowledge_search)
-    participant Graph as multi_agent_graph
-    participant Frontend as 前端
-
-    Tool->>Tool: 返回文本 + [IMG-N] + <!--KB_IMAGES:{...}-->
-    Graph->>Graph: 从 ToolMessage 解析 KB_IMAGES
-    Graph->>Frontend: emit_kb_images({images})
-    Frontend->>Frontend: replaceImagePlaceholders()
-    Note over Frontend: ✅ 保留文图混排顺序
-```
-
-**实现**:
-- `knowledge_search` 只返回占位符，不直接写长 URL 到正文
-- Graph 负责把映射透传为 `kb_images` 事件
-- 前端渲染阶段按映射替换，保留“文字-图片-文字”顺序
-
-#### 图片位置与时序
-
-> [!IMPORTANT]
-> `appendImageToAiMessage` 将图片追加到**当时内容的末尾**，但 LLM 后续输出会让图片被"包裹"在中间。
-
-**fig_inter 时序**（图片被文字包裹）：
-```
-T0: LLM 输出 "好的，我来画圆形"  → content = "好的，我来画圆形"
-T1: 工具执行，生成图片
-T2: emit_result() 追加图片       → content = "好的...![图片](...)"
-T3: LLM 继续输出 "完成！"        → content = "好的...![图片](...)完成！"
-                                              ↑ 图片在中间
-```
-
-**knowledge_search 时序**（图片在最前面）：
-```
-T0: LLM 调用工具                → content = "" (空)
-T1: 工具执行，检索知识库
-T2: 收到 kb_images 映射          → content 仍含 [IMG-0]
-T3: 渲染阶段替换占位符           → content = "...![参考图片](...)..."
-                                     ↑ 图片按引用位置内联显示
-```
-
-**关键差异**：图表走 `result.image`（block），知识库走 `kb_images + [IMG-N]`（inline）。
-
-#### 路径 2: 数据库持久化
+#### Live 路径
 
 ```mermaid
 sequenceDiagram
     participant Tool as 工具
-    participant Graph as LangGraph
-    participant DB as 数据库
-    
-    Tool->>Tool: 返回文本/JSON（含图片引用信息）
-    Tool-->>Graph: "...[IMG-N]..." 或 "{\"image_url\":\"...\"}"
-    Graph->>DB: save_conversation_from_messages()
+    participant Service as chat_service
+    participant Compiler as message_display_blocks
+    participant Frontend as 前端
+
+    Tool->>Service: final_text / kb_images / result_events
+    Service->>Compiler: compile_message_display_blocks(...)
+    Compiler-->>Service: ordered blocks
+    Service->>Frontend: SSE display_blocks
+    Frontend->>Frontend: AssistantContentBlocks 逐块渲染
+```
+
+#### History 路径
+
+```mermaid
+sequenceDiagram
+    participant Service as chat_service
+    participant Repo as chat_repo
+    participant API as chat_api
+    participant Frontend as 前端
+
+    Service->>Repo: 保存 AI 最终消息
+    Repo->>Repo: content_type=multimodal, content=blocks[]
+    API->>Frontend: 返回 canonical blocks
+    Frontend->>Frontend: 直接渲染 blocks
+```
+
+#### 关键约束
+
+- `[IMG-N]` 仍保留，但只作为**上游锚点语法**；它不再是前端最终展示协议。
+- 前端不再执行 `replaceImagePlaceholders()` 这类 compiler 逻辑；`AssistantMessage` 只做“有块渲块、无块渲纯文本”。
+- 仓储层不再把占位符改写成 Markdown 图片，也不再在“图片未被正文引用”时自动补到底部。
+- 未命中的占位符保留为文本；未知 `result.data_type` 降级为 `fallback_result` block，而不是静默丢弃。
     Note over DB: AIMessage.content 包含图片链接
 ```
 

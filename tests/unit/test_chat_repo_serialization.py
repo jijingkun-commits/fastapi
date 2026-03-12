@@ -159,3 +159,122 @@ def test_save_conversation_from_messages_preserves_structured_sql_result_for_ref
     assert extra_data["data"]["rows"][0]["客户名称"] == "张三"
     assert extra_data["result_events"][0]["data"]["chart"] == chart_payload
     assert extra_data["result_events"][0]["envelope"]["id"] == "evt-sql-1"
+
+
+
+def test_save_conversation_from_messages_should_persist_multimodal_blocks_for_kb_images() -> None:
+    """知识库占位符应落成 multimodal blocks，而不是 Markdown 图片字符串。"""
+
+    messages = [
+        SimpleNamespace(type="human", content="开户怎么开", id="human-1", name=None),
+        SimpleNamespace(
+            type="tool",
+            content="""检索结果
+
+<!--KB_IMAGES:{\"0\": \"/api/v1/assets/proxy/ragflow/img-0\"}-->""",
+            id="tool-1",
+            name="knowledge_search",
+        ),
+        SimpleNamespace(
+            type="ai",
+            content="第一段 [IMG-0] 第二段",
+            additional_kwargs={},
+            name=None,
+        ),
+    ]
+
+    with patch("app.repositories.chat_repo.save_message") as mock_save:
+        chat_repo.save_conversation_from_messages(
+            db=object(),
+            user_id=1,
+            thread_id="thread-kb-blocks",
+            messages=messages,
+        )
+
+    kwargs = mock_save.call_args.kwargs
+    assert kwargs["content_type"] == "multimodal"
+    assert kwargs["content"][1]["type"] == "image"
+    assert kwargs["content"][1]["data"]["source"] == "knowledge"
+    assert kwargs["content"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-0"
+
+
+def test_save_conversation_from_messages_should_use_ai_kb_images_when_tool_marker_missing() -> None:
+    """即使 ToolMessage 丢失 KB_IMAGES 标记，也应优先使用 AI additional_kwargs 里的 kb_images 落库。"""
+
+    messages = [
+        SimpleNamespace(type="human", content="第二轮问题", id="human-2", name=None),
+        SimpleNamespace(
+            type="tool",
+            content="检索结果正文，但这里没有 KB_IMAGES 标记",
+            id="tool-2",
+            name="knowledge_search",
+        ),
+        SimpleNamespace(
+            type="ai",
+            content="第二轮第一段 [IMG-0] 第二轮第二段",
+            additional_kwargs={
+                "kb_images": {
+                    "0": "/api/v1/assets/proxy/ragflow/img-turn-2",
+                }
+            },
+            name=None,
+        ),
+    ]
+
+    with patch("app.repositories.chat_repo.save_message") as mock_save:
+        chat_repo.save_conversation_from_messages(
+            db=object(),
+            user_id=1,
+            thread_id="thread-kb-ai-fallback",
+            messages=messages,
+        )
+
+    kwargs = mock_save.call_args.kwargs
+    assert kwargs["content_type"] == "multimodal"
+    assert kwargs["extra_data"]["kb_images"]["0"] == "/api/v1/assets/proxy/ragflow/img-turn-2"
+    assert kwargs["content"][1]["type"] == "image"
+    assert kwargs["content"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-turn-2"
+
+
+def test_save_conversation_from_messages_should_not_append_missing_chart_markdown() -> None:
+    """图表图片应该保留为结构化 image block，不再补到正文末尾。"""
+
+    messages = [
+        SimpleNamespace(type="human", content="给我画图", id="human-1", name=None),
+        SimpleNamespace(
+            type="tool",
+            content='{"status": "success", "image_url": "/images/charts/chart-a.png"}',
+            id="tool-1",
+            name="fig_inter",
+        ),
+        SimpleNamespace(
+            type="ai",
+            content="图表已生成，请查看。",
+            additional_kwargs={
+                "result_events": [
+                    {
+                        "data_type": "image",
+                        "data": {"url": "/images/charts/chart-a.png"},
+                        "message": "图表已生成",
+                        "sequence_number": 1,
+                    }
+                ]
+            },
+            name=None,
+        ),
+    ]
+
+    with patch("app.repositories.chat_repo.save_message") as mock_save:
+        chat_repo.save_conversation_from_messages(
+            db=object(),
+            user_id=1,
+            thread_id="thread-chart-blocks",
+            messages=messages,
+        )
+
+    kwargs = mock_save.call_args.kwargs
+    assert kwargs["content_type"] == "multimodal"
+    assert kwargs["content"][0]["data"]["text"] == "图表已生成，请查看。"
+    assert kwargs["content"][1]["type"] == "image"
+    assert kwargs["content"][1]["data"]["url"] == "/images/charts/chart-a.png"
+    assert "![生成的图表]" not in str(kwargs["content"])

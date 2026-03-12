@@ -71,6 +71,18 @@ function writeThreadCache(nextThreads: Thread[]) {
   cachedThreads = nextThreads;
 }
 
+function logThreadListFallback(reason: unknown) {
+  if (typeof reason === "number") {
+    console.warn("获取对话列表失败，已降级为空列表/缓存:", reason);
+    return;
+  }
+  if (reason instanceof Error) {
+    console.warn("获取对话列表失败，已降级为空列表/缓存:", reason.message);
+    return;
+  }
+  console.warn("获取对话列表失败，已降级为空列表/缓存");
+}
+
 async function fetchThreadList(force = false): Promise<Thread[]> {
   if (!force && cachedThreads) {
     return cachedThreads;
@@ -84,14 +96,14 @@ async function fetchThreadList(force = false): Promise<Thread[]> {
     try {
       const response = await apiFetch(`/api/v1/chat/threads?limit=50`);
       if (!response.ok) {
-        console.error("获取对话列表失败:", response.status);
+        logThreadListFallback(response.status);
         return cachedThreads ?? [];
       }
       const data: ConversationThread[] = await response.json();
       cachedThreads = normalizeThreads(data);
       return cachedThreads;
     } catch (error) {
-      console.error("获取对话列表失败:", error);
+      logThreadListFallback(error);
       return cachedThreads ?? [];
     } finally {
       threadsPromise = null;

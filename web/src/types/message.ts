@@ -12,7 +12,7 @@ import type { ResultEventEnvelope } from "@/types/generated/result-event";
  * 支持多种内容格式：文本、Markdown、图片、图表、自定义 UI
  */
 export interface ContentBlock {
-    type: "text" | "markdown" | "image" | "chart" | "custom_ui";
+    type: "text" | "markdown" | "image" | "chart" | "custom_ui" | "sql_result" | "todo_list" | "fallback_result" | "table";
     data: unknown;
     component?: string;
     props?: Record<string, unknown>;
@@ -110,6 +110,7 @@ export const STREAM_EVENT_TYPES = [
     "task_finished",   // 执行任务结束
     "coverage_check",  // 覆盖率检查
     "final_answer",    // 最终答复
+    "display_blocks",  // 最终展示块快照
     "kb_images",       // 知识库图片映射
     "confirmation",    // 确认请求
     "clarification",   // 澄清问题
@@ -260,4 +261,11 @@ export interface StatusEventData {
  */
 export interface KbImagesEventData {
     images: Record<string, string>;
+}
+
+/**
+ * canonical 展示块快照事件数据
+ */
+export interface DisplayBlocksEventData {
+    blocks: ContentBlock[];
 }

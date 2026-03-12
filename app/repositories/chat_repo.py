@@ -15,6 +15,7 @@ from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.repositories import chat_assets_repository
 from app.core.message_content import normalize_message_content
+from app.core.message_display_blocks import compile_message_display_blocks
 from app.core.utils import content_hash as _content_hash
 
 
@@ -168,6 +169,47 @@ def _normalize_result_additional_kwargs_for_replay(additional_kwargs: Any) -> Di
         normalized["message"] = latest_message
 
     return normalized
+
+
+def _normalize_kb_images_payload(value: Any) -> Dict[str, str]:
+    """规范化 kb_images 载荷。"""
+
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: Dict[str, str] = {}
+    for key, raw_url in value.items():
+        if not isinstance(raw_url, str):
+            continue
+        url = raw_url.strip()
+        if not url:
+            continue
+        normalized[str(key)] = url
+    return normalized
+
+
+def _merge_turn_kb_images_into_additional_kwargs(
+    base_additional_kwargs: Any,
+    ai_messages: List[Any],
+    tool_kb_images: Dict[str, str],
+) -> tuple[Dict[str, Any], Dict[str, str]]:
+    """将当前轮 kb_images 收敛到 AI additional_kwargs。"""
+
+    merged = dict(base_additional_kwargs) if isinstance(base_additional_kwargs, dict) else {}
+    resolved_kb_images = _normalize_kb_images_payload(tool_kb_images)
+
+    for message in ai_messages or []:
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        if not isinstance(additional_kwargs, dict):
+            continue
+        resolved_kb_images.update(_normalize_kb_images_payload(additional_kwargs.get("kb_images")))
+
+    if resolved_kb_images:
+        merged["kb_images"] = resolved_kb_images
+    else:
+        merged.pop("kb_images", None)
+
+    return merged, resolved_kb_images
 
 
 def _result_event_identity(event: Dict[str, Any]) -> tuple[Any, ...]:
@@ -643,160 +685,92 @@ def save_conversation_from_messages(
     last_human = None
     last_ai = None
     turn_ai_messages: list[Any] = []
-    tool_images: set[str] = set()  # 收集该轮工具返回的图片
-    kb_images = {}    # 知识库图片映射 {索引: URL}
-    
+    tool_kb_images = {}    # 知识库图片映射 {索引: URL}
+
     for msg in reversed(messages):
         msg_type = getattr(msg, "type", None)
         msg_name = getattr(msg, "name", None)
-        
-        # 调试日志
-        logger.debug("遍历消息: type=%s, name=%s, content_preview=%s", 
+
+        logger.debug("遍历消息: type=%s, name=%s, content_preview=%s",
                     msg_type, msg_name, str(getattr(msg, "content", ""))[:50])
-        
+
         if msg_type == "human" and last_human is None:
             last_human = msg
-            break  # 找到 human 后停止（一轮对话结束）
+            break
         elif msg_type == "ai":
             turn_ai_messages.append(msg)
             if last_ai is None:
-                last_ai = msg  # 只取最后一条 AI 消息
+                last_ai = msg
         elif msg_type == "tool":
-            # 提取工具返回中的图片链接（用于图表图片补充）
             content = str(getattr(msg, "content", ""))
-            for url in _extract_tool_image_urls(content):
-                tool_images.add(url)
-            
-            # 提取知识库图片映射（用于占位符替换）
             logger.info("Tool消息内容(前500字): %s", content[:500])
             kb_images_match = re.search(r'<!--KB_IMAGES:(\{.*?\})-->', content)
             if kb_images_match:
                 try:
                     import json
                     new_images = json.loads(kb_images_match.group(1))
-                    kb_images.update(new_images)  # 合并而不是覆盖
-                    logger.info("提取到 kb_images 映射: %s (累计: %s)", new_images, kb_images)
+                    tool_kb_images.update(new_images)
+                    logger.info("提取到 kb_images 映射: %s (累计: %s)", new_images, tool_kb_images)
                 except json.JSONDecodeError:
                     logger.warning("解析 kb_images 失败: %s", kb_images_match.group(1))
             else:
                 logger.info("Tool消息中未找到 KB_IMAGES 标记")
-    
+
     turn_ai_messages.reverse()
 
     merged_additional_kwargs = _merge_turn_result_events_into_additional_kwargs(
         getattr(last_ai, "additional_kwargs", None) if last_ai else None,
         turn_ai_messages,
     )
+    merged_additional_kwargs, kb_images = _merge_turn_kb_images_into_additional_kwargs(
+        merged_additional_kwargs,
+        turn_ai_messages,
+        tool_kb_images,
+    )
+    result_events, _compat_source = _resolve_result_events_for_replay(merged_additional_kwargs)
 
-    # 提取内容
     human_content = getattr(last_human, "content", "") if last_human else ""
     ai_content = normalize_message_content(getattr(last_ai, "content", "")) if last_ai else ""
-    replaced_count = 0  # 用于跟踪图片占位符替换数量
-    
-    # ============================================================
-    # Thinking 内容处理
-    # ============================================================
-    # 
-    # 【背景】DeepSeek/Qwen 的思考内容存储在 additional_kwargs 的
-    #         reasoning_content 或 thinking_content 字段
-    # 【处理】如果 ai_content 中没有 <think> 标签但有 thinking 内容，
-    #         将其包装后添加到内容开头，确保历史加载时前端能正确解析
-    # ============================================================
+
     if last_ai:
         additional_kwargs = merged_additional_kwargs
         thinking = (
-            additional_kwargs.get("reasoning_content") or 
-            additional_kwargs.get("thinking_content") or 
+            additional_kwargs.get("reasoning_content") or
+            additional_kwargs.get("thinking_content") or
             ""
         )
         if thinking and "<think>" not in ai_content:
-            # 将 thinking 内容包装在 <think> 标签内，添加到内容开头
             ai_content = f"<think>\n{thinking}\n</think>\n\n{ai_content}"
             logger.info("已将 thinking 内容包装到 AI 回复中: %d 字符", len(thinking))
-    
-    # ============================================================
-    # 图片占位符替换
-    # ============================================================
-    # 
-    # 【背景】knowledge_search 工具返回 [IMG-N] 占位符和 kb_images 映射
-    # 【处理】在保存前，将 LLM 输出中的 [IMG-N] 替换为实际的 Markdown 图片
-    # ============================================================
-    
-    if kb_images and ai_content:
-        import re as re2
-        # 先统计 ai_content 中有多少占位符
-        placeholders_in_content = re2.findall(r'\[IMG-\d+\]', ai_content)
-        logger.info("AI回复中包含 %d 个占位符: %s", len(placeholders_in_content), placeholders_in_content)
-        logger.info("kb_images 映射包含 %d 个图片: %s", len(kb_images), list(kb_images.keys()))
-        
-        replaced_count = 0
-        for idx_str, url in kb_images.items():
-            placeholder = f"[IMG-{idx_str}]"
-            if placeholder in ai_content:
-                markdown_img = f"![参考图片]({url})"
-                # 使用 replace 不限制次数，替换所有匹配项（修复多次引用同一占位符的问题）
-                count_before = ai_content.count(placeholder)
-                ai_content = ai_content.replace(placeholder, markdown_img)
-                replaced_count += count_before
-                logger.info("替换图片占位符: %s -> %s (共 %d 处)", placeholder, url, count_before)
-            else:
-                logger.info("占位符 %s 不在 AI 回复中", placeholder)
-        
-        if replaced_count > 0:
-            logger.info("已替换 %d 个图片占位符", replaced_count)
-        else:
-            logger.warning("未替换任何占位符！")
-    
-    # ============================================================
-    # 🖼️ 图表图片保存策略（差异化处理）
-    # ============================================================
-    # 
-    # 【背景】fig_inter（图表生成）的图片，LLM 可能忘记引用
-    # 【处理】如果 LLM 未引用，自动补充到末尾
-    # ============================================================
-    if tool_images and ai_content:
-        missing_chart_images = []
-        for url in tool_images:
-            # 只补充图表工具生成的图片（/charts/ 路径）
-            is_chart_image = "/charts/" in url
-            is_not_in_content = url not in ai_content
-            
-            if is_chart_image and is_not_in_content:
-                missing_chart_images.append(url)
-                logger.debug("图表图片未被 LLM 引用，自动补充: %s", url)
-        
-        if missing_chart_images:
-            ai_content += "\n\n"
-            for url in missing_chart_images:
-                ai_content += f"![生成的图表]({url})\n"
-    
-    if not human_content and not ai_content:
+
+    display_blocks = compile_message_display_blocks(
+        final_text=ai_content,
+        kb_images=kb_images,
+        result_events=result_events,
+    )
+    has_structured_display = bool(kb_images) or len(result_events) > 0
+
+    if not human_content and not display_blocks and not ai_content:
         return
-    
-    # human 消息已在 stream 开始时保存，postprocess 只负责保存 AI 消息
-    # 职责划分：human -> stream开始, interrupt AI -> interrupt, final AI -> postprocess
-    
-    # 4. 保存 ai 消息（只保存最后一条）
-    extra_data = None  # 在外部定义，确保日志可访问
-    if last_ai:  # 使用 last_ai 对象判断，确保能获取 metadata
-        # 提取 metadata (additional_kwargs)
+
+    extra_data = None
+    if last_ai:
         extra_data = merged_additional_kwargs or None
         save_message(
             db,
             user_id=user_id,
             thread_id=thread_id,
             role="ai",
-            content_type="markdown",
-            content=ai_content,
-            extra_data=extra_data,  # 保存 metadata
+            content_type="multimodal" if has_structured_display else "markdown",
+            content=display_blocks if has_structured_display else ai_content,
+            extra_data=extra_data,
         )
-    
-    # 详细同步追踪日志
+
     saved_extra_keys = list(extra_data.keys()) if extra_data else []
     logger.info(
-        "[SYNC-TRACE] 数据库保存完成: thread_id=%s, ai_len=%d, ai_hash=%s, extra_data_keys=%s, kb_images_replaced=%d",
+        "[SYNC-TRACE] 数据库保存完成: thread_id=%s, ai_len=%d, ai_hash=%s, extra_data_keys=%s, display_block_count=%d",
         thread_id, len(str(ai_content)), _content_hash(str(ai_content)),
-        saved_extra_keys, replaced_count
+        saved_extra_keys, len(display_blocks)
     )
 
 
