@@ -2,7 +2,7 @@
 
 > **结论先行**：
 > 1. 结构化结果只走 `event: result` 单通道；
-> 2. 回放 canonical 字段冻结为 `additional_kwargs.result_events[]`；
+> 2. 结构化结果输入 canonical 字段冻结为 `additional_kwargs.result_events[]`；最终展示 canonical 字段为 `message.content(blocks)`；
 > 3. 可靠性最小集冻结为 `id + retry + heartbeat + Last-Event-ID`；
 > 4. 文档过渡策略冻结为 `OpenAPI 3.1 + AsyncAPI 3.0`，并预留 `text/event-stream + itemSchema(oneOf)` 迁移位。
 
@@ -26,13 +26,14 @@ data: <json_payload>
 |---|---|---|
 | `token` | 增量文本 | 否 |
 | `status` | 阶段状态 | 否 |
-| `result` | 结构化结果（卡片/表格/图片/图表） | **是（唯一通道）** |
+| `result` | 结构化结果输入（卡片/表格/图片/图表） | **是（结构化输入唯一通道）** |
 | `final_answer` | 最终正文 | 否 |
+| `display_blocks` | 最终展示块快照（live canonical blocks） | **是（最终展示唯一快照）** |
 | `interrupt` | 人审中断 | 否 |
 | `done` | 生命周期收口（`thread_id/message_id/final_content?`） | 否 |
 | `error` | 错误收口 | 否 |
 
-> 前端渲染约束：`image/chart/table/todo_list/sql_result` 等结构化产物必须以 `result` / `additional_kwargs.result_events[]` 为单一展示 owner，禁止再把同一产物复制进正文做第二份渲染。
+> 前端渲染约束：`result` / `additional_kwargs.result_events[]` 仍是结构化结果输入 owner；live 展示统一消费 `display_blocks`，历史回放统一消费 `message.content(blocks)`。禁止再次回退到“正文字符串 + result_events + kb_images 共同决定 UI”的模式。
 
 ---
 
@@ -102,14 +103,14 @@ data: <json_payload>
 
 ### 5.1 字段优先级（读取）
 
-1. `additional_kwargs.result_events[]`（canonical）
+1. `additional_kwargs.result_events[]`（结构化输入 canonical）
 2. `additional_kwargs.result_event`（过渡单值）
 3. `additional_kwargs.data_type + additional_kwargs.data`（legacy）
 4. `metadata` 历史兼容字段（只读兜底）
 
 ### 5.2 写回规则（新）
 
-- 新写路径必须包含 `additional_kwargs.result_events[]`。
+- 新写路径必须包含 `additional_kwargs.result_events[]`，且最终展示消息优先写 `content_type=multimodal` + `content=[blocks...]`。
 - 兼容观察字段：`compat_source`（`result_events|result_event|data_type_data`）。
 - 多结果场景必须按 `sequence_number` 保序。
 
@@ -131,6 +132,7 @@ data: <json_payload>
 
 - `text_event_stream_itemSchema`：SSE 单帧事件 `oneOf` 模型名称。
 - `result_event_union`：`result.data` 使用的联合类型名称。
+- `display_blocks`：SSE live 最终展示快照事件名，`data.blocks` 为 canonical ordered content blocks。
 
 ---
 

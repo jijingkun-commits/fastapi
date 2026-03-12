@@ -5,6 +5,7 @@
 - 对话历史查询和管理
 - 恢复被中断的流程（人工审核）
 """
+import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Any
@@ -31,6 +32,7 @@ from app.repositories import chat_repo
 from app.api.deps import get_current_user
 from app.core.utils import content_hash as _content_hash
 from app.core.message_content import normalize_legacy_message_content
+from app.core.message_display_blocks import compile_message_display_blocks
 
 from app.ai.workflow.multi_agent_graph import cancel_checkpoint
 from app.models.user import User
@@ -38,6 +40,35 @@ from app.models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("api.chat")
+
+
+def _normalize_history_message_content(content: Any, content_type: str, extra_data: Optional[dict] = None) -> tuple[str, Any]:
+    """历史消息内容归一化：优先输出 canonical blocks，其余再走 legacy 文本兼容。"""
+    if content_type == "multimodal":
+        if isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                return "markdown", normalize_legacy_message_content(content)
+            return ("multimodal", parsed if isinstance(parsed, list) else content)
+        return "multimodal", content
+
+    normalized_content = normalize_legacy_message_content(content)
+    metadata = extra_data if isinstance(extra_data, dict) else {}
+    kb_images = metadata.get("kb_images") if isinstance(metadata.get("kb_images"), dict) else {}
+    result_events = metadata.get("result_events") if isinstance(metadata.get("result_events"), list) else []
+
+    if not kb_images and not result_events:
+        return content_type, normalized_content
+
+    display_blocks = compile_message_display_blocks(
+        final_text=normalized_content,
+        kb_images=kb_images,
+        result_events=result_events,
+    )
+    if not display_blocks:
+        return content_type, normalized_content
+    return "multimodal", display_blocks
 
 
 # ==================== Schemas ====================
@@ -384,22 +415,29 @@ def get_thread_messages(
     
     result = []
     for m in messages:
-        content = normalize_legacy_message_content(m.content)
+        response_content_type, content = _normalize_history_message_content(m.content, m.content_type, m.extra_data)
         
         # 同步追踪日志（仅对 AI 消息记录）
         if m.role == "ai":
             extra_keys = list(m.extra_data.keys()) if m.extra_data else []
+            if isinstance(content, str):
+                content_length = len(content)
+                content_hash = _content_hash(content) if content else "empty"
+            else:
+                serialized_content = json.dumps(content, ensure_ascii=False, default=str) if content else ""
+                content_length = len(serialized_content)
+                content_hash = _content_hash(serialized_content) if serialized_content else "empty"
             logger.info(
                 "[SYNC-TRACE] 历史加载: thread_id=%s, msg_id=%d, ai_len=%d, ai_hash=%s, extra_data_keys=%s",
-                thread_id, m.id, len(content) if content else 0, 
-                _content_hash(content) if content else "empty", extra_keys
+                thread_id, m.id, content_length,
+                content_hash, extra_keys
             )
         
         result.append(MessageOut(
             id=m.id,
             thread_id=m.thread_id,
             role=m.role,
-            content_type=m.content_type,
+            content_type=response_content_type,
             content=content,
             metadata=m.extra_data,
             additional_kwargs=m.extra_data,

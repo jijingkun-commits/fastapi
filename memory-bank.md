@@ -8,6 +8,8 @@
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
+- 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
+- 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `docs/plans/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
 - 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 - 2026-03-11｜JJK 工程流重构为 `clarify(requirements) -> design -> plan(UAT) -> imp -> verify`，正式产品/设计文档改为 `--doc` 显式发布，API 文档继续自动同步（ACTIVE）→ `.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`memory-bank.md`
@@ -21,6 +23,28 @@
 - 2026-03-10｜CardRun 分支感知基线：首轮继承当前父分支，后续固化到 task state `integration_branch`（ACTIVE）→ `docs/plans/2026-03-10-cardrun-branch-aware-base-design.md`
 - 2026-03-10｜问数 TopN/Ranking contract 贯穿 handoff -> session_frame -> SQL 生成（ACTIVE）→ `docs/产品文档/问数助手需求.md`、`docs/开发文档/架构设计/AI模块设计.md`
 - 2026-03-09｜Lifespan 资源治理收口为 `app.state.runtime`（ACTIVE）→ `docs/plans/2026-03-09-lifespan-runtime-consolidation-design.md`
+
+### 2026-03-12 聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器
+
+- 状态：ACTIVE
+- 决策主题：聊天 live 展示协议统一改为 SSE `display_blocks` 快照；前端不再根据 `final_answer + kb_images + result_events` 现场拼 UI。
+- 背景与问题：旧链路里正文、知识库图片、结构化结果分散在多路字段，导致“首屏串位、刷新丢图、占位符泄漏”反复出现；前端临时 compiler 只能缓解，不能消灭双轨事实源。
+- 最终决策：后端在 stream / resume 收口阶段编译 canonical ordered blocks，并通过 `display_blocks` 一次性发给前端；`AssistantMessage` 只做“有块渲块、无块渲纯文本”。
+- 取舍理由：项目未上线，优先把展示协议收敛成单一 owner；相比继续保留占位符替换器或运行时猜结构，SSE canonical snapshot 更简单、更稳。
+- 影响范围：`app/services/chat_service.py`、`app/ai/events.py`、`web/src/lib/backend.ts`、`web/src/hooks/useSSEStream.ts`、`web/src/components/chat/messages/ai.tsx`
+- 回退/失效条件：若未来协议继续演进，也必须保持“单一 canonical blocks owner”不变；禁止恢复前端 placeholder 编译器。
+- 关联文档/代码：`docs/API文档/接口文档.md`、`docs/开发文档/架构设计/AI模块设计.md`、`web/e2e/chat-ordered-content-blocks.spec.cjs`
+
+### 2026-03-11 知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks
+
+- 状态：ACTIVE
+- 决策主题：`[IMG-N]` 继续保留在知识库生成链路里，但只作为上游锚点语法；最终展示与持久化统一收敛到 ordered content blocks。
+- 背景与问题：过去既在前端替换占位符，又在仓储层落库前替换，还会在未引用时补图到正文末尾，导致协议分裂与历史回放不一致。
+- 最终决策：新增 `app/core/message_display_blocks.py` 作为唯一编译入口；history 保存 `content_type="multimodal" + content=blocks[]`，legacy 消息只在接口层兼容编译。
+- 取舍理由：保留锚点语法能继续利用现有知识库链路的稳定性，但展示 owner 必须从字符串替换升级为结构化 blocks，才能真正解决图文混排和刷新回放问题。
+- 影响范围：`app/core/message_display_blocks.py`、`app/repositories/chat_repo.py`、`app/api/v1/endpoints/chat_api.py`、`tests/unit/test_message_display_blocks.py`
+- 回退/失效条件：待上游能直接输出更显式的结构化锚点后，可继续缩窄 `[IMG-N]` 语法；在此之前禁止重新把 placeholder 当最终 UI 协议。
+- 关联文档/代码：`docs/plans/2026-03-11-ordered-content-blocks-design.md`、`docs/开发文档/架构设计/防屎山记录手册.md`
 
 ### 2026-03-11 前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`
 

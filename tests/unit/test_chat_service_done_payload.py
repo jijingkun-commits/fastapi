@@ -271,6 +271,57 @@ def test_stream_forwards_final_answer_and_done_final_content() -> None:
     assert done_events[0]["final_content"] == final_text
 
 
+def test_stream_emits_display_blocks_after_final_answer_with_kb_images() -> None:
+    """final_answer 命中知识库占位符时，应额外发送 canonical display_blocks 快照。"""
+
+    final_text = "第一段 [IMG-0] 第二段"
+    fake_snapshot = SimpleNamespace(
+        tasks=[],
+        values={
+            "messages": [
+                HumanMessage(content="解释这张图", id="human-display-blocks"),
+                AIMessage(content=final_text),
+            ]
+        },
+    )
+    fake_graph = _FakeGraph(
+        chunks=[
+            {
+                "type": "kb_images",
+                "data": {
+                    "images": {
+                        "0": "/api/v1/assets/proxy/ragflow/img-0",
+                    }
+                },
+                "node": "knowledge_search",
+            },
+            {
+                "type": "final_answer",
+                "data": {"content": final_text, "meta": {"coverage_pass": True}},
+                "node": "final_composer",
+            },
+        ],
+        snapshot=fake_snapshot,
+    )
+
+    async def _fake_get_graph(self, enable_thinking=False, model_id=None):
+        return fake_graph
+
+    with patch("app.db.session.get_db_context", _fake_get_db_context), patch(
+        "app.repositories.chat_repo.save_message", lambda *args, **kwargs: None
+    ), patch.object(ChatService, "get_graph", _fake_get_graph):
+        svc = ChatService()
+        events = _collect_events(
+            svc.stream(prompt="解释这张图", thread_id="thread-display-blocks", user_id=1)
+        )
+
+    display_block_events = [payload for event, payload in events if event == "display_blocks"]
+    assert len(display_block_events) == 1
+    assert display_block_events[0]["blocks"][0]["type"] == "markdown"
+    assert display_block_events[0]["blocks"][1]["type"] == "image"
+    assert display_block_events[0]["blocks"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-0"
+
+
 def test_interrupt_event_payload_includes_frozen_required_fields():
     """interrupt 事件应包含 reason/message 必填字段并保留兼容字段。"""
 

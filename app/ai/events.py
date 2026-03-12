@@ -34,6 +34,7 @@ EventType = Literal[
     "task_finished",   # 任务完成
     "coverage_check",  # 覆盖率检查
     "final_answer",    # 最终答复（唯一对外正文）
+    "display_blocks",  # 最终展示块快照（canonical ordered content blocks）
     "kb_images",       # 知识库图片映射（RAG 占位符 [IMG-N] -> URL）
     "confirmation",    # 确认请求（需要用户确认的操作）
     "clarification",   # 澄清问题（需要用户补充信息）
@@ -66,6 +67,7 @@ class AgentEventType(str, Enum):
     TASK_FINISHED = "task_finished"
     COVERAGE_CHECK = "coverage_check"
     FINAL_ANSWER = "final_answer"
+    DISPLAY_BLOCKS = "display_blocks"
     CONFIRMATION = "confirmation"
     CLARIFICATION = "clarification"
     HANDOFF = "handoff"

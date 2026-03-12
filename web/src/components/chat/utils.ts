@@ -8,9 +8,24 @@ import type { Message } from "@langchain/langgraph-sdk";
  */
 export function getContentString(content: Message["content"]): string {
   if (typeof content === "string") return content;
-  const texts = content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text);
+  const texts = content.flatMap((item) => {
+    const maybeText = item as { type?: string; text?: unknown; data?: unknown };
+    if (maybeText.type === "text" && typeof maybeText.text === "string") {
+      return [maybeText.text];
+    }
+    if ((maybeText.type === "markdown" || maybeText.type === "text") && typeof maybeText.data === "string") {
+      return [maybeText.data];
+    }
+    if (
+      (maybeText.type === "markdown" || maybeText.type === "text")
+      && typeof maybeText.data === "object"
+      && maybeText.data !== null
+      && typeof (maybeText.data as { text?: unknown }).text === "string"
+    ) {
+      return [(maybeText.data as { text: string }).text];
+    }
+    return [];
+  });
   return texts.join(" ");
 }
 
@@ -18,24 +33,3 @@ export function getContentString(content: Message["content"]): string {
  * 知识库图片映射类型
  */
 export type KbImages = Record<string, string>;
-
-/**
- * 将内容中的 [IMG-N] 占位符替换为实际的 Markdown 图片语法
- * @param content 包含占位符的内容
- * @param kbImages 图片映射 {索引: URL}
- * @returns 替换后的内容
- */
-export function replaceImagePlaceholders(content: string, kbImages: KbImages): string {
-  if (!kbImages || Object.keys(kbImages).length === 0) return content;
-
-  let result = content;
-  for (const [idx, url] of Object.entries(kbImages)) {
-    const placeholder = `[IMG-${idx}]`;
-    if (result.includes(placeholder)) {
-      // 使用 split+join 来替换所有匹配项（修复多次引用同一占位符的问题）
-      result = result.split(placeholder).join(`![参考图片](${url})`);
-    }
-  }
-  
-  return result;
-}

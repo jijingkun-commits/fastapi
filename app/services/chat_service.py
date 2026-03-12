@@ -34,6 +34,7 @@ from app.core.config import (
     MEMORY_INTENT_ASYNC_ENABLED,
 )
 from app.core.message_content import normalize_message_content
+from app.core.message_display_blocks import compile_message_display_blocks
 from app.core.utils import content_hash as _content_hash
 from app.db.postgres_checkpoint import get_checkpointer, is_checkpointer_busy_error
 from app.db.session import get_db_context
@@ -644,6 +645,51 @@ def _build_done_payload(
     return payload
 
 
+def _normalize_streaming_kb_images(data: Any) -> dict[str, str]:
+    """标准化流式 kb_images 事件。"""
+
+    if not isinstance(data, dict):
+        return {}
+
+    raw_images = data.get("images")
+    if not isinstance(raw_images, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for key, raw_url in raw_images.items():
+        if not isinstance(raw_url, str):
+            continue
+        url = raw_url.strip()
+        if not url:
+            continue
+        normalized[str(key)] = url
+    return normalized
+
+
+def _build_display_blocks_payload(
+    *,
+    final_text: str,
+    kb_images: dict[str, str],
+    result_events: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """根据当前流式收敛态生成 canonical display_blocks 快照。"""
+
+    if not final_text and not kb_images and not result_events:
+        return None
+
+    if not kb_images and not result_events:
+        return None
+
+    blocks = compile_message_display_blocks(
+        final_text=final_text,
+        kb_images=kb_images,
+        result_events=result_events,
+    )
+    if not blocks:
+        return None
+    return {"blocks": blocks}
+
+
 def _build_stopped_payload(*, thread_id: str, run_id: str, reason: str) -> dict[str, Any]:
     """构造 stopped 事件载荷。"""
 
@@ -742,7 +788,7 @@ class ChatService:
             delay_ms: Token 输出延迟（毫秒）
             attachments: 附件列表
             run_id: 运行ID（可选，默认自动生成）
-            
+
         Yields:
             SSE 格式的事件数据
         """
@@ -875,6 +921,9 @@ class ChatService:
         cancel_after_token_count = 0
         client_disconnected = False
         result_sequence_number = 0
+        collected_result_events: list[dict[str, Any]] = []
+        collected_kb_images: dict[str, str] = {}
+        display_blocks_emitted = False
         visible_activity_recorded = False
 
         def _mark_run_activity(*, force: bool) -> None:
@@ -1058,6 +1107,14 @@ class ChatService:
                                         "node": chunk.get("node", ""),
                                     },
                                 )
+                                display_blocks_payload = _build_display_blocks_payload(
+                                    final_text=content,
+                                    kb_images=collected_kb_images,
+                                    result_events=collected_result_events,
+                                )
+                                if display_blocks_payload is not None:
+                                    yield self._format_sse("display_blocks", display_blocks_payload)
+                                    display_blocks_emitted = True
                             except asyncio.CancelledError:
                                 _mark_client_disconnected("final_answer")
 
@@ -1098,12 +1155,42 @@ class ChatService:
                             result_sequence_number,
                             result_payload.get("envelope"),
                         )
+                        collected_result_events.append(result_payload)
                         _record_visible_activity(force=True)
                         if not client_disconnected:
                             try:
                                 yield self._format_sse("result", result_payload)
+                                if final_answer_content:
+                                    display_blocks_payload = _build_display_blocks_payload(
+                                        final_text=final_answer_content,
+                                        kb_images=collected_kb_images,
+                                        result_events=collected_result_events,
+                                    )
+                                    if display_blocks_payload is not None:
+                                        yield self._format_sse("display_blocks", display_blocks_payload)
+                                        display_blocks_emitted = True
                             except asyncio.CancelledError:
                                 _mark_client_disconnected("result")
+
+                    elif event_type == "kb_images":
+                        new_images = _normalize_streaming_kb_images(event_data)
+                        if new_images:
+                            collected_kb_images.update(new_images)
+                        _record_visible_activity(force=False)
+                        if not client_disconnected:
+                            try:
+                                yield self._format_sse("kb_images", {"images": new_images})
+                                if final_answer_content:
+                                    display_blocks_payload = _build_display_blocks_payload(
+                                        final_text=final_answer_content,
+                                        kb_images=collected_kb_images,
+                                        result_events=collected_result_events,
+                                    )
+                                    if display_blocks_payload is not None:
+                                        yield self._format_sse("display_blocks", display_blocks_payload)
+                                        display_blocks_emitted = True
+                            except asyncio.CancelledError:
+                                _mark_client_disconnected("kb_images")
 
                     elif event_type == "plan_ready":
                         plan_payload = _normalize_plan_ready_event_payload(
@@ -1157,7 +1244,7 @@ class ChatService:
                 else:
                     raise e
 
-            
+
             # 流结束后检查是否有 interrupt
             snapshot = None
             if client_disconnected:
@@ -1296,6 +1383,18 @@ class ChatService:
                                         except asyncio.CancelledError:
                                             _mark_client_disconnected("token_fallback")
                                     done_payload["final_content"] = content
+                                    if not display_blocks_emitted:
+                                        display_blocks_payload = _build_display_blocks_payload(
+                                            final_text=content,
+                                            kb_images=collected_kb_images,
+                                            result_events=collected_result_events,
+                                        )
+                                        if display_blocks_payload is not None and not client_disconnected:
+                                            try:
+                                                yield self._format_sse("display_blocks", display_blocks_payload)
+                                                display_blocks_emitted = True
+                                            except asyncio.CancelledError:
+                                                _mark_client_disconnected("display_blocks_fallback")
                                 else:
                                     logger.warning("跳过原始JSON输出: %s", content[:100])
 
@@ -1312,6 +1411,18 @@ class ChatService:
                 done_payload["message_id"] = message_id
             if final_answer_content:
                 done_payload["final_content"] = final_answer_content
+            if not display_blocks_emitted:
+                display_blocks_payload = _build_display_blocks_payload(
+                    final_text=final_answer_content or "".join(full_answer),
+                    kb_images=collected_kb_images,
+                    result_events=collected_result_events,
+                )
+                if display_blocks_payload is not None and not client_disconnected:
+                    try:
+                        yield self._format_sse("display_blocks", display_blocks_payload)
+                        display_blocks_emitted = True
+                    except asyncio.CancelledError:
+                        _mark_client_disconnected("display_blocks_done")
 
             if run_control_enabled:
                 with get_db_context() as db:
@@ -1643,6 +1754,9 @@ async def sse_resume_stream(
     cancel_after_token_count = 0
     cancel_reason = "user_cancelled"
     result_sequence_number = 0
+    collected_result_events: list[dict[str, Any]] = []
+    collected_kb_images: dict[str, str] = {}
+    display_blocks_emitted = False
     visible_activity_recorded = False
 
     def _mark_run_activity(*, force: bool) -> None:
@@ -1784,6 +1898,14 @@ async def sse_resume_stream(
                             "node": chunk.get("node", ""),
                         },
                     )
+                    display_blocks_payload = _build_display_blocks_payload(
+                        final_text=content,
+                        kb_images=collected_kb_images,
+                        result_events=collected_result_events,
+                    )
+                    if display_blocks_payload is not None:
+                        yield format_sse("display_blocks", display_blocks_payload)
+                        display_blocks_emitted = True
 
                 elif event_type == "result":
                     if event_data.get("message"):
@@ -1818,8 +1940,18 @@ async def sse_resume_stream(
                         result_sequence_number,
                         result_payload.get("envelope"),
                     )
+                    collected_result_events.append(result_payload)
                     _record_visible_activity(force=True)
                     yield format_sse("result", result_payload)
+                    if final_answer_content:
+                        display_blocks_payload = _build_display_blocks_payload(
+                            final_text=final_answer_content,
+                            kb_images=collected_kb_images,
+                            result_events=collected_result_events,
+                        )
+                        if display_blocks_payload is not None:
+                            yield format_sse("display_blocks", display_blocks_payload)
+                            display_blocks_emitted = True
 
                 elif event_type == "plan_ready":
                     plan_payload = _normalize_plan_ready_event_payload(
@@ -1843,6 +1975,22 @@ async def sse_resume_stream(
                 elif event_type in ("status", "clarification", "confirmation"):
                     _record_visible_activity(force=False)
                     yield format_sse(event_type, event_data)
+
+                elif event_type == "kb_images":
+                    new_images = _normalize_streaming_kb_images(event_data)
+                    if new_images:
+                        collected_kb_images.update(new_images)
+                    _record_visible_activity(force=False)
+                    yield format_sse("kb_images", {"images": new_images})
+                    if final_answer_content:
+                        display_blocks_payload = _build_display_blocks_payload(
+                            final_text=final_answer_content,
+                            kb_images=collected_kb_images,
+                            result_events=collected_result_events,
+                        )
+                        if display_blocks_payload is not None:
+                            yield format_sse("display_blocks", display_blocks_payload)
+                            display_blocks_emitted = True
 
                 else:
                     yield format_sse(event_type, event_data)
@@ -1918,12 +2066,30 @@ async def sse_resume_stream(
                     if content and content != streamed_content and not text_output_emitted:
                         yield format_sse("token", {"content": content})
                         done_payload["final_content"] = content
+                        if not display_blocks_emitted:
+                            display_blocks_payload = _build_display_blocks_payload(
+                                final_text=content,
+                                kb_images=collected_kb_images,
+                                result_events=collected_result_events,
+                            )
+                            if display_blocks_payload is not None:
+                                yield format_sse("display_blocks", display_blocks_payload)
+                                display_blocks_emitted = True
 
         message_id = svc._get_latest_ai_message_id(thread_id)
         if message_id is not None:
             done_payload["message_id"] = message_id
         if final_answer_content:
             done_payload["final_content"] = final_answer_content
+        if not display_blocks_emitted:
+            display_blocks_payload = _build_display_blocks_payload(
+                final_text=final_answer_content or "".join(full_answer),
+                kb_images=collected_kb_images,
+                result_events=collected_result_events,
+            )
+            if display_blocks_payload is not None:
+                yield format_sse("display_blocks", display_blocks_payload)
+                display_blocks_emitted = True
 
         if run_control_service.is_enabled() and resolved_run_id:
             with get_db_context() as db:

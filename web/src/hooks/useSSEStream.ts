@@ -47,6 +47,7 @@ import type { KbImages } from "@/components/chat/utils";
 import { safeParseJson, SelectedTodoSchema } from "@/lib/utils";
 import type {
   ClarificationEventData,
+  DisplayBlocksEventData,
   ResultEventData,
   StatusEventData,
 } from "@/types/message";
@@ -79,6 +80,10 @@ const NON_UNREAD_DONE_STATUSES = new Set([
   "cancelled",
   "aborted",
 ]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function buildLocalThreadTitle(prompt: string): string {
   const firstNonEmptyLine = prompt
@@ -400,6 +405,62 @@ export function useSSEStream(): StreamContextValue {
             id: String(messageId),
           };
         }
+        return updated;
+      });
+    },
+    [updateThreadMessages],
+  );
+
+  const storeKbImagesToMessage = useCallback(
+    (threadKey: string, aiId: string, images: Record<string, string>) => {
+      if (Object.keys(images).length === 0) {
+        return;
+      }
+
+      updateThreadMessages(threadKey, (prev) => {
+        const updated = [...prev];
+        const idx = updated.findIndex((m) => m.id === aiId);
+        if (idx === -1) {
+          return updated;
+        }
+
+        const message = updated[idx] as MessageWithAdditionalKwargs;
+        const existingKwargs = isRecord(message.additional_kwargs)
+          ? message.additional_kwargs
+          : {};
+        const existingKbImages = isRecord(existingKwargs.kb_images)
+          ? existingKwargs.kb_images
+          : {};
+
+        updated[idx] = {
+          ...updated[idx],
+          additional_kwargs: {
+            ...existingKwargs,
+            kb_images: {
+              ...existingKbImages,
+              ...images,
+            },
+          },
+        } as Message;
+        return updated;
+      });
+    },
+    [updateThreadMessages],
+  );
+
+  const applyDisplayBlocksToMessage = useCallback(
+    (threadKey: string, aiId: string, data: DisplayBlocksEventData) => {
+      updateThreadMessages(threadKey, (prev) => {
+        const updated = [...prev];
+        const idx = updated.findIndex((m) => m.id === aiId);
+        if (idx === -1) {
+          return updated;
+        }
+
+        updated[idx] = {
+          ...updated[idx],
+          content: data.blocks,
+        } as unknown as Message;
         return updated;
       });
     },
@@ -1152,6 +1213,12 @@ ${typeof m.content === "string" ? m.content : ""}`,
                 currentStatus: null,
               });
             },
+            onDisplayBlocks: (data) => {
+              applyDisplayBlocksToMessage(runtimeKeyRef.current, aiId, data);
+              patchThreadRuntime(runtimeKeyRef.current, {
+                currentStatus: null,
+              });
+            },
             onStatus: (statusData: StatusEventData) => {
               const normalizedStatus = normalizeStatusData(statusData);
               if (!normalizedStatus) return;
@@ -1184,6 +1251,7 @@ ${typeof m.content === "string" ? m.content : ""}`,
               console.log(
                 `🖼️ 收到 kb_images 映射: ${Object.keys(images).length} 张图片`,
               );
+              storeKbImagesToMessage(runtimeKeyRef.current, aiId, images);
               updateThreadRuntime(runtimeKeyRef.current, (prev) => ({
                 ...prev,
                 kbImages: { ...prev.kbImages, ...images },
@@ -1229,6 +1297,8 @@ ${typeof m.content === "string" ? m.content : ""}`,
       patchThreadRuntime,
       rekeyThreadRuntime,
       handleStructuredResultEvent,
+      applyDisplayBlocksToMessage,
+      storeKbImagesToMessage,
       applyFinalAnswerToMessage,
       applyClarificationToMessage,
       finalizeStreamLifecycle,
@@ -1316,6 +1386,10 @@ ${typeof m.content === "string" ? m.content : ""}`,
             );
             patchThreadRuntime(currentThreadKey, { currentStatus: null });
           },
+          onDisplayBlocks: (data) => {
+            applyDisplayBlocksToMessage(currentThreadKey, aiId!, data);
+            patchThreadRuntime(currentThreadKey, { currentStatus: null });
+          },
           onStatus: (statusData: StatusEventData) => {
             const normalizedStatus = normalizeStatusData(statusData);
             if (!normalizedStatus) return;
@@ -1335,6 +1409,7 @@ ${typeof m.content === "string" ? m.content : ""}`,
             console.log(
               `🖼️ 恢复流收到 kb_images 映射: ${Object.keys(images).length} 张图片`,
             );
+            storeKbImagesToMessage(currentThreadKey, aiId!, images);
             updateThreadRuntime(currentThreadKey, (prev) => ({
               ...prev,
               kbImages: { ...prev.kbImages, ...images },
@@ -1389,6 +1464,8 @@ ${typeof m.content === "string" ? m.content : ""}`,
       patchThreadRuntime,
       updateThreadMessages,
       handleStructuredResultEvent,
+      storeKbImagesToMessage,
+      applyDisplayBlocksToMessage,
       applyFinalAnswerToMessage,
       applyClarificationToMessage,
       finalizeStreamLifecycle,

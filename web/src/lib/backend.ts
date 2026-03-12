@@ -3,6 +3,7 @@ import { validateResultEventPayload } from "@/lib/validators/result-event";
 import { STREAM_EVENT_TYPES } from "@/types/message";
 import type {
   ClarificationEventData,
+  DisplayBlocksEventData,
   DoneEventData,
   FinalAnswerEventData,
   InitEventData,
@@ -284,6 +285,8 @@ export interface StreamCallbacks {
   onKbImages?: (images: Record<string, string>) => void;
   /** 最终答复（唯一对外正文） */
   onFinalAnswer?: (data: FinalAnswerEventData) => void;
+  /** canonical 展示块快照 */
+  onDisplayBlocks?: (data: DisplayBlocksEventData) => void;
 }
 
 export interface StreamResultMeta {
@@ -374,6 +377,19 @@ function normalizeFinalAnswerEventData(data: unknown): FinalAnswerEventData | nu
   return {
     content,
     meta: isObjectRecord(data.meta) ? data.meta : undefined,
+  };
+}
+
+function normalizeDisplayBlocksEventData(data: unknown): DisplayBlocksEventData | null {
+  if (!isObjectRecord(data) || !Array.isArray(data.blocks)) {
+    return null;
+  }
+  const blocks = data.blocks.filter((item) => isObjectRecord(item) && "type" in item && "data" in item);
+  if (blocks.length === 0) {
+    return null;
+  }
+  return {
+    blocks: blocks as DisplayBlocksEventData["blocks"],
   };
 }
 
@@ -503,6 +519,7 @@ function dispatchSSEEvent(
     onClarification,
     onKbImages,
     onFinalAnswer,
+    onDisplayBlocks,
     onDone,
     onError,
   } = callbacks;
@@ -600,6 +617,13 @@ function dispatchSSEEvent(
       const finalAnswerData = normalizeFinalAnswerEventData(event.data);
       if (finalAnswerData) {
         onFinalAnswer?.(finalAnswerData);
+      }
+      return;
+    }
+    case "display_blocks": {
+      const displayBlocksData = normalizeDisplayBlocksEventData(event.data);
+      if (displayBlocksData) {
+        onDisplayBlocks?.(displayBlocksData);
       }
       return;
     }
@@ -959,7 +983,7 @@ export interface ConversationMessage {
 }
 
 export interface ContentBlock {
-  type: "markdown" | "text" | "chart" | "image" | "custom_ui";
+  type: "markdown" | "text" | "chart" | "image" | "custom_ui" | "sql_result" | "todo_list" | "fallback_result" | "table";
   data: any;
   component?: string;
   props?: Record<string, any>;

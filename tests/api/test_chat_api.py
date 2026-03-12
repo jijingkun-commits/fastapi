@@ -193,6 +193,86 @@ class TestMessagesAPI:
             app.dependency_overrides.clear()
 
 
+    def test_get_messages_should_preserve_multimodal_blocks(self):
+        """multimodal 历史消息应返回 block 数组，不应被打平成纯文本。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        mock_msg = MagicMock()
+        mock_msg.id = 3
+        mock_msg.thread_id = "thread-multimodal"
+        mock_msg.role = "ai"
+        mock_msg.content_type = "multimodal"
+        mock_msg.content = '[{"type": "markdown", "data": {"text": "第一段"}}, {"type": "image", "data": {"url": "/api/v1/assets/proxy/ragflow/img-0", "source": "knowledge"}}]'
+        mock_msg.extra_data = {}
+        mock_msg.title = None
+        mock_msg.create_time = datetime.now()
+
+        try:
+            with patch("app.repositories.chat_repo.get_messages_by_thread") as mock_get, patch(
+                "app.repositories.chat_repo.get_feedback_scores_batch"
+            ) as mock_feedback:
+                mock_get.return_value = [mock_msg]
+                mock_feedback.return_value = {}
+
+                response = client.get("/api/v1/chat/threads/thread-multimodal/messages")
+                assert response.status_code == 200
+
+                data = response.json()
+                assert len(data) == 1
+                assert isinstance(data[0]["content"], list)
+                assert data[0]["content"][0]["type"] == "markdown"
+                assert data[0]["content"][1]["type"] == "image"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_get_messages_should_compile_legacy_kb_images_into_multimodal_blocks(self):
+        """legacy markdown + kb_images 应在接口层编译成 canonical blocks，前端不再参与 placeholder 编译。"""
+        app.dependency_overrides[get_current_user] = _mock_user
+        mock_db = MagicMock()
+
+        def _mock_get_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = _mock_get_db
+        mock_msg = MagicMock()
+        mock_msg.id = 4
+        mock_msg.thread_id = "thread-legacy-kb"
+        mock_msg.role = "ai"
+        mock_msg.content_type = "markdown"
+        mock_msg.content = "第一段 [IMG-0] 第二段"
+        mock_msg.extra_data = {
+            "kb_images": {
+                "0": "/api/v1/assets/proxy/ragflow/img-0",
+            }
+        }
+        mock_msg.title = None
+        mock_msg.create_time = datetime.now()
+
+        try:
+            with patch("app.repositories.chat_repo.get_messages_by_thread") as mock_get, patch(
+                "app.repositories.chat_repo.get_feedback_scores_batch"
+            ) as mock_feedback:
+                mock_get.return_value = [mock_msg]
+                mock_feedback.return_value = {}
+
+                response = client.get("/api/v1/chat/threads/thread-legacy-kb/messages")
+                assert response.status_code == 200
+
+                data = response.json()
+                assert len(data) == 1
+                assert data[0]["content_type"] == "multimodal"
+                assert isinstance(data[0]["content"], list)
+                assert data[0]["content"][1]["type"] == "image"
+                assert data[0]["content"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-0"
+        finally:
+            app.dependency_overrides.clear()
+
+
 class TestDeleteThreadAPI:
     """删除对话接口测试。"""
     
