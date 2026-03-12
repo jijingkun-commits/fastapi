@@ -5,6 +5,7 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 
+- 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 - 2026-03-11｜JJK 工程流重构为 `clarify(requirements) -> design -> plan(UAT) -> imp -> verify`，正式产品/设计文档改为 `--doc` 显式发布，API 文档继续自动同步（ACTIVE）→ `.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`memory-bank.md`
@@ -29,6 +30,17 @@
 - 影响范围：`web/package.json`、`web/eslint.config.js`、前端 lint 工作流、后续 warning 基线
 - 回退/失效条件：若未来升级到新的官方 lint 集成方案并明确替代 `eslint .`，可由新的入口替代；在此之前保持当前配置
 - 关联文档/代码：`web/package.json`、`web/eslint.config.js`、`docs/内部参考/迭代需求/refactor_report_chat-shell-style-unification.md`
+
+### 2026-03-12 聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖
+
+- 状态：ACTIVE
+- 决策主题：聊天页问数图表继续走客户端 `react-vega + renderer="svg"`；`vega-canvas` 触发的 Node 侧 `canvas` 可选依赖 warning 统一在 `web/next.config.mjs` 收口，不在业务组件里继续加条件分支或要求安装 `node-canvas`
+- 背景与问题：`/chat` 开发编译会沿 `react-vega -> vega-embed -> vega -> vega-canvas.node.js` 扫到 `import('canvas')`，Next 因本仓未安装 `canvas` 输出 warning；但当前图表真实运行路径是客户端 SVG，不需要服务端 `node-canvas`
+- 最终决策：保留 `web/src/components/chat/messages/sql-result-chart.tsx` 的动态客户端加载与 `renderer="svg"`；在 `web/next.config.mjs` 中将 `canvas` 作为可选 Node 依赖做单点隔离，避免无关 warning 污染前端编译输出
+- 取舍理由：项目未上线，优先把边界收在配置层，而不是为一个 Node 侧可选分支引入额外原生依赖；相比安装 `canvas` 或在业务层堆 fallback，配置层收口更简单、更稳定
+- 影响范围：`web/next.config.mjs`、聊天图表编译链路、前端 dev/build warning 基线、后续 `react-vega` 升级时的依赖判断
+- 回退/失效条件：若未来明确需要服务端 PNG/Canvas 渲染，或图表导出能力改为依赖 `node-canvas`，则重新评估并显式引入服务端依赖；在此之前保持客户端 SVG 路径
+- 关联文档/代码：`docs/开发文档/架构设计/前端架构.md`、`web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 
 ### 2026-03-11 聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class
 
