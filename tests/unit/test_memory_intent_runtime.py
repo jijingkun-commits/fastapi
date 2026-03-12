@@ -57,39 +57,18 @@ def test_process_memory_intent_job_should_resolve_and_flush(monkeypatch) -> None
 
 
 def test_lifespan_should_start_and_stop_memory_intent_runtime(monkeypatch) -> None:  # noqa: ANN001
-    import app.core.settings as settings_module
-    import app.db.session as session_module
-    import app.services.llm_config_service as llm_config_module
-    import app.services.llm_scene_service as llm_scene_module
-    import app.services.result_enrichment_rule_service as rule_module
-    import app.services.system_config_service as system_config_module
-
     calls: list[str] = []
-
-    class _SessionContext:
-        def __enter__(self):
-            return object()
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    async def _noop_async(*args, **kwargs):  # noqa: ANN002, ANN003
-        return None
 
     async def _fake_stop(app):  # noqa: ANN001
         calls.append("stop")
 
-    monkeypatch.setattr(main_module, "setup_logging", lambda: None)
-    monkeypatch.setattr(main_module, "INIT_DB_ON_STARTUP", False)
-    monkeypatch.setattr(main_module, "get_checkpointer", _noop_async)
-    monkeypatch.setattr(main_module, "close_checkpointer", _noop_async)
-    monkeypatch.setattr(settings_module, "Settings", lambda: object())
-    monkeypatch.setattr(session_module, "SessionLocal", lambda: _SessionContext())
-    monkeypatch.setattr(llm_config_module.LLMConfigService, "load_from_db", lambda *args, **kwargs: None)
-    monkeypatch.setattr(llm_scene_module.LLMSceneService, "load_from_db", lambda *args, **kwargs: None)
-    monkeypatch.setattr(llm_scene_module.LLMSceneService, "validate_startup_integrity", lambda *args, **kwargs: None)
-    monkeypatch.setattr(system_config_module.SystemConfigService, "load_from_db", lambda *args, **kwargs: None)
-    monkeypatch.setattr(rule_module, "get_result_enrichment_rule_service", lambda: SimpleNamespace(refresh_rules=lambda: None))
+    async def _fake_aclose() -> None:
+        return None
+
+    async def _fake_build_runtime():
+        return SimpleNamespace(aclose=_fake_aclose)
+
+    monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime, raising=False)
     monkeypatch.setattr(main_module, "start_memory_intent_runtime", lambda app: calls.append("start"), raising=False)
     monkeypatch.setattr(main_module, "stop_memory_intent_runtime", _fake_stop, raising=False)
 
@@ -100,3 +79,41 @@ def test_lifespan_should_start_and_stop_memory_intent_runtime(monkeypatch) -> No
     asyncio.run(_exercise())
 
     assert calls == ["start", "stop"]
+
+
+def test_runtime_loop_should_backoff_idle_polls_and_reset_after_work(monkeypatch) -> None:  # noqa: ANN001
+    """空闲轮询应逐步退避，并在消费任务后恢复最小间隔。"""
+
+    results = iter(
+        [
+            {"status": "idle"},
+            {"status": "idle"},
+            {"status": "succeeded"},
+            {"status": "idle"},
+        ]
+    )
+    delays: list[float] = []
+
+    async def _fake_to_thread(func, *args, **kwargs):  # noqa: ANN002, ANN003
+        return func(*args, **kwargs)
+
+    async def _fake_sleep_or_stop(stop_event, seconds):  # noqa: ANN001
+        delays.append(float(seconds))
+        if len(delays) >= 3:
+            stop_event.set()
+
+    async def _fake_sleep(seconds):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(runtime.asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(runtime, "run_memory_intent_worker_once", lambda worker_id=None: next(results))
+    monkeypatch.setattr(runtime, "_sleep_or_stop", _fake_sleep_or_stop)
+    monkeypatch.setattr(runtime.asyncio, "sleep", _fake_sleep)
+
+    async def _exercise() -> None:
+        stop_event = asyncio.Event()
+        await runtime._run_memory_intent_runtime_loop(stop_event)
+
+    asyncio.run(_exercise())
+
+    assert delays == [0.5, 1.0, 0.5]

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+
+import app.core.config as config_module
 import app.db.session as session_module
 
 
@@ -44,3 +47,15 @@ def test_close_database_runtime_disposes_both_engines(monkeypatch) -> None:
 
     assert chat_engine.dispose_calls == 1
     assert analytics_engine.dispose_calls == 1
+
+
+def test_db_echo_should_default_to_false_when_env_missing(monkeypatch) -> None:
+    """未显式配置时，DB_ECHO 应保持关闭，避免常驻服务打印原始 SQL。"""
+
+    with monkeypatch.context() as scoped:
+        scoped.setenv("ENV", "test")
+        scoped.delenv("DB_ECHO", raising=False)
+        reloaded = importlib.reload(config_module)
+        assert reloaded.DB_ECHO is False
+
+    importlib.reload(config_module)

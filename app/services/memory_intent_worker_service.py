@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from datetime import datetime
 from math import ceil
@@ -27,6 +28,16 @@ BACKPRESSURE_LEVEL_L3 = "L3"
 
 _BACKPRESSURE_MODE_ENABLED = "enabled"
 _BACKPRESSURE_MODE_DISABLED = "disabled"
+_OBSERVABILITY_SAMPLE_WINDOW_SECONDS = 30.0
+
+
+@dataclass(slots=True)
+class _ObservabilityCacheEntry:
+    captured_at: datetime
+    snapshot: dict[str, float | int | None]
+
+
+_OBSERVABILITY_CACHE_BY_WORKER: dict[str, _ObservabilityCacheEntry] = {}
 
 
 def _safe_non_negative_int(value: object, default: int = 0) -> int:
@@ -281,17 +292,50 @@ def collect_memory_intent_observability(
     }
 
 
+def _resolve_observability_snapshot(
+    db: Session,
+    *,
+    worker_id: str,
+    now: datetime,
+    metrics_provider: Callable[[Session], Mapping[str, float | int | None]] | None = None,
+) -> dict[str, float | int | None]:
+    """同一 worker 的短窗口空轮询复用观测结果，避免重复统计整表。"""
+
+    if metrics_provider is not None:
+        return dict(metrics_provider(db))
+
+    normalized_worker_id = str(worker_id or "").strip()
+    cache_entry = _OBSERVABILITY_CACHE_BY_WORKER.get(normalized_worker_id)
+    if cache_entry is not None:
+        elapsed_seconds = (now - cache_entry.captured_at).total_seconds()
+        if elapsed_seconds < _OBSERVABILITY_SAMPLE_WINDOW_SECONDS:
+            return dict(cache_entry.snapshot)
+
+    snapshot = dict(collect_memory_intent_observability(db))
+    if normalized_worker_id:
+        _OBSERVABILITY_CACHE_BY_WORKER[normalized_worker_id] = _ObservabilityCacheEntry(
+            captured_at=now,
+            snapshot=dict(snapshot),
+        )
+    return snapshot
+
+
 def _resolve_runtime_metrics(
     db: Session,
     *,
+    worker_id: str,
+    now: datetime,
     metrics_provider: Callable[[Session], Mapping[str, float | int | None]] | None = None,
     backpressure_mode: str | None = None,
 ) -> dict[str, object]:
     """统一收敛背压指标采集异常，避免影响主链路。"""
 
     try:
-        observability = (
-            dict(metrics_provider(db)) if metrics_provider is not None else collect_memory_intent_observability(db)
+        observability = _resolve_observability_snapshot(
+            db,
+            worker_id=worker_id,
+            now=now,
+            metrics_provider=metrics_provider,
         )
     except Exception:
         logger.warning("memory_intent_backpressure_observability_failed", exc_info=True)
@@ -328,6 +372,8 @@ def run_once(
     current_time = now or datetime.now()
     metrics_snapshot = _resolve_runtime_metrics(
         db,
+        worker_id=worker_id,
+        now=current_time,
         metrics_provider=metrics_provider,
         backpressure_mode=backpressure_mode,
     )
@@ -455,4 +501,3 @@ class MemoryIntentWorkerService:
             metrics_provider=self.metrics_provider,
             metrics_sink=self.metrics_sink,
         )
-
