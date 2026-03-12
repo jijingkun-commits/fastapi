@@ -4,72 +4,25 @@
 作用域覆盖当前目录及所有子目录；若子目录存在更深层 `AGENTS.md`，以更深层文件为准。
 
 ## 层级与优先级（强制）
-1. 系统/开发者硬约束 > 当次用户目标 > Layer1（本文件）> Layer2（`.cursor/rules/*.mdc`）> Layer3（Skills / tools）> Layer4（`memory-bank.md`）> 代理默认习惯。
+1. 系统/开发者硬约束 > 当次用户目标 > Layer1（本文件）> Layer2（`.cursor/rules/*.mdc`）> `PLANS.md` > Layer4（`memory-bank.md`）> 代理默认习惯。
 2. 同层规则冲突时，优先“更具体路径、更强约束、更可验证”的规则。
 3. 出现规则冲突时，先说明冲突点、取舍理由与风险，再执行。
-4. Layer1 只保留治理口径与交付门禁；技术细则与场景化规范统一落在 Layer2，避免重复维护。
+4. Layer1 只保留治理口径与交付门禁；技术细则统一落在 Layer2，执行长流程统一落在 `PLANS.md`，避免根文件继续长胖。
 
 ## Layer1 执行治理（强制）
-1. **降低代码行数** 核心是优先删除冗余代码、收敛重复逻辑、缩短调用链、消除不必要抽象；**本项目未上线，架构设计质量绝对优先于兼容性与改动量**，根因在结构/依赖/状态归属层面必须 `refactor`，禁止用 `patch` 或兼容层掩盖；`bugfix/refactor` 在编码前必须先声明 `obsolete_paths`（计划删除的旧函数/旧分支/旧文件）、`retained_paths`（必须保留的旧路径及唯一理由）与 `single_entry_owner`（收敛后唯一入口），若说不清，禁止开工。
-2. **架构评审门禁**：任何改动前必须提交“模块边界、依赖方向、状态归属、错误处理责任”四段式结论；原则解释统一引用 `.cursor/rules/core.mdc` 第 6 条。
-3. **根因修复门禁**：禁止以多层 fallback、重复分支、硬编码开关或兼容层掩盖问题；未上线阶段涉及模块边界、依赖方向、状态归属、错误处理责任时优先 `refactor`；修复说明必须包含根因定位与修复层级，技术细则统一引用 `.cursor/rules/core.mdc` 第 7 条。
-4. **变更量约束**：在 `bugfix/refactor` 中默认 `line_budget=added<=deleted`；若 `新增行数 > 删除行数`，默认视为未完成瘦身，必须先说明架构必要性与不可拆分原因；命中热点目录/热点大文件时，继续净增长默认失败，技术细则统一引用 `.cursor/rules/core.mdc` 第 16/17 条。
-5. **文档变更门禁**：涉及架构/API/表结构/配置变更/功能变动时，先更新文档再改代码；同步细则统一引用 `.cursor/rules/doc_sync.mdc` 与 `.cursor/rules/core.mdc` 第 8 条。
-6. **文档原位修改门禁**：对需求/设计/API/配置/表结构/测试等真理源文档，默认必须定位到对应章节执行原位修改与收敛，禁止在文末或平行小节追加同主题内容；仅审批记录、变更日志、巡检记录、归档记录及明确约定的附录/自检卡可追加，技术细则统一引用 `.cursor/rules/doc_sync.mdc`。
-7. **证据化交付**：未给出瘦身证据（`obsolete_paths` 命中结果、`retained_paths` 保留理由、删除清单、重复收敛、复杂度变化、验证结果）不得宣称 `lean/refactor` 完成。
-8. **去重约束**：Layer1 只保留治理口径与交付门禁，不复述 Layer2 技术细则；同主题仅保留“门禁 + 引用”。
-9. **外部事实核验门禁**：涉及最新实现方案、第三方库/API、最佳实践或官方文档时，优先使用 MCP 检索官方/GitHub 等权威来源再定方案；实现时优先复用现有模块与职责边界，禁止通过继续堆叠私有 helper、包装函数或局部抽象代替结构收敛，技术细则统一引用 `.cursor/rules/mcp-routing.mdc`、`.cursor/rules/core.mdc` 第 14/16 条与 `docs/工程规范/lean-guard.md`。
-10. **语义判定边界门禁**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract，技术细则统一引用 `.cursor/rules/core.mdc` 第 15 条。
-11. **Lean 硬门禁**：热点目录/热点文件必须通过 `lean-guard`；超阈值文件继续净增长、继续新增私有 helper、继续新增嵌套函数、或新实现已覆盖旧职责但旧路径仍无理由残留时默认阻断，禁止以“后续再治理”替代当前收口，技术细则统一引用 `.cursor/rules/core.mdc` 第 16/17 条与 `docs/工程规范/lean-guard.md`。
-12. **测试质量门禁**：`tests/**`、`app/tests/**`、`docs/开发文档/测试管理/**` 为覆盖关键风险可允许合理净增长；高质量测试定义、坏测试反模式、评分卡与阻断规则统一引用 `.cursor/rules/test_quality.mdc`。
+1. **未上线项目优先架构正确**：设计合理和简洁优先于兼容性与改动量；结构问题默认 `refactor`，禁止用 `patch`、fallback、兼容层、重复分支或硬编码开关掩盖。
+2. **架构门禁先行**：任何改动前必须先给出“模块边界、依赖方向、状态归属、错误处理责任”四段式结论；说不清则禁止开工。
+3. **瘦身合同先行**：`bugfix/refactor` 或新实现替代旧职责时，必须先声明 `obsolete_paths`、`retained_paths`、`single_entry_owner`、`line_budget`；说不清则禁止开工。
+4. **默认做减法**：默认 `line_budget=added<=deleted`；若净增长，必须先说明架构必要性与不可拆分原因。
+5. **文档先行且原位修改**：涉及架构/API/表结构/配置/功能变动时，先更新真理源文档再改代码；同主题默认原位修改，禁止平行追加。
+6. **外部事实先核验**：涉及最佳实践、第三方库/API、官方实现或最新信息时，优先核验官方或权威来源，再下结论。
+7. **语义判定边界固定**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract。
+8. **Lean 交付要有证据**：热点目录/热点文件必须过 `lean-guard`；未给出删除清单、重复收敛、复杂度变化、验证结果，不得宣称 `lean/refactor` 完成。
 
-## `patch` 模式附加门槛（强制）
-- 必须包含：影响范围、临时性说明、回退路径、后续治理任务；若 `patch` 已形成新旧双轨或无法给出 `retained_paths` 的唯一保留理由，必须升级为 `refactor`。
-
-## 执行上下文校验（强制）
-### A. 基础观测（每次执行前）
-修改代码或运行测试前必须先输出：
-1. `pwd`
-2. `git branch --show-current`
-3. `git worktree list`
-
-### B. 期望上下文比对（`jjk-verify` / 测试前强制）
-仅做基础观测不足以保证“测对分支/测对 worktree”，必须做“期望值比对”：
-1. 从输入证据中提取期望上下文（至少其一）：`task_id/pr_id`、目标分支、目标 worktree 路径、目标提交 SHA。
-2. 采集实际上下文：`pwd`、`git rev-parse --show-toplevel`、`git branch --show-current`、`git rev-parse HEAD`。
-3. 比对“期望 vs 实际”；任一关键项不一致，`FAIL_FAST` 输出 `VERIFY_CONTEXT_MISMATCH` 并停止测试执行。
-4. `jjk-verify` 报告必须包含：目标上下文、实际上下文、比对结论、阻断/放行原因。
-5. 若输入证据无法提供可比对的期望上下文，`FAIL_FAST` 输出 `VERIFY_INPUT_INCOMPLETE`，禁止进入测试阶段。
-
-## 文件编辑工具契约（强制）
-1. 文件编辑必须以当前会话**实际暴露**的工具集为准；若没有独立 `apply_patch` 入口，禁止通过 `exec_command` 包装 `apply_patch`。
-2. 命中该场景时，必须显式记录 `APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK`，并改用当前可用的直接写回方式（如 Python/Perl/安全 shell 重写），禁止因工具冲突反复空转。
-3. 若后续环境真实暴露独立 `apply_patch` 工具，应优先使用真实工具；仓内规则不为不存在的工具制造兼容壳。
-
-## 测试解释器契约（强制）
-1. 任何测试/验证命令在执行前，必须先通过 `bash scripts/repo_python.sh` 解析仓库测试解释器，禁止默认裸用 `python3 -m pytest`。
-2. 解析优先级固定为：`VK_RUNTIME_VENV` -> `venv` -> `.venv` -> `.vibe/venv` -> 系统 `python3/python`；只有仓内解释器不存在时，才允许回落到系统解释器。
-3. `jjk-verify` / 测试证据中必须回显本次命中的解释器路径，避免再次出现“测错环境”。
-
-## 测试语义分层（强制）
-1. TDD/调试阶段的定向回归，统一使用 `bash scripts/pytest_targeted.sh <tests...>`，默认附带 `--no-cov`，只验证当前根因是否命中。
-2. 最终收口/门禁验证继续使用常规 pytest/coverage 命令；coverage 只属于最终收口语义，不得混入开发期红绿循环。
-3. 两类命令禁止混用；若定向入口收到 `--cov` 类参数，应立即 `FAIL_FAST`，避免再次把 coverage 噪音带回 RED 阶段。
-
-## 运行态校验（按需强制）
-以下场景必须补充运行态校验，不得只做静态命令验证：
-1. 端口/服务启动相关问题；
-2. API 联调、E2E/UAT、回归关键链路；
-3. 用户明确要求“确认服务是否启动/端口是否可用”。
-
-推荐最小校验集（按需选择）：
-1. 先基于当前分支/工作树计算端口：`eval "$(bash scripts/vk_ports.sh --export)"`
-2. 端口监听：`lsof -nP -iTCP:${VK_BACKEND_PORT} -sTCP:LISTEN`、`lsof -nP -iTCP:${VK_FRONTEND_PORT} -sTCP:LISTEN`
-3. 后端健康：`curl -sf "http://127.0.0.1:${VK_BACKEND_PORT}/health"`
-4. 前端可达：`curl -I "http://127.0.0.1:${VK_FRONTEND_PORT}"`
-5. 浏览器/E2E 验证必须使用 `VK_FRONTEND_BASE_URL`（或 `PLAYWRIGHT_BASE_URL`）与 `VK_BACKEND_BASE_URL`，禁止硬编码 `3000/8000`。
-
-未执行运行态校验时，必须在交付中写明：未触发原因、替代证据、残余风险。
+## 执行流程入口（强制）
+1. 改代码、跑测试、做验收前，先读 `PLANS.md` 对应章节。
+2. `PLANS.md` 是以下流程的唯一入口：`patch` 门槛、执行上下文校验、文件编辑工具契约、测试解释器契约、测试语义分层、运行态校验。
+3. 命中 API / Schema / Route / DTO / 接口语义变更时，除本文件外还必须遵守 `.cursor/rules/doc_sync.mdc` 与对应的 `jjk-api-doc-sync` 门禁。
 
 ## Layer2 规则入口（唯一源）
 - 规则唯一源：`.cursor/rules/*.mdc`
@@ -82,10 +35,6 @@
   - LangGraph 约束：`.cursor/rules/langgraph.mdc`
   - 语言风格：`.cursor/rules/python_style.mdc`、`.cursor/rules/typescript_style.mdc`
   - 测试质量与坏测试治理：`.cursor/rules/test_quality.mdc`
-
-## Layer3 技能入口（功能级）
-- Skills / tools 用于功能级执行策略。
-- 命中技能触发条件时必须使用；缺失或不可用时说明原因并降级，不得阻塞任务。
 
 ## Layer4 项目记忆（历史决策）
 - 决策记录文件：`memory-bank.md`（本仓库根目录）。

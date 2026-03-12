@@ -51,6 +51,37 @@
 
 后续若继续治理流程产物路径，再单独收口 `docs/plans/`。
 
+
+### AI 协作者规则文档分层
+
+如果当前任务会用到 `Codex` / `AGENTS.md` / `PLANS.md` 这类协作规则，按下面这套方式理解：
+
+| 文档载体 | 角色 | 应该放什么 | 什么时候读 |
+|---|---|---|---|
+| **根 `AGENTS.md`** | 常驻入口 | 全局硬门禁、输出口径、加载路由 | 几乎每个仓内任务都会生效 |
+| **目录级 `AGENTS.md`** | 局部覆盖 | 只对当前目录树生效的补充规则 | 命中对应目录时再读 |
+| **`.cursor/rules/*.mdc`** | 技术规则真理源 | 架构、文档同步、测试质量、MCP 路由等技术细则全文 | 命中对应主题时按需读 |
+| **`PLANS.md`** | 长流程执行手册 | 实现、测试、验证、交付这类多阶段流程 | 复杂任务或长流程任务时再读 |
+
+这套分层的核心不是“删规则”，而是**不丢规则内容，但缩小默认加载面**：
+
+- 根 `AGENTS.md` 只保留**总则 + 路由**，不要继续承载所有细则全文。
+- 技术细则保留在 `.cursor/rules/*.mdc` 作为**唯一真理源**，避免根文件和平行文档双写。
+- 只有在开始实现、跑测试、做验收时，才通过 `AGENTS.md` 路由去读 `PLANS.md` 的长流程。
+- 目录越靠近当前工作路径，优先级越高；局部规则优先覆盖全局规则。
+- 静态且高复用的说明应尽量短、稳定，避免把无关长清单每轮都塞进上下文。
+
+这样做的目的有两个：
+
+1. **规则内容不丢**：全文仍然保留在真理源文档里。
+2. **上下文更聚焦**：模型默认只背最需要的规则，不必每轮重复加载整套长流程和长清单。
+
+参考依据：
+
+- OpenAI 官方 `AGENTS.md` 文档说明：Codex 会按全局、仓库、子目录逐级加载指令，目录越近优先级越高；当项目文档过大时，应拆分到更靠近代码的嵌套目录，而不是继续堆在根文件中。参见：[Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md)
+- OpenAI Developer Cookbook（2025-10-07）建议：对于多小时、多阶段、需要研究与实施并行推进的任务，可以在 `AGENTS.md` 中声明何时使用 `PLANS.md`，再将长流程放入 `PLANS.md`。参见：[Using PLANS.md for multi-hour problem solving](https://developers.openai.com/cookbook/articles/codex_exec_plans)
+- OpenAI 官方 Prompt Caching 建议：稳定且重复的前缀应尽量保持固定，动态内容应尽量后置，以获得更好的缓存与延迟表现。参见：[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)
+
 ---
 
 ## 你是谁？从这里开始

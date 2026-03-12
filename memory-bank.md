@@ -9,6 +9,7 @@
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 - 2026-03-11｜JJK 工程流重构为 `clarify(requirements) -> design -> plan(UAT) -> imp -> verify`，正式产品/设计文档改为 `--doc` 显式发布，API 文档继续自动同步（ACTIVE）→ `.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`memory-bank.md`
 - 2026-03-11｜task_split 机器契约/过程报告从 docs 彻底收口到 `workdocs/任务拆解/contracts|reports`，真实运行态只认 `.artifacts/states/task_splits`（ACTIVE）→ `docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`
+- 2026-03-11｜根 AGENTS 收敛为总则+路由，执行长流程下沉到 `PLANS.md`（ACTIVE）→ `AGENTS.md`、`PLANS.md`、`docs/README.md`
 - 2026-03-11｜瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`docs/工程规范/lean-guard.md`、`.cursor/commands/jjk-arch-gate.md`、`.cursor/commands/jjk-refactor.md`
 - 2026-03-11｜文档记忆启用且 Worker 就绪时，`memory.intent_async_enabled` 默认保持开启（ACTIVE）→ `docs/开发文档/快速入门/配置说明.md`、`app/core/memory_intent_runtime.py`
 - 2026-03-11｜JJK 命令执行统一采用单步单目标，禁止长链整串重跑（ACTIVE）→ `.cursor/rules/core.mdc`、`.cursor/commands/jjk-verify.md`、`docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md`
@@ -61,6 +62,16 @@
 - 影响范围：`scripts/task_split_paths.py`、`scripts/coder4/*.py|*.sh`、`scripts/workflow_contract_*`、`scripts/check_workflow_contract.py`、`scripts/docs_guard.py`、`.cursor/rules/doc_sync.mdc`、`workdocs/任务拆解/**`、`docs/README.md`、`docs/SUMMARY.md`、`workdocs/README.md`、`memory-bank.md`
 - 回退/失效条件：若未来统一改到另一套工作流存储或正式文档站点，可由新的目录策略替代；在此之前保持 `workdocs/contracts|reports + .artifacts runtime` 这套边界，不恢复 docs 下 task_split 机器 JSON
 - 关联文档/代码：`docs/plans/2026-03-11-docs-governance-phase2-task-split-layering-design.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_requirements.md`、`docs/内部参考/迭代需求/docs-governance-phase2-task-split-layering_implementation_plan.md`、`scripts/task_split_paths.py`
+
+### 2026-03-11 根 AGENTS 收敛为总则+路由，执行长流程下沉到 `PLANS.md`
+- 状态：ACTIVE
+- 决策主题：将仓库根 `AGENTS.md` 收敛为高信号常驻入口，把只在实现/测试/验收阶段才需要的长流程规则统一下沉到 `PLANS.md`
+- 背景与问题：根 `AGENTS.md` 同时承担治理总则与执行型流程，默认加载面过大；规则内容虽然正确，但对日常对话和轻量任务来说噪音过高
+- 最终决策：根 `AGENTS.md` 仅保留全局门禁、路由和真理源入口；`patch` 门槛、上下文校验、文件编辑工具契约、测试解释器、测试语义分层、运行态校验统一迁入 `PLANS.md`
+- 取舍理由：这次不删除规则事实内容，只调整装配方式；让高频常驻内容更短，同时保留长流程规则的完整可追溯性，更符合 OpenAI 对仓库指令“短、稳、按需加载”的公开最佳实践
+- 影响范围：`AGENTS.md`、`PLANS.md`、`docs/README.md` 中的 AI 协作者规则分层说明，以及后续所有仓内任务的规则读取路径
+- 回退/失效条件：若后续 Codex / 仓内执行链改为新的统一计划载体，并由更高优先级真理源替代 `PLANS.md`，可将本决策标记为 `SUPERSEDED`；在此之前保持启用
+- 关联文档/代码：`AGENTS.md`、`PLANS.md`、`docs/README.md`、`.cursor/rules/core.mdc`、`.cursor/rules/doc_sync.mdc`
 
 ### 2026-03-11 瘦身规则前置为 shrink contract，旧路径残留升级为硬阻断
 
