@@ -6,14 +6,7 @@
  * @test-case TC-CHAT-THREAD-02 历史条目左侧点击可直接切换会话
  */
 const { test, expect } = require('@playwright/test');
-
-function json(route, data, status = 200) {
-  return route.fulfill({
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
-    body: JSON.stringify(data),
-  });
-}
+const { setupMockChatApi } = require('./helpers/mock-chat-api');
 
 async function setupMockApi(page) {
   const threadA = {
@@ -65,53 +58,11 @@ async function setupMockApi(page) {
     ],
   };
 
-  await page.addInitScript(() => {
-    window.sessionStorage.setItem('auth:token', 'e2e-mock-token');
-  });
-
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const { pathname } = url;
-
-    if (req.method() === 'GET' && pathname === '/api/v1/me') {
-      return json(route, {
-        id: 1,
-        username: 'e2e',
-        mobile: null,
-        data_role: null,
-        data_role_label: null,
-      });
-    }
-
-    if (req.method() === 'GET' && pathname === '/api/v1/llm/models') {
-      return json(route, [
-        {
-          model_code: 'mock-chat',
-          model_name: 'Mock Chat',
-          model_type: 'chat',
-          provider: 'mock',
-          supports_thinking: false,
-          is_default: true,
-        },
-      ]);
-    }
-
-    if (req.method() === 'GET' && pathname === '/api/v1/chat/threads/latest') {
-      return json(route, threadA);
-    }
-
-    if (req.method() === 'GET' && pathname === '/api/v1/chat/threads') {
-      return json(route, [threadA, threadB]);
-    }
-
-    const messageMatch = pathname.match(/^\/api\/v1\/chat\/threads\/([^/]+)\/messages$/);
-    if (req.method() === 'GET' && messageMatch) {
-      const tid = decodeURIComponent(messageMatch[1]);
-      return json(route, messagesByThread[tid] || []);
-    }
-
-    return json(route, {});
+  await setupMockChatApi(page, {
+    threadA,
+    threadB,
+    latestThread: threadA,
+    messagesByThread,
   });
 }
 
@@ -126,7 +77,7 @@ test.describe('会话切换稳定性回归', () => {
     await page.goto('/chat?threadId=thread-A', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15000 });
 
-    const newThreadButton = page.getByRole('button', { name: '新建对话' }).first();
+    const newThreadButton = page.getByRole('button', { name: '新会话' }).first();
     await expect(newThreadButton).toBeVisible({ timeout: 10000 });
 
     await expect

@@ -133,6 +133,7 @@ module.exports = {
     loginViaApi,
     loginAndGoto,
     loginAndOpenThread,
+    seedAuthToken,
     ensureChatReady,
     waitForChatReady,
     waitForAIResponse,

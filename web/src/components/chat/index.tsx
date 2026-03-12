@@ -30,7 +30,6 @@ import { useModels } from "@/lib/model-config";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
-  footer?: ReactNode;
   className?: string;
   contentClassName?: string;
 }) {
@@ -47,8 +46,6 @@ function StickyToBottomContent(props: {
       >
         {props.content}
       </div>
-
-      {props.footer}
     </div>
   );
 }
@@ -387,6 +384,20 @@ export function Thread() {
                       handleRegenerate={handleRegenerate}
                     />
                   )}
+                  {currentStatus?.message && (
+                    <div className="chat-content-shell mx-auto flex w-full flex-col items-start gap-2">
+                      <div
+                        data-testid="runtime-status"
+                        data-phase={currentStatus.phase}
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                        className="chat-runtime-status"
+                      >
+                        {currentStatus.message}
+                      </div>
+                    </div>
+                  )}
                   {isLoading && !firstTokenReceived && (
                     <AssistantMessageLoading />
                   )}
@@ -398,15 +409,6 @@ export function Thread() {
 
           <footer className="chat-footer-surface sticky bottom-0 z-10 w-full pb-[env(safe-area-inset-bottom)] transition-all duration-300">
             <div className="chat-stream-shell relative mx-auto">
-              {currentStatus?.message && (
-                <div
-                  data-testid="runtime-status"
-                  data-phase={currentStatus.phase}
-                  className="chat-runtime-status mb-2"
-                >
-                  {currentStatus.message}
-                </div>
-              )}
               <ChatInput
                 input={input}
                 setInput={setInput}
