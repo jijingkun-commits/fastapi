@@ -130,7 +130,7 @@ def test_exam_generation_service_create_job_should_reject_parallel_limit(monkeyp
     engine.dispose()
 
 
-def test_exam_generation_service_list_jobs_should_replay_download_url_from_history() -> None:
+def test_exam_generation_service_list_jobs_should_replay_download_url_from_history(monkeypatch) -> None:
     engine = create_engine("sqlite:///:memory:")
     ExamGenerationJob.__table__.create(bind=engine)
     Session = sessionmaker(bind=engine)
@@ -151,11 +151,14 @@ def test_exam_generation_service_list_jobs_should_replay_download_url_from_histo
         minio_object_key="1/exam-job-1/exports/history.pdf",
     )
 
+    monkeypatch.setattr('app.services.exam_generation_service.get_dataset_label_map', lambda dataset_ids: {'kb-a': '网络金融部', 'kb-b': '零售条线'})
+
     jobs = service.list_jobs(db, user=SimpleNamespace(id=1), limit=10)
 
     assert len(jobs) == 1
     assert jobs[0].title == "历史试卷"
     assert jobs[0].dataset_ids == ["kb-a", "kb-b"]
+    assert jobs[0].dataset_labels == ['网络金融部', '零售条线']
     assert jobs[0].download_url == f"/api/v1/exam-admin/jobs/{job.id}/download"
 
     db.close()

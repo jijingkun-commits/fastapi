@@ -31,6 +31,7 @@ def test_retrieve_exam_evidence_should_prioritize_earlier_dataset(monkeypatch) -
 
     def _merge_and_rerank_candidates(route_chunks, **kwargs):
         captured_chunks.extend(route_chunks)
+        assert kwargs['enable_rerank'] is True
         return route_chunks
 
     monkeypatch.setattr(workflow.ragflow_tool, "_retrieve_chunks_for_query", _retrieve_chunks_for_query)

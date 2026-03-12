@@ -45,6 +45,7 @@ export interface ExamJobSummary {
   title: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   dataset_ids: string[];
+  dataset_labels?: string[];
   asset_id?: number | null;
   minio_object_key?: string | null;
   download_url?: string | null;

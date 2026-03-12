@@ -88,6 +88,7 @@ test.describe('用户故事: AI 出题后台', () => {
             await expect(page.getByText('题量上限 100')).toBeVisible();
             await expect(page.getByText('并发上限 3')).toBeVisible();
             await expect(page.getByText('历史试卷 A')).toBeVisible();
+            await expect(page.getByText('知识库 A')).toBeVisible();
             await expect(page.getByRole('button', { name: '下载', exact: true })).toBeVisible();
         });
 

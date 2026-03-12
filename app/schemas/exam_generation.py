@@ -144,6 +144,7 @@ class ExamGenerationJobSummary(BaseModel):
     title: str
     status: ExamJobStatus
     dataset_ids: list[str]
+    dataset_labels: list[str] = Field(default_factory=list)
     asset_id: Optional[int] = None
     minio_object_key: Optional[str] = None
     download_url: Optional[str] = None

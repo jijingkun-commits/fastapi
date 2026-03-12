@@ -23,7 +23,14 @@ from app.schemas.exam_generation import (
     ExamGenerationJobSummary,
 )
 from app.services.asset_service import get_asset_service
-from app.services.exam_template_service import MAX_ACTIVE_JOBS_PER_USER, MAX_TOTAL_QUESTIONS, build_default_template, list_available_datasets
+from app.services.exam_template_service import (
+    MAX_ACTIVE_JOBS_PER_USER,
+    MAX_TOTAL_QUESTIONS,
+    build_default_template,
+    list_available_datasets,
+    get_dataset_label_map,
+    resolve_dataset_labels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,17 +80,20 @@ class ExamGenerationService:
             dataset_ids=payload.dataset_ids,
             request_snapshot=jsonable_encoder(payload),
         )
-        return self._to_summary(job)
+        dataset_label_map = get_dataset_label_map(list(job.dataset_ids or []))
+        return self._to_summary(job, dataset_label_map=dataset_label_map)
 
     def list_jobs(self, db: Session, *, user: Any, limit: int = 50) -> list[ExamGenerationJobSummary]:
         jobs = exam_generation_job_repo.list_jobs_by_user(db, int(user.id), limit=min(max(limit, 1), 100))
-        return [self._to_summary(job) for job in jobs]
+        dataset_label_map = get_dataset_label_map([dataset_id for job in jobs for dataset_id in list(job.dataset_ids or [])])
+        return [self._to_summary(job, dataset_label_map=dataset_label_map) for job in jobs]
 
     def get_job(self, db: Session, *, user: Any, job_id: int) -> ExamGenerationJobDetail:
         job = exam_generation_job_repo.get_job_by_id(db, job_id)
         if job is None or int(job.user_id) != int(user.id):
             raise HTTPException(status_code=404, detail="任务不存在")
-        return self._to_detail(job)
+        dataset_label_map = get_dataset_label_map(list(job.dataset_ids or []))
+        return self._to_detail(job, dataset_label_map=dataset_label_map)
 
     def run_job(self, job_id: int) -> None:
         with get_db_context() as db:
@@ -148,14 +158,16 @@ class ExamGenerationService:
             file_name=f"{safe_title}.pdf",
         )
 
-    def _to_summary(self, job) -> ExamGenerationJobSummary:
+    def _to_summary(self, job, *, dataset_label_map: dict[str, str] | None = None) -> ExamGenerationJobSummary:
         result_payload = job.result_payload or {}
+        dataset_ids = list(job.dataset_ids or [])
         return ExamGenerationJobSummary(
             id=int(job.id),
             user_id=int(job.user_id),
             title=str(job.title),
             status=str(job.status),
-            dataset_ids=list(job.dataset_ids or []),
+            dataset_ids=dataset_ids,
+            dataset_labels=resolve_dataset_labels(dataset_ids, label_map=dataset_label_map),
             asset_id=int(job.asset_id) if job.asset_id is not None else None,
             minio_object_key=job.minio_object_key,
             download_url=result_payload.get("download_url"),
@@ -166,8 +178,8 @@ class ExamGenerationService:
             finished_at=job.finished_at,
         )
 
-    def _to_detail(self, job) -> ExamGenerationJobDetail:
-        summary = self._to_summary(job)
+    def _to_detail(self, job, *, dataset_label_map: dict[str, str] | None = None) -> ExamGenerationJobDetail:
+        summary = self._to_summary(job, dataset_label_map=dataset_label_map)
         return ExamGenerationJobDetail(
             **summary.model_dump(),
             request_snapshot=dict(job.request_snapshot or {}),

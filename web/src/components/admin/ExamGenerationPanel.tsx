@@ -225,7 +225,7 @@ export function ExamGenerationPanel() {
                   <TableCell>
                     <Badge variant={job.status === 'succeeded' ? 'default' : job.status === 'failed' ? 'destructive' : 'secondary'}>{job.status}</Badge>
                   </TableCell>
-                  <TableCell>{job.dataset_ids.join(', ')}</TableCell>
+                  <TableCell>{(job.dataset_labels && job.dataset_labels.length > 0 ? job.dataset_labels : job.dataset_ids).join(', ')}</TableCell>
                   <TableCell>{formatTime(job.created_at)}</TableCell>
                   <TableCell>
                     {job.status === 'succeeded' ? (

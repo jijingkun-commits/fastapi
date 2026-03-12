@@ -130,6 +130,7 @@ def retrieve_exam_evidence(dataset_ids: list[str], template: PaperTemplateReques
 
     merged = ragflow_tool._merge_and_rerank_candidates(  # type: ignore[attr-defined]
         route_chunks,
+        enable_rerank=True,
         similarity_weight=0.7,
         route_weight_weight=0.3,
     )
