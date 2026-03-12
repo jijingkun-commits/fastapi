@@ -122,34 +122,36 @@ npx ai-agent-skills info <skill-name>
 ### 2.1 核心流程
 
 ```
-想法 → /jjk-clarify（设计冻结 + PRD-Lite） → /jjk-plan → requirements.md + implementation_plan.md
-     → /jjk-imp（或 /jjk-vkplan -> /jjk-cardrun） → /jjk-verify → 验收
+想法 → /jjk-clarify（纯需求） → /jjk-design（技术方案 + shrink/db migration contract）
+     → /jjk-plan（implementation_plan + uat_cases）
+     → /jjk-imp（或 /jjk-vkplan -> /jjk-cardrun） → /jjk-review → /jjk-verify → 验收
                                                 （或 /jjk-review → /jjk-test → 验收）
 ```
 
-`/jjk-clarify` 支持在同一命令内完成探索与冻结（不强制前置 `brainstorming`）。
+`/jjk-clarify` 只负责需求冻结；技术方案统一进入 `/jjk-design`。
 
 | 阶段 | 命令 | 产出 | 说明 |
 |------|------|------|------|
-| **澄清冻结** | `/jjk-clarify` | `design.md` + `design_freeze_summary` + `clarify_handoff_contract` | 开发前冻结边界/语义/回退口径 |
-| **规划** | `/jjk-plan` | `requirements.md` + `implementation_plan.md` | 形成 WHAT + HOW，可直接承接实现 |
-| **实现** | `/jjk-imp` | 代码 + 文档 | AI 实现功能 |
-| **一站式验证** | `/jjk-verify` | 验证报告 | 审查 + 测试 + 交互式 UAT + 测试质量达标判定 |
+| **需求冻结** | `/jjk-clarify` | `requirements.md` | 冻结“做什么”，可选 `--doc` 发布正式产品/需求文档 |
+| **技术方案** | `/jjk-design` | `design.md` | 冻结“怎么做”，含 `change_map/shrink_contract/db_migration_contract` |
+| **规划** | `/jjk-plan` | `implementation_plan.md` + `uat_cases.md` | 形成施工单 + 验收单 |
+| **实现** | `/jjk-imp` | 代码 + 证据 | 命中 DB 变化时自动执行 migration |
+| **一站式验收** | `/jjk-verify` | 验证报告 | 消费既有 UAT、DB migration 与文档证据 |
 | **测试** | `/jjk-test` | 测试报告 | 验证功能 + 风险模型 / 失败模式覆盖 |
 | **调试** | `/jjk-debug` | 修复方案 | 排查问题 |
 | **审查** | `/jjk-review` | 审查意见 | 代码质量检查 + 测试质量评分卡 |
 | **并行拆解** | `/jjk-vkplan` + `/jjk-cardrun` | `parallel_plan` + 卡片执行证据 | 多任务并行与串行收口 |
 
-### 2.1.1 Clarify v3.2 必过门禁（工程模式）
+### 2.1.1 Clarify / Design / Plan 必过门禁（工程模式）
 
 开发前必须满足：
 
-1. `product_contract`（PRD-Lite）完整：`target_users/core_scenarios/business_goals/non_goals/acceptance_gates`。
-2. `design_freeze_summary.product_contract_ready=true`。
-3. `clarify_consistency_check.clarify_phase=approval` 且 `open_questions_count=0`。
-4. 条件采纳（`design_approved=false`）不得进入 `/jjk-plan`。
-5. 修改 `jjk-clarify` 命令/模板后执行：`python3 scripts/check_clarify_contract_consistency.py`。
-6. 建议执行：`python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path ... --implementation-path ...` 做桥接校验。
+1. `/jjk-clarify` 已冻结纯需求，并得到 `requirements_approved=true`。
+2. `/jjk-design` 已冻结四段式架构结论、`change_map`、`db_migration_contract`、`shrink_contract`。
+3. `/jjk-plan` 已同时产出 `implementation_plan.md` 与 `uat_cases.md`。
+4. 条件采纳不得进入下游实现链。
+5. 命中 DB 变化时，计划里必须已有 migration task 与命令模板。
+6. `/jjk-verify` 只消费既有合同，不临场补 UAT。
 
 ### 2.2 上下文引用策略
 
@@ -417,7 +419,7 @@ description: 命令的简短描述
 | 命令 | 说明 | 产出物 |
 |------|------|--------|
 | `/ask` | 兼容入口（已降级），触发后立即并入 `/jjk-clarify` | 无独立权威产物 |
-| `/jjk-clarify` | 设计冻结入口（默认收敛），沉淀 `design_freeze_summary + clarify_handoff_contract` | `design.md` |
+| `/jjk-clarify` | 需求冻结入口（默认收敛），沉淀内部 `requirements.md` | `requirements.md` |
 | `/jjk-plan` | 正式规划入口（`core/parallel`），产出需求与实现方案 | `requirements.md` + `implementation_plan.md` |
 | `/jjk-imp` | 标准实现入口，按计划改码并同步必要文档 | 代码 + 文档 |
 | `/jjk-wtimp` | worktree 隔离实现入口，适合中大改动 | 隔离实现证据 + 合并结果 |
@@ -474,7 +476,7 @@ description: 命令的简短描述
 | `/jjk-imp` | 实现阶段同步必要文档变更 | `/jjk-imp` |
 | `/jjk-review` | 审查阶段检查文档-代码一致性 | `/jjk-review` |
 | `/jjk-verify` | 验收阶段做最终文档收口确认 | `/jjk-verify` |
-| `python3 scripts/check_workflow_contract.py --mode clarify_plan ...` | Clarify/Plan 契约一致性校验 | `python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path ... --implementation-path ...` |
+| `python3 scripts/check_workflow_contract.py --mode clarify_plan ...` | 需求/方案/计划契约一致性校验 | `python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path ... --implementation-path ...` |
 
 ### 7.7 并行与看板协作
 
@@ -513,7 +515,8 @@ npx ai-agent-skills update --all    # 更新全部
 /ask               # 兼容别名（已降级），会立即转入 /jjk-clarify
 /jjk-clarify       # 设计冻结 + handoff 契约（含 PRD-Lite）
 /jjk-arch-gate     # 改动前四段式架构门禁
-/jjk-plan          # 生成 requirements + implementation_plan（core/parallel）
+/jjk-design        # 生成 design.md（技术方案 + shrink/db migration contract）
+/jjk-plan          # 生成 implementation_plan + uat_cases
 /jjk-api-doc-sync  # API / Schema / Route 文档同步门禁
 
 # 并行与看板 - 多 worktree 协作

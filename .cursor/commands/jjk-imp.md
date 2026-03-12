@@ -1,110 +1,91 @@
 ---
-description: 代码实现入口：按 implementation_plan 执行、验证与回填
+description: 代码实现入口：严格消费 implementation_plan 与 uat_cases，执行实现、验证与文档回填
 ---
-
-> 参考规则: @dual-database
 
 # 实现工作流（Implementation Workflow）
 
-`/jjk-imp` 负责把已审批的计划落到代码、测试和文档证据。
+`/jjk-imp` 负责把已审批的需求、方案与计划落到代码、测试和文档证据。
 
 > **中文主导**：思考与输出统一中文。
 
----
-
 ## 输入前置（强制）
 
-按优先级读取：
+1. `docs/内部参考/迭代需求/<topic>_requirements.md`
+2. `docs/plans/YYYY-MM-DD-<topic>-design.md`
+3. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+4. `docs/内部参考/迭代需求/<topic>_uat_cases.md`
 
-1. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（首选）
-2. `docs/内部参考/迭代需求/fix_plan_<topic>.md`
-3. `docs/内部参考/迭代需求/<topic>_requirements.md`（仅兜底，不建议直接开工）
+失败时：
 
-硬校验：
-
-1. 若 `implementation_readiness.implementation_ready=false` -> `IMPLEMENTATION_NOT_READY`
-2. 若缺少工单级字段（如 `task_id/file_paths/symbols/acceptance_cmds`）-> `IMP_INPUT_TOO_COARSE`
-3. 若缺少 `execution_contract` -> `IMP_EXECUTION_CONTRACT_MISSING`
-
----
+1. 缺少计划：`IMP_PLAN_REQUIRED`
+2. 缺少 UAT：`IMP_UAT_CASES_REQUIRED`
+3. 缺少 shrink contract：`IMP_SHRINK_CONTRACT_MISSING`
+4. 工单字段不全：`IMP_INPUT_TOO_COARSE`
 
 ## 执行流程（四步）
 
 ### 0) 上下文校验
 
-补充执行约束：执行命令时统一遵循 `.cursor/rules/core.mdc` 的“命令执行拆分”规则：单步单目标、失败只重跑当前步、长任务只轮询不重启、输出截断时优先拆短当前步。
-
 至少检查：
 
-1. 任务映射（`feature_id/task_id/pr_id/card_id`）；
-2. 当前工作区变更与依赖文件；
-3. 相关测试入口与最小回归范围。
+1. 当前任务对应哪些 `task_id`；
+2. 相关 `acceptance_cmds` 与最小回归范围；
+3. 是否命中 API 文档自动同步；
+4. 是否命中 `db_migration_required=true`。
 
-### 1) 按 `execution_contract` 执行任务
+### 1) 按 `implementation_plan` 执行任务
 
-先读取：`delivery_mode/execution_unit/commit_policy/stop_boundary/stop_on_blocked`。
+1. 每次只实现当前 `task_id` 声明的职责；
+2. 命中 `obsolete_paths` 时，必须同步执行删除或收口；
+3. 若发现设计漂移，输出 `IMP_PLAN_DRIFT_DETECTED`，回退 `/jjk-design` 或 `/jjk-plan`；
+4. 禁止在实现阶段私自改需求或改技术方案。
 
-执行规则：
+### 1.5) 自动执行 DB Migration（命中时强制）
 
-1. `one_shot`：连续执行到 `all_done` 或阻塞；
-2. `staged`：按 `per_pr` 或 `per_task` 边界停下；
-3. `single_commit`：全量完成后提交；
-4. `per_pr`：每个 `pr_id` 完成后提交。
-
-每次停下必须输出：
-
-1. `IMP_STOP_REASON=all_done|stage_boundary|blocked|manual`
-2. `IMP_STOP_CONTEXT=<pr_id|task_id|blocker>`
+1. 当 `db_migration_required=true` 时，必须自动解析仓库 Python：`PYTHON_BIN=$(bash scripts/repo_python.sh)`；
+2. 开发态默认执行：`bash scripts/db/run_dev_migration.sh`；
+3. 若 `release_migration_required=true`，还必须自动生成 Alembic 迁移草稿并复核，再执行 `bash scripts/db/run_release_migration.sh --upgrade-only`；
+4. 必须把迁移文件路径、执行命令、退出码和摘要一并回填证据；
+5. 命中 DB 结构变化却未执行 migration，直接失败：`IMP_DB_MIGRATION_MISSING`。
 
 ### 2) 测试与验证
 
-1. 可用时优先 TDD；不可用输出 `TDD_UNAVAILABLE_FALLBACK`。
-2. 必须执行计划中的 `acceptance_cmds`。
-3. 可用时执行 `verification-before-completion`；不可用输出 `VERIFY_BEFORE_COMPLETION_UNAVAILABLE_FALLBACK` 并附手工证据。
-4. 若本次变更命中 Lean Guard 热点文件，完成实现前必须执行 `python3 scripts/ci/check_lean_budget.py --cached --strict`；失败则 `FAIL_FAST` 输出 `IMP_LEAN_GUARD_FAILED`。
+1. 必须执行当前任务对应的 `acceptance_cmds`；
+2. 必须回填 `mandatory_evidence`；
+3. 命中 DB migration 时，必须回填 `db_migration_evidence`；
+4. 可用时执行 `verification-before-completion`；
+5. 无新鲜命令证据，不得宣称完成。
 
-### 3) 文档回填与交接
+### 3) 文档回填与同步
 
-命中以下变更时必须同步文档：
+1. 命中 API 变化时，API 文档必须自动同步；
+2. 仅当 `publish_product_doc=true` 时，才回填正式产品/需求文档；
+3. 仅当 `publish_design_doc=true` 时，才回填正式设计/架构文档；
+4. 测试行为变化时，回填测试资产。
 
-1. API -> `docs/API文档/接口文档.md`
-2. 表结构 -> `docs/开发文档/架构设计/数据库设计.md`
-3. 配置 -> `docs/开发文档/快速入门/配置说明.md` + `.env.example`
-4. 测试行为 -> `docs/开发文档/测试管理/测试用例库.md`
-5. 产品运行时 Skill 变更（如 `app/ai/skills/**`、`app/data/skills/**`、`app/services/skill_service.py`、`app/services/skill_bootstrap_service.py`、`app/main.py`、`app/api/v1/endpoints/skill_admin_api.py`、`app/api/v1/endpoints/user_skill_api.py`、`app/models/agent_skill.py`、`app/schemas/user_skill.py`、`scripts/data/import_skills.py`）-> 必须按 `.cursor/rules/doc_sync.mdc` 的“产品运行时 Skill 专项映射（强制）”同步 `技能系统需求.md`、`AI技能库.md`、`接口文档.md`、相关配置/部署/测试文档
-6. 禁止只更新 Skill 测试报告、只更新接口文档，或只更新内部参考而遗漏产品需求文档
+### 4) 交接给 `/jjk-verify`
 
-最终必须输出：
+至少交付：
 
-1. 已完成任务清单（`task_id -> 文件 -> 验收命令 -> 结果`）
-2. 未完成/阻塞项
-3. 风险与回滚建议
-4. 下一命令建议（`/jjk-verify` 或 `/jjk-review`）
-5. `pr_ready_manifest`（`task_id/pr_id/card_id/changed_files/acceptance_cmds/rollback_point`）
-
----
-
-## Team 策略（简化）
-
-命中任一条件可启用 Team：
-
-1. 改动文件 `>=8`
-2. 跨边界 `>=2`
-3. 待执行 `task_id >=6`
-4. 需要并行 worktree
-
-无 Team 能力时降级单代理并输出 `TEAM_UNAVAILABLE_FALLBACK`。
-
----
+1. 改动文件清单；
+2. `acceptance_cmds` 结果；
+3. `mandatory_evidence`；
+4. 文档同步状态；
+5. `obsolete_paths` 执行结果；
+6. `db_migration_evidence`。
 
 ## 禁止项（强制）
 
-1. 禁止输入不完整就直接编码。
-2. 禁止跳过 `acceptance_cmds` 就宣称完成。
-3. 禁止更改需求语义或计划目标。
-4. 禁止命中同步规则时只改代码不回填文档。
-5. 若进入 `/jjk-create-pr`，禁止 `pr_ready_manifest` 缺失。
+1. 禁止跳过 `acceptance_cmds`；
+2. 禁止缺少 `uat_cases` 就宣称“可验收”；
+3. 禁止命中 API 同步规则却不更新 API 文档；
+4. 禁止私自发布正式产品/设计文档；
+5. 禁止保留已被新实现覆盖的旧路径且不给理由；
+6. 禁止命中 DB 变化却把 migration 留给人工手补。
+
+## 推荐链路
+
+`/jjk-plan -> /jjk-imp -> /jjk-verify`
 
 ---
-
-*使用 `/jjk-imp` 触发。目标是“按计划可追溯实施，不自由漂移”。*
+*使用 `/jjk-imp` 触发。目标是“按计划落地并回传证据”，不是“边做边改真理源”。*

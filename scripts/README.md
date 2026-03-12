@@ -76,7 +76,9 @@ scripts/                        # 项目脚本（根目录保留高频入口，�
 ### 数据库迁移
 
 ```bash
-python scripts/db/sync_database.py              # ★ 自动同步（推荐）
+bash scripts/db/run_dev_migration.sh            # ★ 开发态 migration 统一入口（推荐）
+bash scripts/db/run_release_migration.sh --message "<message>" --skip-upgrade
+bash scripts/db/run_release_migration.sh --upgrade-only
 python scripts/db/migrate_access_admin_keys.py --dry-run
 ```
 
@@ -85,7 +87,7 @@ python scripts/db/migrate_access_admin_keys.py --dry-run
 ```bash
 ./deploy.sh dev init                             # 一键部署
 # 或手动：
-python scripts/db/sync_database.py               # 先同步数据库
+bash scripts/db/run_dev_migration.sh            # 先同步数据库
 python scripts/init_llm_config.py                # LLM 模型配置
 python scripts/data/init_metric_definition.py    # 指标定义
 python scripts/data/expand_metrics.py            # 扩展指标
@@ -114,7 +116,8 @@ python scripts/db/schema_sync.py                 # 元数据同步
 ### 日常维护
 
 ```bash
-python scripts/db/schema_sync.py                 # 新增表后同步元数据
+bash scripts/db/run_dev_migration.sh            # 新增表/列/索引后优先执行
+python scripts/db/schema_sync.py                 # 元数据同步（需要时）
 python scripts/data/import_skills.py             # 已退役：本地 SKILL.md 导入链不再可用
 python scripts/data/skill_offline_evaluation.py  # Skill 检索离线评测
 python scripts/config_doctor.py --strict         # 配置健康检查

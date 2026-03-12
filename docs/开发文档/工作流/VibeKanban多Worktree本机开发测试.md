@@ -100,7 +100,7 @@ bash scripts/vk_dev.sh up
 > 命令权威源：`.cursor/commands/*.md`。本文用于流程落地与本机脚本约定，命令细节冲突时以权威源为准。
 
 ```text
-/jjk-clarify -> /jjk-plan parallel（或 /jjk-plan core） -> /jjk-vkplan
+/jjk-clarify -> /jjk-design -> /jjk-plan -> /jjk-vkplan
         -> /jjk-vktodo <任务拆解目录> create（create-only）
         -> /jjk-cardrun <任务拆解目录> loop
         -> python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir <任务拆解目录>

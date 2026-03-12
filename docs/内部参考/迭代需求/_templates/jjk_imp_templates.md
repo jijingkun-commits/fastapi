@@ -3,12 +3,25 @@
 > 仅用于覆盖全局模板差异：
 > `/Users/jijingkun/.codex/engineering/templates/jjk_imp_templates.md`
 
-## 项目覆盖段（按需填写）
+## DB Migration 执行模板
 
-```markdown
-### 覆盖: <topic-or-domain>
-- 覆盖原因:
-- execution_log 差异:
-- blocked_items 差异:
-- 交接摘要差异:
+```bash
+bash scripts/db/run_dev_migration.sh
+```
+
+```bash
+bash scripts/db/run_release_migration.sh --message "<message>"
+```
+
+## 证据回填模板
+
+```yaml
+db_migration_evidence:
+  db_migration_required: true
+  mode: sync_database_only|alembic_versioned
+  executed_cmds:
+    - cmd: <command>
+      exit_code: 0
+      summary: <summary>
+  migration_files: []
 ```

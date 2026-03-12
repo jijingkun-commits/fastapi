@@ -3,10 +3,14 @@
 > 仅用于覆盖全局模板差异：
 > `/Users/jijingkun/.codex/engineering/templates/jjk_review_templates.md`
 
-## 当前状态
+## 审查清单补充段
 
-```markdown
-### 覆盖: none
-- 说明: 当前项目关于测试质量评分卡的通用要求已上收至全局模板，本地不再重复覆盖。
-- 使用原则: 仅当本仓库需要额外审查字段或更严格门禁时，才在此文件补充差异。
+```yaml
+review_checklist:
+  requirements_conformance: pass|warn|fail
+  design_conformance: pass|warn|fail
+  plan_conformance: pass|warn|fail
+  shrink_contract_conformance: pass|warn|fail
+  db_migration_conformance: pass|warn|fail
+  api_doc_sync_conformance: pass|warn|fail
 ```
