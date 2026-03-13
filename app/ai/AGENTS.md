@@ -3,6 +3,18 @@
 本文件只覆盖 `app/ai/**`。
 目标很简单：别再把 agent 写成“模型很强，代码却更爱抢主导”的样子。
 
+## 快速定位
+
+如果你命中 `app/ai/**`，但还不知道该先看哪个文件，先按下面这张表缩小范围：
+
+1. 主图 / supervisor / 流式收口：`workflow/multi_agent_graph.py`
+2. 问数链路 / data graph / 澄清：`workflow/data_graph.py`、`router/*`、`utils/sql_*`
+3. 待办链路 / 确认流：`workflow/todo_graph.py`、`agents/todo_enhanced_nodes.py`
+4. 状态 / 事件 / handoff 契约：`state.py`、`protocol.py`、`events.py`
+5. Prompt / 系统上下文：`prompts/*`、`context_engineering.py`
+6. Tools / 外部能力边界：`tools/*`
+7. 如果要先理解运行时调用链，再决定改哪：看 `docs/开发文档/代码解读/多智能体工作流.md`
+
 ## 默认做法
 
 1. `simple-first`：默认先单 agent、单 supervisor 或简单 workflow。只有简单方案被证据证明不够，才允许新增决策层或新增 agent。

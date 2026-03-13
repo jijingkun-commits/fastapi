@@ -113,6 +113,7 @@ yarn-error.log*
 # 运行态目录（不纳入版本控制）
 /.state/
 /output/
+/workdocs/stash-archive/
 
 # 其他（按需扩展）
 *.swp

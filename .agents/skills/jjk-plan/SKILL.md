@@ -77,22 +77,24 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 
 1. `task_id`
 2. `feature_id`
-3. `design_item_refs`
-4. `requirement_ids`
-5. `goal`
-6. `file_paths`
-7. `symbols`
-8. `module_changes`
-9. `deletion_actions`
-10. `acceptance_cmds`
-11. `mandatory_evidence`
+3. `risk_tags`
+4. `design_item_refs`
+5. `requirement_ids`
+6. `goal`
+7. `file_paths`
+8. `symbols`
+9. `module_changes`
+10. `deletion_actions`
+11. `acceptance_cmds[*]`
+12. `mandatory_evidence`
 
 写法重点：
 
 1. `goal` 说清这个任务完成后系统会变成什么样
 2. `module_changes` 说清到底动哪个模块
 3. `deletion_actions` 说清这步要不要删旧代码
-4. `acceptance_cmds` 给真实命令，不写空话
+4. `acceptance_cmds[*]` 给真实命令，不写空话，并写清 `kind`
+5. `risk_tags`、`mandatory_evidence` 和 `acceptance_cmds[*]` 要能互相对上，不能只有风险没有证据
 
 ### 3. UAT 写给人看，不写给代码看
 
@@ -133,6 +135,9 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 2. 开发态命令是什么
 3. 发布态命令是什么
 4. 需要什么证据
+5. 相关任务的 `risk_tags`、`mandatory_evidence`、`acceptance_cmds[*]` 如何覆盖读写回路
+
+如果命中 `chat_db`、`data_db`、脚本链路或其它高风险外部状态，但没有把上面三项写完整，按 `PLAN_DB_EVIDENCE_MISSING` 处理。
 
 ## 写作风格
 
