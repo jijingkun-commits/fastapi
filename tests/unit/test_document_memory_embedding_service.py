@@ -21,7 +21,7 @@ class _DummySession:
         self.commit_called += 1
 
 
-def test_process_pending_chunks_should_mark_ready_and_failed(monkeypatch) -> None:  # noqa: ANN001
+def test_compensate_pending_embeddings_should_mark_ready_and_failed(monkeypatch) -> None:  # noqa: ANN001
     """补偿任务应按结果分别更新 ready/failed。"""
 
     session = _DummySession()
@@ -54,7 +54,7 @@ def test_process_pending_chunks_should_mark_ready_and_failed(monkeypatch) -> Non
     monkeypatch.setattr(embedding_service.document_memory_repo, "mark_chunk_embedding_ready", _mark_ready)
     monkeypatch.setattr(embedding_service.document_memory_repo, "mark_chunk_embedding_failed", _mark_failed)
 
-    summary = embedding_service.process_pending_chunks(session, limit=10)
+    summary = embedding_service.compensate_pending_embeddings(session, limit=10)
 
     assert summary["processed"] == 2
     assert summary["ready"] == 1

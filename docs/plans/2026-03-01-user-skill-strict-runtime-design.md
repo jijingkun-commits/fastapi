@@ -138,7 +138,7 @@ flowchart LR
 
 在 `user_service.create_user` 成功后增加：
 
-1. `bootstrap_user_skills(user_id)` 读取统一模板；
+1. `bootstrap_user_skills(user_id)` 读取统一模板，并在服务内部负责是否启用初始化的开关判定；
 2. 逐条写入 `t_user_skill_bindings`；
 3. 幂等策略：已存在 `user_id + skill_id` 则跳过或按策略更新；
 4. 失败处理：记录告警并降级，不回滚用户创建主事务（与现有偏好记忆 bootstrap 口径一致）。

@@ -283,14 +283,6 @@ class AssetService:
 
 _ASSET_SERVICE_KEY = "asset_service.instance"
 
-
-def reset_asset_service() -> None:
-    """清理共享 AssetService 实例。"""
-
-    get_cache_registry().clear(_ASSET_SERVICE_KEY)
-
-
-
 def get_asset_service() -> AssetService:
     """获取共享 AssetService 实例。"""
 

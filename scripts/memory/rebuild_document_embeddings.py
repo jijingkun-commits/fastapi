@@ -45,7 +45,7 @@ def main() -> int:
     ]
 
     with get_db_context() as db:
-        summary = document_memory_embedding_service.process_pending_chunks(
+        summary = document_memory_embedding_service.compensate_pending_embeddings(
             db,
             limit=max(1, int(args.limit)),
             user_id=args.user_id,

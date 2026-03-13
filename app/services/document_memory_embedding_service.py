@@ -118,29 +118,6 @@ def compensate_pending_embeddings(
     }
 
 
-def process_pending_chunks(
-    db: Session,
-    *,
-    limit: int = DEFAULT_BATCH_SIZE,
-    user_id: int | None = None,
-    doc_id: int | None = None,
-    status_filter: Iterable[str] | None = None,
-    max_retry: int = DEFAULT_MAX_RETRY,
-    source: str = DEFAULT_SOURCE,
-) -> dict[str, int]:
-    """兼容旧入口：转发到 compensate_pending_embeddings。"""
-
-    return compensate_pending_embeddings(
-        db,
-        limit=limit,
-        user_id=user_id,
-        doc_id=doc_id,
-        status_filter=status_filter,
-        max_retry=max_retry,
-        source=source,
-    )
-
-
 def retry_failed_chunks(
     db: Session,
     *,

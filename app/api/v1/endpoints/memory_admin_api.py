@@ -129,7 +129,7 @@ def _run_embedding_rebuild_task(
     limit: int,
 ) -> None:
     with SessionLocal() as db:
-        summary = document_memory_embedding_service.process_pending_chunks(
+        summary = document_memory_embedding_service.compensate_pending_embeddings(
             db,
             user_id=user_id,
             doc_id=doc_id,
@@ -406,7 +406,7 @@ def rebuild_document_embeddings(
                 elapsed_ms=0,
             )
 
-        summary = document_memory_embedding_service.process_pending_chunks(
+        summary = document_memory_embedding_service.compensate_pending_embeddings(
             db,
             user_id=request.user_id,
             doc_id=request.doc_id,
@@ -562,7 +562,7 @@ def retry_failed_document_embeddings(
                 total=reset,
             )
 
-        summary = document_memory_embedding_service.process_pending_chunks(
+        summary = document_memory_embedding_service.compensate_pending_embeddings(
             db,
             user_id=request.user_id,
             doc_id=request.doc_id,
