@@ -110,9 +110,8 @@ yarn-error.log*
 /data/
 !/data/README.md
 
-# 过程文档（本地维护，不纳入版本控制）
-/docs/内部参考/迭代需求/requirements.md
-/docs/内部参考/迭代需求/implementation_plan.md
+# 运行态目录（不纳入版本控制）
+/.state/
 /output/
 
 # 其他（按需扩展）

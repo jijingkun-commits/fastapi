@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -97,12 +98,10 @@ CURRENT_STATE_DOC_ROOTS = (
 )
 CURRENT_STATE_PROCESS_DOCS = {
     DOCS_DIR / "开发文档" / "架构设计" / "防屎山记录手册.md",
+    DOCS_DIR / "内部参考" / "迭代需求" / "README.md",
+    DOCS_DIR / "内部参考" / "任务拆解" / "README.md",
 }
-PROCESS_DOC_ROOTS = (
-    DOCS_DIR / "内部参考" / "迭代需求",
-    DOCS_DIR / "内部参考" / "任务拆解",
-)
-TASK_SPLIT_DIR = DOCS_DIR / "内部参考" / "任务拆解"
+PROCESS_DOC_ROOTS: tuple[Path, ...] = ()
 RUNTIME_JSON_FILENAMES = {
     "task-runner-state.json",
     "coder4-idempotency.json",
@@ -844,19 +843,8 @@ def is_archived_doc(path: Path) -> bool:
 
 
 def is_task_split_phase1_compat_json(path: Path) -> bool:
+    # Phase 2 已完成，docs 下不再允许 task_split 兼容 JSON。
     del path
-    return False
-
-    rel = path.relative_to(TASK_SPLIT_DIR)
-    parts = rel.parts
-    if not parts:
-        return False
-    if parts[0] == "_templates":
-        return True
-    if path.name in TASK_SPLIT_PHASE1_COMPAT_JSON_NAMES:
-        return True
-    if len(parts) >= 3 and parts[1] in TASK_SPLIT_PHASE1_COMPAT_SUBDIRS:
-        return True
     return False
 
 
@@ -866,6 +854,29 @@ def is_runtime_json_artifact(path: Path) -> bool:
     if path.name in RUNTIME_JSON_FILENAMES:
         return True
     return any(pattern.match(path.name) for pattern in RUNTIME_JSON_PATTERNS)
+
+
+def iter_git_tracked_paths(pathspec: str) -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", pathspec],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    tracked: list[Path] = []
+    for line in result.stdout.splitlines():
+        raw = line.strip()
+        if raw:
+            tracked.append(Path(raw))
+    return tracked
 
 
 def is_summary_optional_doc(path: Path) -> bool:
@@ -1089,6 +1100,24 @@ def check_blacklist_vars(findings: list[Finding]) -> int:
                         detail="发现黑名单变量 DATA_DATABASE_URL",
                     )
                 )
+    return count
+
+
+def check_tracked_runtime_state_pollution(findings: list[Finding]) -> int:
+    count = 0
+    for rel_path in iter_git_tracked_paths(".state"):
+        candidate = ROOT / rel_path
+        if not candidate.exists():
+            continue
+        count += 1
+        findings.append(
+            Finding(
+                category="runtime_artifact_pollution",
+                level="error",
+                file=str(rel_path),
+                detail="根 `.state/` 运行态文件不应纳入版本控制，应迁移到 `.artifacts/` 或从 Git 跟踪中移除",
+            )
+        )
     return count
 
 
@@ -1343,7 +1372,10 @@ def main() -> int:
         "report_naming_errors": check_report_naming(findings),
         "current_state_timestamp_missing": current_state_timestamp_missing,
         "current_state_forbidden_headings": current_state_forbidden_headings,
-        "runtime_artifact_pollution": check_runtime_artifact_pollution(findings),
+        "runtime_artifact_pollution": (
+            check_runtime_artifact_pollution(findings)
+            + check_tracked_runtime_state_pollution(findings)
+        ),
         "blacklist_var_hits": check_blacklist_vars(findings),
         "openclaw_gate_status_errors": check_openclaw_gate_status(findings),
         "g01_evidence_binding_errors": check_g01_evidence_binding(findings),
