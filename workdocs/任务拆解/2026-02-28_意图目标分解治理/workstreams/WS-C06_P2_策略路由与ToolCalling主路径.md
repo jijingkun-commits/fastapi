@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -45,7 +45,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -56,7 +56,7 @@ else:
 - `tests/unit/test_planner_tool_call_primary.py`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -89,7 +89,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `strategy router pass; tool call primary pass`
 - 本 WS 负责的门禁子项: `C06:P2-01, P2-02`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4`
 
 ## 6. 风险与回滚
 
@@ -129,10 +129,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["按模型能力判定结构化输出路径，统一策略路由入口", "支持 tool_call 时优先函数调用产出 goals", "策略路由对上游模型差异透明化"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_build_planner_intent_plan", "app/ai/workflow/multi_agent_graph.py::_infer_model_intent_plan_via_tool_call", "app/ai/llm_util.py::get_scene_llm"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.1", "docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.2"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.1", "workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.2"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"]
   rollback_anchors: ["PLANNER_STRUCTURED_STRATEGY=legacy_json_object", "PLANNER_DISABLE_TOOL_CALL=true"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_strategy_router.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_tool_call_primary.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

@@ -39,7 +39,8 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
     (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scripts" / "set_active_task.py").write_text("# test stub\n", encoding="utf-8")
 
-    active_task_path = tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json"
+    active_task_index_path = tmp_path / "workdocs" / "任务拆解" / "_active_task.json"
+    active_task_path = tmp_path / "workdocs" / "任务拆解" / TASK_SPLIT_DIR / "contracts" / "_active_task.json"
     _write_json(
         active_task_path,
         {
@@ -50,6 +51,19 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
             "single_active_card": True,
             "preflight_required": "C01",
             "status_source_of_truth": "",
+        },
+    )
+    _write_json(
+        active_task_index_path,
+        {
+            "project_id": "test-project-id",
+            "task_split_dir": TASK_SPLIT_DIR,
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "single_active_card": True,
+            "preflight_required": "C01",
+            "status_source_of_truth": "",
+            "active_task_path": str(active_task_path),
         },
     )
 
@@ -83,7 +97,7 @@ def _prepare_workspace(tmp_path: Path, *, state_payload: dict | None = None) -> 
             "merge_required": True,
         },
     ]
-    vk_cards_path = active_task_path.parent / TASK_SPLIT_DIR / "vk_cards.json"
+    vk_cards_path = active_task_path.parent / "vk_cards.json"
     _write_json(
         vk_cards_path,
         {
@@ -127,7 +141,7 @@ def test_build_kernel_context_auto_whitelists_active_task_state_dir(monkeypatch,
     module = _load_kernel_module()
     active_task_path, state_path, _, _ = _prepare_workspace(tmp_path)
 
-    task_state_dir = active_task_path.parent / TASK_SPLIT_DIR / ".state" / module.sanitize_task_key_segment(TASK_KEY)
+    task_state_dir = tmp_path / ".artifacts" / "states" / "task_splits" / TASK_SPLIT_DIR / module.sanitize_task_key_segment(TASK_KEY)
     task_state_file = task_state_dir / "task-runner-state.json"
     _write_json(task_state_file, {"task_key": TASK_KEY, "card_status_map": {"C01": "done"}})
     subprocess.run(["git", "add", str(task_state_file.relative_to(tmp_path))], cwd=tmp_path, check=True, capture_output=True)
@@ -145,7 +159,7 @@ def test_build_kernel_context_auto_whitelists_active_task_state_dir(monkeypatch,
         "http://127.0.0.1:3001",
         local_mode=True,
         state_path=state_path,
-        dirty_whitelist=["docs/plans/"],
+        dirty_whitelist=["workdocs/设计/"],
     )
 
     assert ctx.main_repo_clean is True
@@ -270,7 +284,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
     """seed/activate 在 local-mode 下应只写本地状态并记录运行字段。"""
 
     module = _load_kernel_module()
-    _, state_path, card_order, cards_by_id = _prepare_workspace(tmp_path)
+    active_task_path, state_path, card_order, cards_by_id = _prepare_workspace(tmp_path)
     _write_json(
         state_path,
         {
@@ -331,7 +345,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         "seed",
         "C02",
         None,
-        active_task_path=tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json",
+        active_task_path=active_task_path,
         local_mode=True,
         state_path=state_path,
     )
@@ -352,7 +366,7 @@ def test_apply_action_local_mode_updates_runtime_fields_without_http(monkeypatch
         "activate",
         "C02",
         None,
-        active_task_path=tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json",
+        active_task_path=active_task_path,
         local_mode=True,
         state_path=state_path,
     )
@@ -389,6 +403,7 @@ def test_main_local_mode_triggers_auto_wake_after_card_done(monkeypatch, tmp_pat
         }
 
     monkeypatch.setattr(module, "trigger_next_round", _fake_trigger_next_round, raising=False)
+    monkeypatch.setattr(module, "DEFAULT_REPO_ROOT", tmp_path.resolve())
 
     args = argparse.Namespace(
         active_task=str(active_task_path),

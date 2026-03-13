@@ -4,7 +4,7 @@
 
 > 计划 ID: PP-YYYYMMDD-XXX  
 > 主题: <需求主题>  
-> 输入来源: `docs/内部参考/迭代需求/<topic>_requirements.md` / `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+> 输入来源: `workdocs/归档/正文/需求/<topic>_requirements.md` / `workdocs/归档/正文/实施计划/<topic>_implementation_plan.md`
 
 ## -1. 执行策略（新增）
 

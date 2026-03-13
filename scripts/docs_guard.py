@@ -28,14 +28,16 @@ from urllib.parse import unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 DOCS_DIR = ROOT / "docs"
 SUMMARY_FILE = DOCS_DIR / "SUMMARY.md"
-REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
-WAVE_PLAN_FILE = DOCS_DIR / "内部参考" / "迭代需求" / "迁移执行波次_implementation_plan.md"
-ITERATION_REQUIREMENTS_DIR = DOCS_DIR / "内部参考" / "迭代需求"
+REPORT_DIR = ROOT / "workdocs" / "归档" / "报告" / "测试报告"
+WAVE_PLAN_FILE = ROOT / "workdocs" / "归档" / "正文" / "实施计划" / "迁移执行波次_implementation_plan.md"
+ITERATION_REQUIREMENTS_DIR = ROOT / "workdocs" / "归档" / "正文" / "需求"
+ITERATION_IMPLEMENTATION_PLAN_DIR = ROOT / "workdocs" / "归档" / "正文" / "实施计划"
 REQUIREMENTS_SUFFIX = "_requirements.md"
 IMPLEMENTATION_PLAN_SUFFIX = "_implementation_plan.md"
 G01_WORKSTREAM_FILE = (
     ROOT
     / "workdocs"
+    / "归档"
     / "任务拆解"
     / "2026-02-21_openclaw迁移重建基线"
     / "workstreams"
@@ -139,20 +141,11 @@ CURRENT_STATE_FORBIDDEN_HEADING_RULES = (
     ),
 )
 CURRENT_STATE_LEGACY_ALLOWLIST = {
-    "docs/产品文档/技能系统需求.md": {"timestamp_missing"},
-    "docs/产品文档/用户管理需求.md": {"timestamp_missing"},
-    "docs/产品文档/模型路由需求.md": {"timestamp_missing"},
-    "docs/产品文档/待办助手需求.md": {"timestamp_missing"},
     "docs/产品文档/配置治理需求.md": {"timestamp_missing"},
-    "docs/产品文档/系统需求.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/附件系统设计.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/前端UI设计方案.md": {"timestamp_missing"},
-    "docs/开发文档/架构设计/系统总览.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/问数引擎设计.md": {"timestamp_missing"},
-    "docs/开发文档/架构设计/后端架构.md": {"timestamp_missing"},
-    "docs/开发文档/架构设计/RAG集成设计.md": {"timestamp_missing"},
     "docs/开发文档/架构设计/待办Agent设计.md": {"timestamp_missing"},
-    "docs/开发文档/架构设计/DIDP数据架构与指标提取.md": {"timestamp_missing"},
     "docs/产品文档/聊天系统需求.md": {"timestamp_missing", "incremental_heading"},
     "docs/产品文档/问数助手需求.md": {"incremental_heading"},
 }
@@ -312,7 +305,7 @@ def iter_requirement_plan_pairs() -> Iterable[tuple[Path, Path]]:
         plan_name = req_file.name.replace(REQUIREMENTS_SUFFIX, IMPLEMENTATION_PLAN_SUFFIX)
         if plan_name == req_file.name:
             continue
-        plan_file = req_file.with_name(plan_name)
+        plan_file = ITERATION_IMPLEMENTATION_PLAN_DIR / plan_name
         if plan_file.exists():
             yield req_file, plan_file
 

@@ -50,8 +50,10 @@ ALLOWED_PREFIXES=(
 )
 DIRTY_POLICY_VERSION="v1_docs_templates"
 DEFAULT_DIRTY_WHITELIST=(
-  "docs/plans/"
-  "docs/内部参考/迭代需求/"
+  "workdocs/需求/"
+  "workdocs/设计/"
+  "workdocs/归档/正文/需求/"
+  "workdocs/归档/正文/设计/"
 )
 
 WT_FLOW_PARSE_STATE_DIR=""

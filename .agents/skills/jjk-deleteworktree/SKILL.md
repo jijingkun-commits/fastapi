@@ -9,7 +9,6 @@ description: "Use when you need `jjk-deleteworktree` in this repository. Source 
 
 `$jjk-deleteworktree` 是 `jjk-*` 体系里的 Git 生命周期清理入口，负责在当前 worktree 任务已完成后，安全删除“当前分支 + 当前 worktree”。
 
-> **中文主导**：无论是思考过程还是最终输出，**永远使用中文**。
 
 ## 输入前置（强制）
 
@@ -97,7 +96,7 @@ $jjk-deleteworktree
 ```
 
 ```text
-$jjk-deleteworktree @docs/内部参考/迭代需求/review_report_xxx.md
+$jjk-deleteworktree @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

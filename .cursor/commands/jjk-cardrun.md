@@ -10,7 +10,6 @@ description: 串行卡片执行入口：消费 /jjk-vkplan 产物并按 card_ord
 
 `/jjk-plan -> /jjk-vkplan -> /jjk-cardrun(loop) -> /jjk-wtimp(executor_mode=cardrun_dispatch)`
 
-> **中文主导**：思考与输出统一中文。
 
 ---
 

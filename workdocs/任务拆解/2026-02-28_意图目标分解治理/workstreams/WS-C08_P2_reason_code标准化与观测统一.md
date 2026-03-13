@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -43,7 +43,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -53,7 +53,7 @@ else:
 - `tests/unit/test_planner_reason_codes.py`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -84,7 +84,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `reason_code normalization pass`
 - 本 WS 负责的门禁子项: `C08:P2-05`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4`
 
 ## 6. 风险与回滚
 
@@ -123,10 +123,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["fallback_meta.reason 输出稳定 reason_code 枚举", "SSE/日志口径统一，支持按 reason_code 聚合", "为灰度与运维定位提供统一观测维度"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_build_planner_intent_plan", "app/services/chat_service.py::stream"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.2", "docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.2", "workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"]
   rollback_anchors: ["PLANNER_REASON_CODE_VERBOSE=false"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_reason_codes.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

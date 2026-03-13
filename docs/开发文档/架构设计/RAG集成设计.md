@@ -1,5 +1,6 @@
 # RAG 与知识库集成设计详解
 
+> 更新时间：2026-03-13
 > **状态**: 已发布
 > **验证日期**: 2026-01-21
 > **代码对应**: `app/ai/tools/ragflow_tool.py`, `app/api/v1/endpoints/assets_api.py`

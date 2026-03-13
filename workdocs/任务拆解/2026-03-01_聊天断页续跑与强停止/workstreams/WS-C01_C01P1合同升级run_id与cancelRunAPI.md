@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260301-CHAT-RUN-STOP`
-- 来源主计划: `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/聊天断页续跑与强停止_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md`
 - card_key: `PP-20260301-CHAT-RUN-STOP::WS-C01`
 - PR 归属: `PR-01` / `codex/chat-run-stop-pr-01`
@@ -50,7 +50,7 @@ else:
 - `web/src/lib/backend.ts`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -82,7 +82,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `init run_id 契约打通; cancelRun API 封装可用`
 - 本 WS 负责的门禁子项: `C01:P1-01,P1-02`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/聊天断页续跑与强停止_implementation_plan.md#7`
 
 ## 6. 风险与回滚
 
@@ -133,7 +133,7 @@ card_export:
   rollback_anchors:
     - 回退 InitEventData run_id 字段扩展
     - 删除 cancelRun API 封装，恢复旧调用链
-  evidence_entry: docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7
+  evidence_entry: workdocs/归档/正文/实施计划/聊天断页续跑与强停止_implementation_plan.md#7
   check_cmd:
     - cd web && pnpm exec eslint src/types/message.ts src/lib/backend.ts
   done_gate:

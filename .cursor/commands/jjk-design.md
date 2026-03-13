@@ -1,167 +1,230 @@
 ---
-description: 技术方案入口：消费 requirements 产出 design 与 shrink contract；可选 --doc 发布正式设计文档
+description: 技术方案入口：基于 requirements 和现有代码写出能落地的 design 文档，包含最佳实践判断、技术图、模块改造清单、删除清单和实现种子
 ---
 
 # 技术方案工作流（Technical Design）
 
-`/jjk-design` 负责把已审批需求转成**技术方案**，并明确新代码职责、架构调整方式，以及哪些旧路径会因此废弃。
+`/jjk-design` 的任务是回答四个问题：
 
-> **中文主导**：思考与输出统一中文。
->
-> **唯一目标**：回答“系统怎么改、旧代码怎么收口”。
+1. 系统到底改哪里
+2. 为什么这样改
+3. 旧代码哪些该删、哪些保留
+4. `/jjk-plan` 接下来该怎么拆
 
-## 产物与边界
+## 你现在扮演谁
 
-必须产出：
+你是技术负责人 + 架构师 + 文档作者。
 
-1. `docs/plans/YYYY-MM-DD-<topic>-design.md`
+你的工作不是直接写代码，而是先把方案写到“别人照着就能拆任务”的程度。
 
-可选发布（仅显式 `--doc` 时）：
+## 开工前先做两件事
 
-2. 对应正式设计/架构文档章节
+### 1. 读输入
 
-本命令不做：
+先读：
 
-1. 不重写需求；
-2. 不做详细任务拆解；
-3. 不写完整 UAT 用例；
-4. 不直接改业务代码。
+1. `requirements.md`
+2. 相关代码
+3. 相关架构/接口文档
+4. 已有同主题设计文档
 
-## 参数
+默认检索范围：
 
-1. `--doc`：在生成内部 `design.md` 的同时，发布到正式设计/架构文档；
-2. `--refactor`：显式声明本次以结构收敛为优先；
-3. `--patch`：仅限局部非结构性问题；若形成新旧双轨，必须升级为 `refactor`。
+1. 先看 `workdocs/需求/`、`workdocs/设计/`、`docs/开发文档/`、相关代码
+2. 默认排除 `.artifacts/**` 与 `workdocs/归档/**`
+3. 只有当前主题在活跃层没有对应材料，或用户明确要求“参考历史方案”时，才读取 `workdocs/归档/**`
 
-约束：
+### 2. 查最佳实践
 
-1. 不带 `--doc` 时，内部 `design.md` 仍必须生成；
-2. `--doc` 只控制“是否发布正式设计文档”，不控制“是否生成方案产物”。
+先查官方或权威资料，再定方案。
 
-## 输入前置（强制）
+你不用长篇摘抄资料，只需要在设计文档里回答：
 
-1. 已审批的 `requirements.md`；
-2. 明确的主题与范围；
-3. 若是 bugfix/refactor，必须给出待收敛旧路径线索。
+1. 参考了什么
+2. 采用了什么
+3. 没采用什么
+4. 为什么这个仓库不完全照搬
 
-失败时：
+## 产物
 
-1. 缺少已审批需求：`DESIGN_REQUIREMENTS_REQUIRED`
-2. 边界不清：`DESIGN_BOUNDARY_UNCLEAR`
-3. 缺少 shrink contract：`DESIGN_SHRINK_CONTRACT_MISSING`
-4. 试图跳过方案直接写实施计划：`DESIGN_STAGE_SKIPPED`
+输出到：
 
-## 执行流程（强制顺序）
+1. `workdocs/设计/<topic>/design.md`
 
-### 0) 上下文检查
+同时回填：
 
-至少检查：
+2. `workdocs/需求/<topic>/requirements.md`
 
-1. 需求是否已审批；
-2. 当前变更是否命中 API / Schema / DB / Config / 架构边界；
-3. 现有实现里哪些路径可能被新方案替代；
-4. 若命中表结构/索引/约束变化，DB migration 应采用 `run_dev_migration.sh` 还是 Alembic 版本化。
+至少回填这些字段：
 
-### 1) 输出四段式架构结论
+1. `requirements_contract.design_source`
+2. `requirements_contract.design_approved`
+3. `requirements_contract.design_approval_evidence`
+4. `requirements_contract.design_freeze_summary`
+5. `requirements_contract.clarify_handoff_source`
+6. `requirements_contract.clarify_handoff_version`
 
-必须按以下顺序输出：
+## 你要怎么写
+
+### 1. 开头先给设计结论
+
+不要先堆背景。
+
+开头先用短段落回答：
+
+1. 这次主方案是什么
+2. 这次不选什么方案
+3. 最大收益是什么
+4. 最大代价是什么
+
+### 2. 写最佳实践判断
+
+请在文档里放一个 `best_practice_review`。
+
+写法要像这样：
+
+1. 来源
+2. 采用点
+3. 不采用点
+4. 适配原因
+
+不要只写“已参考最佳实践”，那没有任何信息量。
+
+### 3. 给出四段式架构结论
+
+按这个顺序写：
 
 1. `module_boundaries`
 2. `dependency_direction`
 3. `state_ownership`
 4. `error_handling`
 
-每一段都必须包含：
+每一段都回答三件事：
 
-1. 当前问题；
-2. 最终决策；
-3. 禁止动作。
+1. 现状哪里别扭
+2. 这次怎么改
+3. 明确不再怎么做
 
-### 2) 输出 Change Map
+### 4. 一定要画技术图
 
-`design.md` 必须显式列出：
+至少放一张 Mermaid 图。
 
-1. `new_paths`：准备新增哪些代码/模块，各自作用是什么；
-2. `modified_paths`：哪些现有路径会被调整，调整目的是什么；
-3. `replaced_responsibilities`：哪些旧职责会被新实现覆盖。
+建议：
 
-### 3) 冻结 DB Migration Contract
+1. 模块关系用 `flowchart`
+2. 请求/事件交互用 `sequenceDiagram`
+3. 状态变化用 `stateDiagram-v2`
 
-命中 DB / Schema / 索引 / 约束变化时，必须输出：
+图后补一句解释：
 
-1. `db_migration_required=true|false`
-2. `db_change_scope`
-3. `db_migration_mode=sync_database_only|alembic_versioned`
-4. `release_migration_required=true|false`
-5. `db_rollback_strategy`
+1. 这张图在帮助谁理解什么
 
-强约束：
+### 5. 把“改什么模块、为什么改”写具体
 
-1. 开发态默认优先 `run_dev_migration.sh`；
-2. 若该变更需要进入可回滚、可审计的发布链路，必须同时标记 `release_migration_required=true`，并在计划阶段补 Alembic 任务；
-3. 禁止命中 DB 结构变化却不声明 migration 策略。
+请显式写 `module_change_plan`。
 
-### 4) 冻结 Shrink Contract
+每行至少包含：
 
-必须输出：
+1. `module`
+2. `current_problem`
+3. `target_change`
+4. `why_this_way`
+5. `affected_paths`
+6. `owner`
 
-1. `obsolete_paths`
-2. `retained_paths`
-3. `single_entry_owner`
-4. `line_budget`
+这部分不要写成抽象口号。要让人一眼看出：
 
-强约束：
+1. 哪个模块是主改
+2. 哪个模块只是配合
+3. 为什么不选别的改法
 
-1. `obsolete_paths` 为空时必须写 `none` 与原因；
-2. `retained_paths` 必须给唯一保留理由；
-3. 新实现若覆盖旧职责但旧路径仍残留且无理由，直接失败；
-4. 默认 `line_budget=added<=deleted`；若不能满足，必须说明架构必要性。
+### 6. 把“删什么”写具体
 
-### 5) 文档发布与 API 同步提示
+请显式写：
 
-1. 若命中 API 变化，必须标记 `api_doc_required=true`，后续进入 `/jjk-api-doc-sync`；
-2. 仅当显式 `--doc` 时，`publish_design_doc=true`；
-3. 不带 `--doc` 时，禁止修改正式设计/架构文档。
+1. `change_map`
+2. `deletion_plan`
+3. `shrink_contract`
 
-## 输出要求（强制）
+其中：
 
-至少输出：
+1. `change_map` 说新增、修改、替代关系
+2. `deletion_plan` 说哪些旧路径或旧职责要删，为什么删，谁接手
+3. `shrink_contract` 说哪些废弃、哪些保留、单入口归谁
 
-1. 四段式架构结论；
-2. `change_map` 摘要；
-3. `db_migration_contract`；
-4. `shrink_contract`；
-5. `publish_design_doc` 状态；
-6. `api_doc_required` 状态；
-7. 下一步建议（仅限 `/jjk-plan` 或 `/jjk-api-doc-sync` 组合）。
+删除清单不要只写路径名，要补上下文。可以照这个思路写：
 
-## 禁止项（强制）
-
-1. 禁止把需求澄清混回方案阶段；
-2. 禁止省略 `obsolete_paths` / `retained_paths` / `single_entry_owner`；
-3. 禁止用 fallback、兼容层、双轨路径掩盖结构问题；
-4. 禁止在未出方案前进入 `/jjk-plan`；
-5. 禁止把正式设计文档发布与内部 `design.md` 二选一。
-
-## 推荐链路
-
-`/jjk-clarify -> /jjk-design -> /jjk-plan`
-
-`/jjk-design -> /jjk-api-doc-sync`（命中 API 变化时）
-
-## 使用示例
-
-```text
-/jjk-design
+```yaml
+- path_or_symbol: app/services/legacy_xxx.py
+  current_responsibility: 旧查询聚合入口
+  remove_reason: 新方案已经把入口收敛到统一 query service
+  replaced_by: app/services/query_service.py
+  cleanup_timing: implementation
 ```
 
-```text
-/jjk-design --doc
-```
+### 7. 给计划阶段留“实现种子”
 
-```text
-/jjk-design --refactor
-```
+设计文档里请直接放：
+
+1. `implementation_seeds`
+2. `execution_chain_seed`
+3. `clarify_handoff_contract`
+
+这些不是走形式，它们是给 `/jjk-plan` 用的。
+
+写的时候要保证：
+
+1. 每个 `design_item` 都能落到后续任务
+2. 每个 `implementation_seed` 都说清文件、符号、改动类型
+3. `clarify_handoff_contract` 里能看出每条设计项对应哪条 FR
+
+### 8. 命中数据库时，把数据库说清楚
+
+如果这次会动数据库，就补一个 `db_migration_contract`。
+
+请回答：
+
+1. 动不动表结构
+2. 范围多大
+3. 开发态怎么迁移
+4. 发布态怎么迁移
+5. 回滚怎么做
+
+## 写作风格
+
+请按这个风格来：
+
+1. 先说结论，再给理由
+2. 少写“提升灵活性/增强扩展性”，多写真实取舍
+3. 多写“现状 -> 决策 -> 影响”
+4. 多写“改哪里、删哪里、保留哪里”
+5. 如果有假设，写明假设，不要装作已经确定
+
+## 不要写成什么样
+
+不要把设计文档写成：
+
+1. 一堆标题，没有内容
+2. 一堆原则，没有模块
+3. 一堆抽象词，没有路径
+4. 只说新增，不说删除
+5. 只说怎么改，不说为什么
+
+## 完成后顺手检查
+
+写完后快速问自己：
+
+1. 别人看完，能不能知道先改哪个模块
+2. 为什么这么改，是否说服人
+3. 该删的旧代码有没有写出来
+4. `/jjk-plan` 能不能直接从这里拆任务
+
+## 下一步
+
+完成后，下一步建议进入：
+
+1. `/jjk-plan`
+2. 命中 API 变化时，再接 `/jjk-api-doc-sync`
 
 ---
-*使用 `/jjk-design` 触发。目标是“冻结技术方案与收口合同”，不是“边想边写代码”。*
+*目标不是“写一份看起来专业的设计文档”，而是“写一份别人真能照着做的设计文档”。*

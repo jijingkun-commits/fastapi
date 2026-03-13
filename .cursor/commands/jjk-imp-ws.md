@@ -8,7 +8,6 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 
 `/jjk-imp-ws` 是 `jjk-*` 体系里的 WS 级实现入口，负责把单个 `WS-*.md` 按契约落到代码、测试和回填文档。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 与 Superpowers / OMX 的分工（强制）
 ## 跨 IDE 调用方式
@@ -19,7 +18,7 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 1. 全局共享模板（默认主模板）：
    `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_imp_ws_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
-   `docs/内部参考/迭代需求/_templates/jjk_imp_ws_templates.md`
+   `workdocs/_templates/jjk_imp_ws_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 
@@ -30,9 +29,9 @@ description: WS 执行入口（消费 /jjk-vkplan 契约）：按单个工作包
 1. 单个 `WS-*.md` 文档。
 2. 同目录 `parallel_plan.md`（可选；自动生成总览）。
 3. 同目录 `vk_cards.json`（唯一机器真理源）。
-4. 同主题：`docs/内部参考/迭代需求/<topic>_requirements.md`。
-5. 同主题：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`。
-6. 若 WS 引用专项附录：`docs/内部参考/迭代需求/<topic>_<appendix>_implementation_plan.md`。
+4. 同主题：`workdocs/需求/<topic>/requirements.md`。
+5. 同主题：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md`。
+6. 若 WS 引用专项附录：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/<appendix>_implementation_plan.md`。
 
 硬约束：
 
@@ -177,7 +176,7 @@ venv/bin/python scripts/backfill_gate_status.py --cards workdocs/任务拆解/<Y
 ## 输出模板（推荐）
 
 见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_imp_ws_templates.md`（`输出模板` 段）。
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_imp_ws_templates.md`。
+若本项目有覆盖规则，再查：`workdocs/_templates/jjk_imp_ws_templates.md`。
 
 ## 禁止项（强制）
 

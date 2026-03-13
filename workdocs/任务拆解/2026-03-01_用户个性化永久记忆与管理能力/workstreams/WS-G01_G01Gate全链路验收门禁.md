@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260301-USER-MEMORY-ADMIN`
-- 来源主计划: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md`
 
 ## 1. 目标
@@ -30,7 +30,7 @@
 - 代码锚点（函数/类级）:
   - `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/_active_task.json::scope`
   - `scripts/docs_guard.py::strict mode`
-  - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
+  - `workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
 
 ```python
@@ -41,17 +41,17 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
 - `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md`
 - `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json`
-- `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -84,7 +84,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `所有 acceptance_checks 通过; active_task 作用域绑定正确`
 - 本 WS 负责的门禁子项: `G01:G-1`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9`
 
 ## 6. 风险与回滚
 
@@ -122,7 +122,7 @@ card_export:
   file_whitelist:
     - workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md
     - workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json
-    - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
+    - workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md
   readonly_scope: []
   owner_fields: []
   mechanism_summary:
@@ -132,16 +132,16 @@ card_export:
   code_anchor_refs:
     - workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/_active_task.json::scope
     - scripts/docs_guard.py::strict mode
-    - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
+    - workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
   example_refs:
-    - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#4
+    - workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4
   acceptance_checks:
     - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict
   rollback_anchors:
     - 暂停 /jjk-vktodo
     - 回退到 C06 前状态并复测
-  evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9
+  evidence_entry: workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9
   check_cmd:
     - cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict

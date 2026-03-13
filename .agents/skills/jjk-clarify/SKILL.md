@@ -1,141 +1,187 @@
 ---
 name: jjk-clarify
-description: "Use when you need `jjk-clarify` in this repository. Source intent: 需求澄清入口：只产出 requirements contract；可选 --doc 发布正式产品/需求文档"
+description: "Use when you need `jjk-clarify` in this repository. Source intent: 需求澄清入口：把模糊诉求写成可执行 requirements 文档，包含业务流程图、FR/NFR、验收种子与设计交接信息"
 ---
 <!-- AUTO-GENERATED: jjk-skill-mirror -->
 <!-- source: .cursor/commands/jjk-clarify.md -->
 
 # 需求澄清工作流（Requirements Clarify）
 
-`$jjk-clarify` 只负责把用户意图冻结为**纯需求**，不负责技术方案、任务拆解或实现细节。
+`$jjk-clarify` 的任务只有一个：把“想做什么”说清楚，而且说到 `$jjk-design` 可以直接接手。
 
-> **中文主导**：思考与输出统一中文。
->
-> **唯一目标**：回答“做什么、为什么做、做到什么算完成”。
+## 你现在扮演谁
 
-## 产物与边界
+你是产品负责人 + 需求分析师 + 文档作者。
 
-必须产出：
+你的工作不是讨论技术实现，而是把用户诉求整理成一份清楚、具体、可追溯的需求文档。
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
+## 先做什么
 
-可选发布（仅显式 `--doc` 时）：
+先读用户输入、当前需求文档、相关产品文档。
 
-2. 对应正式产品/需求文档章节
+默认检索范围：
 
-本命令不做：
+1. 先看 `workdocs/需求/`、`docs/产品文档/`、`docs/README.md`、`docs/SUMMARY.md`
+2. 默认排除 `.artifacts/**` 与 `workdocs/归档/**`
+3. 只有用户明确要求“看历史方案 / 历史过程”时，才回头读 `workdocs/归档/**`
 
-1. 不写技术方案；
-2. 不写模块边界/依赖方向/状态归属；
-3. 不写文件路径、函数名、任务拆解；
-4. 不写 UAT 步骤；
-5. 不写 `obsolete_paths` / `retained_paths` / `single_entry_owner`。
+把内容分成三类：
 
-## 参数
+1. 已经明确的业务目标
+2. 还模糊但必须说清的场景
+3. 不该提前进入需求文档的技术实现
 
-1. `--doc`：在生成内部 `requirements.md` 的同时，发布到正式产品/需求文档；
-2. `--hydrate`：对历史需求做归一化收口，但仍只输出需求层内容。
+如果信息不全，不要硬编实现方案。请把缺口写成“待确认项”或“当前假设”，放进需求文档里。
 
-约束：
+## 产物
 
-1. 不带 `--doc` 时，内部 `requirements.md` 仍必须生成；
-2. `--doc` 只控制“是否发布正式文档”，不控制“是否生成需求产物”。
+输出到：
 
-## 输入前置（强制）
+1. `workdocs/需求/<topic>/requirements.md`
 
-至少提供以下信息中的最小组合：
+可选：
 
-1. 业务目标或问题陈述；
-2. 目标用户或核心场景；
-3. 成功标准、限制条件、显式非目标中的任意一类。
+2. 当显式带 `--doc` 时，同步到正式产品文档
 
-失败时：
+## 你要怎么写
 
-1. 缺少业务目标：`CLARIFY_GOAL_MISSING`
-2. 缺少核心场景：`CLARIFY_SCENARIO_MISSING`
-3. 成功标准不可验证：`CLARIFY_SUCCESS_CRITERIA_MISSING`
-4. 混入技术实现内容且无法抽离：`CLARIFY_SCOPE_POLLUTED_BY_DESIGN`
+请按下面顺序组织文档。
 
-## 执行流程（强制顺序）
+### 1. 先写一句话结论
 
-### 0) 上下文检查
+开头先用 3 到 6 句话说明：
 
-至少检查：
+1. 这次到底要解决什么问题
+2. 为什么现在做
+3. 谁最受影响
+4. 做完后用户会看到什么变化
 
-1. 当前主题是否已有同名 `requirements.md`；
-2. 是否存在已审批但待更新的旧需求；
-3. 用户输入里哪些是需求，哪些其实是技术方案。
+### 2. 画业务流程图
 
-### 1) 冻结需求合同
+至少放一张 Mermaid 图。
 
-`<topic>_requirements.md` 至少包含：
+选择方法：
 
-1. `problem_statement`
-2. `target_users`
-3. `core_scenarios`
-4. `in_scope`
-5. `out_of_scope`
-6. `functional_requirements`
-7. `non_functional_requirements`
-8. `business_acceptance_criteria`
-9. `constraints_and_assumptions`
-10. `publish_product_doc`
+1. 单人主流程用 `flowchart`
+2. 多角色配合用 `sequenceDiagram`
+3. 明显状态变化用 `stateDiagram-v2`
 
-强约束：
+图不要装饰化，要能回答业务问题。图后面补一句解释：
 
-1. 每条 `functional_requirements` 必须可被后续 UAT 覆盖；
-2. `non_functional_requirements` 不能只有“性能更好/体验更好”这类空话；
-3. `out_of_scope` 不能为空；
-4. 若出现文件路径、类名、表字段级改法，必须下沉到 `$jjk-design`。
+1. 这张图回答什么
+2. 哪一步最关键
+3. 哪一步最容易歧义
 
-### 2) 审批门禁
+### 3. 把需求写成结构化合同
 
-必须明确：
+需求文档至少包含这些部分：
 
-1. `requirements_approved=true|false`
-2. `approved_at`
-3. `approval_evidence`
+1. `requirements_contract`
+2. `product_contract_matrix`
+3. `fr_contract_matrix`
+4. `nfr_contract_matrix`
+5. `acceptance_seed_matrix`
+6. `traceability_seed_matrix`
+7. `out_of_scope`
+8. `constraints_and_assumptions`
+9. `approval`
 
-若用户未确认，允许停留在 `draft`，但不得进入 `$jjk-design`。
+### 4. FR 要写到“真的能做”
 
-### 3) 正式文档发布（仅 `--doc`）
+每条 `fr_contract_matrix` 不要只写标题。
 
-1. `publish_product_doc=true` 时，按主题把需求收敛到正式产品/需求文档对应章节；
-2. 不带 `--doc` 时，`publish_product_doc=false`；
-3. 禁止在没有 `--doc` 的情况下修改正式产品文档；
-4. 禁止用 `--doc` 替代内部 `requirements.md`。
+请至少写清：
 
-## 输出要求（强制）
+1. `fr_id`
+2. `scenario_id`
+3. 用户得到什么价值
+4. 什么情况下触发
+5. 输入是什么
+6. 输出是什么
+7. 失败时用户看到什么
+8. 验收时应该看什么现象
 
-至少输出：
+可以照这个思路写：
 
-1. 需求结论摘要；
-2. `requirements.md` 路径；
-3. `requirements_approved` 状态；
-4. `publish_product_doc` 状态；
-5. 下一步建议（仅限 `$jjk-design`）。
-
-## 禁止项（强制）
-
-1. 禁止把技术方案写进需求文档；
-2. 禁止把任务拆解写进需求文档；
-3. 禁止把 UAT 细节写进需求文档；
-4. 禁止未审批就进入 `$jjk-design`；
-5. 禁止用“内部没写，但正式文档补了”替代需求真理源。
-
-## 推荐链路
-
-`$jjk-clarify -> $jjk-design -> $jjk-plan -> $jjk-imp -> $jjk-verify`
-
-## 使用示例
-
-```text
-$jjk-clarify
+```yaml
+- fr_id: FR-01
+  scenario_id: S-01
+  user_value: 用户可以快速完成一次标准查询
+  trigger: 用户在首页输入问题并点击发送
+  input_contract:
+    required_fields: [question]
+    optional_fields: [filters]
+  output_contract:
+    required_fields: [answer, status]
+  failure_semantics: 查询失败时页面保留输入，并明确提示失败原因
+  acceptance_story: 用户输入有效问题后，能在一次交互内拿到清晰结果
+  linked_business_goals: [BG-01]
 ```
 
-```text
-$jjk-clarify --doc
-```
+### 5. NFR 不要写空话
+
+像“体验更好”“性能更强”这种话不要单独成条。
+
+请改写成可以观察的表述，例如：
+
+1. 首屏判断时间 <= 3 秒
+2. 占位信息数量 = 0
+3. 输出字段漂移事件数 = 0
+
+### 6. 给下游留好交接信息
+
+`traceability_seed_matrix` 不是走形式，它是给 `$jjk-design` 和 `$jjk-plan` 用的。
+
+每行至少写：
+
+1. `bg_id`
+2. `fr_id`
+3. `scenario_id`
+4. `acceptance_seed_ids`
+5. `design_focus`
+
+其中 `design_focus` 要回答一句话：
+
+1. 设计阶段最该优先想清楚什么
+
+## 写作风格
+
+请按下面的风格写：
+
+1. 先说结论，再展开
+2. 少写大词，多写场景
+3. 少写“优化/升级/增强”，多写“用户看到什么变化”
+4. 每一节都尽量让非技术同学看得懂
+5. 如果有假设，就明确写出来，不要偷偷带过去
+
+## 不要写什么
+
+不要在需求文档里写这些：
+
+1. 文件路径
+2. 类名、函数名
+3. 表结构改法
+4. 技术分层
+5. 任务拆解
+6. 实现步骤
+
+这些内容留给 `$jjk-design`。
+
+## 完成后顺手检查
+
+写完后自己快速检查一遍：
+
+1. 用户为什么要这个能力，是否说清了
+2. 有没有流程图
+3. 每条 FR 是否能被验收
+4. `out_of_scope` 是否明确
+5. 下游看到这份文档，能不能开始做设计
+
+## 下一步
+
+完成后，下一步建议进入：
+
+1. `$jjk-design`
 
 ---
-*使用 `$jjk-clarify` 触发。目标是“冻结纯需求”，不是“顺手把方案也写了”。*
+*目标不是“把需求写长”，而是“把事情写具体，让设计阶段不用重新猜”。*

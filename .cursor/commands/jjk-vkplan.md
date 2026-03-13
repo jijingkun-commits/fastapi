@@ -8,7 +8,6 @@ description: 并行拆解入口：消费 /jjk-plan 产物并生成可执行卡�
 
 `/jjk-vkplan` 负责把规划产物转换为“可落卡、可执行、可追溯”的并行拆解产物。
 
-> **中文主导**：思考与输出统一中文。
 
 ---
 
@@ -16,8 +15,8 @@ description: 并行拆解入口：消费 /jjk-plan 产物并生成可执行卡�
 
 必须存在：
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
-2. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+1. `workdocs/需求/<topic>/requirements.md`
+2. `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md`
 3. `implementation_plan.planning_contract`
 4. `implementation_plan.execution_contract`
 5. `implementation_plan.task_to_pr_mapping`

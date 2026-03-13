@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "task_split_dir": "",
+  "design": "/Users/jijingkun/.codex/worktrees/31a0/fastapi/workdocs/归档/正文/设计/2026-03-09-langgraph-v1-adoption-design.md",
+  "requirements": "/Users/jijingkun/.codex/worktrees/31a0/fastapi/workdocs/归档/正文/需求/langgraph-v1-adoption_requirements.md",
+  "implementation_plan": "/Users/jijingkun/.codex/worktrees/31a0/fastapi/workdocs/归档/正文/实施计划/langgraph-v1-adoption_implementation_plan.md",
+  "summary": {
+    "traceability_rows": 5,
+    "implementation_tasks": 5,
+    "tasks_missing_required_details": 0
+  },
+  "errors": [],
+  "db_evidence_contract": {
+    "ok": true,
+    "implementation_plan": "/Users/jijingkun/.codex/worktrees/31a0/fastapi/workdocs/归档/正文/实施计划/langgraph-v1-adoption_implementation_plan.md",
+    "tasks_checked": 5,
+    "errors": []
+  }
+}

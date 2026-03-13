@@ -112,9 +112,9 @@ else
     fi
 
     if has_code_match '^\.cursor/commands/'; then
-        add_required_doc 'docs/开发文档/工作流/开发工作流.md'
-        add_required_doc 'docs/开发文档/技巧与速查/vibe-coding开发技巧.md'
-        add_required_doc 'docs/开发文档/技巧与速查/AI协作速查表.md'
+        add_required_doc 'docs/开发文档/流程与工具/开发工作流.md'
+        add_required_doc 'docs/开发文档/流程与工具/vibe-coding开发技巧.md'
+        add_required_doc 'docs/开发文档/流程与工具/AI协作速查表.md'
     fi
 
     # 需求文档映射（关键链路）
@@ -161,7 +161,7 @@ else
         echo ""
         echo "提示："
         echo "  - 文档映射规则见 .cursor/rules/doc_sync.mdc"
-        echo "  - 过程文档（workdocs/、docs/plans/、docs/内部参考/迭代需求/）不能替代稳定真理源；task_split canonical 根目录已切到 workdocs/任务拆解/"
+        echo "  - 新过程文档只应写入 workdocs/ 与 .artifacts/；历史正文、机读校验与设计归档统一去 workdocs/归档/"
         echo "  - 建议先执行 /jjk-doc-check 再提交"
         if [[ "$STRICT_MODE" != "true" ]]; then
             echo "  - 当前为非阻断模式：本次仅告警，不阻断提交"

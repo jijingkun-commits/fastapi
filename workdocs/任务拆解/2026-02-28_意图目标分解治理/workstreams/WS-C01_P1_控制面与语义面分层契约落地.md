@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -46,7 +46,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -57,7 +57,7 @@ else:
 - `tests/unit/test_intent_plan_model_primary.py`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -90,7 +90,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `intent layer boundary tests green; model primary planner tests green`
 - 本 WS 负责的门禁子项: `C01:P1-01, P1-02`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11`
 
 ## 6. 风险与回滚
 
@@ -130,10 +130,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["控制面仅处理命令/队列/权限，不直接改写语义目标", "planner 主判定输出结构化 intent_plan，形成语义单一真相源", "保留旧路径兼容字段，先做契约治理再切执行路径"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_build_planner_intent_plan", "app/ai/workflow/multi_agent_graph.py::_infer_model_intent_plan", "app/services/chat_service.py::stream", "app/ai/prompts/agent_prompts.py"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#4.1", "docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#4.2"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#4.1", "workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#4.2"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_plan_model_primary.py"]
   rollback_anchors: ["ENABLE_INTENT_LAYERING", "INTENT_MODE=heuristic_only"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_layer_boundary.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_intent_plan_model_primary.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

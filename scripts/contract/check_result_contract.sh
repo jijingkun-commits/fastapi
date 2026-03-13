@@ -16,10 +16,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-REQUIREMENTS_PATH = ROOT / "docs/内部参考/迭代需求/composite-query-multimodal-response-contract_requirements.md"
-IMPLEMENTATION_PATH = ROOT / "docs/内部参考/迭代需求/composite-query-multimodal-response-contract_implementation_plan.md"
-CLARIFY_ALIGNMENT_OUTPUT = ROOT / "docs/内部参考/迭代需求/composite-query-multimodal-response-contract_clarify_plan_alignment.json"
-TEMPORAL_GATE_OUTPUT = ROOT / "docs/内部参考/迭代需求/composite-query-multimodal-response-contract_planning_temporal_gate.json"
+REQUIREMENTS_PATH = ROOT / "workdocs/归档/正文/需求/composite-query-multimodal-response-contract_requirements.md"
+IMPLEMENTATION_PATH = ROOT / "workdocs/归档/正文/实施计划/composite-query-multimodal-response-contract_implementation_plan.md"
+CLARIFY_ALIGNMENT_OUTPUT = ROOT / "workdocs/归档/报告/机读校验/composite-query-multimodal-response-contract_clarify_plan_alignment.json"
+TEMPORAL_GATE_OUTPUT = ROOT / "workdocs/归档/报告/机读校验/composite-query-multimodal-response-contract_planning_temporal_gate.json"
 RESULT_SCHEMA_PATH = ROOT / "contracts/streaming/result-event.schema.json"
 
 
@@ -45,8 +45,8 @@ def assert_symbols_exist() -> None:
     symbol_targets = {
         "docs/开发文档/代码解读/SSE事件协议.md": ROOT / "docs/开发文档/代码解读/SSE事件协议.md",
         "docs/产品文档/聊天系统需求.md": ROOT / "docs/产品文档/聊天系统需求.md",
-        "docs/api/streaming-events.asyncapi.yaml": ROOT / "docs/api/streaming-events.asyncapi.yaml",
-        "docs/api/openapi.yaml": ROOT / "docs/api/openapi.yaml",
+        "contracts/api/streaming-events.asyncapi.yaml": ROOT / "contracts/api/streaming-events.asyncapi.yaml",
+        "contracts/api/openapi.yaml": ROOT / "contracts/api/openapi.yaml",
     }
 
     text_by_file: dict[str, str] = {}

@@ -100,7 +100,6 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
-  const currentStatus = stream.currentStatus;
   // 从 Context 获取所有持久化状态
   const { selectedModel, handleModelChange, startNewThread } = stream as any;
 

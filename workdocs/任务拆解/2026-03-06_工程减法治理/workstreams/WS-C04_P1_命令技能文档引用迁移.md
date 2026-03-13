@@ -52,7 +52,7 @@ card_export:
     - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
   rollback_anchors:
     - WORKFLOW_GATE_DEPRECATION_ENFORCED=false
-  evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+  evidence_entry: workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md
   check_cmd:
     - cd /Users/jijingkun/bojxAI/fastapi && rg -n "check_workflow_contract.py|check_clarify_plan_alignment.py|check_plan_vk_coverage.py|check_gate_contract_consistency.py|check_integration_gate.py" .cursor/commands .agents/skills docs/开发文档
   done_gate:

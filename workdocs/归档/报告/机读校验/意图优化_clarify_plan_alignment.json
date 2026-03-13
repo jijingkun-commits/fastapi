@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "task_split_dir": "",
+  "design": "/Users/jijingkun/bojxAI/fastapi/workdocs/归档/正文/设计/2026-03-06-intent-optimization-runtime-contract-v2-design.md",
+  "requirements": "/Users/jijingkun/bojxAI/fastapi/workdocs/归档/正文/需求/意图优化_requirements.md",
+  "implementation_plan": "/Users/jijingkun/bojxAI/fastapi/workdocs/归档/正文/实施计划/意图优化_implementation_plan.md",
+  "summary": {
+    "traceability_rows": 7,
+    "implementation_tasks": 7,
+    "tasks_missing_required_details": 0
+  },
+  "errors": []
+}

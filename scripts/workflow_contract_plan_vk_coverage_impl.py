@@ -16,7 +16,10 @@ from check_clarify_plan_alignment import AlignmentCheckError, run_alignment_chec
 from task_split_paths import resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIREMENTS_BASE = Path("docs/内部参考/迭代需求")
+TASK_SPLIT_BASE = Path("workdocs/任务拆解")
+IMPLEMENTATION_FALLBACK_BASES = (
+    Path("workdocs/归档/正文/实施计划"),
+)
 YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
 REQUIRED_EXECUTION_FIELDS = (
     "delivery_mode",
@@ -164,13 +167,16 @@ def _resolve_implementation_plan(
             if impl_path.exists() and impl_path.is_file():
                 return impl_path.resolve()
 
+    canonical_path = task_split_dir / "contracts" / "implementation_plan.md"
+    if canonical_path.exists() and canonical_path.is_file():
+        return canonical_path.resolve()
+
     split_name = task_split_dir.name
-    inferred_topic = split_name
-    if re.match(r"^\d{4}-\d{2}-\d{2}_", split_name):
-        inferred_topic = split_name.split("_", 1)[1]
-    inferred_path = repo_root / REQUIREMENTS_BASE / f"{inferred_topic}_implementation_plan.md"
-    if inferred_path.exists() and inferred_path.is_file():
-        return inferred_path.resolve()
+    inferred_topic = split_name.split("_", 1)[1] if re.match(r"^\d{4}-\d{2}-\d{2}_", split_name) else split_name
+    for base in IMPLEMENTATION_FALLBACK_BASES:
+        fallback_path = repo_root / base / f"{inferred_topic}_implementation_plan.md"
+        if fallback_path.exists() and fallback_path.is_file():
+            return fallback_path.resolve()
 
     raise CoverageCheckError(
         "无法定位 implementation_plan："

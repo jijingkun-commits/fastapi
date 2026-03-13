@@ -74,8 +74,10 @@ DEFAULT_DISPATCH_EXECUTOR = "wtimp"
 DEFAULT_DISPATCH_EXECUTOR_MODE = "cardrun_dispatch"
 DEFAULT_DISPATCH_TIMEOUT_SECONDS = 600
 DEFAULT_DIRTY_WHITELIST = (
-    "docs/plans/",
-    "docs/内部参考/迭代需求/",
+    "workdocs/需求/",
+    "workdocs/设计/",
+    "workdocs/归档/正文/需求/",
+    "workdocs/归档/正文/设计/",
 )
 
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"

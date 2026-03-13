@@ -6,7 +6,6 @@ description: Git 交付编排入口：提交当前分支并通过 shared deliver
 
 `/jjk-commit` 是 `jjk-*` 体系里的本地 Git 交付编排入口，负责把“当前 worktree 上的已验证改动”提交为原子 commit，并委托 shared delivery engine 把当前分支安全收口到仓库主干 `master`。
 
-> **中文主导**：无论是思考过程还是最终输出，**永远使用中文**。
 
 ## 输入前置（强制）
 
@@ -138,7 +137,7 @@ description: Git 交付编排入口：提交当前分支并通过 shared deliver
 ```
 
 ```text
-/jjk-commit @docs/内部参考/迭代需求/review_report_xxx.md
+/jjk-commit @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

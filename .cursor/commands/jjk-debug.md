@@ -8,7 +8,6 @@ description: 问题修复入口（结合 systematic-debugging）：根因定位 
 
 `/jjk-debug` 是 `jjk-*` 体系里的修复入口，目标是**先根因后修复**，并以验证证据收口。
 
-> **中文主导**: 无论是思考过程（CoT）还是最终输出，**永远使用中文**。
 
 ## 执行模式
 
@@ -18,7 +17,7 @@ description: 问题修复入口（结合 systematic-debugging）：根因定位 
 ### 仅诊断模式：`/jjk-debug --diagnose-only`
 - 仅做诊断与规划，**禁止修改代码**
 - 产出修复计划（包含 2-3 个方案对比）
-- 统一产物：`docs/内部参考/迭代需求/fix_plan_<topic>.md`
+- 统一产物：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/fix_plan.md`
 - 该模式替代旧 `jjk-pc` 入口
 
 ---
@@ -100,7 +99,7 @@ description: 问题修复入口（结合 systematic-debugging）：根因定位 
 
 必须输出调试交付文档：
 
-`docs/内部参考/迭代需求/debug_report_<topic>.md`
+`workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/debug_report.md`
 
 最小内容：
 
@@ -111,7 +110,7 @@ description: 问题修复入口（结合 systematic-debugging）：根因定位 
 5. 风险、回滚点与后续建议
 
 建议结构见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_debug_templates.md`。  
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`。
+若本项目有覆盖规则，再查：`workdocs/_templates/jjk_debug_templates.md`。
 
 ---
 

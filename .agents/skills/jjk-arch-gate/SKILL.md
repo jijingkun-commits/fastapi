@@ -9,7 +9,6 @@ description: "Use when you need `jjk-arch-gate` in this repository. Source inten
 
 `$jjk-arch-gate` 是轻量前置门禁：当你需要在正式出 `design.md` 前先判断结构方向是否合理时使用。
 
-> **中文主导**：思考与输出统一中文。
 
 ## 输入前置（强制）
 

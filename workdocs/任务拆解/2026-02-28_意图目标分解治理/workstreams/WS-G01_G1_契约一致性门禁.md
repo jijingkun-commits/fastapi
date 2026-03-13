@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -32,7 +32,7 @@
 ### 1.2 代码锚点与样例（必填）
 
 - 代码锚点（函数/类级）:
-- `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - `docs/SUMMARY.md`
 - 最小样例（可伪代码）:
 
@@ -44,16 +44,16 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
-- `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - `docs/SUMMARY.md`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -85,7 +85,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `docs index updated; docs guard strict pass`
 - 本 WS 负责的门禁子项: `G01:G-1`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11`
 
 ## 6. 风险与回滚
 
@@ -119,15 +119,15 @@ card_export:
   hard_depends_on: ["C05"]
   soft_depends_on: []
   depends_on: ["C05"]
-  file_whitelist: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md", "docs/SUMMARY.md"]
+  file_whitelist: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md", "docs/SUMMARY.md"]
   readonly_scope: []
   owner_fields: []
   mechanism_summary: ["校验 planning_contract 与拆解产物一致", "校验 Gate 卡片化、依赖链与字段完整性", "执行 docs_guard 严格检查并回填证据"]
-  code_anchor_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md", "docs/SUMMARY.md"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11"]
+  code_anchor_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md", "docs/SUMMARY.md"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"]
   rollback_anchors: ["WAVE_ROLLBACK_DRILL_MATRIX"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

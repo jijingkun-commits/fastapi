@@ -53,7 +53,7 @@ card_export:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir workdocs/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
   rollback_anchors:
     - WORKFLOW_GATE_UNIFIED_ENABLED=false
-  evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+  evidence_entry: workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md
   check_cmd:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode full-gate --task-split-dir workdocs/任务拆解/2026-03-06_工程减法治理 --baseline master --output -
   done_gate:

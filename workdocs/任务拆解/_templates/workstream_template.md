@@ -9,7 +9,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`:
-- 来源主计划：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+- 来源主计划：`workdocs/归档/正文/实施计划/<topic>_implementation_plan.md`
 - 来源并行计划总览（可选，自动生成）：`workdocs/任务拆解/<YYYY-MM-DD_主题>/parallel_plan.md`
 
 ## 1. 目标
@@ -135,13 +135,13 @@ card_export:
   code_anchor_refs:
     - path/to/file.py::function_name
   example_refs:
-    - docs/内部参考/迭代需求/<topic>_implementation_plan.md#L1
+    - workdocs/归档/正文/实施计划/<topic>_implementation_plan.md#L1
   acceptance_checks:
     - venv/bin/python -m pytest -q tests/unit/test_x.py
     - python3 scripts/docs_guard.py --strict
   rollback_anchors:
     - ENABLE_X=true|false
-  evidence_entry: docs/内部参考/迭代需求/<topic>_implementation_plan.md#...
+  evidence_entry: workdocs/归档/正文/实施计划/<topic>_implementation_plan.md#...
   check_cmd:
     - venv/bin/python -m pytest -q tests/unit/test_x.py
   handoff_artifacts:
