@@ -5,6 +5,7 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 
+- 2026-03-12｜聊天复合提问耗时治理首轮采用局部重构版 B，先修 preview 回流、frozen todo.query、coverage 口径，不先上 `Send` 全并行（ACTIVE）→ `docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
@@ -101,6 +102,17 @@
 - 影响范围：`web/next.config.mjs`、聊天图表编译链路、前端 dev/build warning 基线、后续 `react-vega` 升级时的依赖判断
 - 回退/失效条件：若未来明确需要服务端 PNG/Canvas 渲染，或图表导出能力改为依赖 `node-canvas`，则重新评估并显式引入服务端依赖；在此之前保持客户端 SVG 路径
 - 关联文档/代码：`docs/开发文档/架构设计/前端架构.md`、`web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
+
+### 2026-03-12 聊天复合提问耗时治理首轮采用局部重构版 B，而不是直接上 `Send` 全并行
+
+- 状态：ACTIVE
+- 决策主题：针对“显式复合提问已识别但后续仍串行、且 `todo.query` 误入澄清”的问题，首轮治理采用局部重构版 B：先修 preview 提前回流、frozen `todo.query` 直通、coverage answered 口径与 timing 观测；暂不上 LangGraph `Send` 全并行 fan-out/fan-in
+- 背景与问题：当前慢点主要集中在图内串行链路与错误澄清，而不是 HTTP/SSE 建连；若直接上全量并行重写，会同时放大 state ownership、resume、coverage、回放风险
+- 最终决策：保留当前主图拓扑与 `final_answer` 单一收口；`multi_agent_graph.py` 继续作为本轮 composite delivery policy owner；`todo_graph` 对 frozen `todo.query` 只执行不重判；请求级与 goal 级 timing 先走运行态 meta，不引入 DB migration
+- 取舍理由：项目未上线，优先选择“低风险高收益”的结构收敛；先把 23 秒无正文和 6 秒误澄清打掉，比一开始重写成全并行图更稳、更容易验证
+- 影响范围：`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_uat_cases.md`
+- 回退/失效条件：若局部重构版 B 完成后仍无法显著改善 `first_visible_at_ms` 或仍存在串行瓶颈，再升级到 LangGraph `Send` 并行方案；在此之前不提前进入全量并行重构
+- 关联文档/代码：`docs/plans/2026-03-10-composite-chat-latency-design.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
 
 ### 2026-03-11 聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class
 
