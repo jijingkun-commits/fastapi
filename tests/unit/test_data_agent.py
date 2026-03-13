@@ -5,14 +5,8 @@
 - data_access_control: 表白名单、RLS、SQL 验证
 - data_query_tools: semantic_query 工具
 
-注意：使用 sys.path 直接导入模块，避免 workflow/__init__.py 的链式依赖
 """
 import pytest
-import sys
-from pathlib import Path
-
-# 添加项目根目录到 path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from unittest.mock import Mock, patch, MagicMock
 
@@ -223,8 +217,3 @@ class TestSemanticQuery:
         # 应该走 Vanna 路径
         result = semantic_query.invoke({"question": "成交额是多少"})
         assert isinstance(result, str)
-
-
-# 运行测试的入口
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

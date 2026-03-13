@@ -43,9 +43,3 @@ def test_import():
     assert AssetType.EXPORT.value == "export"
     
     print("✅ AssetType 枚举验证通过")
-
-
-if __name__ == "__main__":
-    test_url_pattern()
-    test_import()
-    print("\n🎉 所有测试通过!")

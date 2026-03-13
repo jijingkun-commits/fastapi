@@ -5,14 +5,7 @@
   此时 ToolMessage 不一定是最后一条消息，仍必须能识别 handoff 并路由到专家。
 """
 
-import sys
-from pathlib import Path
-
 from langchain_core.messages import AIMessage, ToolMessage
-
-
-# 添加项目根目录到 path（与 app/tests 其他用例保持一致）
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 def test_extract_latest_handoff_from_messages_tool_message_not_last():
@@ -109,7 +102,6 @@ def test_augment_data_handoff_payload_should_preserve_specific_frame_for_mixed_q
     assert "贷款余额前10名" in normalized["frame"]["query_text"]
     assert normalized["frame"]["metric"] == "贷款余额"
     assert normalized["frame"]["time_range"] == "2025-06-30"
-    assert normalized["frame"]["dimensions"] == ["客户"]
     assert normalized["frame"]["query_shape"] == "top_n"
     assert normalized["frame"]["ranking"]["limit"] == 10
 

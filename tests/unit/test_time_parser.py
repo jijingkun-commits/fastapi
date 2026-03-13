@@ -126,7 +126,3 @@ class TestNaturalTimeParser(unittest.TestCase):
         parsed, _ = self.parser.parse(text)
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.minute, 59)
-
-
-if __name__ == "__main__":
-    unittest.main()

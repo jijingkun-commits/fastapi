@@ -7,14 +7,15 @@
 4. 使用 Vanna 验证 Text-to-SQL 生成效果。
 """
 import sys
-import os
 import re
 import logging
 from typing import List
+from pathlib import Path
 from sqlalchemy import create_engine, text
 
-# 添加路径
-sys.path.append(os.getcwd())
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import DATABASE_URL
 from scripts.schema_sync import get_analytics_tables, sync_tables_to_metadata, sync_relations
@@ -23,7 +24,7 @@ from app.ai.semantic.vanna_client import get_vanna
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("AskDataTest")
 
-DDL_FILE = "docs/问数表结构与指标/存款和贷款表结构.txt"
+DDL_FILE = PROJECT_ROOT / "docs/问数表结构与指标/存款和贷款表结构.txt"
 
 def clean_ddl(raw_ddl: str) -> List[str]:
     """清洗 DDL，使其适配 Standard Postgres。"""
@@ -103,7 +104,7 @@ def clean_ddl(raw_ddl: str) -> List[str]:
 def setup_database():
     """在本地 DB 创建表结构。"""
     logger.info("正在读取并清洗 DDL...")
-    with open(DDL_FILE, 'r') as f:
+    with open(DDL_FILE, 'r', encoding="utf-8") as f:
         raw_content = f.read()
     
     sqls = clean_ddl(raw_content)

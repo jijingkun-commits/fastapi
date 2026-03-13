@@ -82,6 +82,3 @@ class TestAnalyzeIntentIntegration(unittest.TestCase):
         constraints = new_state.get("time_constraints")
         self.assertIn("blocked_weekdays", constraints)
         self.assertIn(5, constraints["blocked_weekdays"]) # 周五=5
-        
-if __name__ == "__main__":
-    unittest.main()

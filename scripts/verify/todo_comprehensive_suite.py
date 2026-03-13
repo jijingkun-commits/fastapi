@@ -4,12 +4,13 @@
 """
 import asyncio
 import logging
-import os
 import sys
 from uuid import uuid4
+from pathlib import Path
 
-# 添加项目根目录到 sys.path
-sys.path.append(os.getcwd())
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver

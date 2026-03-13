@@ -1,11 +1,12 @@
 import asyncio
 import sys
-import os
 import logging
 from typing import List, Dict, Any
+from pathlib import Path
 
-# Ensure project root is in path
-sys.path.append(os.getcwd())
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import MemorySaver

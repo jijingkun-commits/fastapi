@@ -63,12 +63,12 @@ include = ["app*"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-q --cov=app --cov-report=term-missing --cov-report=html"
-testpaths = ["app/tests", "tests"]
+testpaths = ["tests"]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
 source = ["app"]
-omit = ["app/tests/*", "*/conftest.py"]
+omit = ["*/conftest.py"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -79,4 +79,3 @@ exclude_lines = [
 ]
 fail_under = 30
 show_missing = true
-

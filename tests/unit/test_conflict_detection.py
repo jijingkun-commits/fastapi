@@ -68,6 +68,3 @@ class TestConflictDetectionNode(unittest.TestCase):
         # 2个任务 * 2h = 4h < 8h，不应该有冲突
         conflicts = new_state.get("detected_conflicts", [])
         self.assertEqual(len(conflicts), 0)
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,24 +1,25 @@
 """待办助手全面测试主程序 (Master Test Runner).
 
 此脚本依次运行以下测试套件，并生成汇总报告：
-1. `tests/test_todo_comprehensive_suite.py` (基础功能 & 健壮性)
-2. `tests/test_shortcuts.py` (快捷指令)
-3. `tests/test_todo_complex_flow.py` (复杂流程)
+1. `scripts/verify/todo_comprehensive_suite.py` (基础功能 & 健壮性)
+2. `scripts/verify/todo_shortcuts.py` (快捷指令)
+3. `scripts/verify/todo_complex_flow.py` (复杂流程)
 
 Author: Antigravity
 Date: 2026-01-28
 """
 import sys
-import os
 import asyncio
 import importlib.util
+from pathlib import Path
 
-# 添加项目根目录
-sys.path.append(os.getcwd())
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-async def run_module(module_path):
+async def run_module(module_path: Path):
     """动态加载并运行测试模块的 main 函数"""
-    module_name = os.path.basename(module_path).replace(".py", "")
+    module_name = module_path.stem
     print(f"\n{'='*20} Running {module_name} {'='*20}")
     
     spec = importlib.util.spec_from_file_location(module_name, module_path)
@@ -45,15 +46,15 @@ async def main():
     results = {}
     
     # 1. Comprehensive Suite
-    ret = await run_module("tests/test_todo_comprehensive_suite.py")
+    ret = await run_module(PROJECT_ROOT / "scripts/verify/todo_comprehensive_suite.py")
     results["Comprehensive Suite"] = "✅ PASS" if ret == 0 else "❌ FAIL"
     
     # 2. Shortcut Suite
-    ret = await run_module("tests/test_shortcuts.py")
+    ret = await run_module(PROJECT_ROOT / "scripts/verify/todo_shortcuts.py")
     results["Shortcut Suite"] = "✅ PASS" if ret == 0 else "❌ FAIL"
     
     # 3. Complex Flow Suite
-    ret = await run_module("tests/test_todo_complex_flow.py")
+    ret = await run_module(PROJECT_ROOT / "scripts/verify/todo_complex_flow.py")
     results["Complex Flow Suite"] = "✅ PASS" if ret == 0 else "❌ FAIL"
     
     print("\n" + "="*50)
