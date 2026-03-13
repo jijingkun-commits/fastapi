@@ -56,6 +56,14 @@ REQUIRED_MARKERS = {
         "real_task_eval_verified",
         "missing_eval_evidence",
     ],
+    "workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/reports/agent_governance_real_task_eval.md": [
+        "EC-01",
+        "EC-05",
+        "multi_decider_stack",
+        "keyword_primary_routing",
+        "missing_eval_evidence",
+        "manual_eval_verdict",
+    ],
     ".github/workflows/agent-governance-gate.yml": [
         "test_agent_governance_contract_docs.py",
         ".cursor/rules/agent_authoring.mdc",
