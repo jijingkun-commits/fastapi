@@ -2085,6 +2085,12 @@ Data Agent 采用两层漏斗模型处理用户查询：
 14. **Tool Observation 归一（2026-03-09）**：Supervisor / summarize 消费第三方搜索工具输出时，必须先经过 observation normalizer，将 HTML 属性、站点导航、标题锚点等网页噪声剔除后再写入 `handoff_execution_trace` 或最终答复；Tavily 无结果/错误文本不得直接透传给用户。  
 15. **Coverage 失败/缺失收口（2026-03-09）**：`data.query` 交付物只有在存在结构化 `data` 或结构化 message 时才视为 `success`；若仅返回失败/澄清文本，则标记为 `failed` 并携带 `payload.failure_message`；若既无结构化结果也无失败摘要，则标记为 `missing`，由统一汇总阶段继续补齐。  
 16. **TopN 合同前推到 SQL 生成（2026-03-10）**：`pending_handoff.frame.query_shape/ranking` 不再只作为路由校验字段存在，而是与 `session_frame/query_context` 一起成为 SQL 生成真值源；`metric_resolve/_derive_metric_sql` 优先消费结构化合同，重建自然语言问题只用于展示与日志，不得再单独决定 TopN 语义。  
+17. **Data Intent Router/Resolver 单入口（2026-03-11）**：问数语义前置到 `app/ai/router/data_intent_router.py::decide_data_intent` 与 `app/ai/router/data_intent_resolver.py::resolve_data_intent`；`data_graph.py` / `multi_agent_graph.py` 只消费结构化 contract，不再在 workflow 编排层通过关键词、substring、正则直接放行业务分支。
+18. **`router_result_v2.route_decisions[].data_intent` 单挂载点（2026-03-11）**：data 场景运行态 contract 继续沿用 `router_result_v2`，仅允许把 `DataIntentContract` 挂在 `route_decisions[].data_intent`；禁止新增 `router_result_v3` 或平级 `data_intent_contract` 顶层字段。
+19. **缺时间直接写结构化澄清（2026-03-12）**：`resolve_data_intent()` 现在对“命中指标但缺时间范围”的查询直接输出 `needs_clarification + clarify_contract(target_slot=time_range)`；`router_result_v2.route_decisions[].data_intent` 与 `analyze_data_intent` 不再出现一边 `accept`、一边再追问时间的双口径。
+20. **metadata substring 维度误触发已关闭（2026-03-12）**：问数词法维度信号不再对 `t_meta_columns` 全量 `display_name/column_name` 做裸 substring 扫描；像“余额”这类通用词不会再把“贷款余额”错误抬成维度提示。
+21. **`llm-shadow` 非阻塞旁路（2026-03-12）**：问数主链路不再同步等待 LLM 意图分析；`data_graph.analyze_data_intent` 在开关开启时会异步调度 shadow compare，通过回调记录 `diff_fields/shadow_decision/shadow_reason_code`，主路径只保留 rule-primary 结果。详细时序、判定矩阵、contract 示例、迁移回滚与正反例见 [问数引擎设计 §8.2](问数引擎设计.md)。
+22. **真理源收口（2026-03-11）**：指标只认 `t_metric_definition`，列/维度/数据类型只认 `t_meta_columns`；`data_intent_helpers.py` 等旧 helper 不再作为 workflow 运行态真理源，仅保留外部 import 兼容路径。
 
 #### 相关状态字段（DataAgentState）
 

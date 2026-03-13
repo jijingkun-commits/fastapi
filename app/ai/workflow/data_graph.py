@@ -11,20 +11,22 @@ import json
 import time
 import re
 import math
+import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Number
 from typing import Dict, List, Optional, Literal, Any, Tuple
 
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
 from app.ai.utils.message_factory import create_ai_message
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.config import get_stream_writer
 
-from app.ai.llm_util import get_scene_llm, _normalize_text_content
+from app.ai.llm_util import _normalize_text_content
+from app.ai.llm_util import get_scene_llm
 from app.ai.scene_registry import SCENE_KEY_DATA_INTENT_ANALYSIS
 from app.ai.state import DataAgentState
 from app.ai.semantic import get_vanna
@@ -48,6 +50,9 @@ from app.ai.workflow.data_query_contract import (
     detect_query_shape as _detect_query_shape,
     extract_top_n as _extract_top_n,
 )
+from app.ai.router.data_intent_router import decide_data_intent, shadow_compare_async
+from app.ai.router.data_intent_resolver import resolve_data_intent
+from app.ai.router.data_intent_contract import build_clarify_contract, build_data_intent_contract
 from app.ai.events import emit_token, emit_status, emit_error, emit_result
 from app.ai.protocol import (
     build_expert_input_contract_payload,
@@ -1195,6 +1200,183 @@ def _load_data_graph_intent_policy(force_refresh: bool = False) -> Dict[str, Any
     return configured
 
 
+def _resolve_data_intent_shadow_settings() -> Dict[str, Any]:
+    settings: Dict[str, Any] = {
+        "intent_mode": "model_primary",
+        "intent_shadow_enabled": False,
+    }
+    try:
+        from app.services.config_resolver import ConfigResolver
+
+        resolved = ConfigResolver.get_intent_shadow_settings(default_mode="model_primary")
+    except Exception as exc:
+        logger.warning("data_intent_shadow_settings_resolve_failed: %s", exc)
+        return settings
+
+    settings["intent_mode"] = str(resolved.get("intent_mode") or "model_primary").strip().lower() or "model_primary"
+    settings["intent_shadow_enabled"] = bool(resolved.get("intent_shadow_enabled", False))
+    if settings["intent_mode"] != "model_primary":
+        settings["intent_shadow_enabled"] = False
+    return settings
+
+
+def _parse_data_intent_shadow_analysis(result_text: Any) -> Dict[str, Any]:
+    text = _normalize_text_content(result_text)
+    if not text:
+        raise ValueError("data_intent_shadow_empty_response")
+
+    clean_text = text.replace("```json", "").replace("```", "").strip()
+    start = clean_text.find("{")
+    end = clean_text.rfind("}")
+    if start != -1 and end != -1:
+        clean_text = clean_text[start : end + 1]
+    return json.loads(clean_text)
+
+
+def _build_data_intent_shadow_contract(analysis: Dict[str, Any], *, user_text: str) -> Dict[str, Any]:
+    metric_name = str(analysis.get("metric_name") or "").strip()
+    time_range = str(analysis.get("time_range") or "").strip() or None
+    dimensions = _ensure_text_list(analysis.get("dimensions"))
+    chart_type = str(analysis.get("chart_type") or "").strip() or None
+    clarification_needed = str(analysis.get("clarification_needed") or "").strip()
+    intent = str(analysis.get("intent") or "").strip().lower()
+    query_contract = build_query_contract(user_text, dimensions=dimensions, metric=metric_name)
+    ranking = dict(query_contract.get("ranking") or {}) if isinstance(query_contract.get("ranking"), dict) else {}
+    slots = {
+        "metric": metric_name,
+        "time_range": time_range,
+        "dimensions": dimensions,
+        "chart_type": chart_type,
+        "org_level": None,
+        "top_n": int(ranking.get("limit")) if ranking.get("limit") else None,
+        "display_mode": chart_type,
+        "query_shape": str(query_contract.get("query_shape") or "") or None,
+        "ranking": ranking,
+    }
+    evidence_codes = [f"llm_shadow.intent:{intent or 'unknown'}"]
+
+    if clarification_needed or intent == "clarification":
+        if not metric_name and not time_range:
+            clarify = build_clarify_contract(
+                target_slot="metric",
+                reason_code="llm_shadow_missing_metric_time",
+                prompt_template_key="ask_metric_time_range",
+            )
+        elif not metric_name:
+            clarify = build_clarify_contract(
+                target_slot="metric",
+                reason_code="llm_shadow_missing_metric",
+                prompt_template_key="ask_metric",
+            )
+        else:
+            clarify = build_clarify_contract(
+                target_slot="time_range",
+                reason_code="llm_shadow_missing_time_range",
+                prompt_template_key="ask_time_range",
+            )
+        return build_data_intent_contract(
+            decision="needs_clarification",
+            route="clarification",
+            confidence=0.42,
+            reason_code=str(clarify.get("reason_code") or "llm_shadow_clarification"),
+            evidence_codes=evidence_codes,
+            conflict_codes=[],
+            slots=slots,
+            safe_to_execute=False,
+            clarify=clarify,
+        )
+
+    route = "visualization" if chart_type or intent == "visualization" else "metric_query"
+    if dimensions or str(slots.get("query_shape") or "") == "top_n":
+        route = "detail_query" if route != "visualization" else route
+
+    return build_data_intent_contract(
+        decision="accept",
+        route=route,
+        confidence=0.42,
+        reason_code="llm_shadow_accept",
+        evidence_codes=evidence_codes,
+        conflict_codes=[],
+        slots=slots,
+        safe_to_execute=False,
+    )
+
+
+def _build_data_intent_shadow_runner(existing_context: str):
+    llm = get_scene_llm(
+        scene_key=SCENE_KEY_DATA_INTENT_ANALYSIS,
+        internal=True,
+    )
+
+    async def _runner(user_text: str) -> Dict[str, Any]:
+        prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
+            existing_context=existing_context,
+            question=user_text,
+            available_metrics=AVAILABLE_METRICS,
+        )
+        response = await llm.ainvoke([SystemMessage(content=prompt)])
+        result_text = response.content if hasattr(response, "content") else response
+        analysis = _parse_data_intent_shadow_analysis(result_text)
+        return _build_data_intent_shadow_contract(analysis, user_text=user_text)
+
+    return _runner
+
+
+def _record_data_intent_shadow_compare_result(result: Dict[str, Any]) -> None:
+    status = str(result.get("status") or "unknown")
+    log_fn = logger.warning if status == "shadow_failed" else logger.info
+    log_fn(
+        "data_intent_shadow_compare_result status=%s diff_fields=%s shadow_decision=%s shadow_reason_code=%s",
+        status,
+        result.get("diff_fields"),
+        result.get("shadow_decision"),
+        result.get("shadow_reason_code"),
+    )
+
+
+def _schedule_data_intent_shadow_compare(
+    *,
+    user_text: str,
+    primary_contract: Dict[str, Any],
+    existing_context: str,
+    enabled: bool,
+) -> Dict[str, Any]:
+    if not enabled:
+        return {"status": "disabled"}
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.info("data_intent_shadow_compare_skipped_no_running_loop")
+        return {"status": "bypassed_no_running_loop"}
+
+    try:
+        shadow_runner = _build_data_intent_shadow_runner(existing_context)
+    except Exception as exc:
+        logger.warning("data_intent_shadow_runner_unavailable: %s", exc)
+        return {"status": "shadow_runner_unavailable"}
+
+    async def _run_shadow_compare() -> Dict[str, Any]:
+        return await shadow_compare_async(
+            user_text=user_text,
+            primary_contract=primary_contract,
+            shadow_runner=shadow_runner,
+        )
+
+    task = loop.create_task(_run_shadow_compare(), name="data-intent-shadow-compare")
+
+    def _on_done(done_task):
+        try:
+            result = done_task.result()
+        except Exception as exc:
+            logger.warning("data_intent_shadow_compare_task_failed: %s", exc)
+            return
+        _record_data_intent_shadow_compare_result(result)
+
+    task.add_done_callback(_on_done)
+    return {"status": "scheduled_nonblocking"}
+
+
 def _extract_metric_alias_map_from_available_metrics() -> Dict[str, Tuple[str, ...]]:
     """从 AVAILABLE_METRICS 文本解析指标及同义词映射。"""
     alias_map: Dict[str, Tuple[str, ...]] = {}
@@ -1308,126 +1490,6 @@ def _pick_first_non_empty_list(*values: Optional[List[str]]) -> List[str]:
     return []
 
 
-def _extract_metric_from_text(text: str) -> str:
-    """从文本中抽取指标名称（配置/元数据驱动）。"""
-    lowered = text.lower()
-    best_metric = ""
-    best_match_len = 0
-
-    for canonical, synonyms in _load_metric_synonym_groups():
-        for synonym in synonyms:
-            normalized_synonym = str(synonym or "").strip().lower()
-            if not normalized_synonym:
-                continue
-            if normalized_synonym in lowered and len(normalized_synonym) > best_match_len:
-                best_metric = canonical
-                best_match_len = len(normalized_synonym)
-
-    return best_metric
-
-
-def _extract_time_from_text(text: str) -> str:
-    """从文本中抽取时间表达。"""
-    compact = re.sub(r"\s+", "", text or "")
-    if not compact:
-        return ""
-
-    date_match = re.search(r"(\d{4})[-年/.](\d{1,2})[-月/.](\d{1,2})日?", compact)
-    if date_match:
-        year, month, day = date_match.groups()
-        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-
-    yyyymmdd_match = re.search(r"(?<!\d)(\d{8})(?!\d)", compact)
-    if yyyymmdd_match:
-        raw = yyyymmdd_match.group(1)
-        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
-
-    relative_match = re.search(
-        r"(今(?:天|日)|昨天|昨日|本周|上周|本月|上月|本季度|上季度|今年|去年|(?:近|最近|过去)\d+(?:天|周|月|季度|年))",
-        compact,
-    )
-    if relative_match:
-        return relative_match.group(1)
-
-    return ""
-
-
-def _extract_chart_type_from_text(text: str) -> str:
-    """从文本中抽取图表类型（配置优先）。"""
-    compact = re.sub(r"\s+", "", text or "")
-    if not compact:
-        return ""
-
-    policy = _load_data_graph_intent_policy()
-    chart_alias_map = policy.get("chart_alias_map")
-    if isinstance(chart_alias_map, dict):
-        for alias, canonical in chart_alias_map.items():
-            alias_text = str(alias or "").strip()
-            canonical_text = str(canonical or "").strip()
-            if alias_text and canonical_text and alias_text in compact:
-                return canonical_text
-
-    chart_type_match = re.search(r"(柱状图|柱形图|条形图|饼图|折线图)", compact)
-    if chart_type_match:
-        detected = chart_type_match.group(1)
-        if detected in {"柱形图", "条形图"}:
-            return "柱状图"
-        return detected
-
-    if re.search(r"(图|可视化|画图|出图)", compact) and len(compact) <= 12:
-        return "图表"
-
-    return ""
-
-
-def _extract_dimensions_from_text(text: str) -> List[str]:
-    """从文本中抽取聚合维度（轻量规则）。"""
-    compact = re.sub(r"\s+", "", text or "")
-    if not compact:
-        return []
-
-    if "总体" in compact or "汇总" in compact:
-        return []
-
-    dimensions: List[str] = []
-    if "机构" in compact:
-        dimensions.append("机构")
-    if "客户" in compact:
-        dimensions.append("客户")
-    if any(token in compact for token in ("日期", "按天", "按月", "趋势")):
-        dimensions.append("日期")
-    if "分行" in compact:
-        dimensions.append("分行")
-    if "支行" in compact:
-        dimensions.append("支行")
-
-    return _ensure_text_list(dimensions)
-
-
-def _extract_org_level_from_text(text: str) -> str:
-    """从文本中抽取机构层级。"""
-    compact = re.sub(r"\s+", "", text or "")
-    if "支行" in compact:
-        return "支行"
-    if "分行" in compact:
-        return "分行"
-    if "总行" in compact:
-        return "总行"
-    return ""
-
-
-def _extract_context_from_text(text: str) -> Dict[str, Any]:
-    """从自由文本提取可复用上下文。"""
-    normalized = _normalize_user_message_for_intent(text)
-    return {
-        "metric_name": _extract_metric_from_text(normalized),
-        "time_range": _extract_time_from_text(normalized),
-        "dimensions": _extract_dimensions_from_text(normalized),
-        "chart_type": _extract_chart_type_from_text(normalized),
-        "org_level": _extract_org_level_from_text(normalized),
-    }
-
-
 def build_data_query_handoff_frame(
     query_text: str,
     base_frame: Optional[Dict[str, Any]] = None,
@@ -1435,7 +1497,24 @@ def build_data_query_handoff_frame(
     """构建 data.query 子任务结构化合同。"""
     normalized_query = _normalize_text_content(query_text)
     frame = dict(base_frame) if isinstance(base_frame, dict) else {}
-    parsed = _extract_context_from_text(normalized_query) if normalized_query else {}
+    router_contract = (
+        resolve_data_intent(
+            decide_data_intent(normalized_query, session_frame=frame),
+            user_text=normalized_query,
+        )
+        if normalized_query
+        else {}
+    )
+    parsed_slots = dict(router_contract.get("slots") or {})
+    parsed = {
+        "metric_name": str(parsed_slots.get("metric") or "").strip(),
+        "time_range": str(parsed_slots.get("time_range") or "").strip(),
+        "dimensions": _ensure_text_list(parsed_slots.get("dimensions")),
+        "chart_type": str(parsed_slots.get("chart_type") or "").strip(),
+        "org_level": str(parsed_slots.get("org_level") or "").strip(),
+        "query_shape": str(parsed_slots.get("query_shape") or "").strip(),
+        "ranking": dict(parsed_slots.get("ranking") or {}),
+    }
 
     metric = _pick_first_non_empty_str(
         frame.get("metric"),
@@ -1481,8 +1560,8 @@ def build_data_query_handoff_frame(
         normalized_query,
         dimensions=dimensions,
         metric=metric,
-        query_shape=frame.get("query_shape"),
-        ranking=frame.get("ranking"),
+        query_shape=frame.get("query_shape") or parsed.get("query_shape"),
+        ranking=frame.get("ranking") or parsed.get("ranking"),
     )
     if query_contract.get("query_shape"):
         frame["query_shape"] = query_contract["query_shape"]
@@ -1583,7 +1662,7 @@ def _is_continuation_reply(
         return False, "too_long"
 
     policy = _load_data_graph_intent_policy()
-    current_context = _extract_context_from_text(compact)
+    current_context = build_data_query_handoff_frame(compact)
 
     baseline_frame = {
         "metric": _pick_first_non_empty_str(existing_metric, handoff_metric),
@@ -1611,61 +1690,12 @@ def _is_continuation_reply(
     return False, reason
 
 
-def _infer_clarify_slot(clarification: str) -> str:
-    """根据澄清文案推断澄清槽位。"""
-    compact = re.sub(r"\s+", "", clarification or "")
-    if not compact:
-        return ""
-    if any(
-        keyword in compact
-        for keyword in ("图表", "可视化", "柱状图", "柱形图", "条形图", "饼图", "折线图", "明细", "占比", "列表")
-    ):
-        return "display_mode"
-    if "指标" in compact and "时间" in compact:
-        return "metric_time"
-    if "指标" in compact:
-        return "metric"
-    if "时间" in compact:
-        return "time_range"
-    if any(keyword in compact for keyword in ("层级", "分行", "支行")):
-        return "org_level"
-    return "general"
-
-
-def _normalize_clarify_level(value: Any) -> str:
-    """标准化澄清级别：required|optional。"""
-    token = str(value or "").strip().lower()
-    if not token:
-        return ""
-
-    if token in {"required", "mandatory", "must", "必需", "必须"}:
-        return "required"
-    if token in {"optional", "suggested", "preference", "可选", "建议"}:
-        return "optional"
-    return ""
-
-
-def _build_clarification_message(missing_slots: List[str]) -> str:
-    """按缺失槽位生成最小化澄清问题。"""
-    missing = set(missing_slots)
-    if "metric" in missing and "time_range" in missing:
-        return "请补充查询指标和时间范围（例如：查询2025-06-30贷款余额）。"
-    if "metric" in missing:
-        return "请补充要查询的指标（例如：贷款余额、存款余额）。"
-    if "time_range" in missing:
-        return "请补充时间范围（例如：2025-06-30、本月、过去30天）。"
-    if "org_level" in missing:
-        return "请确认机构层级（分行或支行）；未指定时默认按分行。"
-    return "请补充查询所需的关键信息。"
-
-
 def _is_schema_metadata_query(text: str) -> bool:
     """识别“表/字段/schema”类元数据查询，避免误追问指标与时间。"""
     compact = re.sub(r"\s+", "", str(text or "")).lower()
     if not compact:
         return False
 
-    # 显式 schema/元数据关键词
     metadata_keywords = (
         "schema",
         "information_schema",
@@ -1691,63 +1721,6 @@ def _is_schema_metadata_query(text: str) -> bool:
     )
     return any(re.search(pattern, sanitized) for pattern in metadata_patterns)
 
-
-def _resolve_clarification(
-    *,
-    analysis_clarification: str,
-    analysis_clarify_level: str,
-    merged_metric: str,
-    merged_time: str,
-    need_org_level: bool,
-    merged_org_level: str,
-    require_metric_time_slots: bool,
-    allow_metric_time_analysis_clarify: bool,
-    continuation_mode: bool,
-    last_clarify_slot: str,
-    clarify_count: int,
-) -> Tuple[Optional[str], Optional[str], int, str]:
-    """按缺项驱动澄清，并做重复澄清保护。"""
-    missing_slots: List[str] = []
-    if require_metric_time_slots:
-        if not merged_metric:
-            missing_slots.append("metric")
-        if not merged_time:
-            missing_slots.append("time_range")
-    if need_org_level and not merged_org_level:
-        missing_slots.append("org_level")
-
-    if missing_slots:
-        slot = "metric_time" if {"metric", "time_range"}.issubset(set(missing_slots)) else missing_slots[0]
-        message = _build_clarification_message(missing_slots)
-        reason = f"missing_slots:{','.join(missing_slots)}"
-        return message, slot, max(clarify_count, 0) + 1, reason
-
-    clarification = str(analysis_clarification or "").strip()
-    if not clarification:
-        return None, None, 0, "no_clarification_needed"
-
-    clarify_level = _normalize_clarify_level(analysis_clarify_level)
-    if clarify_level == "optional":
-        return None, None, 0, "skip_optional_clarify_level"
-
-    analysis_slot = _infer_clarify_slot(clarification)
-
-    if not allow_metric_time_analysis_clarify and analysis_slot in {"metric", "time_range", "metric_time"}:
-        return None, None, 0, "skip_metric_time_clarify_for_metadata_query"
-
-    # 重复澄清保护：上一轮已问展示方式，本轮补充后不再追问指标/时间
-    if continuation_mode and last_clarify_slot == "display_mode":
-        if analysis_slot in {"metric", "time_range", "metric_time", "general"}:
-            return None, None, 0, "skip_redundant_clarify_after_display_mode"
-
-    # 已具备关键槽位时，拒绝模型回退成全量追问
-    if analysis_slot in {"metric", "time_range", "metric_time"} and merged_metric and merged_time:
-        return None, None, 0, "skip_redundant_metric_time_clarify"
-
-    if analysis_slot == "org_level" and merged_org_level:
-        return None, None, 0, "skip_redundant_org_level_clarify"
-
-    return clarification, analysis_slot or "general", max(clarify_count, 0) + 1, f"analysis:{analysis_slot or 'general'}"
 
 def analyze_data_intent(state: DataAgentState) -> Dict:
     """分析用户数据查询意图。
@@ -1922,6 +1895,7 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
     existing_context = "；".join(parts) if parts else "（无，为首轮或尚未提供）"
 
     try:
+        shadow_settings = _resolve_data_intent_shadow_settings()
         use_handoff_frame_analysis = bool(handoff_context_text)
         if use_handoff_frame_analysis:
             analysis = {
@@ -1932,78 +1906,23 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "dimensions": [],
                 "chart_type": "",
                 "clarification_needed": "",
+                "shadow_status": "skipped_handoff_short_circuit",
             }
             logger.info("意图分析结果: handoff_frame_short_circuit=%s", analysis)
         else:
-            # 调用 LLM 分析意图（internal=True 自动禁用流式 + 添加 tag，防止 JSON 泄露）
-            # 使用 SQL 生成/内部分析 路由配置的模型，避免推理模型浪费 thinking tokens
-            llm = get_scene_llm(
-                scene_key=SCENE_KEY_DATA_INTENT_ANALYSIS,
-                internal=True,
-            )
-            prompt = DATA_INTENT_ANALYSIS_PROMPT.format(
-                question=normalized_last_message,
-                existing_context=existing_context,
-                available_metrics=AVAILABLE_METRICS
-            )
-
-            response = llm.invoke(prompt)
-            content = _normalize_text_content(
-                response.content if hasattr(response, "content") else response
-            )
-
-            # 解析 JSON 响应
-            json_start = content.find('{')
-            json_end = content.rfind('}') + 1
-            if json_start >= 0 and json_end > json_start:
-                analysis = json.loads(content[json_start:json_end])
-            else:
-                analysis = {"intent": "free_query"}
-
-            logger.info(f"意图分析结果: {analysis}")
+            analysis = {
+                "intent": "free_query",
+                "metric_name": "",
+                "time_range": "",
+                "filters": [],
+                "dimensions": [],
+                "chart_type": "",
+                "clarification_needed": "",
+                "shadow_status": "disabled",
+            }
+            logger.info("意图分析结果: llm_shadow_precheck=%s", analysis["shadow_status"])
 
 
-        current_context = _extract_context_from_text(normalized_last_message)
-
-        # 当前轮解析结果（优先使用 LLM；无值时由规则补齐）
-        current_metric = _pick_first_non_empty_str(
-            analysis.get("metric_name"),
-            current_context.get("metric_name"),
-        )
-        current_time = _pick_first_non_empty_str(
-            analysis.get("time_range"),
-            current_context.get("time_range"),
-        )
-        current_dims = _pick_first_non_empty_list(
-            _ensure_text_list(analysis.get("dimensions")),
-            _ensure_text_list(current_context.get("dimensions")),
-        )
-        current_filters = _ensure_text_list(analysis.get("filters"))
-        current_chart_type = _pick_first_non_empty_str(
-            analysis.get("chart_type"),
-            current_context.get("chart_type"),
-        )
-        current_org_level = _pick_first_non_empty_str(current_context.get("org_level"))
-        current_query_contract = build_query_contract(
-            normalized_last_message,
-            dimensions=current_dims,
-            metric=current_metric,
-            fallback_total=False,
-        )
-        current_query_shape = str(current_query_contract.get("query_shape") or "")
-        current_ranking = dict(current_query_contract.get("ranking") or {})
-
-        # 会话帧归并：当前轮 > handoff > 历史 state
-        current_frame = {
-            "metric": current_metric,
-            "time_range": current_time,
-            "dimensions": current_dims,
-            "filters": current_filters,
-            "chart_type": current_chart_type,
-            "org_level": current_org_level,
-            "query_shape": current_query_shape,
-            "ranking": current_ranking,
-        }
         handoff_frame = {
             "metric": handoff_metric,
             "time_range": handoff_time,
@@ -2023,6 +1942,53 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
             "org_level": existing_org_level,
             "query_shape": existing_query_shape,
             "ranking": existing_ranking,
+        }
+        current_router_contract = resolve_data_intent(
+            decide_data_intent(
+                normalized_last_message,
+                session_frame=state_frame,
+                handoff_frame=handoff_frame,
+            ),
+            user_text=normalized_last_message,
+        )
+        if not use_handoff_frame_analysis:
+            scheduled_shadow = _schedule_data_intent_shadow_compare(
+                user_text=normalized_last_message,
+                primary_contract=current_router_contract,
+                existing_context=existing_context,
+                enabled=bool(shadow_settings.get("intent_shadow_enabled")),
+            )
+            analysis["shadow_status"] = str(scheduled_shadow.get("status") or "unknown")
+        current_slots = dict(current_router_contract.get("slots") or {})
+        current_context = {
+            "metric_name": str(current_slots.get("metric") or "").strip(),
+            "time_range": str(current_slots.get("time_range") or "").strip(),
+            "dimensions": _ensure_text_list(current_slots.get("dimensions")),
+            "chart_type": str(current_slots.get("chart_type") or "").strip(),
+            "org_level": str(current_slots.get("org_level") or "").strip(),
+            "query_shape": str(current_slots.get("query_shape") or "").strip(),
+            "ranking": dict(current_slots.get("ranking") or {}),
+        }
+
+        current_metric = _pick_first_non_empty_str(current_context.get("metric_name"))
+        current_time = _pick_first_non_empty_str(current_context.get("time_range"))
+        current_dims = _pick_first_non_empty_list(_ensure_text_list(current_context.get("dimensions")))
+        current_filters = _ensure_text_list(analysis.get("filters"))
+        current_chart_type = _pick_first_non_empty_str(current_context.get("chart_type"))
+        current_org_level = _pick_first_non_empty_str(current_context.get("org_level"))
+        current_query_shape = str(current_context.get("query_shape") or "")
+        current_ranking = dict(current_context.get("ranking") or {})
+
+        # 会话帧归并：当前轮 > handoff > 历史 state
+        current_frame = {
+            "metric": current_metric,
+            "time_range": current_time,
+            "dimensions": current_dims,
+            "filters": current_filters,
+            "chart_type": current_chart_type,
+            "org_level": current_org_level,
+            "query_shape": current_query_shape,
+            "ranking": current_ranking,
         }
 
         merged_frame, frame_source_map = reduce_session_frame(
@@ -2079,13 +2045,10 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
         if not context_reset_for_new_query:
             combined_text_parts.insert(1, handoff_context_text)
         combined_text = " ".join([part for part in combined_text_parts if part])
-        compact_combined_text = re.sub(r"\s+", "", combined_text)
-        org_dimension_requested = any(
-            keyword in compact_combined_text for keyword in ("机构", "分行", "支行")
-        )
-        has_chart_request = bool(merged_chart_type) or any(
-            keyword in compact_combined_text for keyword in ("图表", "柱状图", "饼图", "折线图", "可视化", "出图")
-        )
+        current_route = str(current_router_contract.get("route") or "").strip()
+        current_decision = str(current_router_contract.get("decision") or "").strip()
+        org_dimension_requested = _is_org_dimension_requested(merged_dims) or bool(merged_org_level)
+        has_chart_request = bool(merged_chart_type) or current_route == "visualization"
 
         # 默认值策略：图表场景未指定层级时默认分行
         used_default_org_level = False
@@ -2095,25 +2058,38 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
 
         is_schema_metadata_query = _is_schema_metadata_query(normalized_last_message)
         require_metric_time_slots = not is_schema_metadata_query
-        allow_metric_time_analysis_clarify = not is_schema_metadata_query
 
         previous_clarify_slot = str(state.get("last_clarify_slot") or "").strip()
         previous_clarify_count = int(state.get("clarify_count") or 0)
         previous_clarify_fsm_state = str(state.get("clarify_fsm_state") or "idle").strip() or "idle"
         previous_clarify_round = int(state.get("clarify_round") or previous_clarify_count or 0)
-        clarification, clarify_slot, clarified_count, clarify_reason = _resolve_clarification(
-            analysis_clarification=str(analysis.get("clarification_needed") or ""),
-            analysis_clarify_level=str(analysis.get("clarify_level") or ""),
-            merged_metric=merged_metric,
-            merged_time=merged_time,
-            need_org_level=has_chart_request and org_dimension_requested and not bool(merged_org_level),
-            merged_org_level=merged_org_level,
-            require_metric_time_slots=require_metric_time_slots,
-            allow_metric_time_analysis_clarify=allow_metric_time_analysis_clarify,
-            continuation_mode=continuation_mode,
-            last_clarify_slot=previous_clarify_slot,
-            clarify_count=previous_clarify_count,
-        )
+        clarify_contract = current_router_contract.get("clarify") if isinstance(current_router_contract.get("clarify"), dict) else None
+        clarification = None
+        clarify_slot = None
+        clarified_count = 0
+        clarify_reason = "no_clarification_needed"
+        if not is_schema_metadata_query and isinstance(clarify_contract, dict):
+            prompt_key = str(clarify_contract.get("prompt_template_key") or "")
+            prompt_map = {
+                "ask_metric_time_range": "请补充要查询的指标和时间范围（例如：查询2025-06-30贷款余额）。",
+                "ask_metric": "请补充要查询的指标（例如：贷款余额、存款余额）。",
+                "ask_time_range": "请补充时间范围（例如：2025-06-30、本月、过去30天）。",
+                "ask_org_level": "请确认机构层级（分行或支行）；未指定时默认按分行。",
+            }
+            clarification = prompt_map.get(prompt_key, "请补充查询所需的关键信息。")
+            clarify_slot = str(clarify_contract.get("target_slot") or "").strip() or None
+            clarified_count = max(previous_clarify_count, 0) + 1
+            clarify_reason = f"contract:{str(clarify_contract.get('reason_code') or 'unknown')}"
+        elif require_metric_time_slots and not merged_metric:
+            clarification = "请补充要查询的指标（例如：贷款余额、存款余额）。"
+            clarify_slot = "metric"
+            clarified_count = max(previous_clarify_count, 0) + 1
+            clarify_reason = "contract:missing_metric"
+        elif require_metric_time_slots and not merged_time:
+            clarification = "请补充时间范围（例如：2025-06-30、本月、过去30天）。"
+            clarify_slot = "time_range"
+            clarified_count = max(previous_clarify_count, 0) + 1
+            clarify_reason = "contract:missing_time_range"
 
         missing_slots_for_fsm: List[str] = []
         if require_metric_time_slots:
@@ -2180,13 +2156,13 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 full_question = f"{merged_desc}。用户补充：{normalized_last_message}"
 
         analysis_intent = str(analysis.get("intent") or "free_query").strip() or "free_query"
-        resolved_intent = analysis_intent
-        if clarification:
+        resolved_intent = "free_query"
+        if clarification or current_decision == "needs_clarification":
             resolved_intent = "clarification"
-        elif merged_metric:
-            resolved_intent = "metric_query"
-        elif has_chart_request or analysis_intent == "visualization":
+        elif current_decision == "accept" and current_route == "visualization":
             resolved_intent = "visualization"
+        elif current_decision == "accept" and current_route in {"metric_query", "detail_query"}:
+            resolved_intent = "metric_query"
         elif analysis_intent == "clarification":
             resolved_intent = "free_query"
 
@@ -2239,6 +2215,10 @@ def analyze_data_intent(state: DataAgentState) -> Dict:
                 "original_question": full_question,
                 "last_user_message": normalized_last_message,
                 "analysis": analysis,
+                "intent_decision": current_decision or None,
+                "intent_route": current_route or None,
+                "intent_safe_to_execute": bool(current_router_contract.get("safe_to_execute")),
+                "resolved_sources": dict(current_router_contract.get("resolved_sources") or {}),
                 "org_level": merged_org_level or None,
                 "query_shape": merged_query_shape or None,
                 "ranking": merged_ranking,
@@ -3935,21 +3915,13 @@ def _collect_chart_axis_semantic_context(
     dimension_hints: List[str] = []
     dimension_hints.extend(_ensure_text_list(state.get("dimensions")))
 
-    analysis_metric = ""
-    query_context = state.get("query_context")
-    if isinstance(query_context, dict):
-        analysis = query_context.get("analysis")
-        if isinstance(analysis, dict):
-            dimension_hints.extend(_ensure_text_list(analysis.get("dimensions")))
-            analysis_metric = str(analysis.get("metric_name") or "").strip()
-
-    dimension_hints.extend(_extract_dimensions_from_text(question))
+    question_frame = build_data_query_handoff_frame(question)
+    dimension_hints.extend(_ensure_text_list(question_frame.get("dimensions")))
     normalized_dimension_hints = _ensure_text_list(dimension_hints)
 
     metric_hint = _pick_first_non_empty_str(
         str(state.get("matched_metric") or "").strip(),
-        analysis_metric,
-        _extract_metric_from_text(question),
+        str(question_frame.get("metric") or "").strip(),
     )
 
     return normalized_dimension_hints, metric_hint
