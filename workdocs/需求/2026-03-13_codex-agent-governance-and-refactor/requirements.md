@@ -46,6 +46,11 @@ success_definition:
   - 后续 agent 需求默认先出简单方案，再证明复杂度必要性。
   - Codex 默认把语义理解交给结构化 contract，把 guardrail 留给护栏层，而不是再堆关键词主路由。
   - agent 设计的优劣能通过明确门禁和评测被观察到。
+design_source: workdocs/设计/2026-03-13_codex-agent-governance-and-refactor/design.md
+clarify_handoff_source: workdocs/设计/2026-03-13_codex-agent-governance-and-refactor/design.md#13-clarify_handoff_contract
+clarify_handoff_version: v2
+implementation_plan_source: workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/contracts/implementation_plan.md
+uat_cases_source: workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/contracts/uat_cases.md
 ```
 
 ## product_contract_matrix
@@ -201,6 +206,32 @@ success_definition:
 | BG-02 | FR-02 | S-01 | AS-02, AS-05 | 如何把官方最佳实践和本仓库协作方式结合成可复用的审查模板 |
 | BG-02 | FR-06 | S-01 | AS-05 | 如何把写法复杂度和行为质量转成最小可持续评测集 |
 | BG-02 | FR-07 | S-01 | AS-02, AS-03 | 如何沉淀统一坏味道清单、例外条件和阻断规则，减少审查口径漂移 |
+
+## process_bundle_links
+
+| 过程产物 | 路径 | 角色 |
+|---|---|---|
+| 需求真理源 | `workdocs/需求/2026-03-13_codex-agent-governance-and-refactor/requirements.md` | 当前需求合同 |
+| 设计文档 | `workdocs/设计/2026-03-13_codex-agent-governance-and-refactor/design.md` | 单方案技术设计 |
+| implementation_plan | `workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/contracts/implementation_plan.md` | 可执行任务拆解 |
+| uat_cases | `workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/contracts/uat_cases.md` | 最小验收矩阵 |
+
+## traceability_matrix
+
+| fr_id | design_item | feature_id | task_id | tc_id | acceptance_cmd_ref |
+|---|---|---|---|---|---|
+| FR-01 | D-01 | GOV-01 | T-01 | TC-01 | `T-01.acceptance_cmds[0]` |
+| FR-02 | D-02 | GOV-02 | T-02 | TC-03 | `T-02.acceptance_cmds[0]` |
+| FR-02 | D-02 | GOV-05 | T-05 | TC-05 | `T-05.acceptance_cmds[0]` |
+| FR-03 | D-03 | GOV-03 | T-03 | TC-01 | `T-03.acceptance_cmds[0]` |
+| FR-04 | D-04 | GOV-01 | T-01 | TC-02 | `T-01.acceptance_cmds[0]` |
+| FR-04 | D-04 | GOV-04 | T-04 | TC-02 | `T-04.acceptance_cmds[1]` |
+| FR-05 | D-05 | GOV-01 | T-01 | TC-03 | `T-01.acceptance_cmds[0]` |
+| FR-05 | D-05 | GOV-02 | T-02 | TC-03 | `T-02.acceptance_cmds[0]` |
+| FR-06 | D-06 | GOV-03 | T-03 | TC-04 | `T-03.acceptance_cmds[0]` |
+| FR-06 | D-06 | GOV-04 | T-04 | TC-04 | `T-04.acceptance_cmds[0]` |
+| FR-07 | D-07 | GOV-03 | T-03 | TC-02 | `T-03.acceptance_cmds[0]` |
+| FR-07 | D-07 | GOV-05 | T-05 | TC-05 | `T-05.acceptance_cmds[0]` |
 
 ## out_of_scope
 
