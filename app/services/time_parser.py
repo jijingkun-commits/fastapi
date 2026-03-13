@@ -193,6 +193,30 @@ class NaturalTimeParser:
         
         return (hour, minute)
 
+    def parse_data_time_range(self, text: str) -> str:
+        """将问数时间表达归一为 YYYY-MM-DD 或保留相对口径。"""
+        compact = re.sub(r"\s+", "", str(text or ""))
+        if not compact:
+            return ""
+
+        date_match = re.search(r"(\d{4})[-年/.](\d{1,2})[-月/.](\d{1,2})日?", compact)
+        if date_match:
+            year, month, day = date_match.groups()
+            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+        yyyymmdd_match = re.search(r"(?<!\d)(\d{8})(?!\d)", compact)
+        if yyyymmdd_match:
+            raw = yyyymmdd_match.group(1)
+            return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+
+        if re.search(r"今(?:天|日)|昨天|昨日|本周|上周|本月|上月|本季度|上季度|今年|去年|(?:近|最近|过去)\d+(?:天|周|月|季度|年)", compact):
+            return compact
+
+        parsed_time, _meta = self.parse(compact)
+        if parsed_time is None:
+            return ""
+        return parsed_time.strftime("%Y-%m-%d")
+
     def _adjust_time_of_day(self, dt: datetime, text: str) -> datetime:
         """根据 早上/上午/下午/晚上/下班前 调整时间。
         
@@ -251,3 +275,8 @@ class NaturalTimeParser:
         """判断时间表达是否模糊。"""
         keywords = ["下午", "上午", "晚上", "早上", "凌晨", "可能", "大概", "左右"]
         return any(k in text for k in keywords)
+
+
+def parse_data_time_range(text: str, base_time: datetime | None = None) -> str:
+    """模块级问数时间归一入口。"""
+    return NaturalTimeParser(base_time=base_time).parse_data_time_range(text)

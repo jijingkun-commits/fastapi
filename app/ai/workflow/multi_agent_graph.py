@@ -3142,13 +3142,25 @@ def _apply_router_contract_guard(
         enriched_handoff = dict(handoff)
         enriched_handoff["goal_id"] = str(current_goal.get("goal_id") or "")
         dispatch_reason = "compiled_data_goal_frame" if str(handoff.get("compiled_by") or "").strip() == "goal_contract" else "decomposed_goals_allowed_agents"
-        enriched_handoff["route_decision"] = {
+        route_decision = {
             "goal_id": str(current_goal.get("goal_id") or ""),
             "target_agent": target_agent,
             "dispatch_reason": dispatch_reason,
             "priority": int(current_goal.get("order") or 0),
             "blocked_by": [],
         }
+        if goal_bucket == "data":
+            frame = handoff.get("frame") if isinstance(handoff.get("frame"), dict) else {}
+            query_text = _normalize_text_content(frame.get("query_text"))
+            if query_text:
+                from app.ai.router.data_intent_router import decide_data_intent
+                from app.ai.router.data_intent_resolver import resolve_data_intent
+
+                route_decision["data_intent"] = resolve_data_intent(
+                    decide_data_intent(query_text, session_frame=frame),
+                    user_text=query_text,
+                )
+        enriched_handoff["route_decision"] = route_decision
         accepted.append(enriched_handoff)
         pending_goals.pop(0)
 
