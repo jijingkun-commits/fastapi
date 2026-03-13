@@ -303,8 +303,8 @@ test.describe('契约静态守卫', () => {
     });
 
     test('TC-EDGE-11: redaction_whitelist_test 文档存在 payload_budget_rules', async () => {
-        const openapiPath = path.resolve(__dirname, '../../docs/api/openapi.yaml');
-        const asyncapiPath = path.resolve(__dirname, '../../docs/api/streaming-events.asyncapi.yaml');
+        const openapiPath = path.resolve(__dirname, '../../contracts/api/openapi.yaml');
+        const asyncapiPath = path.resolve(__dirname, '../../contracts/api/streaming-events.asyncapi.yaml');
 
         const openapiText = fs.readFileSync(openapiPath, 'utf-8');
         const asyncapiText = fs.readFileSync(asyncapiPath, 'utf-8');

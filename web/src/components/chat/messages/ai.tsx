@@ -347,6 +347,45 @@ const rendererRegistry: Record<string, ResultRenderer> = {
   image: imageRenderer,
 };
 
+function RuntimeStatusBadge({
+  message,
+  phase,
+}: {
+  message: string;
+  phase: "processing" | "generating" | "done";
+}) {
+  const shouldAnimateStatus = phase !== "done";
+
+  return (
+    <div
+      data-testid="runtime-status"
+      data-phase={phase}
+      className="chat-runtime-status"
+    >
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "bg-current/60 inline-block h-1.5 w-1.5 rounded-full",
+            shouldAnimateStatus && "animate-pulse",
+          )}
+        />
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
+
+function LoadingDotsBubble() {
+  return (
+    <div className="bg-muted flex h-8 items-center gap-1 rounded-2xl px-4 py-2">
+      <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full"></div>
+      <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_0.5s_infinite] rounded-full"></div>
+      <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_1s_infinite] rounded-full"></div>
+    </div>
+  );
+}
+
 /**
  * AI 消息主组件
  */
@@ -371,6 +410,7 @@ export function AssistantMessage({
   const thread = useStreamContext();
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const kbImages = thread.kbImages;
+  const currentStatus = thread.currentStatus;
 
   const aiMessage = message as AIMessage | undefined;
   const additionalKwargs = aiMessage?.additional_kwargs;
@@ -428,8 +468,17 @@ export function AssistantMessage({
   }
 
   if (isLoading) {
+    const shouldShowLoadingDots =
+      displayContent.length === 0 && renderedResultEvents.length === 0;
+
     return (
       <div className="chat-content-shell mx-auto flex flex-col gap-2">
+        {currentStatus?.message && (
+          <RuntimeStatusBadge
+            message={currentStatus.message}
+            phase={currentStatus.phase}
+          />
+        )}
         {displayContent.length > 0 && (
           <MarkdownText className="markdown-content-readable">
             {displayContent}
@@ -437,6 +486,7 @@ export function AssistantMessage({
         )}
         {renderedResultEvents}
         {hasToolCalls && <ToolCalls toolCalls={message.tool_calls} isComplete={!isLoading} />}
+        {shouldShowLoadingDots && <LoadingDotsBubble />}
       </div>
     );
   }
@@ -492,11 +542,7 @@ export function AssistantMessage({
 export function AssistantMessageLoading() {
   return (
     <div className="chat-content-shell mx-auto flex items-start gap-2">
-      <div className="bg-muted flex h-8 items-center gap-1 rounded-2xl px-4 py-2">
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_0.5s_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_1s_infinite] rounded-full"></div>
-      </div>
+      <LoadingDotsBubble />
     </div>
   );
 }

@@ -76,7 +76,7 @@ def test_build_codex_exec_command_for_cardrun_dispatch():
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
@@ -98,12 +98,12 @@ def test_run_dispatch_parses_json_result_and_requires_commit_sha(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
 
-    stdout = """some log\n{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "abc123def456", "merge_sha": null, "changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [{"kind": "chat_db", "cmd": "pytest -q tests/unit/test_dummy.py", "exit_code": 0, "summary": "1 passed"}], "evidence_satisfied": true}\n"""
+    stdout = """some log\n{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "abc123def456", "merge_sha": null, "changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [{"kind": "chat_db", "cmd": "pytest -q tests/unit/test_dummy.py", "exit_code": 0, "summary": "1 passed"}], "evidence_satisfied": true}\n"""
 
     process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
     _patch_popen(monkeypatch, module, process)
@@ -129,12 +129,12 @@ def test_run_dispatch_fails_when_commit_sha_missing(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
 
-    stdout = '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "", "merge_sha": null, "changed_files": [], "acceptance_results": [], "evidence_satisfied": true}'
+    stdout = '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", "card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", "subagent_id": "wtimp-C02-1", "commit_sha": "", "merge_sha": null, "changed_files": [], "acceptance_results": [], "evidence_satisfied": true}'
 
     process = _FakePopenProcess(stdout=stdout, stderr="", returncode=0)
     _patch_popen(monkeypatch, module, process)
@@ -151,7 +151,7 @@ def test_run_dispatch_maps_nonzero_exit_to_subagent_failed(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
@@ -172,7 +172,7 @@ def test_run_dispatch_maps_timeout_to_subagent_failed(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
         timeout_seconds=12,
@@ -202,7 +202,7 @@ def test_run_dispatch_timeout_terminates_process_group(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
         timeout_seconds=12,
@@ -243,7 +243,7 @@ def test_run_dispatch_rejects_non_contract_json_log_object(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
@@ -262,19 +262,19 @@ def test_run_dispatch_rejects_multiple_contract_payloads(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
 
     stdout = (
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
-        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
         '"changed_files": ["scripts/coder4/coder4_bootstrap_kernel.py"], "acceptance_results": [], "evidence_satisfied": true}'
         '\nnoise\n'
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
-        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-2", "commit_sha": "def456", "merge_sha": null, '
         '"changed_files": ["scripts/coder4/wtimp_dispatch_bridge.py"], "acceptance_results": [], "evidence_satisfied": true}'
     )
@@ -293,14 +293,14 @@ def test_run_dispatch_rejects_missing_evidence_satisfied(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
 
     stdout = (
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
-        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
         '"changed_files": [], "acceptance_results": []}'
     )
@@ -319,14 +319,14 @@ def test_run_dispatch_rejects_untyped_acceptance_results(monkeypatch):
     request = module.WtimpDispatchRequest(
         task_key="PP-20260306-CARDRUN-WTIMP",
         card_id="C02",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md",
         worktree_path="/tmp/worktree-c02",
         executor_mode="cardrun_dispatch",
     )
 
     stdout = (
         '{"ok": true, "executor": "wtimp", "executor_mode": "cardrun_dispatch", '
-        '"card_id": "C02", "ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
+        '"card_id": "C02", "ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C02.md", '
         '"subagent_id": "wtimp-C02-1", "commit_sha": "abc123", "merge_sha": null, '
         '"changed_files": [], "acceptance_results": [{"cmd": "pytest -q", "exit_code": 0, "summary": "ok"}], '
         '"evidence_satisfied": true}'

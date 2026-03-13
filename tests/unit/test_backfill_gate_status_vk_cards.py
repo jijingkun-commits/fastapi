@@ -31,10 +31,10 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def _prepare_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     repo_root = tmp_path / "repo"
-    task_dir = repo_root / "docs" / "内部参考" / "任务拆解" / TASK_SPLIT_DIR
-    impl_path = repo_root / "docs" / "内部参考" / "迭代需求" / "parallel-plan-summary_implementation_plan.md"
+    task_dir = repo_root / "workdocs" / "任务拆解" / TASK_SPLIT_DIR
+    impl_path = repo_root / "workdocs" / "归档" / "实施计划" / "parallel-plan-summary_implementation_plan.md"
     (repo_root / "web").mkdir(parents=True, exist_ok=True)
-    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / "contracts").mkdir(parents=True, exist_ok=True)
     impl_path.parent.mkdir(parents=True, exist_ok=True)
 
     impl_path.write_text(
@@ -51,7 +51,7 @@ planning_contract:
         encoding="utf-8",
     )
 
-    vk_cards_path = task_dir / "vk_cards.json"
+    vk_cards_path = task_dir / "contracts" / "vk_cards.json"
     _write_json(
         vk_cards_path,
         {
@@ -82,14 +82,14 @@ planning_contract:
                 "card_id": "C00",
                 "feature_ids": ["C00-PREFLIGHT"],
                 "required_done_gate": ["scope ok"],
-                "source_ws_file": f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-00.md",
+                "source_ws_file": f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-00.md",
             },
             "source_files": {
                 "implementation_plan": str(impl_path.relative_to(repo_root)),
-                "parallel_plan": f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/parallel_plan.md",
+                "parallel_plan": f"workdocs/任务拆解/{TASK_SPLIT_DIR}/parallel_plan.md",
                 "workstreams": [
-                    f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01.md",
-                    f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-G01.md",
+                    f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01.md",
+                    f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-G01.md",
                 ],
             },
             "mapping_checks": {
@@ -108,7 +108,7 @@ planning_contract:
                     "feature_ids": ["F01"],
                     "task_ids": ["T01"],
                     "acceptance_checks": ["pytest -q tests/unit/test_dummy.py"],
-                    "source_ws_file": f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01.md",
+                    "source_ws_file": f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01.md",
                     "pr_id": "PR-01",
                 },
                 {
@@ -119,7 +119,7 @@ planning_contract:
                     "feature_ids": ["G-01"],
                     "task_ids": ["G01"],
                     "acceptance_checks": ["python3 scripts/check_workflow_contract.py --mode gate_contract --task-split-dir x --output -"],
-                    "source_ws_file": f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-G01.md",
+                    "source_ws_file": f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-G01.md",
                     "pr_id": "PR-GATE",
                 },
             ],

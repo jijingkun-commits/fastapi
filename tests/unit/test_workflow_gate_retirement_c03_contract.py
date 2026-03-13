@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 
-TASK_SPLIT_DIR = Path("docs/内部参考/任务拆解/2026-03-06_工程减法治理")
+TASK_SPLIT_DIR = Path("workdocs/任务拆解/2026-03-06_工程减法治理")
 WS_C03_PATH = TASK_SPLIT_DIR / "workstreams" / "WS-C03_P1_L1旧脚本wrapper兼容壳.md"
-VK_CARDS_PATH = TASK_SPLIT_DIR / "vk_cards.json"
+VK_CARDS_PATH = TASK_SPLIT_DIR / "contracts" / "vk_cards.json"
 
 
 def test_c03_contract_closes_file_scope_and_acceptance_command():

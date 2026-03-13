@@ -21,7 +21,7 @@ description: "Use when you need `jjk-create-pr` in this repository. Source inten
 1. 全局共享模板（默认主模板）：
    `${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_create_pr_templates.md`
 2. 项目覆盖模板（仅放差异，不放全量复制）：
-   `docs/内部参考/迭代需求/_templates/jjk_create_pr_templates.md`
+   `workdocs/_templates/jjk_create_pr_templates.md`
 
 若全局模板缺失，输出标记 `GLOBAL_TEMPLATE_MISSING` 并提示先初始化共享模板目录。
 
@@ -130,7 +130,7 @@ PR 描述至少包含：
 ## 输出模板（推荐）
 
 见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_create_pr_templates.md`（`输出模板` 段）。
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_create_pr_templates.md`。
+若本项目有覆盖规则，再查：`workdocs/_templates/jjk_create_pr_templates.md`。
 
 ## 禁止项（强制）
 

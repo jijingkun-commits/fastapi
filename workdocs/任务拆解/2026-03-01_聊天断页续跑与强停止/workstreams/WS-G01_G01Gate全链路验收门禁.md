@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260301-CHAT-RUN-STOP`
-- 来源主计划: `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md`
+- 来源主计划: `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md`
 - card_key: `PP-20260301-CHAT-RUN-STOP::WS-G01`
 ## 1. 目标
@@ -30,7 +30,7 @@
 - 代码锚点（函数/类级）:
   - `workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/_active_task.json::scope`
   - `scripts/docs_guard.py::strict`
-  - `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract`
+  - `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
 
 ```python
@@ -45,10 +45,10 @@ else:
 ### 可修改（白名单）
 - `workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md`
 - `workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/vk_cards.json`
-- `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md`
+- `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -80,7 +80,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `文档索引与关键验收命令全绿`
 - 本 WS 负责的门禁子项: `G01:G-1`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7`
+- 证据回填位置（文档节）: `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7`
 
 ## 6. 风险与回滚
 
@@ -118,7 +118,7 @@ card_export:
   file_whitelist:
     - workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md
     - workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/vk_cards.json
-    - docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md
+    - workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md
   mechanism_summary:
     - 聚合 C01-C03 验收结果，确认硬门禁全绿
     - 校验 docs_guard 与关键测试，阻断带病进入 vktodo
@@ -126,14 +126,14 @@ card_export:
   code_anchor_refs:
     - workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/_active_task.json::scope
     - scripts/docs_guard.py::strict
-    - docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract
+    - workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md::planning_contract
   acceptance_checks:
     - python3 scripts/docs_guard.py --strict
     - venv/bin/python -m pytest tests/unit/test_chat_stop_cancel_semantics.py tests/unit/test_chat_service_disconnect_continue.py -q
   rollback_anchors:
     - 暂停 /jjk-vktodo
     - 回退到 C03 前状态并复测
-  evidence_entry: docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7
+  evidence_entry: workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7
   check_cmd:
     - python3 scripts/docs_guard.py --strict
     - venv/bin/python -m pytest tests/unit/test_chat_stop_cancel_semantics.py tests/unit/test_chat_service_disconnect_continue.py -q

@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260301-CHAT-RUN-STOP  
 > 主题: 聊天断页续跑与强停止  
-> 输入来源: `docs/内部参考/迭代需求/聊天断页续跑与强停止_requirements.md` / `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md`
+> 输入来源: `workdocs/归档/需求/聊天断页续跑与强停止_requirements.md` / `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -90,7 +90,7 @@ automation_contract:
 | `web/src/hooks/useSSEStream.ts` | WS-C02/WS-C03 | 否 | 串行独占写 |
 | `app/services/chat_service.py` | WS-C02 | 否 | 运行时语义单卡改造 |
 | `app/api/v1/endpoints/chat_api.py` | WS-C02/WS-C03 | 否 | API 契约变更同卡收敛 |
-| `docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md` | WS-C03/WS-G01 | 否 | Gate 证据回填专用 |
+| `workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md` | WS-C03/WS-G01 | 否 | Gate 证据回填专用 |
 
 ## 6. 依赖图与里程碑
 

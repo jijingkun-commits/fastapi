@@ -7,7 +7,7 @@ from pathlib import Path
 
 AGENTS_PATH = Path("AGENTS.md")
 CLAUDE_PATH = Path("CLAUDE.md")
-HANDBOOK_PATH = Path("docs/开发文档/工作流/指令用法_实现方式_工程流全景手册.md")
+HANDBOOK_PATH = Path("docs/开发文档/流程与工具/指令用法_实现方式_工程流全景手册.md")
 FALLBACK_MARKER = "APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK"
 APPLY_PATCH_RULE = "禁止通过 `exec_command` 包装 `apply_patch`"
 

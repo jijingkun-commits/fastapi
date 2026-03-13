@@ -35,7 +35,8 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, Path]:
     (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scripts" / "set_active_task.py").write_text("# test stub\n", encoding="utf-8")
 
-    active_task_path = tmp_path / "docs" / "内部参考" / "任务拆解" / "_active_task.json"
+    active_task_index_path = tmp_path / "workdocs" / "任务拆解" / "_active_task.json"
+    active_task_path = tmp_path / "workdocs" / "任务拆解" / TASK_SPLIT_DIR / "contracts" / "_active_task.json"
     _write_json(
         active_task_path,
         {
@@ -46,6 +47,19 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, Path]:
             "single_active_card": True,
             "preflight_required": "C00",
             "status_source_of_truth": "",
+        },
+    )
+    _write_json(
+        active_task_index_path,
+        {
+            "project_id": "vk-project-1",
+            "task_split_dir": TASK_SPLIT_DIR,
+            "task_key": TASK_KEY,
+            "execution_mode": "serial",
+            "single_active_card": True,
+            "preflight_required": "C00",
+            "status_source_of_truth": "",
+            "active_task_path": str(active_task_path),
         },
     )
 
@@ -73,7 +87,7 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, Path]:
         },
     ]
     _write_json(
-        active_task_path.parent / TASK_SPLIT_DIR / "vk_cards.json",
+        active_task_path.parent / "vk_cards.json",
         {
             "card_order": ["C01", "C02", "C03"],
             "cards": cards,
@@ -138,6 +152,7 @@ def test_run_sync_all_cards_dry_run_reports_reconciliation(monkeypatch, tmp_path
         }
 
     monkeypatch.setattr(module, "fetch_scoped_task_map", _fake_fetch_scoped_task_map)
+    monkeypatch.setattr(module, "DEFAULT_REPO_ROOT", tmp_path.resolve())
 
     payload = module.run_sync(
         _build_args(
@@ -166,6 +181,7 @@ def test_run_sync_single_card_respects_disable_env(monkeypatch, tmp_path):
 
     monkeypatch.setenv("DISABLE_VK_SYNC", "1")
     monkeypatch.setattr(module, "fetch_scoped_task_map", _unexpected_fetch)
+    monkeypatch.setattr(module, "DEFAULT_REPO_ROOT", tmp_path.resolve())
 
     payload = module.run_sync(
         _build_args(

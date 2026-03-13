@@ -34,7 +34,7 @@ def _build_ctx(module):
         cards_by_id={
             "C01": {
                 "card_id": "C01",
-                "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+                "source_ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
             }
         },
         scoped_tasks=[],
@@ -68,7 +68,7 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
         lambda *_args, **_kwargs: module.wtimp_dispatch_bridge.WtimpDispatchRequest(
             task_key=ctx.task_key,
             card_id="C01",
-            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
             worktree_path=str((tmp_path / "wt-C01").resolve()),
             executor_mode="cardrun_dispatch",
         ),
@@ -81,7 +81,7 @@ def test_dispatch_mode_returns_wt_flow_merge_owner_and_never_calls_http(monkeypa
             executor="wtimp",
             executor_mode="cardrun_dispatch",
             card_id="C01",
-            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
             subagent_id="wtimp-C01-1",
             commit_sha="abc123",
             merge_sha=None,

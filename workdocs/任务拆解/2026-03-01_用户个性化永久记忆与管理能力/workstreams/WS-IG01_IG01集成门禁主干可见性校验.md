@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260301-USER-MEMORY-ADMIN`
-- 来源主计划: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- 来源主计划: `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md`
 
 ## 1. 目标
@@ -30,7 +30,7 @@
 - 代码锚点（函数/类级）:
   - `scripts/coder4/check_integration_gate.py::run_check`
   - `.artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力/<task_key>/task-runner-state.json.merge_results.<card_id>`
-  - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
+  - `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract`
 - 最小样例（可伪代码）:
 
 ```python
@@ -42,7 +42,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+  - `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -50,10 +50,10 @@ else:
 - `scripts/coder4/check_integration_gate.py`
 - `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md`
 - `workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json`
-- `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -85,7 +85,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `实现卡已合并且主干可见`
 - 本 WS 负责的门禁子项: `IG01:IG-1`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9`
+- 证据回填位置（文档节）: `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9`
 
 ## 6. 风险与回滚
 
@@ -124,7 +124,7 @@ card_export:
     - scripts/coder4/check_integration_gate.py
     - workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md
     - workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json
-    - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
+    - workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md
   readonly_scope: []
   owner_fields: []
   mechanism_summary:
@@ -134,15 +134,15 @@ card_export:
   code_anchor_refs:
     - scripts/coder4/check_integration_gate.py::run_check
     - .artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力/<task_key>/task-runner-state.json.merge_results.<card_id>
-    - docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
+    - workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract
   example_refs:
-    - docs/开发文档/技巧与速查/AI协作速查表.md#串行主干状态流最小路径
+    - docs/开发文档/流程与工具/AI协作速查表.md#串行主干状态流最小路径
   acceptance_checks:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir ".artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力" --baseline master
   rollback_anchors:
     - 保持最终状态在 G01 done / IG01 blocked
     - 回到缺失证据的实现卡补齐 merge 账本
-  evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md#9
+  evidence_entry: workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9
   check_cmd:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/coder4/check_integration_gate.py --task-split-dir "2026-03-01_用户个性化永久记忆与管理能力" --state-dir ".artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力" --baseline master
   handoff_artifacts:

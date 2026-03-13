@@ -103,7 +103,6 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
-  const currentStatus = stream.currentStatus;
   // 从 Context 获取所有持久化状态
   const { selectedModel, handleModelChange, startNewThread } = stream as any;
 
@@ -398,15 +397,6 @@ export function Thread() {
 
           <footer className="chat-footer-surface sticky bottom-0 z-10 w-full pb-[env(safe-area-inset-bottom)] transition-all duration-300">
             <div className="chat-stream-shell relative mx-auto">
-              {currentStatus?.message && (
-                <div
-                  data-testid="runtime-status"
-                  data-phase={currentStatus.phase}
-                  className="chat-runtime-status mb-2"
-                >
-                  {currentStatus.message}
-                </div>
-              )}
               <ChatInput
                 input={input}
                 setInput={setInput}

@@ -25,6 +25,43 @@ quote() {
   printf '%q' "$1"
 }
 
+find_branch_worktree() {
+  local repo_root="$1"
+  local branch_name="$2"
+  local target_ref="refs/heads/${branch_name}"
+  local line=""
+  local worktree_path=""
+  local worktree_branch=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -z "$line" ]]; then
+      if [[ -n "$worktree_path" && "$worktree_branch" == "$target_ref" ]]; then
+        printf '%s\n' "$worktree_path"
+        return 0
+      fi
+      worktree_path=""
+      worktree_branch=""
+      continue
+    fi
+
+    case "$line" in
+      worktree\ *)
+        worktree_path="${line#worktree }"
+        ;;
+      branch\ *)
+        worktree_branch="${line#branch }"
+        ;;
+    esac
+  done < <(git -C "$repo_root" worktree list --porcelain)
+
+  if [[ -n "$worktree_path" && "$worktree_branch" == "$target_ref" ]]; then
+    printf '%s\n' "$worktree_path"
+    return 0
+  fi
+
+  return 1
+}
+
 BASE_BRANCH="master"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,11 +120,16 @@ if [[ "$WORKTREE_OWNER_COUNT" -gt 1 ]]; then
   die "DELETE_WORKTREE_BRANCH_INVALID: 分支 ${CURRENT_BRANCH} 仍被其他 worktree 持有"
 fi
 
+BRANCH_DELETE_WT="$(find_branch_worktree "$REPO_ROOT" "$BASE_BRANCH" || true)"
+[[ -n "$BRANCH_DELETE_WT" ]] || die "DELETE_WORKTREE_BASE_CONTEXT_MISSING: 未找到检出 ${BASE_BRANCH} 的 worktree，无法安全生成 branch -d 命令"
+BRANCH_DELETE_WT="$(cd "$BRANCH_DELETE_WT" && pwd -P)"
+
 REPO_Q="$(quote "$REPO_ROOT")"
 WT_Q="$(quote "$CURRENT_WT")"
 BRANCH_Q="$(quote "$CURRENT_BRANCH")"
 HEAD_Q="$(quote "$CURRENT_HEAD")"
 BASE_Q="$(quote "$BASE_BRANCH")"
+BRANCH_DELETE_WT_Q="$(quote "$BRANCH_DELETE_WT")"
 
-printf 'git -C %s rev-parse --verify %s >/dev/null && git -C %s merge-base --is-ancestor %s %s && test -z "$(git -C %s status --porcelain 2>/dev/null)" && git -C %s worktree remove %s && git -C %s branch -d %s\n' \
-  "$REPO_Q" "$BASE_Q" "$REPO_Q" "$HEAD_Q" "$BASE_Q" "$WT_Q" "$REPO_Q" "$WT_Q" "$REPO_Q" "$BRANCH_Q"
+printf 'git -C %s rev-parse --verify %s >/dev/null && git -C %s merge-base --is-ancestor %s %s && test -z "$(git -C %s status --porcelain 2>/dev/null)" && test "$(git -C %s branch --show-current 2>/dev/null)" = %s && git -C %s worktree remove %s && git -C %s branch -d %s\n' \
+  "$REPO_Q" "$BASE_Q" "$REPO_Q" "$HEAD_Q" "$BASE_Q" "$WT_Q" "$BRANCH_DELETE_WT_Q" "$BASE_Q" "$REPO_Q" "$WT_Q" "$BRANCH_DELETE_WT_Q" "$BRANCH_Q"

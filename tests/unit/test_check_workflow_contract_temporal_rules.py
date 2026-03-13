@@ -15,6 +15,9 @@ SCRIPT_PATH = Path("scripts/check_workflow_contract.py")
 
 def _load_module():
     module_name = f"check_workflow_contract_test_{uuid.uuid4().hex}"
+    scripts_dir = SCRIPT_PATH.parent.resolve()
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
     spec = spec_from_file_location(module_name, SCRIPT_PATH)
     assert spec and spec.loader
     module = module_from_spec(spec)
@@ -64,21 +67,22 @@ def test_retirement_guard_still_blocks_on_legacy_usage():
 def test_temporal_gate_contract_detects_window_blockers(tmp_path):
     module = _load_module()
     repo_root = tmp_path / "repo"
-    task_dir = repo_root / "docs" / "内部参考" / "任务拆解" / "2026-03-07_temporal-gate"
-    impl_path = repo_root / "docs" / "内部参考" / "迭代需求" / "temporal_gate_implementation_plan.md"
+    task_dir = repo_root / "workdocs" / "任务拆解" / "2026-03-07_temporal-gate"
+    impl_path = repo_root / "workdocs" / "归档" / "实施计划" / "temporal_gate_implementation_plan.md"
     task_dir.mkdir(parents=True, exist_ok=True)
     impl_path.parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / "contracts").mkdir(parents=True, exist_ok=True)
 
     (task_dir / "parallel_plan.md").write_text("done_gate: 删除前连续7天零调用\n", encoding="utf-8")
     impl_path.write_text("acceptance_gates:\n  - 删除前连续7天零调用\n", encoding="utf-8")
-    (task_dir / "vk_cards.json").write_text(
+    (task_dir / "contracts" / "vk_cards.json").write_text(
         json.dumps(
             {
                 "source_files": {"implementation_plan": str(impl_path.relative_to(repo_root))},
                 "cards": [
                     {
                         "card_id": "C07",
-                        "acceptance_checks": ["python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --log-path logs/workflow-gate-usage.jsonl --report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"],
+                        "acceptance_checks": ["python3 scripts/check_workflow_contract.py --mode usage-report --window-days 7 --log-path logs/workflow-gate-usage.jsonl --report-output workdocs/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"],
                         "done_gate": ["支持7天零调用聚合判定"],
                     }
                 ],
@@ -155,10 +159,10 @@ implementation_readiness:
 def test_vkplan_db_evidence_contract_detects_mapping_gap_and_split_unclosed(tmp_path):
     module = _load_module()
     repo_root = tmp_path / "repo"
-    implementation_path = repo_root / "docs" / "内部参考" / "迭代需求" / "demo_implementation_plan.md"
-    task_split_dir = repo_root / "docs" / "内部参考" / "任务拆解" / "2026-03-08_demo"
+    implementation_path = repo_root / "workdocs" / "归档" / "实施计划" / "demo_implementation_plan.md"
+    task_split_dir = repo_root / "workdocs" / "任务拆解" / "2026-03-08_demo"
     implementation_path.parent.mkdir(parents=True, exist_ok=True)
-    task_split_dir.mkdir(parents=True, exist_ok=True)
+    (task_split_dir / "contracts").mkdir(parents=True, exist_ok=True)
 
     implementation_path.write_text(
         """
@@ -180,7 +184,7 @@ implementation_readiness:
         encoding="utf-8",
     )
 
-    (task_split_dir / "vk_cards.json").write_text(
+    (task_split_dir / "contracts" / "vk_cards.json").write_text(
         json.dumps(
             {
                 "execution_mode": "serial",

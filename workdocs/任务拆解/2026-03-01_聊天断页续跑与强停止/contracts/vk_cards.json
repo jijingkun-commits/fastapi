@@ -56,8 +56,8 @@
     "source_ws_file": "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/workstreams/WS-00_C00_预检门禁冻结.md"
   },
   "source_files": {
-    "requirements": "docs/内部参考/迭代需求/聊天断页续跑与强停止_requirements.md",
-    "implementation_plan": "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md",
+    "requirements": "workdocs/归档/需求/聊天断页续跑与强停止_requirements.md",
+    "implementation_plan": "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md",
     "parallel_plan": "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md",
     "workstreams": [
       "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/workstreams/WS-C01_C01P1合同升级run_id与cancelRunAPI.md",
@@ -105,7 +105,7 @@
         "web/src/lib/backend.ts::cancelRun"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#3"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#3"
       ],
       "acceptance_checks": [
         "cd web && pnpm exec eslint src/types/message.ts src/lib/backend.ts"
@@ -114,7 +114,7 @@
         "回退 InitEventData run_id 字段扩展",
         "删除 cancelRun API 封装，恢复旧调用链"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7",
+      "evidence_entry": "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -168,7 +168,7 @@
         "app/api/v1/endpoints/chat_api.py::cancel_run"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#3"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#3"
       ],
       "acceptance_checks": [
         "cd web && pnpm exec playwright test e2e/test_feedback_stop.spec.cjs --project=chromium",
@@ -178,7 +178,7 @@
         "前端 stop 回退到仅 AbortController.abort",
         "后端断连语义回退到旧 streaming 处理路径"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7",
+      "evidence_entry": "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -239,7 +239,7 @@
         "web/src/hooks/useSSEStream.ts::loadThreadMessages"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#3"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#3"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/api/test_chat_api.py -k latest_thread -q",
@@ -249,7 +249,7 @@
         "登录流程回退 router.push('/chat') 固定路径",
         "下线 latest thread 查询入口，保留原线程列表获取路径"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7",
+      "evidence_entry": "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -307,10 +307,10 @@
       "code_anchor_refs": [
         "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/_active_task.json::scope",
         "scripts/docs_guard.py::strict",
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md::planning_contract"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md::planning_contract"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#3"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#3"
       ],
       "acceptance_checks": [
         "python3 scripts/docs_guard.py --strict",
@@ -320,13 +320,13 @@
         "暂停 /jjk-vktodo",
         "回退到 C03 前状态并复测"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md#7",
+      "evidence_entry": "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md#7",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
         "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/parallel_plan.md",
         "workdocs/任务拆解/2026-03-01_聊天断页续跑与强停止/contracts/vk_cards.json",
-        "docs/内部参考/迭代需求/聊天断页续跑与强停止_implementation_plan.md"
+        "workdocs/归档/实施计划/聊天断页续跑与强停止_implementation_plan.md"
       ],
       "done_gate": [
         "文档索引与关键验收命令全绿"

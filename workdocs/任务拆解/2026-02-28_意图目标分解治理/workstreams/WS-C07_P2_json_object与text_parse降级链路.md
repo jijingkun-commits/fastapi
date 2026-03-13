@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -45,7 +45,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -55,7 +55,7 @@ else:
 - `tests/unit/test_planner_text_parse_fallback.py`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -88,7 +88,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `json_object fallback pass; text_parse fallback pass`
 - 本 WS 负责的门禁子项: `C07:P2-03, P2-04`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4`
+- 证据回填位置（文档节）: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.4`
 
 ## 6. 风险与回滚
 
@@ -128,10 +128,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["tool_call 不可用或失败时自动进入 json_object 路径", "json_object 失败继续进入 text_parse + schema 校验", "分级降级链路保持主对话不中断"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_infer_model_intent_plan_via_json_object", "app/ai/workflow/multi_agent_graph.py::_infer_model_intent_plan_via_text_parse", "app/ai/workflow/multi_agent_graph.py::_IntentPlanModel"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.1", "docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.2"]
+  example_refs: ["workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.1", "workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.2"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"]
   rollback_anchors: ["PLANNER_DISABLE_JSON_OBJECT=true", "PLANNER_DISABLE_TEXT_PARSE=true"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#12.4
+  evidence_entry: workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.4
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_json_object_fallback.py", "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_planner_text_parse_fallback.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

@@ -37,8 +37,8 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, str, str]:
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
 
-    task_dir = tmp_path / "docs" / "内部参考" / "任务拆解" / TASK_SPLIT_DIR
-    active_task_path = task_dir / "_active_task.json"
+    task_dir = tmp_path / "workdocs" / "任务拆解" / TASK_SPLIT_DIR
+    active_task_path = task_dir / "contracts" / "_active_task.json"
     _write_json(
         active_task_path,
         {
@@ -51,7 +51,7 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, str, str]:
         },
     )
 
-    ws_file = f"docs/内部参考/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01_test.md"
+    ws_file = f"workdocs/任务拆解/{TASK_SPLIT_DIR}/workstreams/WS-C01_test.md"
     (tmp_path / ws_file).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / ws_file).write_text("# ws\n", encoding="utf-8")
 
@@ -60,7 +60,7 @@ def _prepare_workspace(tmp_path: Path) -> tuple[Path, str, str]:
     Path(worktree_path).mkdir(parents=True, exist_ok=True)
 
     _write_json(
-        task_dir / ".state" / sanitized_task_key / "active-session-session-1.json",
+        tmp_path / ".artifacts" / "states" / "task_splits" / TASK_SPLIT_DIR / sanitized_task_key / "active-session-session-1.json",
         {
             "branch": f"feature/{sanitized_task_key}/C01/session-1",
             "worktree": worktree_path,
@@ -129,7 +129,7 @@ def test_resolve_active_session_worktree_path_fails_on_multiple_sessions(tmp_pat
     module = _load_kernel_module()
     active_task_path, ws_file, _ = _prepare_workspace(tmp_path)
     ctx = _build_ctx(module, ws_file)
-    session_dir = active_task_path.parent / ".state" / module.sanitize_task_key_segment(TASK_KEY)
+    session_dir = tmp_path / ".artifacts" / "states" / "task_splits" / TASK_SPLIT_DIR / module.sanitize_task_key_segment(TASK_KEY)
     _write_json(
         session_dir / "active-session-session-2.json",
         {
@@ -155,7 +155,7 @@ def test_resolve_active_session_worktree_path_rejects_card_mismatch(tmp_path):
     module = _load_kernel_module()
     active_task_path, ws_file, _ = _prepare_workspace(tmp_path)
     ctx = _build_ctx(module, ws_file)
-    session_dir = active_task_path.parent / ".state" / module.sanitize_task_key_segment(TASK_KEY)
+    session_dir = tmp_path / ".artifacts" / "states" / "task_splits" / TASK_SPLIT_DIR / module.sanitize_task_key_segment(TASK_KEY)
     _write_json(
         session_dir / "active-session-session-1.json",
         {
