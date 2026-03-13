@@ -1,8 +1,14 @@
-"""测试 MinIO 连接和上传功能。"""
-import os
+"""MinIO 连通性验证脚本。"""
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from app.services.asset_service import get_asset_service
 
-def test_minio_connection():
+def run_minio_connection() -> None:
     print("🚀 开始测试 MinIO 连接...")
     
     # 强制重新加载环境变量（模拟 app 启动）
@@ -36,4 +42,4 @@ def test_minio_connection():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    test_minio_connection()
+    run_minio_connection()

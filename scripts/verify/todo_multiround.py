@@ -8,18 +8,23 @@
 - 优先级动态调整
 
 使用方式：
-    python app/tests/test_todo_multiround.py
+    python scripts/verify/todo_multiround.py
 """
 import asyncio
 import json
 import logging
-import pytest
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any
 from unittest.mock import patch
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 # ==================== 测试对话数据 ====================
@@ -276,20 +281,20 @@ class TodoAgentTester:
 
 # ==================== 简化测试（不需要完整服务） ====================
 
-@pytest.mark.asyncio
-async def test_intent_analysis():
+async def run_intent_analysis():
     """测试意图分析能力（不需要完整服务）。"""
     from app.ai.intent_classifier import classify_intent
 
     class _FakeIntentLLM:
         async def ainvoke(self, prompt: str):
             prompt_text = str(prompt)
+            user_message = prompt_text.split("用户消息:", 1)[-1].split("返回格式:", 1)[0].strip()
 
-            if "天气" in prompt_text:
+            if "天气" in user_message:
                 payload = {"intent": "web_search", "confidence": 0.92, "route_to": "supervisor"}
-            elif "差旅规定" in prompt_text:
+            elif "差旅规定" in user_message:
                 payload = {"intent": "knowledge_query", "confidence": 0.91, "route_to": "supervisor"}
-            elif "饼图" in prompt_text or "图" in prompt_text:
+            elif "饼图" in user_message or "图" in user_message:
                 payload = {"intent": "chart_drawing", "confidence": 0.89, "route_to": "supervisor"}
             else:
                 payload = {"intent": "todo_management", "confidence": 0.95, "route_to": "todo_expert"}
@@ -324,8 +329,7 @@ async def test_intent_analysis():
     return all(results)
 
 
-@pytest.mark.asyncio
-async def test_parameter_extraction():
+async def run_parameter_extraction():
     """测试参数提取能力。"""
     from app.ai.parameter_extractor import extract_todo_params
     
@@ -338,7 +342,8 @@ async def test_parameter_extraction():
     logger.info("\n" + "="*60)
     logger.info("参数提取测试")
     logger.info("="*60)
-    
+
+    results = []
     for message in test_cases:
         try:
             params = await extract_todo_params(message)
@@ -346,12 +351,15 @@ async def test_parameter_extraction():
             logger.info(f"   -> title: {params.title}")
             logger.info(f"   -> due_date: {params.due_date}")
             logger.info(f"   -> priority: {params.priority}")
+            results.append(True)
         except Exception as e:
             logger.error(f"❌ '{message[:30]}...' -> {e}")
+            results.append(False)
+
+    return all(results)
 
 
-@pytest.mark.asyncio
-async def test_guardrails():
+async def run_guardrails():
     """测试护栏系统。"""
     from app.ai.guardrails import guardrail_runner
     
@@ -365,43 +373,57 @@ async def test_guardrails():
     logger.info("\n" + "="*60)
     logger.info("护栏系统测试")
     logger.info("="*60)
-    
+
+    results = []
     for message, should_pass in test_cases:
         passed, content, reason = await guardrail_runner.validate_input(message)
         status = "✅" if passed == should_pass else "❌"
         logger.info(f"{status} '{message[:30]}...' -> passed={passed}, reason={reason}")
+        results.append(passed == should_pass)
+
+    return all(results)
 
 
 async def main():
     """主测试函数。"""
     logger.info("开始测试...")
     logger.info(f"当前时间: {datetime.now()}")
-    
+
+    all_passed = True
+
     # 1. 测试意图识别
     try:
-        await test_intent_analysis()
+        all_passed = await run_intent_analysis() and all_passed
     except Exception as e:
         logger.error(f"意图识别测试失败: {e}")
-    
+        all_passed = False
+
     # 2. 测试参数提取
     try:
-        await test_parameter_extraction()
+        all_passed = await run_parameter_extraction() and all_passed
     except Exception as e:
         logger.error(f"参数提取测试失败: {e}")
-    
+        all_passed = False
+
     # 3. 测试护栏
     try:
-        await test_guardrails()
+        all_passed = await run_guardrails() and all_passed
     except Exception as e:
         logger.error(f"护栏测试失败: {e}")
-    
+        all_passed = False
+
     # 4. 完整多轮对话测试（需要服务运行）
     # tester = TodoAgentTester()
     # await tester.run_all_rounds()
     # print(tester.generate_report())
-    
-    logger.info("\n测试完成!")
+
+    if all_passed:
+        logger.info("\n测试完成! 所有脚本型检查通过。")
+        return 0
+
+    logger.error("\n测试完成，但存在失败项。")
+    return 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))
