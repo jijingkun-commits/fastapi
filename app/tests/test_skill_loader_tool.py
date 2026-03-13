@@ -624,3 +624,66 @@ def test_catalog_after_load_hides_data_handoff_until_skill_loaded(monkeypatch) -
 
     assert hidden == []
     assert [getattr(item, "name", "") for item in visible] == ["assign_to_data_expert"]
+
+
+def test_load_skills_tool_preserves_skill_context_replay_runtime_payload(monkeypatch) -> None:
+    """skill_context 回归：load_skills 仍应产出 registry 与 canonical skill_runtime。"""
+
+    monkeypatch.setattr(
+        SkillService,
+        "resolve_runtime_mode",
+        classmethod(lambda cls: cls.SKILL_RUNTIME_MODE_PROGRESSIVE),
+    )
+    monkeypatch.setattr(
+        SkillService,
+        "load_skills_for_session",
+        classmethod(
+            lambda cls, **kwargs: {
+                "requested_skill_ids": ["sql-expert"],
+                "loaded_skills": [
+                    {
+                        "skill_id": "sql-expert",
+                        "effective_version": "v1",
+                        "content": "# SQL Expert\n正文",
+                        "truncated": False,
+                    }
+                ],
+                "errors": [],
+                "truncated_count": 0,
+                "loaded_skill_registry": {
+                    "sql-expert": {
+                        "skill_id": "sql-expert",
+                        "version": "v1",
+                        "truncated": False,
+                        "source_turn_id": kwargs.get("source_turn_id"),
+                    }
+                },
+                "allowed_tool_registry": {},
+                "loaded_skill_context": "已加载 sql-expert",
+                "catalog_version": "cat-001",
+                "visible_skill_count": 1,
+                "missing_skills": [],
+            }
+        ),
+    )
+
+    tool = multi_agent_graph._create_load_skills_tool()
+    command = tool.func(
+        skill_ids=["sql-expert"],
+        reason="需要 SQL 规划能力",
+        state={
+            "messages": [],
+            "user_id": 7,
+            "turn_id": "turn-002",
+            "catalog_version": "cat-001",
+            "visible_skill_count": 1,
+            "skill_catalog_manifest": [{"skill_id": "sql-expert", "effective_version": "v1"}],
+        },
+        tool_call_id="tc-002",
+    )
+
+    assert command.update["loaded_skill_registry"]["sql-expert"]["version"] == "v1"
+    assert command.update["loaded_skill_context"] == "已加载 sql-expert"
+    message = command.update["messages"][0]
+    assert message.additional_kwargs["skill_runtime"]["loaded_skills"][0]["skill_id"] == "sql-expert"
+    assert message.additional_kwargs["skill_runtime"]["replay_source"] == "live"

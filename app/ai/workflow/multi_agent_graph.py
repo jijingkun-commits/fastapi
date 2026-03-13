@@ -30,6 +30,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.graph import StateGraph, START, END
 
 from app.ai.llm_util import get_scene_llm, get_llm_capabilities, _normalize_text_content
+from app.ai.context_engineering import build_llm_input_context, resolve_context_budget_metadata
 from app.ai.scene_registry import (
     SCENE_KEY_MULTI_AGENT_SUPERVISOR,
 )
@@ -2427,13 +2428,6 @@ def _normalize_tool_summary_text(value: Any, limit: int = 180) -> str:
     return cleaned[:limit]
 
 
-def _calculate_supervisor_context_budget(max_tokens: int) -> int:
-    """根据模型窗口计算 Supervisor 单轮上下文预算。"""
-    safe_max_tokens = max(max_tokens, SUPERVISOR_CONTEXT_MIN_TOKENS)
-    budget = int(safe_max_tokens * SUPERVISOR_CONTEXT_TOKEN_BUDGET_RATIO)
-    return max(budget, SUPERVISOR_CONTEXT_MIN_TOKENS)
-
-
 def _truncate_tool_message_text(
     text: str,
     *,
@@ -4269,44 +4263,6 @@ def _emit_messages_mode_thinking(
         emit_thinking(ctx.writer, reasoning, node=ctx.node_name)
 
 
-def _inject_streaming_context_messages(
-    pruned_messages: Sequence[BaseMessage],
-    state: Dict[str, Any],
-) -> list[BaseMessage]:
-    """将 system_context / skill catalog / loaded skills 注入裁剪后的消息列表。"""
-    from langchain_core.messages import SystemMessage
-
-    context_messages = []
-    if state.get("system_context"):
-        context_messages.append(SystemMessage(content=state["system_context"]))
-
-    if state.get("skill_catalog_context"):
-        context_messages.append(SystemMessage(content=state["skill_catalog_context"]))
-
-    if state.get("loaded_skill_context"):
-        context_messages.append(SystemMessage(content=state["loaded_skill_context"]))
-
-    if (
-        not state.get("skill_catalog_context")
-        and not state.get("loaded_skill_context")
-        and state.get("skill_context")
-    ):
-        context_messages.append(SystemMessage(content=state["skill_context"]))
-
-    if not context_messages:
-        return list(pruned_messages)
-
-    insert_pos = 0
-    for index, message in enumerate(pruned_messages):
-        if not isinstance(message, SystemMessage):
-            insert_pos = index
-            break
-    else:
-        insert_pos = len(pruned_messages)
-
-    return list(pruned_messages[:insert_pos]) + context_messages + list(pruned_messages[insert_pos:])
-
-
 def _build_expert_inference_messages(
     state: Dict[str, Any],
     node_name: str,
@@ -4383,22 +4339,40 @@ def _prepare_streaming_inference_state(
 
     from app.ai import config as ai_config
 
-    token_budget = _calculate_supervisor_context_budget(
-        getattr(ai_config, "MESSAGE_MAX_TOKENS", SUPERVISOR_CONTEXT_MIN_TOKENS)
+    scene_key = SCENE_KEY_MULTI_AGENT_SUPERVISOR if node_name == "supervisor" else None
+    budget_meta = resolve_context_budget_metadata(
+        state,
+        scene_key=scene_key,
+        configured_max_tokens=getattr(ai_config, "MESSAGE_MAX_TOKENS", SUPERVISOR_CONTEXT_MIN_TOKENS),
+        ratio=SUPERVISOR_CONTEXT_TOKEN_BUDGET_RATIO,
+        min_tokens=SUPERVISOR_CONTEXT_MIN_TOKENS,
     )
-    pruned_messages = trim_messages(
-        prepared_messages,
-        max_tokens=token_budget,
+    token_budget = int(budget_meta["token_budget"])
+
+    tool_objects: list[Any] = []
+    prompt_text = ""
+    if node_name == "supervisor":
+        prompt_text = SUPERVISOR_PROMPT
+        tool_objects = [
+            *_get_runtime_visible_supervisor_handoff_tools(state=state),
+            decompose_goals,
+            *_get_runtime_visible_supervisor_tools(state=state),
+        ]
+
+    llm_input_messages, ledger, prepared_token_estimate, pruned_token_estimate = build_llm_input_context(
+        prepared_messages=prepared_messages,
+        state=state,
+        token_budget=token_budget,
+        model_code=str(budget_meta.get("model_code") or ""),
+        provider_code=str(budget_meta.get("provider_code") or ""),
+        context_window=int(budget_meta.get("context_window") or token_budget),
+        prompt_text=prompt_text,
+        tool_objects=tool_objects,
         token_counter=count_tokens_approximately,
-        strategy="last",
-        start_on="human",
-        end_on=("human", "tool", "ai"),
-        include_system=True,
-        allow_partial=False,
     )
 
     pruned_state = state.copy()
-    pruned_state["messages"] = _inject_streaming_context_messages(pruned_messages, state)
+    pruned_state["messages"] = llm_input_messages
     existing_delivery_meta = pruned_state.get("delivery_meta")
     delivery_meta = dict(existing_delivery_meta) if isinstance(existing_delivery_meta, dict) else {}
     delivery_meta.update(
@@ -4423,12 +4397,11 @@ def _prepare_streaming_inference_state(
             "retrieval_truncation_flag": bool(inference_diagnostics.get("retrieval_truncation_flag", False)),
             "ragflow_rollout_stage": _resolve_rollout_stage(),
             "ragflow_rollout_traffic_percent": _resolve_rollout_traffic_percent(),
+            "context_budget_ledger": ledger.to_payload(),
         }
     )
     pruned_state["delivery_meta"] = delivery_meta
 
-    prepared_token_estimate = int(count_tokens_approximately(prepared_messages) or 0)
-    pruned_token_estimate = int(count_tokens_approximately(pruned_messages) or 0)
     input_message_count = len(pruned_state.get("messages", []))
 
     return (

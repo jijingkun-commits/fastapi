@@ -5,8 +5,12 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
 
+from app.ai.context_engineering import build_context_messages, inject_context_messages
 from app.ai.state import BaseAgentState, DataAgentState, MultiAgentState, TodoAgentState
+
+import app.ai.workflow.multi_agent_graph as multi_agent_graph
 
 from app.ai.protocol import (
     AgentOutputParser,
@@ -42,7 +46,6 @@ from app.ai.workflow.multi_agent_graph import (
     fallback_router,
     _handle_streaming_wrapper_exception,
     _handle_messages_mode_tool_message,
-    _inject_streaming_context_messages,
     _prefill_emitted_message_ids,
     _record_emitted_message_id,
     _run_streaming_dispatch_loop,
@@ -366,6 +369,10 @@ def test_prepare_streaming_inference_state_tracks_tool_message_diagnostics() -> 
     assert delivery_meta["tool_message_count"] == 1
     assert delivery_meta["truncated_tool_message_count"] == 1
     assert delivery_meta["tool_message_chars_before"] > delivery_meta["tool_message_chars_after"]
+    ledger = delivery_meta["context_budget_ledger"]
+    assert ledger["prompt_token_estimate"] > 0
+    assert ledger["message_token_estimate"] > 0
+    assert ledger["total_token_estimate_before_send"] >= ledger["message_token_estimate"]
 
 
 def test_prepare_streaming_inference_state_keeps_tool_message_without_truncation() -> None:
@@ -457,10 +464,8 @@ def test_inject_streaming_context_messages_inserts_after_system_prefix() -> None
     user_message = HumanMessage(content="用户问题")
     pruned_messages = [base_system, user_message]
 
-    merged = _inject_streaming_context_messages(
-        pruned_messages=pruned_messages,
-        state={"system_context": "now=2026-02-18", "skill_context": "skill=todo"},
-    )
+    context_messages, _ = build_context_messages({"system_context": "now=2026-02-18", "skill_context": "skill=todo"})
+    merged = inject_context_messages(pruned_messages, context_messages)
 
     assert merged[0] is base_system
     assert merged[1].content == "now=2026-02-18"
@@ -1823,3 +1828,65 @@ def test_build_attachment_planning_contract_should_not_let_todo_anchor_override_
     assert payload["planning_route"] == "data_workflow"
     assert payload["attachment_roles"] == [{"attachment_id": "xls-1", "role": "data_source"}]
     assert payload["requires_user_confirmation"] is False
+
+
+def test_prepare_streaming_inference_state_tracks_prompt_or_tool_schema_budget(monkeypatch) -> None:
+    """Supervisor 推理态应记录 prompt/tool schema 分项预算。"""
+
+    @tool("assign_to_data_expert")
+    def handoff_tool(task_description: str) -> str:
+        """委派给数据专家。"""
+        return task_description
+
+    @tool("knowledge_search")
+    def knowledge_search(query: str) -> str:
+        """查询知识库。"""
+        return query
+
+    monkeypatch.setattr(
+        multi_agent_graph,
+        "_get_runtime_visible_supervisor_handoff_tools",
+        lambda state=None, tool_entries=None: [handoff_tool],
+    )
+    monkeypatch.setattr(
+        multi_agent_graph,
+        "_get_runtime_visible_supervisor_tools",
+        lambda state=None, tool_entries=None: [knowledge_search],
+    )
+
+    state = {"messages": [HumanMessage(content="帮我查一下贷款余额")]}
+
+    pruned_state, *_ = _prepare_streaming_inference_state(state)
+
+    ledger = pruned_state["delivery_meta"]["context_budget_ledger"]
+    assert ledger["prompt_token_estimate"] > 0
+    assert ledger["tool_schema_token_estimate"] > 0
+    assert set(ledger["selected_tools_for_turn"]) >= {"assign_to_data_expert", "knowledge_search", "decompose_goals"}
+
+
+def test_inject_streaming_context_messages_should_summarize_loaded_skill_registry() -> None:
+    """已加载技能应注入摘要，而不是全文正文。"""
+
+    context_messages, _ = build_context_messages(
+        {
+            "loaded_skill_registry": {
+                "knowledge-search": {"version": "v1", "truncated": False}
+            },
+            "skill_catalog_manifest": [
+                {
+                    "skill_id": "knowledge-search",
+                    "display_name": "Knowledge Search",
+                    "when_to_use": "查知识库与事实检索",
+                }
+            ],
+            "loaded_skill_context": "以下技能正文已加载到当前会话，可直接复用：\n\n### Knowledge Search | skill_id=knowledge-search | version=v1\n# Knowledge Search\n正文",
+        }
+    )
+    merged = inject_context_messages([HumanMessage(content="用户问题")], context_messages)
+
+    system_messages = [msg.content for msg in merged if isinstance(msg, SystemMessage)]
+    assert system_messages
+    joined = "\n".join(system_messages)
+    assert "以下技能已加载到当前会话，可直接复用其能力摘要" in joined
+    assert "查知识库与事实检索" in joined
+    assert "# Knowledge Search" not in joined

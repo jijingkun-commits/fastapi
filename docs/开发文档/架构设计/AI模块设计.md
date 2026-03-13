@@ -26,6 +26,7 @@
 
 ```
 app/ai/
+├── context_engineering.py      # 模型调用前上下文装配与预算账本（2026-03 新增）
 ├── intent/
 │   ├── __init__.py           # 运行态意图/goal 解析入口
 │   └── goal_resolver.py      # 多意图原子 goal 与 handoff 判定
@@ -96,6 +97,13 @@ app/ai/
 5. **状态显式回写**：统一写入 `skill_candidates`、`selected_skill_ids`、`skill_context`、`skill_injection_meta`。
 
 > **降级策略**：当 embedding 模型未配置或调用失败时，不阻断主链路，自动回退到关键词召回。
+
+### 送模前上下文工程收口（2026-03）
+
+- `app/ai/context_engineering.py` 成为多智能体主图送模前的单一装配入口：统一负责 `messages trim + system/skill 上下注入 + prompt/tool schema token 账本`。
+- `multi_agent_graph._prepare_streaming_inference_state` 仍是图内唯一推理入口，但不再自行拼接运行时上下文，而是调用 `build_llm_input_context()` 生成 `llm_input_messages`。
+- `delivery_meta.context_budget_ledger` 现在至少记录 `prompt_token_estimate`、`tool_schema_token_estimate`、`system_token_estimate`、`skill_catalog_token_estimate`、`loaded_skill_token_estimate`、`message_token_estimate`、`total_token_estimate_before_send` 与 `selected_tools_for_turn`，便于定位“究竟是谁吃掉了上下文预算”。
+- `loaded_skill_registry` 继续作为技能正文的运行态真相源；默认送模只注入技能摘要，不把 `loaded_skill_context` 全文直接塞进 prompt。
 
 **配置参数（t_system_config）**：
 
@@ -450,6 +458,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 - 消息裁剪从“按条数”升级为“按 token 预算”：使用 `count_tokens_approximately` 估算消息 token，避免单条超长工具输出挤占整轮上下文。
 - 预算公式：`max(MESSAGE_MAX_TOKENS * 0.85, 1024)`；在高噪声场景（如知识库返回长文）可稳定保留最近用户意图与路由指令。
 - 目标：降低“上一轮工具长文本污染下一轮路由”的概率，确保问数/待办委派判断更多依据当前轮输入。
+- 2026-03 起，Supervisor 送模前上下文不再由主图散落拼接，而是统一走 `context_engineering.py`；主图只保留预处理与运行态诊断，预算账本写入 `delivery_meta.context_budget_ledger`。
 
 #### Supervisor 模型异常降级策略（2026-02）
 
