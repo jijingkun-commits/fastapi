@@ -31,6 +31,12 @@ description: "Use when you need `jjk-plan` in this repository. Source intent: �
 3. 历史 `implementation_plan.md`
 4. 相关代码与测试
 
+默认检索范围：
+
+1. 先看 `workdocs/需求/`、`workdocs/设计/`、当前主题 `workdocs/任务拆解/`
+2. 默认排除 `.artifacts/**` 与无关主题的 `workdocs/归档/**`
+3. 只有当前主题缺少活跃 `implementation_plan.md`，或用户明确要求复用历史方案时，才读取 `workdocs/归档/**`
+
 重点看三块：
 
 1. `fr_contract_matrix`

@@ -14,7 +14,13 @@ description: 需求澄清入口：把模糊诉求写成可执行 requirements �
 
 ## 先做什么
 
-先读用户输入、历史需求文档、相关产品文档。
+先读用户输入、当前需求文档、相关产品文档。
+
+默认检索范围：
+
+1. 先看 `workdocs/需求/`、`docs/产品文档/`、`docs/README.md`、`docs/SUMMARY.md`
+2. 默认排除 `.artifacts/**` 与 `workdocs/归档/**`
+3. 只有用户明确要求“看历史方案 / 历史过程”时，才回头读 `workdocs/归档/**`
 
 把内容分成三类：
 

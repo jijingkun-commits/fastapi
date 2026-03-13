@@ -31,6 +31,12 @@ description: "Use when you need `jjk-design` in this repository. Source intent: 
 3. 相关架构/接口文档
 4. 已有同主题设计文档
 
+默认检索范围：
+
+1. 先看 `workdocs/需求/`、`workdocs/设计/`、`docs/开发文档/`、相关代码
+2. 默认排除 `.artifacts/**` 与 `workdocs/归档/**`
+3. 只有当前主题在活跃层没有对应材料，或用户明确要求“参考历史方案”时，才读取 `workdocs/归档/**`
+
 ### 2. 查最佳实践
 
 先查官方或权威资料，再定方案。

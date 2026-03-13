@@ -18,8 +18,7 @@ from task_split_paths import resolve_task_split_paths
 ROOT = Path(__file__).resolve().parents[1]
 TASK_SPLIT_BASE = Path("workdocs/任务拆解")
 IMPLEMENTATION_FALLBACK_BASES = (
-    Path("workdocs/归档/实施计划"),
-    Path("docs/内部参考/迭代需求"),
+    Path("workdocs/归档/正文/实施计划"),
 )
 YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
 REQUIRED_EXECUTION_FIELDS = (
