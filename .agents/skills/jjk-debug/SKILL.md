@@ -113,7 +113,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 5. 风险、回滚点与后续建议
 
 建议结构见全局模板：`${CODEX_HOME:-$HOME/.codex}/engineering/templates/jjk_debug_templates.md`。  
-若本项目有覆盖规则，再查：`docs/内部参考/迭代需求/_templates/jjk_debug_templates.md`。
+若本项目有覆盖规则，再查：`workdocs/_templates/jjk_debug_templates.md`。
 
 ---
 

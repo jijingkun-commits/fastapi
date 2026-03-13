@@ -12,7 +12,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CODEX_PROMPTS_DIR = Path.home() / ".codex" / "prompts"
 COMMAND_PATH = Path(".cursor/commands/jjk-clarify.md")
-TEMPLATE_PATH = Path("docs/内部参考/迭代需求/_templates/jjk_clarify_templates.md")
+TEMPLATE_PATH = Path("workdocs/_templates/jjk_clarify_templates.md")
 SKILL_PATH = Path(".agents/skills/jjk-clarify/SKILL.md")
 PROMPT_FILENAME = "jjk-clarify.md"
 

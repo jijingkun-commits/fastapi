@@ -51,8 +51,8 @@ data: <json_payload>
 ### 2.2 `asyncapi_transitional_contract`
 
 - 当前生效：
-  - REST：`docs/api/openapi.yaml`（OpenAPI 3.1）
-  - SSE：`docs/api/streaming-events.asyncapi.yaml`（AsyncAPI 3.0）
+  - REST：`contracts/api/openapi.yaml`（OpenAPI 3.1）
+  - SSE：`contracts/api/streaming-events.asyncapi.yaml`（AsyncAPI 3.0）
 - 目标态：迁移到 OAS 3.2 时，使用 `text/event-stream` 的 `itemSchema(oneOf)`。
 
 ---

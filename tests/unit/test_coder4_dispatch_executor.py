@@ -36,7 +36,7 @@ def _build_ctx(module, *, dispatch_executor: str = "wtimp", dispatch_executor_mo
         cards_by_id={
             "C01": {
                 "card_id": "C01",
-                "source_ws_file": "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+                "source_ws_file": "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
             }
         },
         scoped_tasks=[],
@@ -101,7 +101,7 @@ def test_apply_dispatch_action_returns_executor_evidence_and_executed_result(mon
     expected_request = module.wtimp_dispatch_bridge.WtimpDispatchRequest(
         task_key=ctx.task_key,
         card_id="C01",
-        ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+        ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
         worktree_path=str((tmp_path / "wt-C01").resolve()),
         executor_mode="cardrun_dispatch",
     )
@@ -168,7 +168,7 @@ def test_apply_dispatch_action_maps_bridge_error_to_subagent_failed(monkeypatch,
         lambda *_args, **_kwargs: module.wtimp_dispatch_bridge.WtimpDispatchRequest(
             task_key=ctx.task_key,
             card_id="C01",
-            ws_file="docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+            ws_file="workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
             worktree_path=str((tmp_path / "wt-C01").resolve()),
             executor_mode="cardrun_dispatch",
         ),
@@ -206,7 +206,7 @@ def test_build_wtimp_dispatch_request_propagates_dispatch_timeout(monkeypatch, t
     monkeypatch.setattr(
         module,
         "resolve_card_source_ws_file",
-        lambda *_args, **_kwargs: "docs/内部参考/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
+        lambda *_args, **_kwargs: "workdocs/任务拆解/2026-03-06_xxx/workstreams/WS-C01.md",
     )
     monkeypatch.setattr(module, "resolve_active_session_worktree_path", lambda *_args, **_kwargs: str(worktree_path))
 

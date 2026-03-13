@@ -17,7 +17,10 @@ from task_split_paths import resolve_task_split_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 TASK_SPLIT_BASE = Path("workdocs/任务拆解")
-LEGACY_REQUIREMENTS_BASE = Path("docs/内部参考/迭代需求")
+IMPLEMENTATION_FALLBACK_BASES = (
+    Path("workdocs/归档/实施计划"),
+    Path("docs/内部参考/迭代需求"),
+)
 YAML_BLOCK_PATTERN = re.compile(r"```yaml\s*(.*?)```", flags=re.DOTALL | re.IGNORECASE)
 REQUIRED_EXECUTION_FIELDS = (
     "delivery_mode",
@@ -171,9 +174,10 @@ def _resolve_implementation_plan(
 
     split_name = task_split_dir.name
     inferred_topic = split_name.split("_", 1)[1] if re.match(r"^\d{4}-\d{2}-\d{2}_", split_name) else split_name
-    legacy_path = repo_root / LEGACY_REQUIREMENTS_BASE / f"{inferred_topic}_implementation_plan.md"
-    if legacy_path.exists() and legacy_path.is_file():
-        return legacy_path.resolve()
+    for base in IMPLEMENTATION_FALLBACK_BASES:
+        fallback_path = repo_root / base / f"{inferred_topic}_implementation_plan.md"
+        if fallback_path.exists() and fallback_path.is_file():
+            return fallback_path.resolve()
 
     raise CoverageCheckError(
         "无法定位 implementation_plan："

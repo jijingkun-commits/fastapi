@@ -9,7 +9,7 @@
 
 - 对应 `task_key`: PP-20260301-KB-RETRIEVAL-P2
 - 对应 `task_id`: 无（Gate 卡）
-- 来源主计划: `docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-01_知识库检索P2分阶段治理/parallel_plan.md`
 
 ## 1. 目标
@@ -57,7 +57,7 @@
 - 对应 implementation plan `done_gate`:
 - 人工相关性@5 >= 80%
 - 错误引用率 <= 5%
-- 证据回填位置: `docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md`
+- 证据回填位置: `workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md`
 
 ## 6. 风险与回滚
 
@@ -89,15 +89,15 @@ card_export:
     - 输出阶段评审结论与回滚决议
   code_anchor_refs:
     - scripts/data/kb_offline_evaluation.py::evaluate_cases
-    - docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md::planning_contract
+    - workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md::planning_contract
   example_refs:
-    - docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1
+    - workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1
   acceptance_checks:
     - venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate
     - python3 scripts/docs_guard.py --strict
   rollback_anchors:
     - 冻结放量并回退到上一稳定阶段配置
-  evidence_entry: docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8
+  evidence_entry: workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8
   check_cmd:
     - venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate
     - python3 scripts/docs_guard.py --strict

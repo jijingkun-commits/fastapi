@@ -1,0 +1,462 @@
+# 用户意图优化（v2：运行态契约收敛）设计说明
+
+> 文档版本：v2.0  
+> 更新时间：2026-03-07  
+> 设计状态：`approved`
+
+## 0. 结论先行
+
+- 本方案采用**单轨运行态契约**：运行阶段只认 `decomposed_goals + handoff.target_agent`，不再读取 `state.intent_plan`。
+- `intent_plan` 仅在 `decompose_goals` 规划阶段内部保留，避免直接删除带来的稳定性回归。
+- 所有阻塞/异常/覆盖缺口统一回流 `supervisor`，禁止专家节点承担兜底。
+- 本文档满足 `$jjk-clarify` v3.2 冻结结构，并冻结“契约源唯一化”：运行态只读只写 `additional_kwargs.router_result_v2`。
+
+## 0.1 可审批摘要
+
+| 维度 | 冻结结论 |
+|---|---|
+| 运行态目标源 | 仅 `decomposed_goals` |
+| 运行态委派字段 | 仅 `handoff.target_agent` |
+| 运行态结构化结果 | 仅 `additional_kwargs.router_result_v2` |
+| 规划阶段中间对象 | 保留 `intent_plan`，但仅限 `decompose_goals` 内部 |
+| 兜底责任 | 仅 `supervisor`，专家节点不兜底 |
+| 规划输入 | `user_query` + 最近 5 轮已落库、面向用户的 `chat_message` 对话 |
+| 窗口计数 | 仅统计 `user/assistant`；`tool/system` 与内部结构化产物不计入 |
+| 当前输入是否入窗 | 否；当前未落库输入只作为独立 `user_query` |
+| 窗口不足处理 | 允许短列表/空列表，不因不足 5 轮触发澄清 |
+| 指代无法消解 | 产出 `clarify_needed -> supervisor`，禁止猜测 |
+
+- 审批重点 1：运行态不再读取 `state.intent_plan`，彻底消除双轨语义。
+- 审批重点 2：`decompose_goals` 只消费“当前用户输入 + 已落库用户可见对话视图”，不读取 `tool/system/内部中间态`。
+- 审批重点 3：本方案不引入开关、不做旧版兼容，回退仅允许代码级回退。
+
+## 1. scope_contract
+
+- 目标:
+  - 收敛意图路由运行态契约，消除历史双轨语义。
+  - 保持规划产能稳定，不牺牲 `decompose_goals` 的可回退能力。
+  - 将错误处理责任统一归属到 `supervisor`，降低职责扩散风险。
+- 范围:
+  - `app/ai/workflow/multi_agent_graph.py`：运行态目标解析、路由门禁、values 分发、fallback 收口。
+  - `app/ai/prompts/agent_prompts.py`：意图判定优先级与反例语义。
+  - `app/ai/contracts/delivery_contract_validators.py`：交付合同字段约束（仅在需要补齐时调整）。
+  - `tests/unit/**`、`tests/integration/**`：新增/修正运行态契约与回归测试。
+  - `docs/开发文档/架构设计/AI模块设计.md`：同步“规划保留、运行剥离”。
+- 边界:
+  - 本轮不删除 `_build_planner_intent_plan` 与现有 planner 策略链路。
+  - 本轮不新增专家节点、不引入专家兜底。
+  - 本轮不改数据库模型与存储层 schema。
+- 成功标准:
+  - 运行态关键路径不再读取 `state.intent_plan`。
+  - `target_agent` 缺失/非法时统一产出结构化阻塞原因并回流 `supervisor`。
+  - 记忆/元信息类请求误派发到 `data_expert` 比例降至 `<=0.5%`。
+
+## 2. product_contract（PRD-Lite）
+
+- target_users: 会话终端用户（关注答复正确性与稳定性）；运营/支持同学（关注误路由可解释与可观测）；AI 工作流研发（关注契约一致性与回归可控）。
+- core_scenarios: S1 用户询问记忆/偏好/能力信息时，应优先进入 supervisor 语义处理，不误派发数据查询；S2 用户明确数据查询请求（如账单/贷款余额）时，可合法派发 `data_expert`；S3 复合请求（例如“先查待办再看记忆”）必须多目标覆盖，不漏答；S4 handoff 字段异常时，系统能在 1 回合内进入 supervisor 兜底并输出非空答复。
+- business_goals: G1 意图误路由率（memory/meta -> data_expert）`<=0.5%`；G2 路由阻塞后恢复时长 `TTR <= 1` 回合；G3 Router Contract Guard 额外耗时 `P50 <= 30ms`、`P95 <= 150ms`；G4 planner 异常回退命中率可观测，`planner_model_failed <= 5%`。
+- non_goals: 不做 planner 全链路重写；不做专家体系扩容或角色重命名；不做前端协议改版。
+- acceptance_gates: A1 `_resolve_active_goals`、`_apply_router_contract_guard`、`_dispatch_values_mode_chunk` 不读取 `state.intent_plan` 作为运行态输入；A2 `invalid_target_agent`、`invalid_task_description`、`target_not_in_allowed_agents` 均可复现并稳定回流 `supervisor`；A3 复合目标覆盖率通过回归测试，不发生漏目标收口；A4 日志/指标字段完整，`event/turn_id/goal_id/target_agent/reason` 可追踪；A5 运行态仅读写 `additional_kwargs.router_result_v2`，检测到历史字段即 fail-fast 并进入 supervisor 收口。
+- release_constraints: 运行态契约为硬约束，不提供任何 feature flag 降级路径；不兼容旧字段，检测到历史字段读写即 fail-fast 并进入 `supervisor_fallback`；回退路径仅允许代码级回退（revert 任务变更集），不允许双轨灰度。
+- 取舍说明: 根据用户“不要任何开关、不要兼容旧版本”的明确要求，本方案以代码回退锚点替代 feature flag 回退锚点。
+
+## 3. architecture_contract
+
+### 3.1 模块边界（冻结）
+
+- `multi_agent_graph`：唯一编排层，负责目标归一、路由门禁、失败回流。
+- `agent_prompts`：仅负责判定语义提示，不承担运行态门禁逻辑。
+- `delivery_contract_validators`：仅负责合同字段校验，不做重路由决策。
+- `experts`：只执行合法委派任务，禁止 fallback。
+- `session_intent_kernel` / `intent-policy`：负责判定 handoff 描述是否具备可直传的结构化特异性，编排层禁止新增关键词词表、正则词表或 substring 语义判定。
+- `tool observation normalizer`：负责第三方工具原始输出（如 Tavily 原始网页文本）的清洗与摘要归一；编排层只消费 clean summary，不感知供应商脏数据细节。
+
+### 3.2 依赖方向（冻结）
+
+- `input -> decompose_goals -> goal_normalization -> router_guard -> dispatch -> fallback/coverage -> final`。
+- `tool_raw_output -> observation_normalizer -> supervisor/todo aggregation -> final`。
+- 依赖单向，不允许从执行层反向修改规划层中间状态。
+- 编排层禁止直接依赖第三方搜索工具的原始 HTML/站点噪声格式。
+
+### 3.3 状态归属（冻结）
+
+- 规划态唯一中间对象：`intent_plan`（仅 `S1_PLAN`）。
+- 规划输入采用最小显式字段契约：`user_query`、`messages`（`chat_message` 落库的最近 5 轮 `user/assistant` 对话），禁止使用 opaque context bag。
+- 轮次计数规则：1 轮 = 1 条落库 `user` 消息 + 紧随其后的 1 条落库 `assistant` 消息；若当前轮尚未产生 `assistant` 输出，则保留该未完成轮。
+- 轮次计数排除项：仅统计 `chat_message` 中已落库的面向用户 `user/assistant` 消息；`tool`、`system`、内部结构化产物以及未落库运行态消息不进入 `decompose_goals` 输入视图。
+- 当前输入规则：本次尚未落库的当前用户输入仅作为独立 `user_query` 参与本次意图识别，不计入 `messages` 的 5 轮窗口。
+- assistant 取值规则：仅纳入最终面向用户展示并已落库的 `assistant` 回复；中间推理、内部草稿、结构化中间产物不纳入 5 轮窗口。
+- 窗口不足规则：若历史不足 5 轮，允许使用短列表或空列表进入 `decompose_goals`；不得因“未凑满 5 轮”单独触发澄清。
+- 运行态唯一目标源：`decomposed_goals`（`S2+` 全阶段）。
+- 运行态唯一委派字段：`handoff.target_agent`。
+- `data.query` 的完成态 owner 为结构化 data contract；澄清文案或自然语言摘要不得单独把数据目标判定为 `success`。
+- 重放幂等键：`turn_id + goal_id`。
+
+### 3.4 错误处理责任（冻结）
+
+- 单策略：任意运行态合同异常均 `block -> supervisor_fallback`，不进入专家兜底。
+- 单策略：`target_not_in_allowed_agents` 一律进入 `supervisor` 重新组织答复，不采用“专家侧自行修复”。
+- 单策略：planner 失败仅触发 `heuristic_fallback`，不终止主链路。
+- 单策略：若仅靠 `user_query + messages` 仍无法消解指代，则产出 `clarify_needed` 并回流 `supervisor`，禁止猜测用户意图。
+- 单策略：第三方工具返回的原始错误文本、HTML 标记、站点导航噪声必须在 normalizer 层被截断或清洗；编排层不直接回显原始内容。
+
+### 3.5 端到端数据流
+
+```mermaid
+flowchart LR
+U[User Query] --> S[Supervisor]
+S --> P[decompose_goals]
+P --> N[Normalize to decomposed_goals]
+N --> R[Router Contract Guard]
+R -->|pass| E[Expert Execution]
+R -->|block| F[Supervisor Fallback]
+E --> C[Coverage Gate]
+F --> C
+C --> O[Final Answer]
+```
+
+### 3.6 回放归一（canonical）
+
+- canonical 字段：`additional_kwargs.router_result_v2`。
+- 执行语义：`read-new-write-new`（固定语义，无兼容分支）。
+  - 读：运行态仅读取 `additional_kwargs.router_result_v2`。
+  - 写：运行态仅写入 `additional_kwargs.router_result_v2`。
+- 历史字段策略：历史字段一律视为非法输入，检测到即记录 `legacy_router_result_detected` 并 fail-fast 到 `supervisor_fallback`。
+
+## 4. requirement_seeds（字段级需求原子）
+
+| design_item | fr_id | trigger | input_contract | output_contract | failure_semantics | rollback_anchor(代码) |
+|---|---|---|---|---|---|---|
+| 运行态目标源单轨化 | FR-01 | 进入路由与分发路径 | `decomposed_goals` | `additional_kwargs.router_result_v2.route_decisions` | 缺失目标触发 `no_pending_goal` 并回流 supervisor | `revert:T01~T03` |
+| handoff 契约强校验 | FR-02 | 生成 handoff | `target_agent + (data.frame.query_text | non_data.task_description)` | `blocked_records` | 字段缺失触发 `invalid_*` 并回流 supervisor | `revert:T02` |
+| fallback 主体唯一化 | FR-03 | block/coverage 缺口/运行异常 | `blocked_handoffs` | `supervisor_fallback_activated` | 不允许专家兜底 | `revert:T03~T04` |
+| planner 规划能力保留 | FR-04 | 调用 `decompose_goals` | `user_query + messages(last_5_persisted_user_visible_chat_turns)` | `goals(source=...)` | `planner_model_failed -> heuristic_fallback`；指代无法消解时 `clarify_needed -> supervisor` | `revert:planner-preservation-delta` |
+| 回放字段归一 | FR-05 | 记录结构化路由结果 | `additional_kwargs.router_result_v2` | `additional_kwargs.router_result_v2(version=v2)` | 检测到 `legacy_field_detected` 或 `canonical_missing` 时 fail-fast 并记观测事件 | `revert:canonical-router-result-v2` |
+| data.query 完成态收紧 | FR-06 | 计算 deliverables / coverage | `data structured result + result_excerpt` | `deliverables(kind=data.query,status=success/pending)` | 仅澄清文案时必须保持 `pending`，避免 coverage 误报通过 | `revert:data-query-coverage-tightening` |
+| Tavily observation 归一 | FR-07 | Supervisor/Todo 消费 web_search 输出 | `tool raw output` | `clean observation summary` | 原始 HTML/站点噪声不得进入 handoff frame 或最终答复 | `revert:tavily-observation-normalizer` |
+| handoff 描述特异性归一 | FR-08 | 规范化 data handoff | `task_description + user_query + policy contract` | `normalized task_description` | 仅当上游 contract 明确 generic 时才回退到用户原问题 | `revert:data-handoff-specificity-contract` |
+
+## 5. implementation_seeds（任务原子）
+
+| task_id | blocked_by | file_paths | symbols | change_type | acceptance_cmds |
+|---|---|---|---|---|---|
+| T01 | [] | `app/ai/workflow/multi_agent_graph.py` | `_resolve_active_goals` | refactor | `PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q` |
+| T02 | [T01] | `app/ai/workflow/multi_agent_graph.py` | `_apply_router_contract_guard` | refactor | `PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q` |
+| T03 | [T02] | `app/ai/workflow/multi_agent_graph.py` | `_dispatch_values_mode_chunk` | refactor | `PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q` |
+| T04 | [T03] | `app/ai/prompts/agent_prompts.py` | `SUPERVISOR_PROMPT` | modify | `PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q` |
+| T05 | [T03] | `tests/unit/test_intent_plan_model_primary.py`,`tests/integration/test_intent_shadow_metrics.py` | `planner_regression_tests` | modify | `PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q && PYTHONPATH=. pytest tests/integration/test_intent_shadow_metrics.py -q` |
+| T06 | [T03] | `tests/unit/test_router_ignores_intent_plan_runtime.py` | `runtime_contract_regression` | add | `PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q` |
+| T07 | [T01,T02,T03,T04,T05,T06] | `docs/开发文档/架构设计/AI模块设计.md` | `intent_routing_sections` | modify | `rg -n "intent_plan|decomposed_goals|router_result_v2|supervisor" docs/开发文档/架构设计/AI模块设计.md` |
+| T08 | [T03] | `app/ai/workflow/multi_agent_graph.py`,`tests/unit/test_multi_intent_queue_flow.py` | `_build_delivery_artifacts`,`data_query_coverage_pending` | refactor | `bash scripts/pytest_targeted.sh tests/unit/test_multi_intent_queue_flow.py -k data_query_pending` |
+| T09 | [T03] | `app/ai/workflow/session_intent_kernel.py`,`app/ai/workflow/multi_agent_graph.py`,`app/tests/test_handoff_detection.py` | `preserve_handoff_specificity_contract` | refactor | `bash scripts/pytest_targeted.sh app/tests/test_handoff_detection.py -k preserve_specific_task` |
+| T10 | [T03] | `app/ai/workflow/multi_agent_graph.py`,`tests/unit/test_multi_agent_streaming_helpers.py` | `tavily_observation_normalizer` | refactor | `bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_streaming_helpers.py -k tavily_raw_markup_noise` |
+
+## 6. execution_chain_seed
+
+```yaml
+execution_chain_seed:
+  preferred_mode: core
+  task_key: PP-20260306-intent-runtime-contract-v2
+  card_seed: [T01, T02, T03, T04, T05, T06, T07]
+  execution_contract_hint:
+    delivery_mode: staged
+    execution_unit: per_task
+    commit_policy: per_pr
+    stop_boundary: per_pr
+```
+
+## 7. risk_rollback_contract
+
+| risk_id | 关键风险 | 触发信号 | 回退锚点（代码） | 回退动作 |
+|---|---|---|---|---|
+| R01 | 运行态单轨化后复合目标漏识别 | `coverage_missing` 上升 | `T01~T03 变更集` | 执行 `git revert` 回退 T01~T03，并恢复上一版目标解析路径 |
+| R02 | 路由门禁误拦截导致空答复 | `router_handoff_blocked_total` 异常升高 | `T02~T04 变更集` | 执行 `git revert` 回退门禁与分发改动，保持 supervisor 直接收口 |
+| R03 | planner 模型波动造成目标拆解质量下降 | `planner_model_failed > 5%` | `planner-preservation-delta` | 回退规划层本次增量并恢复上版 planner 调用链 |
+| R04 | 仍有链路写入历史字段导致契约源分裂 | `legacy_router_result_detected_total > 0` | `canonical-router-result-v2` | 立即回滚 canonical-only 增量并阻断发布，修复后重新提测 |
+
+## 8. 设计冻结回执（机读）
+
+```yaml
+design_freeze_summary:
+  design_actionable: true
+  missing_blocks: []
+  risk_level: medium
+  risk_counterexamples_count: 4
+  handoff_contract_ready: true
+  product_contract_ready: true
+  implementation_seed_count: 7
+  semantic_frozen: true
+  contract_source_decided: true
+  handoff_seed_alignment_ok: true
+  parallel_dependency_ready: true
+  replay_canonical_field_set: true
+  blocking_issues: []
+```
+
+## 9. clarify_handoff_contract（机读）
+
+```yaml
+clarify_handoff_contract:
+  version: v2
+  topic: 用户意图优化（v2：运行态契约收敛）
+  design_source: workdocs/归档/设计/2026-03-06-intent-optimization-runtime-contract-v2-design.md
+  handoff_ready: true
+  required:
+    product_contract_summary:
+      target_users: [会话终端用户, 运营支持, AI工作流研发]
+      core_scenarios:
+        - 记忆/元信息请求不误派发
+        - 明确数据查询可合法派发
+        - 复合目标全覆盖收口
+        - 异常一回合内 supervisor 兜底
+      business_goal_metrics:
+        - 误路由率<=0.5%
+        - 路由恢复TTR<=1回合
+        - 路由门禁P50<=30ms且P95<=150ms
+        - planner_model_failed<=5%
+      non_goals:
+        - 不重写 planner 全链路
+        - 不新增专家节点
+        - 不改数据库 schema
+      acceptance_gates:
+        - 运行态关键路径不读取 state.intent_plan
+        - handoff 关键字段缺失可阻塞并回流 supervisor
+        - 复合目标覆盖率回归通过
+        - 观测字段完整可追溯
+    requirement_seeds:
+      - design_item: D-01-runtime-goal-single-source
+        fr_id: FR-01
+        trigger: 进入路由与分发路径
+        input_contract:
+          required_fields: [decomposed_goals]
+        output_contract:
+          required_fields: [additional_kwargs.router_result_v2.route_decisions]
+        failure_semantics: no_pending_goal -> supervisor_fallback
+        observability_fields: [event, turn_id, goal_id, reason]
+        rollback_anchor: revert:T01~T03
+        acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_layer_boundary.py -q
+      - design_item: D-02-handoff-contract-guard
+        fr_id: FR-02
+        trigger: 生成 handoff
+        input_contract:
+          required_fields: [target_agent]
+          conditional_required_fields: [data.query.frame.query_text, non_data.task_description]
+          optional_fields: [frame]
+        output_contract:
+          required_fields: [additional_kwargs.router_result_v2.router_contract_blocked]
+        failure_semantics: invalid_target_agent|invalid_task_description|invalid_data_query_contract
+        observability_fields: [event, turn_id, target_agent, reason]
+        rollback_anchor: revert:T02
+        acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - design_item: D-03-supervisor-fallback-only
+        fr_id: FR-03
+        trigger: block/coverage缺口/运行异常
+        input_contract:
+          required_fields: [blocked_handoffs, missing_goals, runtime_error]
+        output_contract:
+          required_fields: [supervisor_fallback_activated, final_answer_non_empty]
+        failure_semantics: coverage_missing -> supervisor_fallback
+        observability_fields: [event, turn_id, reason, missing_goal_ids]
+        rollback_anchor: revert:T03~T04
+        acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - design_item: D-04-planner-keep-for-plan-only
+        fr_id: FR-04
+        trigger: decompose_goals 调用
+        input_contract:
+          required_fields: [user_query, messages]
+          constraints:
+            messages_window: recent_5_persisted_user_visible_chat_turns
+            included_roles: [user, assistant]
+            message_source: persisted_user_visible_chat_message_view
+            assistant_message_scope: final_user_visible_reply_only
+            current_user_query_counted_in_window: false
+            allow_short_or_empty_window: true
+        output_contract:
+          required_fields: [goals, source]
+        failure_semantics: planner_model_failed -> heuristic_fallback; unresolved_reference -> clarify_needed
+        observability_fields: [planner_mode, source, fallback_hit_rate]
+        rollback_anchor: revert:planner-preservation-delta
+        acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+      - design_item: D-05-replay-canonical-router-result
+        fr_id: FR-05
+        trigger: 写入结构化路由结果
+        input_contract:
+          required_fields: [additional_kwargs.router_result_v2]
+        output_contract:
+          required_fields: [additional_kwargs.router_result_v2]
+        failure_semantics: legacy_field_detected|canonical_missing -> fail_fast_event
+        observability_fields: [event, turn_id, field_version]
+        rollback_anchor: revert:canonical-router-result-v2
+        acceptance_cmd_ref: PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+    implementation_seeds:
+      - task_id: T01
+        feature_id: INTENT-P1
+        blocked_by: []
+        file_paths: [app/ai/workflow/multi_agent_graph.py]
+        symbols: [_resolve_active_goals]
+        change_type: refactor
+      - task_id: T02
+        feature_id: INTENT-P1
+        blocked_by: [T01]
+        file_paths: [app/ai/workflow/multi_agent_graph.py]
+        symbols: [_apply_router_contract_guard]
+        change_type: refactor
+      - task_id: T03
+        feature_id: INTENT-P1
+        blocked_by: [T02]
+        file_paths: [app/ai/workflow/multi_agent_graph.py]
+        symbols: [_dispatch_values_mode_chunk]
+        change_type: refactor
+      - task_id: T04
+        feature_id: INTENT-P1
+        blocked_by: [T03]
+        file_paths: [app/ai/prompts/agent_prompts.py]
+        symbols: [SUPERVISOR_PROMPT]
+        change_type: modify
+      - task_id: T05
+        feature_id: INTENT-P1
+        blocked_by: [T03]
+        file_paths: [tests/unit/test_intent_plan_model_primary.py, tests/integration/test_intent_shadow_metrics.py]
+        symbols: [planner_regression_tests]
+        change_type: modify
+      - task_id: T06
+        feature_id: INTENT-P1
+        blocked_by: [T03]
+        file_paths: [tests/unit/test_router_ignores_intent_plan_runtime.py]
+        symbols: [runtime_contract_regression]
+        change_type: add
+      - task_id: T07
+        feature_id: INTENT-P1
+        blocked_by: [T01, T02, T03, T04, T05, T06]
+        file_paths: [docs/开发文档/架构设计/AI模块设计.md]
+        symbols: [intent_routing_sections]
+        change_type: modify
+    execution_chain_seed:
+      preferred_mode: core
+      task_key: PP-20260306-intent-runtime-contract-v2
+      card_seed: [T01, T02, T03, T04, T05, T06, T07]
+      execution_contract_hint:
+        delivery_mode: staged
+        execution_unit: per_task
+        commit_policy: per_pr
+        stop_boundary: per_pr
+    alignment_contract:
+      strict_match: true
+      requirement_seed_ids:
+        - D-01-runtime-goal-single-source
+        - D-02-handoff-contract-guard
+        - D-03-supervisor-fallback-only
+        - D-04-planner-keep-for-plan-only
+        - D-05-replay-canonical-router-result
+      implementation_task_ids: [T01, T02, T03, T04, T05, T06, T07]
+      card_seed_ids: [T01, T02, T03, T04, T05, T06, T07]
+  extended:
+    observability_hints:
+      - 统一 event 命名前缀 intent_router_*
+      - route block 事件必须记录 reason 与 goal_id
+      - canonical 字段写入需携带 version=v2
+    risk_counterexample_map:
+      - risk_id: R01
+        counterexample: 多目标输入仅返回单目标答复
+        verify_cmd: PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -q
+      - risk_id: R02
+        counterexample: target_agent 缺失未进入 supervisor fallback
+        verify_cmd: PYTHONPATH=. pytest tests/unit/test_multi_intent_queue_flow.py -q
+      - risk_id: R03
+        counterexample: planner 失败后主链路中断
+        verify_cmd: PYTHONPATH=. pytest tests/unit/test_intent_plan_model_primary.py -q
+      - risk_id: R04
+        counterexample: 运行态仍写入历史字段且未产出 router_result_v2
+        verify_cmd: PYTHONPATH=. pytest tests/unit/test_router_ignores_intent_plan_runtime.py -q
+    assumptions:
+      - 本轮允许新增单测文件以固化“运行态不读 intent_plan”回归。
+      - 本轮不引入 feature flag，不提供双轨兼容层。
+      - 不涉及前端协议变更，后端直接统一到 v2 字段契约。
+      - `messages` 默认取 `chat_message` 落库的最近 5 轮面向用户 `user/assistant` 对话；运行态临时消息与内部结构化产物不作为 `decompose_goals` 输入。
+```
+
+## 10. 一致性自检（机读）
+
+```yaml
+clarify_consistency_check:
+  clarify_phase: approval
+  current_round: 1
+  question_mode: single
+  open_questions_count: 0
+  product_contract_ready: true
+  semantic_frozen: true
+  contract_source_decided: true
+  handoff_seed_alignment_ok: true
+  parallel_dependency_ready: true
+  replay_canonical_field_set: true
+  fail_fast_codes: []
+```
+
+## 11. 审批记录
+
+- design_approved: true
+- approved_at: 2026-03-07 03:01 CST
+- approved_round: round-1
+- approval_evidence: "确认"
+- approval_mode: approved
+- go_no_go: GO
+- blocking_issues: []
+
+## 12. 审批动作（完成）
+
+- 审批结果：已于 2026-03-07 03:01 CST 完成审批。
+- 下游状态：可进入 `$jjk-plan`。
+
+## 13. 2026-03-08 架构收紧：data.query 子任务 contract v1
+
+### 13.1 新根因结论
+
+- 现有多意图链路中，`data.query` 只在 `decompose_goals` 阶段获得“这是一个数据目标”的类型信息；真正 dispatch 给 `data_expert` 时，旧链路仍遗留 `task_description` 文本驱动与运行态回填。
+- 同时，`data_expert` 当前会继续看到整句复合问题，因此意图分析阶段会混入与本子任务无关的外部信息/知识库语义。
+- 结果是：单问数据时正常，子 agent 路径下反而进入澄清或误判。
+
+### 13.2 冻结决策
+
+- `data.query` 在运行态新增结构化 handoff contract，唯一 owner 为 `pending_handoff.frame`。
+- `data.query` 不再写入 `task_description` 作为正式执行字段；所有展示摘要统一由 `frame.query_text` 投影生成。
+- `multi_agent_graph` 在当前 pending goal 为 `data.query` 时，直接基于 `user_query + current_goal + session_frame` 编译 canonical `pending_handoff.frame`，不再把 Supervisor 的自由 tool call 作为正常执行主链路。
+- `data_expert` 在多意图子任务路径下，只接收该数据子任务的输入视图，不再直接消费整句复合问题。
+- `router_guard` 对 `data.query` 增加结构化合同校验；合同不完整时，阻断并回流 `supervisor`。
+
+### 13.3 contract_v1 字段
+
+| 字段 | owner | 说明 |
+|---|---|---|
+| `query_text` | `pending_handoff.frame` | 数据子任务专属查询文本，供 `data_expert` 作为主输入 |
+| `metric` | `pending_handoff.frame` | 指标名，如 `贷款余额` |
+| `time_range` | `pending_handoff.frame` | 时间范围，如 `2025-06-30` |
+| `dimensions` | `pending_handoff.frame` | 维度列表，如 `客户` |
+| `chart_type` | `pending_handoff.frame` | 可选，图表补充轮使用 |
+| `org_level` | `pending_handoff.frame` | 可选，机构层级 |
+| `filters` | `pending_handoff.frame` | 可选，筛选条件 |
+| `query_shape` | `pending_handoff.frame` | `total/dimension/top_n` |
+| `ranking.limit` | `pending_handoff.frame` | 排名数量，如 `10` |
+| `ranking.sort_by` | `pending_handoff.frame` | 排序指标，如 `贷款余额` |
+| `ranking.sort_order` | `pending_handoff.frame` | `desc/asc` |
+
+### 13.4 运行态规则
+
+- `assign_to_data_expert` 仅保留给非 goal-compiler 场景/人工兜底；decompose_goals 已确认的 `data.query` 正常路径由系统自动编译 `frame`，运行态不再从 `task_description` 或用户整句原问题回填。
+- `router_guard` 仅对 `data.query` 强制校验：
+  - `frame.query_text` 必填，且必须是自然语言子任务描述；
+  - `frame.query_text` 禁止直接写 SQL/SELECT；
+  - 若 `query_shape=top_n`，则 `ranking.limit` 必须存在；
+  - `target_agent` 与 `allowed_agents` 仍按既有门禁执行。
+- `data_expert` 的推理消息窗口在多意图子任务路径下替换为“该子任务专属 user message”，禁止继续把整句复合问题作为最新用户输入；该 internal handoff message 不得落库为用户真实发言。
+- `external.lookup` 在复合问题中的主路径改为“直答 Markdown contract”：Supervisor 若已完成可直接回答的子问题，必须把该段用户可见 Markdown 原样沉淀为运行态正文；`payload.display_markdown` 优先读取这段直答 Markdown，原始 tool 结果只作为兜底证据来源，不再依赖天气/站点特化解析来恢复最终正文。
+- `external.lookup` 对外输出采用“双层 contract”：`summary` 保持单行稳定摘要供 coverage/匹配使用，`payload.display_markdown` 保留换行与 Markdown 供最终答复渲染使用。
+- `coverage_report` 除 `goal_results(success-only)` 外，还保留 `goal_attempts(all-with-evidence)`；最终答复对未完成 goal 必须优先展示最近一次失败/缺口原因，而不是统一回退成“缺少可用结果”。
+- `data_graph` 在 handoff 路径下只消费 `frame`；当 `frame.query_text` 已存在时，直接 short-circuit 到 handoff contract 解析，不再重复依赖二次意图分析模型。
+- 若 handoff 之外的意图分析模型不可用，`data_graph` 必须显式产出稳定失败文案并停止继续 SQL 生成，禁止伪装成 `free_query` 继续降级执行。
+
+### 13.5 为什么这是最小正确修复
+
+- 不触碰最终答复层，避免再次在下游文案修补。
+- 不引入 feature flag、旧字段兼容或额外兜底层。
+- 只把“数据子任务合同”和“expert 输入隔离”这两个真正出问题的层收紧。

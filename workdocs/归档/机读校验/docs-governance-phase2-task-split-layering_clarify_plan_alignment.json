@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "task_split_dir": "",
+  "design": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/设计/2026-03-11-docs-governance-phase2-task-split-layering-design.md",
+  "requirements": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/需求/docs-governance-phase2-task-split-layering_requirements.md",
+  "implementation_plan": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/实施计划/docs-governance-phase2-task-split-layering_implementation_plan.md",
+  "summary": {
+    "traceability_rows": 6,
+    "implementation_tasks": 6,
+    "tasks_missing_required_details": 0
+  },
+  "errors": [],
+  "db_evidence_contract": {
+    "ok": true,
+    "implementation_plan": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/实施计划/docs-governance-phase2-task-split-layering_implementation_plan.md",
+    "tasks_checked": 6,
+    "errors": []
+  }
+}

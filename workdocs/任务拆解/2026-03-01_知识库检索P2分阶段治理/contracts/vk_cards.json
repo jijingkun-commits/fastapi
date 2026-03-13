@@ -60,8 +60,8 @@
     "source_ws_file": "workdocs/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-00_C00_预检门禁冻结.md"
   },
   "source_files": {
-    "requirements": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_requirements.md",
-    "implementation_plan": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md",
+    "requirements": "workdocs/归档/需求/知识库检索P2分阶段治理_requirements.md",
+    "implementation_plan": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md",
     "parallel_plan": "workdocs/任务拆解/2026-03-01_知识库检索P2分阶段治理/parallel_plan.md",
     "workstreams": [
       "workdocs/任务拆解/2026-03-01_知识库检索P2分阶段治理/workstreams/WS-C01_C01S0离线评测与基线冻结.md",
@@ -116,7 +116,7 @@
         "tests/unit/test_kb_offline_evaluation.py::test_kb_offline_eval_summary"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python scripts/data/kb_offline_evaluation.py --dry-run",
@@ -125,7 +125,7 @@
       "rollback_anchors": [
         "暂停自动评测门禁，保留人工评审兜底"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -184,7 +184,7 @@
         "app/core/config.py::RAGFLOW_*"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"payload or timeout\""
@@ -193,7 +193,7 @@
         "关闭 RAGFLOW_PAGE_SIZE 配置并回退旧 payload",
         "回退异常处理到当前稳定分支"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -250,7 +250,7 @@
         "app/ai/tools/ragflow_tool.py::_format_retrieval_results"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"dedup or evidence\""
@@ -259,7 +259,7 @@
         "关闭去重与文档限额开关",
         "回退到旧 result_text 拼接逻辑"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -315,7 +315,7 @@
         "app/ai/workflow/multi_agent_graph.py::_prepare_messages_for_supervisor_inference"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_multi_agent_streaming_helpers.py -k tool_message"
@@ -323,7 +323,7 @@
       "rollback_anchors": [
         "回退 SUPERVISOR_TOOL_MESSAGE 配置与压缩逻辑"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -381,7 +381,7 @@
         "app/ai/tools/ragflow_tool.py::_merge_and_rerank_candidates"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k \"rewrite or rerank\""
@@ -390,7 +390,7 @@
         "关闭 query rewrite 开关，仅保留原问主路",
         "回退到单路 similarity 排序"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -445,7 +445,7 @@
         "app/ai/tools/ragflow_tool.py::_build_metadata_condition"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k metadata"
@@ -453,7 +453,7 @@
       "rollback_anchors": [
         "关闭领域路由与 metadata 过滤开关"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -511,7 +511,7 @@
         "docs/API文档/外部服务集成.md::RAG 参数章节"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log",
@@ -521,7 +521,7 @@
         "回退日志扩展并关闭灰度策略开关",
         "回退文档索引变更"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -577,10 +577,10 @@
       ],
       "code_anchor_refs": [
         "scripts/data/kb_offline_evaluation.py::evaluate_cases",
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md::planning_contract"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md::planning_contract"
       ],
       "example_refs": [
-        "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#L1"
+        "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#L1"
       ],
       "acceptance_checks": [
         "venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate",
@@ -589,7 +589,7 @@
       "rollback_anchors": [
         "冻结放量并回退到上一稳定阶段配置"
       ],
-      "evidence_entry": "docs/内部参考/迭代需求/知识库检索P2分阶段治理_implementation_plan.md#8",
+      "evidence_entry": "workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md#8",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [

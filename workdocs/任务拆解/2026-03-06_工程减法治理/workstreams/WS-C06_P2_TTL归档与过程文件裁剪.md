@@ -50,7 +50,7 @@ card_export:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir workdocs/任务拆解 --ttl-days 14 --output -
   rollback_anchors:
     - WORKFLOW_ARTIFACT_TTL_CLEANUP_ENABLED=false
-  evidence_entry: docs/内部参考/迭代需求/workflow-gate-retirement_implementation_plan.md
+  evidence_entry: workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md
   check_cmd:
     - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode ttl-audit --task-split-dir workdocs/任务拆解 --ttl-days 14 --output -
   done_gate:

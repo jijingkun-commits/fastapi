@@ -17,6 +17,9 @@ TASK_KEY = "PP-20260301-ACTIVE-TASK-STORAGE"
 
 def _load_module():
     module_name = f"set_active_task_test_{uuid.uuid4().hex}"
+    scripts_dir = SCRIPT_PATH.parent.resolve()
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
     spec = spec_from_file_location(module_name, SCRIPT_PATH)
     assert spec and spec.loader
     module = module_from_spec(spec)
@@ -32,12 +35,15 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def _prepare_repo_root(tmp_path: Path) -> tuple[Path, Path]:
     repo_root = tmp_path / "repo"
-    split_dir = repo_root / "docs" / "内部参考" / "任务拆解" / TASK_SPLIT_DIR
-    split_dir.mkdir(parents=True, exist_ok=True)
+    split_dir = repo_root / "workdocs" / "任务拆解" / TASK_SPLIT_DIR
+    contracts_dir = split_dir / "contracts"
+    reports_dir = split_dir / "reports"
+    contracts_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
     (repo_root / "scripts").mkdir(parents=True, exist_ok=True)
     (repo_root / "scripts" / "set_active_task.py").write_text("# placeholder\n", encoding="utf-8")
     _write_json(
-        split_dir / "vk_cards.json",
+        contracts_dir / "vk_cards.json",
         {
             "task_key": TASK_KEY,
             "execution_mode": "serial",
@@ -50,7 +56,7 @@ def _prepare_repo_root(tmp_path: Path) -> tuple[Path, Path]:
         },
     )
     _write_json(
-        split_dir / "preflight_status.json",
+        reports_dir / "preflight_status.json",
         {
             "preflight_required": "C00",
             "passed": True,
@@ -70,14 +76,14 @@ def test_set_active_task_writes_task_scoped_and_index_files(monkeypatch, tmp_pat
         auto_done_policy="hard_gate",
         status_source_of_truth=None,
         updated_by="unit-test",
-        active_task_path="docs/内部参考/任务拆解/_active_task.json",
+        active_task_path="workdocs/任务拆解/_active_task.json",
     )
     monkeypatch.setattr(module, "parse_args", lambda: args)
 
     assert module.main() == 0
 
-    task_scoped_path = split_dir / "_active_task.json"
-    active_index_path = repo_root / "docs" / "内部参考" / "任务拆解" / "_active_task.json"
+    task_scoped_path = split_dir / "contracts" / "_active_task.json"
+    active_index_path = repo_root / "workdocs" / "任务拆解" / "_active_task.json"
     assert task_scoped_path.exists()
     assert active_index_path.exists()
 
@@ -100,17 +106,16 @@ def test_set_active_task_respects_custom_index_path(monkeypatch, tmp_path):
         auto_done_policy="hard_gate",
         status_source_of_truth=None,
         updated_by="unit-test",
-        active_task_path="docs/内部参考/任务拆解/_active_task.index.json",
+        active_task_path="workdocs/任务拆解/_active_task.index.json",
     )
     monkeypatch.setattr(module, "parse_args", lambda: args)
 
     assert module.main() == 0
 
-    task_scoped_path = split_dir / "_active_task.json"
-    custom_index_path = repo_root / "docs" / "内部参考" / "任务拆解" / "_active_task.index.json"
+    task_scoped_path = split_dir / "contracts" / "_active_task.json"
+    custom_index_path = repo_root / "workdocs" / "任务拆解" / "_active_task.index.json"
     assert task_scoped_path.exists()
     assert custom_index_path.exists()
 
     index_payload = json.loads(custom_index_path.read_text(encoding="utf-8"))
     assert index_payload["active_task_path"] == str(task_scoped_path.resolve())
-

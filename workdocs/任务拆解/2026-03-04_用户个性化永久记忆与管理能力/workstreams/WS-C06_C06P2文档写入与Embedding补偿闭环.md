@@ -7,7 +7,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260304-USER-MEMORY-LLM-ASYNC`
-- 来源主计划：`docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- 来源主计划：`workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 - 来源并行计划：`workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/parallel_plan.md`
 
 ## 1. 目标
@@ -61,8 +61,8 @@ assert result.ok
 - 验收命令：
 - `venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q`
 
-- 对应 implementation plan `done_gate`：`docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md` 中 `C06` 段。
-- 证据回填位置：`docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- 对应 implementation plan `done_gate`：`workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md` 中 `C06` 段。
+- 证据回填位置：`workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ## 6. 风险与回滚
 
@@ -85,7 +85,7 @@ card_export:
     - venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q
   rollback_anchors:
     - 回退到旧 flush 路径
-  evidence_entry: docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md
+  evidence_entry: workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md
   pr_id: PR-06
   pr_branch: codex/user-memory-async-pr-06
   pr_depends_on: ["PR-04", "PR-05"]

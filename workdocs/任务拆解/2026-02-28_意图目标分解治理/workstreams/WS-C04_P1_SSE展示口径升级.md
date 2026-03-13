@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -43,7 +43,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -53,7 +53,7 @@ else:
 - `tests/api/test_chat_sse_intent_goal_status.py`
 
 ### 禁止修改（黑名单）
-- `docs/内部参考/迭代需求/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -84,7 +84,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `sse goal status compatibility tests green`
 - 本 WS 负责的门禁子项: `C04:P1-05`
-- 证据回填位置（文档节）: `docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11`
+- 证据回填位置（文档节）: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11`
 
 ## 6. 风险与回滚
 
@@ -123,10 +123,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["区分初判目标数与已确认目标数，避免单值误导", "新增字段向后兼容，旧消费方可忽略", "过程事件与最终事件分层保持稳定"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_planner_node", "app/services/chat_service.py::stream"]
-  example_refs: ["docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#4.5"]
+  example_refs: ["workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#4.5"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py"]
   rollback_anchors: ["ENABLE_SSE_INTENT_GOAL_STATUS_V2=false"]
-  evidence_entry: docs/内部参考/迭代需求/意图目标分解治理_implementation_plan.md#11
+  evidence_entry: workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_chat_sse_intent_goal_status.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

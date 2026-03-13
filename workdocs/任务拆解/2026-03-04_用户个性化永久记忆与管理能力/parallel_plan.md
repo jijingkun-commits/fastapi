@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260304-USER-MEMORY-LLM-ASYNC
 > 主题: 用户个性化永久记忆与管理能力
-> 输入来源: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md` / `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+> 输入来源: `workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md` / `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -25,8 +25,8 @@
 
 ## 0. 输入与冻结
 
-- 来源 requirements: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_requirements.md`
-- 来源 implementation_plan: `docs/内部参考/迭代需求/用户个性化永久记忆与管理能力_implementation_plan.md`
+- 来源 requirements: `workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md`
+- 来源 implementation_plan: `workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md`
 - 契约冻结：继承 planning_contract，不重命名 card_id/feature_id，不弱化 depends_on。
 
 ## 1. 卡片总览

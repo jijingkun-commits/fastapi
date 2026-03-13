@@ -9,15 +9,15 @@ from pathlib import Path
 
 
 SCRIPT_PATH = Path("scripts/check_workflow_contract.py")
-TASK_SPLIT_DIR = Path("docs/内部参考/任务拆解/2026-03-06_工程减法治理")
+TASK_SPLIT_DIR = Path("workdocs/任务拆解/2026-03-06_工程减法治理")
 WS_C05_PATH = TASK_SPLIT_DIR / "workstreams" / "WS-C05_P2_旧入口调用观测.md"
-VK_CARDS_PATH = TASK_SPLIT_DIR / "vk_cards.json"
-REPORT_PATH = "docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
+VK_CARDS_PATH = TASK_SPLIT_DIR / "contracts" / "vk_cards.json"
+REPORT_PATH = "workdocs/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
 RUNTIME_LOG = "logs/workflow-gate-usage.jsonl"
 EXPECTED_CMD_FRAGMENT = (
     "scripts/check_workflow_contract.py --mode usage-report "
     "--log-path logs/workflow-gate-usage.jsonl "
-    "--report-output docs/内部参考/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
+    "--report-output workdocs/任务拆解/2026-03-06_工程减法治理/evidence/workflow-gate-usage-report.json"
 )
 
 

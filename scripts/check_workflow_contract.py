@@ -793,11 +793,12 @@ def _resolve_integration_state_dir(*, repo_root: Path, task_split_dir: Path, raw
     if state_dir.is_absolute():
         return state_dir.resolve()
 
-    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=False)
+    common_repo_root = _detect_common_repo_root(repo_root)
+    locator = resolve_task_split_paths(common_repo_root, task_split_dir.name, must_exist=False)
     if str(raw_state_dir).strip() in {".state", "./.state", ""}:
         return locator.runtime_task_split_dir.resolve()
 
-    return (repo_root / state_dir).resolve()
+    return (common_repo_root / state_dir).resolve()
 
 
 def _resolve_task_split_dir_arg(repo_root: Path, raw_value: str) -> Path:
@@ -820,8 +821,8 @@ def _resolve_task_split_dir_arg(repo_root: Path, raw_value: str) -> Path:
         raise SystemExit(str(exc)) from exc
 
 
-def _load_task_source_files(task_split_dir: Path) -> dict[str, Any]:
-    locator = resolve_task_split_paths(ROOT, task_split_dir.name, must_exist=False)
+def _load_task_source_files(task_split_dir: Path, *, repo_root: Path = ROOT) -> dict[str, Any]:
+    locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=False)
     cards_path = locator.vk_cards_file
     payload = json.loads(cards_path.read_text(encoding="utf-8"))
     source_files = payload.get("source_files") or {}
@@ -905,7 +906,7 @@ def _run_legacy_wrapper_compat(passthrough_args: Sequence[str]) -> int:
 
     repo_root = Path(args.repo_root).expanduser().resolve()
     task_split_dir = _resolve_task_split_dir_arg(repo_root, args.task_split_dir)
-    source_files = _load_task_source_files(task_split_dir)
+    source_files = _load_task_source_files(task_split_dir, repo_root=repo_root)
 
     checks: list[dict[str, Any]] = []
     all_ok = True
@@ -1076,7 +1077,7 @@ def check_temporal_gate_contract(task_split_dir: Path | None, repo_root: Path, i
         locator = resolve_task_split_paths(repo_root, task_split_dir.name, must_exist=False)
         files_to_scan.append(locator.parallel_plan_file.resolve())
         files_to_scan.append(locator.vk_cards_file.resolve())
-        source_files = _load_task_source_files(task_split_dir)
+        source_files = _load_task_source_files(task_split_dir, repo_root=repo_root)
         impl_candidate = _resolve_optional_repo_file(repo_root, source_files.get("implementation_plan"))
         if impl_candidate is not None:
             files_to_scan.append(impl_candidate)
@@ -1209,7 +1210,7 @@ def _run_full_gate(passthrough_args: Sequence[str]) -> int:
 
     repo_root = Path(args.repo_root).expanduser().resolve()
     task_split_dir = _resolve_task_split_dir_arg(repo_root, args.task_split_dir)
-    source_files = _load_task_source_files(task_split_dir)
+    source_files = _load_task_source_files(task_split_dir, repo_root=repo_root)
 
     import check_clarify_plan_alignment as clarify_module
     import check_plan_vk_coverage as vk_module

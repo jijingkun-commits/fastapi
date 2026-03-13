@@ -13,11 +13,12 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 
 你是资深 reviewer。
 
-你要重点看三类问题：
+你要重点看四类问题：
 
 1. 需求没落到位
 2. 设计做偏了
-3. 旧代码没收干净
+3. 触达范围的架构更乱了
+4. 旧代码没收干净
 
 ## 先看什么
 
@@ -29,6 +30,7 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 4. `implementation_plan.md`
 5. `uat_cases.md`
 6. 已有证据
+7. 触达模块上下文（至少看主入口、直接依赖、被替代旧路径）
 
 ## 产物
 
@@ -46,21 +48,34 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 2. 哪些 `design_item_refs`
 3. 哪些 `task_id`
 
-### 2. 再看三件关键事
+### 2. 再看四件关键事
 
 1. 需求是不是实现了
 2. 设计是不是按原方案落了
-3. 计划里承诺删除的东西是不是删掉了
+3. 触达范围的模块边界、依赖方向、状态归属、错误处理责任是不是更合理了
+4. 计划里承诺删除的东西是不是删掉了，以及有没有顺手可删却没删的旧入口、重复逻辑、过期 fallback、空转 wrapper/helper、孤儿测试/文档
 
-### 3. Findings 优先写这些
+### 3. 架构与精简怎么审
+
+不要只问“有没有照设计写”，还要独立判断：
+
+1. 这次改动有没有把职责放在正确层级
+2. 有没有把跨层依赖、状态 owner、错误处理又打散
+3. 有没有为了“看起来安全”继续堆一层 wrapper / helper / fallback
+4. 有没有把触达范围本来就很明显的旧入口、重复逻辑、孤儿分支继续留着不管
+5. 如果实现没有违背 design，但明显让 touched scope 更复杂，也要提 finding
+
+### 4. Findings 优先写这些
 
 优先写：
 
 1. 行为错误
 2. 设计漂移
-3. 删除不完整
-4. 追溯链断裂
-5. 证据不足
+3. 架构边界恶化 / 错层实现
+4. 复杂度上升 / 过度抽象
+5. 删除不完整 / 冗余保留
+6. 追溯链断裂
+7. 证据不足
 
 ## 输出怎么写
 
@@ -71,7 +86,15 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 1. 问题是什么
 2. 为什么重要
 3. 对应哪条需求/设计/任务
-4. 建议下一步怎么修
+4. 这是必须本轮修，还是可接受后续跟进
+5. 建议下一步怎么修
+
+建议显式区分评论强度：
+
+1. `P1`：本轮必须修，不然会带来行为风险或明确的架构退化
+2. `P2`：强烈建议本轮修，不然会继续加重复杂度、重复或旧路径残留
+3. `P3`：可作为后续治理，但应写清为什么不放在本轮
+4. `Nit/Optional`：只影响可读性或表达，不影响当前放行
 
 ## 不要做什么
 
@@ -79,7 +102,8 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 
 1. 把历史旧债全算成本次问题
 2. 只看代码风格，不看行为与结构
-3. 无证据给“看起来没问题”的结论
+3. 只问“有没有按设计做”，不问“这样做是不是把 touched scope 变得更复杂”
+4. 无证据给“看起来没问题”的结论
 
 ## 下一步
 

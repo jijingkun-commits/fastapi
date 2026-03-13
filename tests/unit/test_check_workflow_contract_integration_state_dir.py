@@ -15,6 +15,9 @@ SCRIPT_PATH = Path("scripts/check_workflow_contract.py")
 
 def _load_module():
     module_name = f"check_workflow_contract_state_dir_test_{uuid.uuid4().hex}"
+    scripts_dir = SCRIPT_PATH.parent.resolve()
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
     spec = spec_from_file_location(module_name, SCRIPT_PATH)
     assert spec and spec.loader
     module = module_from_spec(spec)
@@ -43,17 +46,18 @@ def test_resolve_integration_state_dir_prefers_common_repo_state_for_worktree(tm
     repo_root.mkdir()
     _git(repo_root, "init", "-b", "master")
 
-    task_rel = Path("docs/内部参考/任务拆解/2026-03-07_workflow-gate")
+    task_rel = Path("workdocs/任务拆解/2026-03-07_workflow-gate")
     (repo_root / task_rel).mkdir(parents=True, exist_ok=True)
-    (repo_root / task_rel / "vk_cards.json").write_text("{}\n", encoding="utf-8")
+    (repo_root / task_rel / "contracts").mkdir(parents=True, exist_ok=True)
+    (repo_root / task_rel / "contracts" / "vk_cards.json").write_text("{}\n", encoding="utf-8")
     (repo_root / "README.md").write_text("seed\n", encoding="utf-8")
-    _git(repo_root, "add", "README.md", str(task_rel / "vk_cards.json"))
+    _git(repo_root, "add", "README.md", str(task_rel / "contracts" / "vk_cards.json"))
     _git(repo_root, "commit", "-m", "init")
 
     worktree_root = repo_root / ".worktrees" / "G01" / "session"
     _git(repo_root, "worktree", "add", "-b", "feature/test-g01", str(worktree_root), "HEAD")
 
-    expected = (repo_root / task_rel / ".state").resolve()
+    expected = (repo_root / ".artifacts" / "states" / "task_splits" / "2026-03-07_workflow-gate").resolve()
     resolved = module._resolve_integration_state_dir(
         repo_root=worktree_root,
         task_split_dir=(worktree_root / task_rel),
