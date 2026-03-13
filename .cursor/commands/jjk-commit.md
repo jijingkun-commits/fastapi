@@ -137,7 +137,7 @@ description: Git 交付编排入口：提交当前分支并通过 shared deliver
 ```
 
 ```text
-/jjk-commit @docs/内部参考/迭代需求/review_report_xxx.md
+/jjk-commit @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

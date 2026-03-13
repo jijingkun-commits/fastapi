@@ -32,9 +32,9 @@ description: "Use when you need `jjk-imp-ws` in this repository. Source intent: 
 1. 单个 `WS-*.md` 文档。
 2. 同目录 `parallel_plan.md`（可选；自动生成总览）。
 3. 同目录 `vk_cards.json`（唯一机器真理源）。
-4. 同主题：`docs/内部参考/迭代需求/<topic>_requirements.md`。
-5. 同主题：`docs/内部参考/迭代需求/<topic>_implementation_plan.md`。
-6. 若 WS 引用专项附录：`docs/内部参考/迭代需求/<topic>_<appendix>_implementation_plan.md`。
+4. 同主题：`workdocs/需求/<topic>/requirements.md`。
+5. 同主题：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md`。
+6. 若 WS 引用专项附录：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/<appendix>_implementation_plan.md`。
 
 硬约束：
 

@@ -38,12 +38,16 @@ description: 实施规划入口：把 requirements 和 design 变成 implementat
 
 输出到：
 
-1. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
-2. `docs/内部参考/迭代需求/<topic>_uat_cases.md`
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md`
+2. `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/uat_cases.md`
 
 同时原位回填：
 
-3. `docs/内部参考/迭代需求/<topic>_requirements.md` 的 `traceability_matrix`
+3. `workdocs/需求/<topic>/requirements.md` 的 `traceability_matrix`
+
+一句话记住：
+
+4. `plan` 之后的执行合同，都跟当前主题的 task bundle 放在一起，不再散落回 `docs/` 旧路径
 
 ## 你要怎么写
 

@@ -140,7 +140,7 @@ $jjk-commit --abort
 ```
 
 ```text
-$jjk-commit @docs/内部参考/迭代需求/review_report_xxx.md
+$jjk-commit @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

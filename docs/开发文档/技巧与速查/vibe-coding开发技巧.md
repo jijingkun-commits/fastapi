@@ -134,7 +134,7 @@ npx ai-agent-skills info <skill-name>
 |------|------|------|------|
 | **需求冻结** | `/jjk-clarify` | `requirements.md` | 冻结“做什么”，可选 `--doc` 发布正式产品/需求文档 |
 | **技术方案** | `/jjk-design` | `design.md` | 冻结“怎么做”，含 `change_map/shrink_contract/db_migration_contract` |
-| **规划** | `/jjk-plan` | `implementation_plan.md` + `uat_cases.md` | 形成施工单 + 验收单 |
+| **规划** | `/jjk-plan` | `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md` + `.../uat_cases.md` | 形成施工单 + 验收单 |
 | **实现** | `/jjk-imp` | 代码 + 证据 | 命中 DB 变化时自动执行 migration |
 | **一站式验收** | `/jjk-verify` | 验证报告 | 消费既有 UAT、DB migration 与文档证据 |
 | **测试** | `/jjk-test` | 测试报告 | 验证功能 + 风险模型 / 失败模式覆盖 |
@@ -148,7 +148,7 @@ npx ai-agent-skills info <skill-name>
 
 1. `/jjk-clarify` 已冻结纯需求，并得到 `requirements_approved=true`。
 2. `/jjk-design` 已冻结四段式架构结论、`change_map`、`db_migration_contract`、`shrink_contract`。
-3. `/jjk-plan` 已同时产出 `implementation_plan.md` 与 `uat_cases.md`。
+3. `/jjk-plan` 已同时产出当前主题 task bundle 下的 `implementation_plan.md` 与 `uat_cases.md`。
 4. 条件采纳不得进入下游实现链。
 5. 命中 DB 变化时，计划里必须已有 migration task 与命令模板。
 6. `/jjk-verify` 只消费既有合同，不临场补 UAT。
@@ -495,7 +495,7 @@ description: 命令的简短描述
 
 | 命令 | 说明 | 使用示例 |
 |------|------|----------|
-| `/plan` | 通用实施规划，输出 `docs/plans/...` 计划文档 | `/plan` |
+| `/plan` | 通用实施规划，输出 `docs/plans/...` 计划文档（非 JJK 主链） | `/plan` |
 | `/do` | 按已有计划执行实现、测试与审查 | `/do` |
 
 ---

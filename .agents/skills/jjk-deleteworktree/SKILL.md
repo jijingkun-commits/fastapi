@@ -96,7 +96,7 @@ $jjk-deleteworktree
 ```
 
 ```text
-$jjk-deleteworktree @docs/内部参考/迭代需求/review_report_xxx.md
+$jjk-deleteworktree @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

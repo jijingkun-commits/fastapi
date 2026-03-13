@@ -6,7 +6,7 @@
 # <Topic> 技术设计
 
 > 设计目标：<一句话说清改造目标>
-> 需求真理源：`docs/内部参考/迭代需求/<topic>_requirements.md`
+> 需求真理源：`workdocs/需求/<topic>/requirements.md`
 
 ## 1. best_practice_review
 - review_date:
@@ -175,7 +175,7 @@ clarify_consistency_check:
 clarify_handoff_contract:
   version: v2
   topic: "<topic>"
-  design_source: docs/内部参考/迭代需求/<topic>_design.md
+  design_source: workdocs/设计/<topic>/design.md
   handoff_ready: true
   required:
     product_contract_summary:

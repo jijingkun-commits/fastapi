@@ -20,7 +20,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 ### 仅诊断模式：`$jjk-debug --diagnose-only`
 - 仅做诊断与规划，**禁止修改代码**
 - 产出修复计划（包含 2-3 个方案对比）
-- 统一产物：`docs/内部参考/迭代需求/fix_plan_<topic>.md`
+- 统一产物：`workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/fix_plan.md`
 - 该模式替代旧 `jjk-pc` 入口
 
 ---
@@ -102,7 +102,7 @@ description: "Use when you need `jjk-debug` in this repository. Source intent: �
 
 必须输出调试交付文档：
 
-`docs/内部参考/迭代需求/debug_report_<topic>.md`
+`workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/debug_report.md`
 
 最小内容：
 

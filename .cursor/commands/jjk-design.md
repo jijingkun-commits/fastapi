@@ -43,11 +43,11 @@ description: 技术方案入口：基于 requirements 和现有代码写出能�
 
 输出到：
 
-1. `docs/内部参考/迭代需求/<topic>_design.md`
+1. `workdocs/设计/<topic>/design.md`
 
 同时回填：
 
-2. `docs/内部参考/迭代需求/<topic>_requirements.md`
+2. `workdocs/需求/<topic>/requirements.md`
 
 至少回填这些字段：
 

@@ -30,6 +30,12 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 4. `uat_cases.md`
 5. 实现证据
 
+## 产物
+
+输出到：
+
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/verify_report.md`
+
 ## 你要怎么验
 
 ### 1. 先按需求验

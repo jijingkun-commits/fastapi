@@ -6,7 +6,7 @@
 verify_summary:
   verdict: PASS|WARN|FAIL
   topic: <topic>
-  design_source: docs/内部参考/迭代需求/<topic>_design.md
+  design_source: workdocs/设计/<topic>/design.md
 
 requirement_coverage:
   - fr_id: FR-01

@@ -27,6 +27,12 @@ description: 验收入口：按需求、设计、任务、UAT 和证据做最终
 4. `uat_cases.md`
 5. 实现证据
 
+## 产物
+
+输出到：
+
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/verify_report.md`
+
 ## 你要怎么验
 
 ### 1. 先按需求验
