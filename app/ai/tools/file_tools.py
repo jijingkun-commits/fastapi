@@ -16,6 +16,7 @@ from langchain.tools import tool
 from langchain_core.runnables.config import RunnableConfig
 
 from app.core import config as ai_config
+from app.core.file_upload_messages import LEGACY_DOC_CONVERT_HINT
 from app.services.asset_service import get_asset_service
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,15 @@ try:
     import pandas as pd
 except ImportError:
     pd = None
+
+try:
+    from docx import Document as DocxDocument
+    from docx.table import Table as DocxTable
+    from docx.text.paragraph import Paragraph as DocxParagraph
+except ImportError:
+    DocxDocument = None
+    DocxTable = None
+    DocxParagraph = None
 
 
 LOCAL_READ_MAX_LINES = 2000
@@ -41,6 +51,7 @@ LOCAL_READ_TEXT_MIME_ALLOWLIST = {
     "application/x-yaml",
     "application/yaml",
 }
+UPLOADED_FILE_MAX_CHARS = 10000
 
 
 def _discover_project_root() -> Path:
@@ -59,6 +70,13 @@ def _json_response(status: str, **payload: object) -> str:
     """统一构造 JSON 字符串返回值。"""
     data = {"status": status, **payload}
     return json.dumps(data, ensure_ascii=False)
+
+
+def _truncate_uploaded_text(content: str, source_bytes: int) -> str:
+    text = str(content or "").strip()
+    if len(text) <= UPLOADED_FILE_MAX_CHARS:
+        return text
+    return text[:UPLOADED_FILE_MAX_CHARS] + f"\n\n... (截断，原文件共 {source_bytes} 字节)"
 
 
 def _extract_user_id(config: Optional[RunnableConfig]) -> Optional[int]:
@@ -413,6 +431,7 @@ def read_uploaded_file(file_path: str, config: RunnableConfig) -> str:
     - CSV (.csv): 返回数据预览和统计信息
     - 文本文件 (.txt, .json): 返回文件内容
     - PDF: 返回提取的文本内容
+    - DOCX: 返回提取的正文与表格文本
 
     Args:
         file_path: 文件的 URL 路径，如 /api/v1/assets/user/thread/file.xlsx
@@ -480,6 +499,20 @@ def read_uploaded_file(file_path: str, config: RunnableConfig) -> str:
         # PDF 文件
         elif file_ext == "pdf" or "pdf" in content_type:
             return _read_pdf(file_content, object_key)
+
+        # DOCX 文件
+        elif file_ext == "docx" or "wordprocessingml.document" in content_type:
+            return _read_docx(file_content, object_key)
+
+        # 兼容历史 .doc 资产，明确给出转换提示
+        elif file_ext == "doc" or content_type == "application/msword":
+            return json.dumps({
+                "status": "unsupported",
+                "message": LEGACY_DOC_CONVERT_HINT,
+                "file_size": file_size,
+                "object_key": object_key,
+                "file_name": object_key.split("/")[-1],
+            }, ensure_ascii=False)
         
         else:
             return json.dumps({
@@ -599,9 +632,7 @@ def _read_text(content: bytes, object_key: str) -> str:
             text = content.decode("utf-8", errors="ignore")
         
         # 限制返回长度
-        max_length = 10000
-        if len(text) > max_length:
-            text = text[:max_length] + f"\n\n... (截断，原文件共 {len(content)} 字节)"
+        text = _truncate_uploaded_text(text, len(content))
         
         return json.dumps({
             "status": "success",
@@ -633,7 +664,7 @@ def _read_pdf(content: bytes, object_key: str) -> str:
                 "file_name": object_key.split("/")[-1],
                 "total_pages": len(reader.pages),
                 "extracted_pages": min(20, len(reader.pages)),
-                "content": text[:10000] if len(text) > 10000 else text
+                "content": _truncate_uploaded_text(text, len(content)),
             }, ensure_ascii=False)
             
         except ImportError:
@@ -645,6 +676,59 @@ def _read_pdf(content: bytes, object_key: str) -> str:
             
     except Exception as e:
         return json.dumps({"error": f"读取 PDF 失败: {str(e)}"}, ensure_ascii=False)
+
+
+def _read_docx(content: bytes, object_key: str) -> str:
+    """读取 DOCX 文件。"""
+    file_name = object_key.split("/")[-1]
+    if DocxDocument is None or DocxParagraph is None or DocxTable is None:
+        return json.dumps({
+            "status": "error",
+            "message": "python-docx 未安装，无法读取 DOCX 文件。",
+            "file_name": file_name,
+        }, ensure_ascii=False)
+
+    try:
+        document = DocxDocument(io.BytesIO(content))
+        parts: list[str] = []
+        paragraph_count = 0
+        table_count = 0
+
+        for block in document.iter_inner_content():
+            if isinstance(block, DocxParagraph):
+                text = str(block.text or "").strip()
+                if not text:
+                    continue
+                parts.append(text)
+                paragraph_count += 1
+                continue
+
+            if isinstance(block, DocxTable):
+                rows: list[str] = []
+                for row in block.rows:
+                    cells = [str(cell.text or "").strip() for cell in row.cells]
+                    if any(cells):
+                        rows.append(" | ".join(cells))
+                if rows:
+                    parts.append("\n".join(rows))
+                    table_count += 1
+
+        text = _truncate_uploaded_text("\n\n".join(parts), len(content))
+        return json.dumps({
+            "status": "success",
+            "file_type": "docx",
+            "file_name": file_name,
+            "paragraph_count": paragraph_count,
+            "table_count": table_count,
+            "content": text,
+        }, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("读取 DOCX 失败: %s", exc)
+        return json.dumps({
+            "status": "error",
+            "message": f"读取 DOCX 失败: {str(exc)}",
+            "file_name": file_name,
+        }, ensure_ascii=False)
 
 
 # 导出工具列表

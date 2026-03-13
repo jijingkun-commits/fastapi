@@ -560,7 +560,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 
 | 工具 | 用途 | 权限与约束 |
 |------|------|------------|
-| `read_uploaded_file` | 读取 MinIO 已上传附件（Excel/CSV/JSON/TXT/PDF） | 沿用既有行为，兼容历史流程 |
+| `read_uploaded_file` | 读取 MinIO 已上传附件（Excel/CSV/JSON/TXT/PDF/`.docx`） | `.docx` 走统一正文抽取；老 `.doc` 不直读，统一提示先转换为 `.docx` |
 | `read` | 读取仓库内本地文本文件，支持 `path/file_path` + `offset/limit` 分页 | 仅 `admin` 可调用；通过 `RunnableConfig.configurable.user_id` 查询 `t_user.role` 判定 |
 
 `read` 工具安全边界：

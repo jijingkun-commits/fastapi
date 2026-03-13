@@ -17,6 +17,7 @@ from app.models.chat_asset import AssetType
 from app.db.session import get_db_context
 from app.services.asset_service import get_asset_service
 from app.core import config as ai_config
+from app.core.file_upload_messages import LEGACY_DOC_CONVERT_HINT
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 logger = logging.getLogger("api.upload")
@@ -38,7 +39,6 @@ ALLOWED_CONTENT_TYPES = {
     "application/pdf": ".pdf",
     # Word 类型
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/msword": ".doc",
     # 文本类型
     "text/plain": ".txt",
     # JSON
@@ -78,10 +78,12 @@ async def upload_image(
     """
     # 验证文件类型
     content_type = file.content_type or "application/octet-stream"
+    if content_type == "application/msword":
+        raise HTTPException(status_code=400, detail=LEGACY_DOC_CONVERT_HINT)
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=400, 
-            detail=f"不支持的文件类型: {content_type}。支持: 图片(JPEG/PNG/GIF/WEBP)、文档(Excel/CSV/PDF/Word/TXT/JSON)"
+            detail=f"不支持的文件类型: {content_type}。支持: 图片(JPEG/PNG/GIF/WEBP)、文档(Excel/CSV/PDF/DOCX/TXT/JSON)"
         )
     
     # 读取文件内容

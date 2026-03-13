@@ -284,7 +284,7 @@ export function ChatInput({
                     type="file"
                     onChange={onFileUpload}
                     multiple
-                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.xlsx,.xls,.csv,.txt,.md,.docx"
+                    accept={CHAT_FILE_INPUT_ACCEPT}
                     className="hidden"
                   />
 
