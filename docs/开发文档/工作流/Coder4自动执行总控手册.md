@@ -30,7 +30,7 @@ coder4 每轮执行前会读取并校验以下链路（缺一会阻断）：
 2. `workdocs/任务拆解/<task_split_dir>/contracts/vk_cards.json`
 3. `workdocs/任务拆解/<task_split_dir>/parallel_plan.md`
 4. `workdocs/任务拆解/<task_split_dir>/workstreams/WS-*.md`
-5. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`
+5. `workdocs/任务拆解/<task_split_dir>/contracts/implementation_plan.md`
 
 ### 2.2.1 Phase 2 分层图
 
@@ -351,7 +351,7 @@ coder4 每一轮按固定顺序执行：
 主题：<主题名>
 输入：output/全面代码审查报告_合并版_20260225.md
 要求：
-1) 产出 <topic>_requirements.md 与 <topic>_implementation_plan.md
+1) 产出 `workdocs/需求/<topic>/requirements.md` 与 `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md`
 2) implementation_plan 必须含 planning_contract（execution_mode=serial, strict_single_active_card=true）
 3) 若 hydrate 映射不全，标注 BLOCKED 并给出 unmapped 清单
 ```

@@ -9,6 +9,7 @@
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
+- 2026-03-12｜文档信息架构细化为“最终/过程/运行态 × 人类/机器”双维模型；功能级过程 bundle 固定为 `需求/设计/任务拆解/contracts|reports`（ACTIVE）→ `docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/工作流/文档信息架构.md`、`workdocs/README.md`
 - 2026-03-12｜瘦身判断收敛为“职责收口优先 + whole-change-set 统计”，新增文件与 helper 同样计入增长（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
@@ -125,6 +126,17 @@
 - 影响范围：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、设计/重构模板，以及后续所有 bugfix/refactor/替代实现任务
 - 失效条件：若未来由脚本自动生成完整 replacement contract 与 whole-change-set 报告，并成为更高优先级真理源，可将本决策标记为 `SUPERSEDED`
 - 关联文档/代码：`AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`、`docs/内部参考/迭代需求/_templates/jjk_design_templates.md`、`docs/内部参考/迭代需求/_templates/jjk_refactor_templates.md`
+
+### 2026-03-12 文档信息架构细化为“最终/过程/运行态 × 人类/机器”双维模型
+
+- 状态：ACTIVE
+- 决策主题：在原有 `docs / workdocs / .artifacts` 三层分治基础上，进一步明确每层的消费方式：最终文档区分“给人读”和“给机器读”，过程文档区分“给人读”和“给机器读”，运行态继续只给机器消费
+- 背景与问题：当前仓库虽然已有“稳定文档 / 过程文档 / 运行态产物”方向，但 `docs/API文档` 与 `docs/api`、`workdocs/任务拆解` 根目录与 `contracts/reports`、`docs/plans` 与 `docs/内部参考/迭代需求` 的角色仍不够直观；维护者容易知道三层，却不容易快速判断“这份过程材料是给人看还是给脚本读”
+- 最终决策：`docs/` 继续承载最终文档，其中 `docs/产品文档`、`docs/开发文档`、`docs/API文档`、`docs/工程规范`、`docs/内部参考` 为给人读的最终文档，`docs/api` 为给机器读的最终契约；`workdocs/` 承载过程文档，其中 `需求/` 与 `设计/` 只放给人读正文，功能级实施/审查/测试/验收/调试合同统一收进 `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts|reports`；`.artifacts/` 继续只承载运行态机器产物
+- 取舍理由：相比额外再开 `方案/评审/验收` 目录，按 topic bundle 收口到 `任务拆解/contracts|reports` 更直观，也更符合“同一功能的过程材料放一起、最终文档不再被过程材料污染”的目标；人看根目录，机器读 `contracts/reports`，上下游更容易接住
+- 影响范围：`docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/工作流/文档信息架构.md`、`workdocs/README.md`、`workdocs/任务拆解/README.md`、`workdocs/需求/README.md`、`workdocs/设计/README.md`、`.cursor/commands/jjk-{plan,vkplan,review,test,verify,wtimp,imp-ws,debug,commit,deleteworktree}.md`
+- 失效条件：若未来把过程文档按 `topic bundle` 再次整体重构为 `workdocs/<topic>/{human,machine}` 统一结构，可由新的目录模型替代当前双维说明
+- 关联文档/代码：`docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/工作流/文档信息架构.md`、`workdocs/README.md`
 
 ### 2026-03-11 聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class
 

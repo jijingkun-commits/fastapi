@@ -8,7 +8,7 @@
 
 1. `workdocs/任务拆解/<task_split_dir>/contracts/_active_task.json`
 2. `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/vk_cards.json`
-3. `docs/内部参考/迭代需求/<topic>_implementation_plan.md`（`planning_contract`）
+3. `workdocs/任务拆解/<task_split_dir>/contracts/implementation_plan.md`（`planning_contract`）
 
 若三者任一不一致，先修文档与作用域，再继续自动执行。
 

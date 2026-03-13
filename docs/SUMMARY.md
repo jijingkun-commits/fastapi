@@ -4,15 +4,16 @@
 
 * [项目上下文](项目上下文.md)
 * [文档阅读指南](README.md)
+* [文档信息架构](开发文档/工作流/文档信息架构.md)
 * [AI 协作者规则文档分层](README.md#ai-协作者规则文档分层)
 
 ---
 
 ## 阅读约定
 
-> 本目录只展开**稳定文档**。
+> 本目录只展开**最终文档**。
 >
-> `workdocs/` 是新的过程层根目录；其中 `workdocs/任务拆解/` 已是 task_split canonical 根。`docs/plans/`、`docs/内部参考/迭代需求/` 仍是迁移期旧路径。
+> 过程文档统一去 `workdocs/`；其中 `workdocs/设计/` 和 `workdocs/需求/` 是给人读的过程入口，`workdocs/任务拆解/` 是 task_split canonical 根。`docs/plans/`、`docs/内部参考/迭代需求/` 是迁移期旧入口。
 
 ---
 
@@ -88,6 +89,7 @@
 ### 工作流
 
 * [开发工作流](开发文档/工作流/开发工作流.md)
+* [文档信息架构](开发文档/工作流/文档信息架构.md)
 * [Vibe Kanban多Worktree本机开发测试](开发文档/工作流/VibeKanban多Worktree本机开发测试.md)
 * [Coder4自动执行总控手册](开发文档/工作流/Coder4自动执行总控手册.md)
 * [Worktree隔离开发模式](开发文档/工作流/开发工作流.md#worktree-隔离开发模式)
@@ -136,6 +138,9 @@
 
 * [接口文档](API文档/接口文档.md)
 * [外部服务集成](API文档/外部服务集成.md)
+
+### 机器可读契约
+
 * [OpenAPI 契约](api/openapi.yaml)
 * [AsyncAPI 契约](api/streaming-events.asyncapi.yaml)
 
@@ -165,6 +170,12 @@
 
 ## 过程文档说明
 
-> 需求、方案、任务拆解、评审、验收等过程材料不属于稳定主导航。
+> 需求、设计、任务拆解等过程材料不属于最终主导航。
 >
-> 新的过程层入口是仓库根目录 `workdocs/`；task_split 统一进入 `workdocs/任务拆解/`。旧的 `docs/plans/`、`docs/内部参考/迭代需求/` 仍保留作迁移期追溯入口。
+> 过程文档请直接去仓库根目录 `workdocs/`：
+>
+> - `workdocs/需求/`：给人读的需求过程材料
+> - `workdocs/设计/`：给人读的设计过程材料
+> - `workdocs/任务拆解/`：task_split 过程正文 + `contracts/reports`
+>
+> 旧的 `docs/plans/`、`docs/内部参考/迭代需求/` 仍保留作迁移期追溯入口。

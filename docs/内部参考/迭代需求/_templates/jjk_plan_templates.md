@@ -60,8 +60,8 @@ execution_contract:
   execution_unit: all_tasks|per_task
   commit_policy: single_commit|per_task_commit
   stop_boundary: per_task|per_card
-  design_source: docs/内部参考/迭代需求/<topic>_design.md
-  requirements_source: docs/内部参考/迭代需求/<topic>_requirements.md
+  design_source: workdocs/设计/<topic>/design.md
+  requirements_source: workdocs/需求/<topic>/requirements.md
 
 tc_execution_mapping:
   - tc_id: TC-01

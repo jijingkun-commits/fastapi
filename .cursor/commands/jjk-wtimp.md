@@ -127,7 +127,7 @@ git worktree list
 
 必须产出：
 
-- `docs/内部参考/迭代需求/wtimp_report_<topic>.md`
+- `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/wtimp_report.md`
 
 最小内容：
 
@@ -170,7 +170,7 @@ git worktree list
 ```
 
 ```text
-/jjk-wtimp @docs/内部参考/迭代需求/<topic>_implementation_plan.md
+/jjk-wtimp @workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md
 ```
 
 ---

@@ -8,8 +8,9 @@
 - 新增 task_split 一律进入 `workdocs/任务拆解/<task_split_dir>/`。
 - `workdocs/任务拆解/` 不再承载 task_split 机器契约或过程 JSON。
 - task_split 根目录只放人读正文：`parallel_plan.md`、`workstreams/*.md`、说明文件。
-- `_active_task.json`、`vk_cards.json` 只放 `contracts/`。
+- `implementation_plan.md`、`uat_cases.md`、`_active_task.json`、`vk_cards.json` 只放 `contracts/`。
 - `preflight_status.json`、`consumption_report.json`、`gate_contract_report.json`、`sync/**` 只放 `reports/`。
+- `review_report.md`、`test_report.md`、`verify_report.md`、`debug_report.md`、`wtimp_report.md` 只放 `reports/`。
 
 ## 目录结构
 
@@ -20,10 +21,17 @@ workdocs/任务拆解/
     ├── parallel_plan.md
     ├── workstreams/
     ├── contracts/
+    │   ├── implementation_plan.md
+    │   ├── uat_cases.md
     │   ├── _active_task.json
     │   ├── vk_cards.json
     │   └── *.json
     └── reports/
+        ├── review_report.md
+        ├── test_report.md
+        ├── verify_report.md
+        ├── debug_report.md
+        ├── wtimp_report.md
         ├── preflight_status.json
         ├── consumption_report.json
         ├── gate_contract_report.json

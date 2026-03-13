@@ -22,10 +22,10 @@
 |---|---|---|---|
 | 需求 | `/jjk-clarify` | `requirements.md` | 只写做什么；`--doc` 才发布正式产品/需求文档 |
 | 方案 | `/jjk-design` | `design.md` | 写四段式架构结论、`change_map`、`db_migration_contract`、`shrink_contract`；`--doc` 才发布正式设计文档 |
-| 计划 | `/jjk-plan` | `implementation_plan.md` + `uat_cases.md` | 既要施工单，也要验收单 |
+| 计划 | `/jjk-plan` | `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md` + `.../uat_cases.md` | 既要施工单，也要验收单 |
 | 实现 | `/jjk-imp` | 代码 + 证据 | DB 变化默认自动跑 `bash scripts/db/run_dev_migration.sh` |
-| 审查 | `/jjk-review` | `review_report.md` | 检查需求/方案/计划/收口/迁移是否一致 |
-| 验收 | `/jjk-verify` | `verify_report.md` | 只判卷，不临场发明 UAT |
+| 审查 | `/jjk-review` | `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md` | 检查需求/方案/计划/收口/迁移是否一致 |
+| 验收 | `/jjk-verify` | `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/verify_report.md` | 只判卷，不临场发明 UAT |
 
 ## `--doc` 规则
 
@@ -54,7 +54,7 @@ bash scripts/db/run_release_migration.sh --message "<message>"
 |---|---|---|
 | Clarify | `requirements_approved=true` | 需求不清、混入技术实现 |
 | Design | 四段式结论 + `shrink_contract` + `db_migration_contract` 完整 | 边界不清、旧路径收口不清 |
-| Plan | `implementation_plan.md` + `uat_cases.md` 完整 | 无 UAT、无 migration task（命中 DB 时） |
+| Plan | `workdocs/任务拆解/<YYYY-MM-DD_主题>/contracts/implementation_plan.md` + `.../uat_cases.md` 完整 | 无 UAT、无 migration task（命中 DB 时） |
 | Imp | `acceptance_cmds` 与 migration 都有证据 | 边做边改真理源 |
 | Verify | 需求/方案/UAT/迁移证据全部对上 | 缺证据、临场补合同 |
 

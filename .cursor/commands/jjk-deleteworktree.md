@@ -93,7 +93,7 @@ description: 生命周期清理入口：删除当前分支及其 worktree（含�
 ```
 
 ```text
-/jjk-deleteworktree @docs/内部参考/迭代需求/review_report_xxx.md
+/jjk-deleteworktree @workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md
 ```
 
 ---

@@ -19,6 +19,12 @@ description: 测试入口：围绕 requirement、design、task 生成最小可�
 3. `design.md`
 4. 当前改动范围
 
+## 产物
+
+输出到：
+
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/test_report.md`
+
 ## 你要怎么测
 
 ### 1. 先建测试矩阵

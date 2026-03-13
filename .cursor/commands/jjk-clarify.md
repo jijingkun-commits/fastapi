@@ -28,7 +28,7 @@ description: 需求澄清入口：把模糊诉求写成可执行 requirements �
 
 输出到：
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
+1. `workdocs/需求/<topic>/requirements.md`
 
 可选：
 

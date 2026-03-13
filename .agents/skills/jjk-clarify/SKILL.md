@@ -31,7 +31,7 @@ description: "Use when you need `jjk-clarify` in this repository. Source intent:
 
 输出到：
 
-1. `docs/内部参考/迭代需求/<topic>_requirements.md`
+1. `workdocs/需求/<topic>/requirements.md`
 
 可选：
 

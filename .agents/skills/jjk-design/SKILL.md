@@ -46,11 +46,11 @@ description: "Use when you need `jjk-design` in this repository. Source intent: 
 
 输出到：
 
-1. `docs/内部参考/迭代需求/<topic>_design.md`
+1. `workdocs/设计/<topic>/design.md`
 
 同时回填：
 
-2. `docs/内部参考/迭代需求/<topic>_requirements.md`
+2. `workdocs/需求/<topic>/requirements.md`
 
 至少回填这些字段：
 

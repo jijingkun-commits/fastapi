@@ -99,7 +99,7 @@ python scripts/cc_context_monitor.py --interval 5
 
 4. **利用项目记忆**：
    - 架构决策 → `docs/开发文档/架构设计/`
-   - 需求变更 → `docs/内部参考/迭代需求/`
+   - 需求变更 → `workdocs/需求/`
    - 不要让 LLM 重复回答已文档化的内容
 
 ## 识别压缩信号

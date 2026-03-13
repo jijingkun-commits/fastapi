@@ -30,6 +30,12 @@ description: "Use when you need `jjk-review` in this repository. Source intent: 
 5. `uat_cases.md`
 6. 已有证据
 
+## 产物
+
+输出到：
+
+1. `workdocs/任务拆解/<YYYY-MM-DD_主题>/reports/review_report.md`
+
 ## 你要怎么审
 
 ### 1. 先找映射
