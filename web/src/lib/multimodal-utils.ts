@@ -1,5 +1,12 @@
 import { ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
+import {
+  LEGACY_DOC_CONVERT_HINT,
+  buildUnsupportedFileNameMessage,
+  buildUnsupportedMimeTypeMessage,
+  isLegacyWordDocFile,
+  isSupportedUploadFile,
+} from "./file-upload-messages";
 
 // 扩展 ContentBlock 以包含原始文件对象
 export type ExtendedContentBlock = ContentBlock.Multimodal.Data & {
@@ -11,37 +18,14 @@ export type ExtendedContentBlock = ContentBlock.Multimodal.Data & {
 export async function fileToContentBlock(
   file: File,
 ): Promise<ExtendedContentBlock> {
-  const supportedImageTypes = [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-  ];
+  if (isLegacyWordDocFile(file)) {
+    toast.error(LEGACY_DOC_CONVERT_HINT);
+    return Promise.reject(new Error(LEGACY_DOC_CONVERT_HINT));
+  }
 
-  const supportedDocTypes = [
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-    "application/vnd.ms-excel", // .xls
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-    "text/csv",
-    "text/plain",
-    "text/markdown",
-  ];
-
-  const supportedFileTypes = [...supportedImageTypes, ...supportedDocTypes];
-
-  // 扩展名检查（应对某些 MIME type 识别不准的情况）
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  const allowedExts = ["jpg", "jpeg", "png", "gif", "webp", "pdf", "xlsx", "xls", "csv", "txt", "md", "docx"];
-
-  // 简化的类型检查：只要是支持的 MIME 类或扩展名即可
-  const isSupported = supportedFileTypes.includes(file.type) || (ext && allowedExts.includes(ext));
-
-  if (!isSupported) {
-    toast.error(
-      `不支持的文件类型：${file.name}`,
-    );
-    return Promise.reject(new Error(`不支持的文件类型：${file.type}`));
+  if (!isSupportedUploadFile(file)) {
+    toast.error(buildUnsupportedFileNameMessage(file.name));
+    return Promise.reject(new Error(buildUnsupportedMimeTypeMessage(file.type)));
   }
 
   // 对于图片，生成预览 URL

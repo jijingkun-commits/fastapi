@@ -89,21 +89,31 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
     );
   }
 
-  // PDF block
-  if (block.type === "file" && block.mimeType === "application/pdf") {
+  const isPdf = block.mimeType === "application/pdf";
+  const isWordDocument =
+    block.mimeType ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+  // PDF / DOCX block
+  if (block.type === "file" && (isPdf || isWordDocument)) {
     const filename =
-      block.metadata?.filename || block.metadata?.name || "PDF 文件";
+      block.metadata?.filename ||
+      block.metadata?.name ||
+      (isPdf ? "PDF 文件" : "Word 文件");
+    const accentClass = isPdf ? "text-red-600" : "text-blue-600";
+    const containerClass = isPdf ? "bg-gray-100" : "bg-blue-50";
+    const removeLabel = isPdf ? "移除 PDF" : "移除 Word";
     return (
       <div
         className={cn(
-          "relative flex items-start gap-2 rounded-md border bg-gray-100 px-3 py-2",
+          `relative flex items-start gap-2 rounded-md border px-3 py-2 ${containerClass}`,
           className,
         )}
       >
         <div className="flex flex-shrink-0 flex-col items-start justify-start">
           <File
             className={cn(
-              "text-red-600",
+              accentClass,
               size === "sm" ? "h-5 w-5" : "h-7 w-7",
             )}
           />
@@ -117,9 +127,12 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
         {removable && (
           <button
             type="button"
-            className="ml-2 self-start rounded-full bg-gray-200 p-1 text-red-600 hover:bg-gray-300"
+            className={cn(
+              "ml-2 self-start rounded-full bg-gray-200 p-1 hover:bg-gray-300",
+              accentClass,
+            )}
             onClick={onRemove}
-            aria-label="移除 PDF"
+            aria-label={removeLabel}
           >
             <XIcon className="h-4 w-4" />
           </button>

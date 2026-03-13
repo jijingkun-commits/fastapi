@@ -37,6 +37,7 @@ import { ThinkingCapability, isThinkingToggleable } from "@/lib/model-config";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/StreamContext";
 import { useQueryState } from "nuqs";
+import { CHAT_FILE_INPUT_ACCEPT } from "@/lib/file-upload-messages";
 
 /** 快捷提示词配置 */
 export const QUICK_PROMPTS = [
@@ -253,7 +254,7 @@ export function ChatInput({
                                         type="file"
                                         onChange={onFileUpload}
                                         multiple
-                                        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.xlsx,.xls,.csv,.txt,.md,.docx"
+                                        accept={CHAT_FILE_INPUT_ACCEPT}
                                         className="hidden"
                                     />
 
