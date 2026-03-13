@@ -1,0 +1,32 @@
+# Codex 默认搜索黑名单
+#
+# 目标：缩小默认搜索面，避免归档、运行态、报告、图片和生成物
+# 在日常 `rg` / `rg --files` 中吞掉大量无关上下文。
+#
+# 若确需查看这些路径，可显式指定路径或使用 `--no-ignore-dot` / `--ignore-file`.
+
+/.artifacts/
+/.worktrees/
+/.state/
+/.codex_plugins/
+/workdocs/归档/
+/docs/内部参考/决策归档/
+/web/playwright-report/
+/web/output/
+/web/public/images/
+/web/.next/
+/web/node_modules/
+/web/pnpm-lock.yaml
+/web/tsconfig.tsbuildinfo
+/htmlcov/
+/coverage/
+/.mypy_cache/
+/.pytest_cache/
+/.ruff_cache/
+**/__pycache__/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.pdf

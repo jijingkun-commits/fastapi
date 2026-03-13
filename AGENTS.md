@@ -16,20 +16,24 @@
 4. **职责替换先收口**：`bugfix/refactor` 或新实现替代旧职责时，先说清新的唯一 owner、旧入口如何处理，以及暂留路径的失效条件；不要把新旧双轨留给“以后再删”。
 5. **默认先收口，再扩写**：优先复用、外移和删旧；是否净增长不是第一判断，关键看职责是否更集中、旧路径是否真正退役。热点文件与变更集增长统计遵循 Layer2 规则。
 6. **文档先行且原位修改**：涉及架构/API/表结构/配置/功能变动时，先更新真理源文档再改代码；同主题默认原位修改，禁止平行追加。
-7. **外部事实先核验**：涉及最佳实践、第三方库/API、官方实现或最新信息时，优先核验官方或权威来源，再下结论。
-8. **诊断先报结论**：调试/排障场景中，若日志、报错栈、监控或最小复现证据已足以锁定根因，必须先用“结论 + 证据位置 + 是否继续处理”的形式同步用户；未经用户明确同意，不得默认进入优化、修复、重构、补测或文档回填闭环。
-9. **语义判定边界固定**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract。
-10. **Lean 交付要有证据**：热点目录/热点文件必须过 `lean-guard`；未给出删除清单、重复收敛、复杂度变化、验证结果，不得宣称 `lean/refactor` 完成。
-11. **Agent 写法治理走专项 rule pack**：命中 agent 编排、路由、handoff、状态契约、review/verify 模板或 `app/ai/**` 时，必须结合 `.cursor/rules/agent_authoring.mdc`；命中 `app/ai/**` 时，以 `app/ai/AGENTS.md` 的局部高信号规则为准。
+7. **上下文读取先缩面**：默认先用 `rg` 在当前真理源、owner 文件和直接依赖中精确命中，再按 80~200 行窗口读取；非用户明确要求时，禁止默认整读 `workdocs/归档/**`、`docs/内部参考/决策归档/**`、`.worktrees/**`、测试报告/截图/锁文件等噪音路径。
+8. **按消费端走单入口**：Codex 运行时命中项目工作流/技能时，默认优先读取 `.agents/skills/*/SKILL.md`；`.cursor/commands/*.md` 只作为命令定义真理源，留给“维护命令定义、排查镜像漂移、同步链治理”场景。禁止在普通执行任务里默认双读两套镜像。
+9. **外部事实先核验**：涉及最佳实践、第三方库/API、官方实现或最新信息时，优先核验官方或权威来源，再下结论。
+10. **诊断先报结论**：调试/排障场景中，若日志、报错栈、监控或最小复现证据已足以锁定根因，必须先用“结论 + 证据位置 + 是否继续处理”的形式同步用户；未经用户明确同意，不得默认进入优化、修复、重构、补测或文档回填闭环。
+11. **语义判定边界固定**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract。
+12. **Lean 交付要有证据**：热点目录/热点文件必须过 `lean-guard`；未给出删除清单、重复收敛、复杂度变化、验证结果，不得宣称 `lean/refactor` 完成。
+13. **Agent 写法治理走专项 rule pack**：命中 agent 编排、路由、handoff、状态契约、review/verify 模板或 `app/ai/**` 时，必须结合 `.cursor/rules/agent_authoring.mdc`；命中 `app/ai/**` 时，以 `app/ai/AGENTS.md` 的局部高信号规则为准。
 
 ## 执行流程入口（强制）
 1. 改代码、跑测试、做验收前，先读 `PLANS.md` 对应章节。
 2. `PLANS.md` 是以下流程的唯一入口：`patch` 门槛、执行上下文校验、文件编辑工具契约、测试解释器契约、测试语义分层、运行态校验。
-3. 命中 API / Schema / Route / DTO / 接口语义变更时，除本文件外还必须遵守 `.cursor/rules/doc_sync.mdc` 与对应的 `jjk-api-doc-sync` 门禁。
+3. 若当前会话没有独立 `apply_patch` 工具，禁止通过 `exec_command` 包装 `apply_patch`；统一记录 `APPLY_PATCH_TOOL_UNAVAILABLE_FALLBACK`，并改走当前实际可用的直接写回方式。
+4. 命中 API / Schema / Route / DTO / 接口语义变更时，除本文件外还必须遵守 `.cursor/rules/doc_sync.mdc` 与对应的 `jjk-api-doc-sync` 门禁。
 
 ## Layer2 规则入口（唯一源）
 - 规则唯一源：`.cursor/rules/*.mdc`
 - 命令唯一源：`.cursor/commands/*.md`
+- Codex 运行态技能入口：`.agents/skills/*/SKILL.md`
 - 详细技术约束以 Layer2 为准（不在本文件重复）：
   - 核心原则与技术栈：`.cursor/rules/core.mdc`
   - MCP 路由与联网/GitHub 检索：`.cursor/rules/mcp-routing.mdc`

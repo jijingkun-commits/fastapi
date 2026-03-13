@@ -105,6 +105,35 @@ python scripts/cc_context_monitor.py --interval 5
    - 需求变更 → `workdocs/需求/`
    - 不要让 LLM 重复回答已文档化的内容
 
+5. **搜索先收窄**：
+   - 默认使用 `rg`，并遵守仓库根 `.rgignore`：自动排除 `workdocs/归档/`、`docs/内部参考/决策归档/`、`.worktrees/`、`web/playwright-report/`、`web/output/`、图片和锁文件等噪音路径
+   - 先命中，再小窗口读取：优先 `sed -n '80,180p' <file>` 这类 80~200 行窗口，不要为了“先了解一下”直接整篇打开
+   - 只有在明确追历史方案、报告、截图或生成产物时，才显式指定这些路径
+
+6. **规则入口按消费端收敛**：
+   - Codex 运行时命中项目工作流/技能，默认先读 `.agents/skills/*/SKILL.md`
+   - `.cursor/commands/*.md` 保留给“维护命令定义、查 skill 镜像漂移、同步链治理”场景，不要在普通执行任务里双读
+   - 根 `AGENTS.md` 负责路由，`.cursor/rules/*.mdc` 负责技术细则，`PLANS.md` 只在长流程阶段再展开
+
+## 推荐搜索姿势
+
+```bash
+# 先在当前真理源和代码 owner 中命中
+rg -n "display_blocks|ordered content blocks" docs app web
+
+# 命中某个工作流时，Codex 先读 skill 入口
+rg -n "jjk-verify|jjk-design" .agents/skills
+
+# 再按窗口读取，不整篇吞
+sed -n '60,180p' docs/API文档/接口文档_聊天与流式协议.md
+
+# 只有维护命令定义或查镜像漂移时，才去看命令真理源
+rg -n "jjk-verify" .cursor/commands
+
+# 只有明确追历史时，才显式点名归档路径
+rg -n "cardrun-wtflow" workdocs/归档/正文/设计
+```
+
 ## 识别压缩信号
 
 如果出现以下情况，说明已触发自动压缩：

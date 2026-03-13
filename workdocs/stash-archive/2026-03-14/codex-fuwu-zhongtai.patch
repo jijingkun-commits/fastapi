@@ -1,0 +1,2053 @@
+diff --git a/app/api/deps.py b/app/api/deps.py
+index 39045dfd..abd9ac8f 100644
+--- a/app/api/deps.py
++++ b/app/api/deps.py
+@@ -1,54 +1,170 @@
+-"""依赖注入：解析当前用户（中文注释）。"""
++"""依赖注入：解析当前用户（中文注释）。
++
++支持双轨认证：
++1. JWT Token 认证（原有逻辑）
++2. API Key 认证（sk- 前缀）
++"""
++from functools import wraps
++from typing import Callable, Optional
++
+ from fastapi import Depends, HTTPException, status
+ from fastapi.security import OAuth2PasswordBearer
+ from sqlalchemy.orm import Session
+ 
+ from app.db.session import get_db
+-from app.services.token_service import is_token_valid
++from app.models.user import User
+ from app.repositories.user_repo import get_by_id
++from app.services import api_key_service
++from app.services.token_service import is_token_valid
+ 
+ 
+ # OAuth2 密码模式，token 获取地址为 v1 的登录接口
+ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/login")
+ 
+ 
+-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+-    """根据Bearer Token解析当前用户。
+-    
+-    验证流程：
+-    1. 解析Token并验证签名
+-    2. 检查Token是否在黑名单中
+-    3. 检查用户是否存在
+-    4. 检查用户是否被禁用
++def authenticate_by_api_key(
++    db: Session,
++    api_key: str,
++) -> tuple[bool, Optional[User], Optional[str], Optional[list[str]]]:
++    """通过 API Key 认证用户。
++
++    Args:
++        db: 数据库会话
++        api_key: API Key
++
++    Returns:
++        (是否成功, 用户对象, 失败原因, 权限范围列表)
+     """
+-    valid, payload = is_token_valid(db, token)
+-    if not valid:
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
+-    
+-    try:
+-        uid = int(payload.get("uid"))
+-    except (TypeError, ValueError):
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
+-    
+-    user = get_by_id(db, uid)
++    # 验证 API Key
++    is_valid, api_key_obj, reason = api_key_service.verify_api_key(db=db, key=api_key)
++    if not is_valid:
++        return False, None, reason, None
++
++    # 查询关联用户
++    user = get_by_id(db, api_key_obj.user_id)
+     if not user:
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
++        return False, None, "关联用户不存在", None
++
+     if not user.is_active:
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户已被禁用")
+-    return user
++        return False, None, "关联用户已被禁用", None
++
++    # 解析权限范围
++    scopes = api_key_obj.scopes.split(",") if api_key_obj.scopes else []
++
++    return True, user, None, scopes
++
++
++def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
++    """根据 Bearer Token 或 API Key 解析当前用户（双轨认证）。
++
++    验证流程：
++    1. 判断 token 前缀：
++       - sk- 开头：API Key 认证
++       - 其他：JWT Token 认证
++    2. API Key 认证流程：
++       - 验证 API Key 有效性
++       - 检查速率限制
++       - 检查关联用户
++    3. JWT Token 认证流程（原有逻辑）：
++       - 解析 Token 并验证签名
++       - 检查 Token 是否在黑名单中
++       - 检查用户是否存在
++       - 检查用户是否被禁用
++    """
++    # 判断认证方式
++    if token.startswith("sk-"):
++        # API Key 认证
++        is_valid, user, reason, scopes = authenticate_by_api_key(db=db, api_key=token)
++        if not is_valid:
++            raise HTTPException(
++                status_code=status.HTTP_401_UNAUTHORIZED,
++                detail=reason or "API Key 认证失败",
++            )
++
++        # 将 scopes 附加到 user 对象（用于后续权限校验）
++        user.api_key_scopes = scopes
++        return user
++    else:
++        # JWT Token 认证（原有逻辑）
++        valid, payload = is_token_valid(db, token)
++        if not valid:
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
++
++        try:
++            uid = int(payload.get("uid"))
++        except (TypeError, ValueError):
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
++
++        user = get_by_id(db, uid)
++        if not user:
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
++        if not user.is_active:
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户已被禁用")
++
++        # JWT Token 认证的用户没有 scopes 限制
++        user.api_key_scopes = None
++        return user
++
++
++def require_scope(required_scope: str) -> Callable:
++    """权限范围装饰器，用于校验 API Key 权限。
++
++    Args:
++        required_scope: 必需的权限范围（如 "exam:admin"）
++
++    Returns:
++        装饰器函数
++
++    使用示例：
++        @router.post("/api/v1/admin/exam/jobs")
++        @require_scope("exam:admin")
++        async def create_job(user: User = Depends(get_current_user)):
++            ...
++    """
++    def decorator(func: Callable) -> Callable:
++        @wraps(func)
++        async def wrapper(*args, **kwargs):
++            # 从 kwargs 中获取 user 对象
++            user = kwargs.get("user") or kwargs.get("current_user")
++            if not user:
++                raise HTTPException(
++                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
++                    detail="权限校验失败：无法获取用户对象",
++                )
++
++            # 如果是 JWT Token 认证，跳过权限校验（JWT Token 用户拥有所有权限）
++            if not hasattr(user, "api_key_scopes") or user.api_key_scopes is None:
++                return await func(*args, **kwargs)
++
++            # 如果是 API Key 认证，校验权限范围
++            if required_scope not in user.api_key_scopes:
++                raise HTTPException(
++                    status_code=status.HTTP_403_FORBIDDEN,
++                    detail=f"权限不足：需要 {required_scope} 权限",
++                )
++
++            return await func(*args, **kwargs)
++
++        return wrapper
++
++    return decorator
+ 
+ 
+ def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+-    """管理员权限验证，仅允许 role=admin 的用户访问。"""
++    """管理员权限验证，仅允许 role=admin 的用户访问。
++
++    注意：此函数仅支持 JWT Token 认证，不支持 API Key 认证。
++    如果需要支持 API Key，请使用 get_current_user + @require_scope 装饰器。
++    """
+     valid, payload = is_token_valid(db, token)
+     if not valid:
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
+-    
++
+     try:
+         uid = int(payload.get("uid"))
+     except (TypeError, ValueError):
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效令牌")
+-    
++
+     user = get_by_id(db, uid)
+     if not user:
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+@@ -67,25 +183,72 @@ def get_current_user_optional(
+     token: str = Depends(oauth2_scheme_optional),
+     db: Session = Depends(get_db)
+ ):
+-    """可选的用户认证，未提供 token 时返回 None。"""
++    """可选的用户认证，未提供 token 时返回 None。
++
++    支持双轨认证（JWT Token + API Key）。
++    """
+     if not token:
+         return None
+-    
+-    valid, payload = is_token_valid(db, token)
+-    if not valid:
+-        return None
+-    
+-    try:
+-        uid = int(payload.get("uid"))
+-        user = get_by_id(db, uid)
+-        if user and user.is_active:
+-            return user
+-        return None
+-    except Exception:
+-        return None
++
++    # 判断认证方式
++    if token.startswith("sk-"):
++        # API Key 认证
++        is_valid, user, reason, scopes = authenticate_by_api_key(db=db, api_key=token)
++        if not is_valid:
++            return None
++
++        user.api_key_scopes = scopes
++        return user
++    else:
++        # JWT Token 认证（原有逻辑）
++        valid, payload = is_token_valid(db, token)
++        if not valid:
++            return None
++
++        try:
++            uid = int(payload.get("uid"))
++            user = get_by_id(db, uid)
++            if user and user.is_active:
++                user.api_key_scopes = None
++                return user
++            return None
++        except Exception:
++            return None
+ 
+ 
+ def get_raw_token(token: str = Depends(oauth2_scheme)) -> str:
+     """获取原始Token字符串（用于登出）。"""
+     return token
+ 
++
++def require_exam_admin_scope(
++    user: User = Depends(get_current_user),
++) -> User:
++    """要求 exam:admin 权限（用于 AI 出题接口）。
++
++    支持双轨认证：
++    - JWT Token 用户：拥有所有权限，直接通过
++    - API Key 用户：必须包含 exam:admin 权限
++
++    Args:
++        user: 当前用户
++
++    Returns:
++        当前用户
++
++    Raises:
++        HTTPException: 如果权限不足
++    """
++    # 如果是 JWT Token 认证，跳过权限校验（JWT Token 用户拥有所有权限）
++    if not hasattr(user, "api_key_scopes") or user.api_key_scopes is None:
++        return user
++
++    # 如果是 API Key 认证，校验权限范围
++    if "exam:admin" not in user.api_key_scopes:
++        raise HTTPException(
++            status_code=status.HTTP_403_FORBIDDEN,
++            detail="权限不足：需要 exam:admin 权限",
++        )
++
++    return user
++
+diff --git a/app/api/v1/endpoints/api_key_admin_api.py b/app/api/v1/endpoints/api_key_admin_api.py
+new file mode 100644
+index 00000000..67c1518d
+--- /dev/null
++++ b/app/api/v1/endpoints/api_key_admin_api.py
+@@ -0,0 +1,204 @@
++"""API Key 管理接口（管理员专用）。"""
++from typing import Optional
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy.orm import Session
++
++from app.api.deps import get_admin_user
++from app.db.session import get_db
++from app.models.user import User
++from app.schemas.api_key import (
++    APIKeyCreateRequest,
++    APIKeyListResponse,
++    APIKeyResponse,
++    APIKeyStatsResponse,
++)
++from app.services import api_key_service
++from app.services import audit_log_service
++
++router = APIRouter()
++
++
++@router.post("/api-keys", response_model=APIKeyResponse, status_code=status.HTTP_201_CREATED)
++async def create_api_key(
++    request: APIKeyCreateRequest,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """创建新的 API Key（管理员专用）。
++
++    Args:
++        request: 创建请求
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        创建的 API Key（包含完整 key，仅此一次返回）
++    """
++    # 创建 API Key
++    api_key = api_key_service.create_api_key(
++        db=db,
++        request=request,
++        created_by=current_user.id,
++    )
++
++    return api_key
++
++
++@router.get("/api-keys", response_model=APIKeyListResponse)
++async def list_api_keys(
++    user_id: Optional[int] = None,
++    is_active: Optional[bool] = None,
++    limit: int = 50,
++    offset: int = 0,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """查询 API Key 列表（管理员专用）。
++
++    Args:
++        user_id: 用户ID（可选，None 表示查询所有）
++        is_active: 是否激活（可选，None 表示不过滤）
++        limit: 返回数量限制
++        offset: 偏移量
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        API Key 列表
++    """
++    return api_key_service.list_api_keys(
++        db=db,
++        user_id=user_id,
++        is_active=is_active,
++        limit=limit,
++        offset=offset,
++    )
++
++
++@router.get("/api-keys/{key_id}", response_model=APIKeyResponse)
++async def get_api_key(
++    key_id: int,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """查询单个 API Key 详情（管理员专用）。
++
++    Args:
++        key_id: API Key ID
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        API Key 详情
++    """
++    api_key = api_key_service.get_api_key_by_id(db=db, api_key_id=key_id)
++    if not api_key:
++        raise HTTPException(
++            status_code=status.HTTP_404_NOT_FOUND,
++            detail="API Key 不存在",
++        )
++
++    return api_key
++
++
++@router.delete("/api-keys/{key_id}", response_model=APIKeyResponse)
++async def revoke_api_key(
++    key_id: int,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """撤销 API Key（管理员专用）。
++
++    Args:
++        key_id: API Key ID
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        撤销后的 API Key
++    """
++    api_key = api_key_service.revoke_api_key(
++        db=db,
++        api_key_id=key_id,
++        revoked_by=current_user.id,
++    )
++    if not api_key:
++        raise HTTPException(
++            status_code=status.HTTP_404_NOT_FOUND,
++            detail="API Key 不存在",
++        )
++
++    return api_key
++
++
++@router.get("/api-keys/{key_id}/stats", response_model=APIKeyStatsResponse)
++async def get_api_key_stats(
++    key_id: int,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """查询 API Key 使用统计（管理员专用）。
++
++    Args:
++        key_id: API Key ID
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        使用统计
++    """
++    # 先检查 API Key 是否存在
++    api_key = api_key_service.get_api_key_by_id(db=db, api_key_id=key_id)
++    if not api_key:
++        raise HTTPException(
++            status_code=status.HTTP_404_NOT_FOUND,
++            detail="API Key 不存在",
++        )
++
++    # 查询使用统计
++    return api_key_service.get_usage_stats(db=db, api_key_id=key_id)
++
++
++@router.get("/api-keys/{key_id}/logs")
++async def get_api_key_logs(
++    key_id: int,
++    limit: int = 100,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(get_admin_user),
++):
++    """查询 API Key 最近的审计日志（管理员专用）。
++
++    Args:
++        key_id: API Key ID
++        limit: 返回数量限制
++        db: 数据库会话
++        current_user: 当前管理员用户
++
++    Returns:
++        审计日志列表
++    """
++    # 先检查 API Key 是否存在
++    api_key = api_key_service.get_api_key_by_id(db=db, api_key_id=key_id)
++    if not api_key:
++        raise HTTPException(
++            status_code=status.HTTP_404_NOT_FOUND,
++            detail="API Key 不存在",
++        )
++
++    # 查询审计日志
++    logs = audit_log_service.get_recent_logs(db=db, api_key_id=key_id, limit=limit)
++
++    # 转换为字典列表
++    return [
++        {
++            "id": log.id,
++            "api_key_id": log.api_key_id,
++            "user_id": log.user_id,
++            "request_url": log.request_url,
++            "request_method": log.request_method,
++            "response_status": log.response_status,
++            "created_at": log.created_at,
++        }
++        for log in logs
++    ]
+diff --git a/app/api/v1/endpoints/exam_admin_api.py b/app/api/v1/endpoints/exam_admin_api.py
+index 95fc1bff..f46374bd 100644
+--- a/app/api/v1/endpoints/exam_admin_api.py
++++ b/app/api/v1/endpoints/exam_admin_api.py
+@@ -1,4 +1,9 @@
+-"""AI 出题后台 API（中文注释）。"""
++"""AI 出题后台 API（中文注释）。
++
++支持双轨认证：
++- JWT Token 认证（管理员用户）
++- API Key 认证（需要 exam:admin 权限）
++"""
+ from __future__ import annotations
+ 
+ import logging
+@@ -8,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+ from fastapi.responses import StreamingResponse
+ from sqlalchemy.orm import Session
+ 
+-from app.api.deps import get_admin_user
++from app.api.deps import require_exam_admin_scope
+ from app.db.session import get_db
+ from app.models.user import User
+ from app.repositories import exam_generation_job_repo
+@@ -29,7 +34,7 @@ router = APIRouter(prefix="/exam-admin", tags=["AI出题管理"])
+ 
+ @router.get("/template", response_model=ExamTemplateResponse)
+ def get_template(
+-    current_user: User = Depends(get_admin_user),
++    current_user: User = Depends(require_exam_admin_scope),
+     service: ExamGenerationService = Depends(get_exam_generation_service),
+ ):
+     return service.build_template_payload()
+@@ -39,7 +44,7 @@ def get_template(
+ def create_job(
+     payload: ExamGenerationJobCreateRequest,
+     background_tasks: BackgroundTasks,
+-    current_user: User = Depends(get_admin_user),
++    current_user: User = Depends(require_exam_admin_scope),
+     db: Session = Depends(get_db),
+     service: ExamGenerationService = Depends(get_exam_generation_service),
+ ):
+@@ -51,7 +56,7 @@ def create_job(
+ @router.get("/jobs", response_model=List[ExamGenerationJobSummary])
+ def list_jobs(
+     limit: int = 50,
+-    current_user: User = Depends(get_admin_user),
++    current_user: User = Depends(require_exam_admin_scope),
+     db: Session = Depends(get_db),
+     service: ExamGenerationService = Depends(get_exam_generation_service),
+ ):
+@@ -61,7 +66,7 @@ def list_jobs(
+ @router.get("/jobs/{job_id}", response_model=ExamGenerationJobDetail)
+ def get_job(
+     job_id: int,
+-    current_user: User = Depends(get_admin_user),
++    current_user: User = Depends(require_exam_admin_scope),
+     db: Session = Depends(get_db),
+     service: ExamGenerationService = Depends(get_exam_generation_service),
+ ):
+@@ -71,7 +76,7 @@ def get_job(
+ @router.get("/jobs/{job_id}/download")
+ def download_export(
+     job_id: int,
+-    current_user: User = Depends(get_admin_user),
++    current_user: User = Depends(require_exam_admin_scope),
+     db: Session = Depends(get_db),
+ ):
+     job = exam_generation_job_repo.get_job_by_id(db, job_id)
+diff --git a/app/api/v1/router.py b/app/api/v1/router.py
+index 36c4ac54..a442358b 100644
+--- a/app/api/v1/router.py
++++ b/app/api/v1/router.py
+@@ -67,6 +67,9 @@ api_router.include_router(dev_codex_router, dependencies=[Depends(get_admin_user
+ # 文档记忆运维路由：仅管理员
+ from app.api.v1.endpoints.memory_admin_api import router as memory_admin_router
+ api_router.include_router(memory_admin_router, dependencies=[Depends(get_admin_user)])
++# API Key 管理路由：仅管理员
++from app.api.v1.endpoints.api_key_admin_api import router as api_key_admin_router
++api_router.include_router(api_key_admin_router, prefix="/admin", tags=["API Key Admin"], dependencies=[Depends(get_admin_user)])
+ 
+ 
+ # AI 出题后台路由：仅管理员
+diff --git a/app/core/config.py b/app/core/config.py
+index 1370bf94..e4ce578e 100644
+--- a/app/core/config.py
++++ b/app/core/config.py
+@@ -61,6 +61,11 @@ DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+ DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+ DB_ECHO: bool = os.getenv("DB_ECHO", "false" if ENV == "prod" else "true").lower() in {"1","true","yes"}
+ 
++# Redis 配置（用于速率限制等功能）
++# 格式：redis://[:password]@host:port/db
++# 示例：redis://localhost:6379/0 或 redis://:password@localhost:6379/0
++REDIS_URL: str = os.getenv("REDIS_URL", "")  # 默认为空，表示不使用 Redis
++
+ # JWT 配置
+ JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me")
+ JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+diff --git a/app/models/api_key.py b/app/models/api_key.py
+new file mode 100644
+index 00000000..a761115b
+--- /dev/null
++++ b/app/models/api_key.py
+@@ -0,0 +1,89 @@
++"""API Key 数据模型。"""
++from __future__ import annotations
++
++from datetime import datetime
++from typing import Optional
++
++from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
++from sqlalchemy.orm import Mapped, mapped_column
++
++from app.db.base import Base
++
++
++class APIKey(Base):
++    """API Key 主表。"""
++
++    __tablename__ = "t_api_key"
++
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
++
++    # 关联用户（必填）
++    user_id: Mapped[int] = mapped_column(
++        Integer, ForeignKey("t_user.id"), nullable=False, index=True, comment="关联用户ID"
++    )
++
++    # API Key（sk- 前缀 + 32 字节随机字符串）
++    key: Mapped[str] = mapped_column(
++        String(64), unique=True, index=True, nullable=False, comment="API Key"
++    )
++
++    # 密钥名称（便于管理员识别）
++    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="密钥名称")
++
++    # 权限范围（逗号分隔，如 "exam:admin,chat:read"）
++    scopes: Mapped[str] = mapped_column(String(500), nullable=False, comment="权限范围")
++
++    # 速率限制（每分钟最大请求数）
++    rate_limit_per_minute: Mapped[int] = mapped_column(
++        Integer, default=60, nullable=False, comment="速率限制（每分钟）"
++    )
++
++    # 使用统计
++    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="使用次数")
++    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="最后使用时间")
++
++    # 状态与过期
++    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否激活")
++    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="过期时间（可选）")
++
++    # 审计字段
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime, default=datetime.now, nullable=False, comment="创建时间"
++    )
++    created_by: Mapped[int] = mapped_column(
++        Integer, ForeignKey("t_user.id"), nullable=False, comment="创建者ID"
++    )
++    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="撤销时间")
++    revoked_by: Mapped[Optional[int]] = mapped_column(
++        Integer, ForeignKey("t_user.id"), comment="撤销者ID"
++    )
++
++    def __repr__(self) -> str:
++        return f"<APIKey(id={self.id}, name={self.name}, user_id={self.user_id}, is_active={self.is_active})>"
++
++
++class APIKeyAuditLog(Base):
++    """API Key 审计日志表。"""
++
++    __tablename__ = "t_api_key_audit_log"
++
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
++    api_key_id: Mapped[int] = mapped_column(
++        Integer, ForeignKey("t_api_key.id"), nullable=False, index=True, comment="API Key ID"
++    )
++    user_id: Mapped[int] = mapped_column(
++        Integer, ForeignKey("t_user.id"), nullable=False, index=True, comment="用户ID"
++    )
++
++    # 请求信息
++    request_url: Mapped[str] = mapped_column(String(500), nullable=False, comment="请求URL")
++    request_method: Mapped[str] = mapped_column(String(10), nullable=False, comment="请求方法")
++    response_status: Mapped[int] = mapped_column(Integer, nullable=False, comment="响应状态码")
++
++    # 时间戳
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime, default=datetime.now, nullable=False, index=True, comment="创建时间"
++    )
++
++    def __repr__(self) -> str:
++        return f"<APIKeyAuditLog(id={self.id}, api_key_id={self.api_key_id}, request_url={self.request_url})>"
+diff --git a/app/repositories/api_key_repo.py b/app/repositories/api_key_repo.py
+new file mode 100644
+index 00000000..bee443fe
+--- /dev/null
++++ b/app/repositories/api_key_repo.py
+@@ -0,0 +1,188 @@
++"""API Key 数据访问层。"""
++from __future__ import annotations
++
++from datetime import datetime
++from typing import Optional
++
++from sqlalchemy import and_, or_
++from sqlalchemy.orm import Session
++
++from app.models.api_key import APIKey
++
++
++def create_api_key(
++    db: Session,
++    user_id: int,
++    key: str,
++    name: str,
++    scopes: str,
++    rate_limit_per_minute: int,
++    created_by: int,
++    expires_at: Optional[datetime] = None,
++) -> APIKey:
++    """创建新的 API Key。
++
++    Args:
++        db: 数据库会话
++        user_id: 关联用户ID
++        key: API Key
++        name: 密钥名称
++        scopes: 权限范围（逗号分隔）
++        rate_limit_per_minute: 速率限制
++        created_by: 创建者ID
++        expires_at: 过期时间（可选）
++
++    Returns:
++        创建的 API Key 对象
++    """
++    api_key = APIKey(
++        user_id=user_id,
++        key=key,
++        name=name,
++        scopes=scopes,
++        rate_limit_per_minute=rate_limit_per_minute,
++        created_by=created_by,
++        expires_at=expires_at,
++        usage_count=0,
++        is_active=True,
++        created_at=datetime.now(),
++    )
++    db.add(api_key)
++    db.commit()
++    db.refresh(api_key)
++    return api_key
++
++
++def get_by_key(db: Session, key: str) -> Optional[APIKey]:
++    """根据 key 查询 API Key。
++
++    Args:
++        db: 数据库会话
++        key: API Key
++
++    Returns:
++        API Key 对象，如果不存在则返回 None
++    """
++    return db.query(APIKey).filter(APIKey.key == key).first()
++
++
++def get_by_id(db: Session, api_key_id: int) -> Optional[APIKey]:
++    """根据 ID 查询 API Key。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++
++    Returns:
++        API Key 对象，如果不存在则返回 None
++    """
++    return db.query(APIKey).filter(APIKey.id == api_key_id).first()
++
++
++def get_by_user_id(
++    db: Session,
++    user_id: int,
++    is_active: Optional[bool] = None,
++    limit: int = 50,
++    offset: int = 0,
++) -> list[APIKey]:
++    """根据 user_id 查询 API Key 列表。
++
++    Args:
++        db: 数据库会话
++        user_id: 用户ID
++        is_active: 是否激活（可选，None 表示不过滤）
++        limit: 返回数量限制
++        offset: 偏移量
++
++    Returns:
++        API Key 列表
++    """
++    query = db.query(APIKey).filter(APIKey.user_id == user_id)
++
++    if is_active is not None:
++        query = query.filter(APIKey.is_active == is_active)
++
++    return query.order_by(APIKey.created_at.desc()).limit(limit).offset(offset).all()
++
++
++def list_all(
++    db: Session,
++    is_active: Optional[bool] = None,
++    limit: int = 50,
++    offset: int = 0,
++) -> list[APIKey]:
++    """查询所有 API Key 列表（管理员用）。
++
++    Args:
++        db: 数据库会话
++        is_active: 是否激活（可选，None 表示不过滤）
++        limit: 返回数量限制
++        offset: 偏移量
++
++    Returns:
++        API Key 列表
++    """
++    query = db.query(APIKey)
++
++    if is_active is not None:
++        query = query.filter(APIKey.is_active == is_active)
++
++    return query.order_by(APIKey.created_at.desc()).limit(limit).offset(offset).all()
++
++
++def count_by_user_id(db: Session, user_id: int, is_active: Optional[bool] = None) -> int:
++    """统计用户的 API Key 数量。
++
++    Args:
++        db: 数据库会话
++        user_id: 用户ID
++        is_active: 是否激活（可选，None 表示不过滤）
++
++    Returns:
++        API Key 数量
++    """
++    query = db.query(APIKey).filter(APIKey.user_id == user_id)
++
++    if is_active is not None:
++        query = query.filter(APIKey.is_active == is_active)
++
++    return query.count()
++
++
++def revoke_api_key(db: Session, api_key_id: int, revoked_by: int) -> Optional[APIKey]:
++    """撤销 API Key。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        revoked_by: 撤销者ID
++
++    Returns:
++        撤销后的 API Key 对象，如果不存在则返回 None
++    """
++    api_key = db.query(APIKey).filter(APIKey.id == api_key_id).first()
++    if not api_key:
++        return None
++
++    api_key.is_active = False
++    api_key.revoked_at = datetime.now()
++    api_key.revoked_by = revoked_by
++
++    db.commit()
++    db.refresh(api_key)
++    return api_key
++
++
++def update_last_used(db: Session, api_key_id: int) -> None:
++    """更新最后使用时间和使用次数。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++    """
++    api_key = db.query(APIKey).filter(APIKey.id == api_key_id).first()
++    if api_key:
++        api_key.last_used_at = datetime.now()
++        api_key.usage_count += 1
++        db.commit()
+diff --git a/app/schemas/api_key.py b/app/schemas/api_key.py
+new file mode 100644
+index 00000000..263bf803
+--- /dev/null
++++ b/app/schemas/api_key.py
+@@ -0,0 +1,86 @@
++"""API Key 相关的 Pydantic Schema。"""
++from __future__ import annotations
++
++from datetime import datetime
++from typing import Optional
++
++from pydantic import BaseModel, Field, field_validator
++
++
++class APIKeyCreateRequest(BaseModel):
++    """创建 API Key 的请求体。"""
++
++    name: str = Field(..., min_length=1, max_length=100, description="密钥名称")
++    user_id: int = Field(..., gt=0, description="关联用户ID")
++    scopes: list[str] = Field(..., min_length=1, description="权限范围列表")
++    rate_limit_per_minute: int = Field(default=60, gt=0, le=1000, description="速率限制（每分钟）")
++    expires_at: Optional[datetime] = Field(default=None, description="过期时间（可选）")
++
++    @field_validator("scopes")
++    @classmethod
++    def validate_scopes(cls, v: list[str]) -> list[str]:
++        """验证权限范围非空。"""
++        if not v:
++            raise ValueError("权限范围不能为空")
++        # 去重
++        return list(set(v))
++
++
++class APIKeyResponse(BaseModel):
++    """API Key 详情响应。"""
++
++    id: int
++    user_id: int
++    key: str  # 只在创建时返回完整 key，查询时只返回前 8 位
++    name: str
++    scopes: list[str]
++    rate_limit_per_minute: int
++    usage_count: int
++    last_used_at: Optional[datetime]
++    is_active: bool
++    expires_at: Optional[datetime]
++    created_at: datetime
++    created_by: int
++    revoked_at: Optional[datetime]
++    revoked_by: Optional[int]
++
++    model_config = {"from_attributes": True}
++
++    @classmethod
++    def from_orm_with_masked_key(cls, obj: any, mask_key: bool = True) -> "APIKeyResponse":
++        """从 ORM 对象创建响应，可选择是否遮蔽 key。"""
++        data = {
++            "id": obj.id,
++            "user_id": obj.user_id,
++            "key": obj.key[:8] + "..." if mask_key else obj.key,
++            "name": obj.name,
++            "scopes": obj.scopes.split(",") if obj.scopes else [],
++            "rate_limit_per_minute": obj.rate_limit_per_minute,
++            "usage_count": obj.usage_count,
++            "last_used_at": obj.last_used_at,
++            "is_active": obj.is_active,
++            "expires_at": obj.expires_at,
++            "created_at": obj.created_at,
++            "created_by": obj.created_by,
++            "revoked_at": obj.revoked_at,
++            "revoked_by": obj.revoked_by,
++        }
++        return cls(**data)
++
++
++class APIKeyListResponse(BaseModel):
++    """API Key 列表响应。"""
++
++    items: list[APIKeyResponse]
++    total: int
++
++
++class APIKeyStatsResponse(BaseModel):
++    """API Key 使用统计响应。"""
++
++    api_key_id: int
++    total_requests: int
++    success_count: int
++    error_count: int
++    avg_requests_per_day: float
++    last_used_at: Optional[datetime]
+diff --git a/app/services/api_key_service.py b/app/services/api_key_service.py
+new file mode 100644
+index 00000000..176abad2
+--- /dev/null
++++ b/app/services/api_key_service.py
+@@ -0,0 +1,227 @@
++"""API Key 业务逻辑服务。
++
++整合 repository、rate limiter 和 audit log service，提供完整的 API Key 管理功能。
++"""
++from __future__ import annotations
++
++import secrets
++from datetime import datetime
++from typing import Optional
++
++from sqlalchemy.orm import Session
++
++from app.models.api_key import APIKey
++from app.repositories import api_key_repo
++from app.schemas.api_key import (
++    APIKeyCreateRequest,
++    APIKeyListResponse,
++    APIKeyResponse,
++    APIKeyStatsResponse,
++)
++from app.services import audit_log_service
++from app.services.rate_limiter import check_rate_limit
++
++
++def generate_api_key() -> str:
++    """生成 API Key（sk- 前缀 + 32 字节随机字符串）。
++
++    Returns:
++        生成的 API Key
++    """
++    return f"sk-{secrets.token_urlsafe(32)}"
++
++
++def create_api_key(
++    db: Session,
++    request: APIKeyCreateRequest,
++    created_by: int,
++) -> APIKeyResponse:
++    """创建新的 API Key。
++
++    Args:
++        db: 数据库会话
++        request: 创建请求
++        created_by: 创建者ID
++
++    Returns:
++        创建的 API Key 响应（包含完整 key）
++    """
++    # 生成 API Key
++    key = generate_api_key()
++
++    # 转换 scopes 为逗号分隔字符串
++    scopes_str = ",".join(request.scopes)
++
++    # 创建 API Key
++    api_key = api_key_repo.create_api_key(
++        db=db,
++        user_id=request.user_id,
++        key=key,
++        name=request.name,
++        scopes=scopes_str,
++        rate_limit_per_minute=request.rate_limit_per_minute,
++        created_by=created_by,
++        expires_at=request.expires_at,
++    )
++
++    # 返回完整 key（只在创建时返回）
++    return APIKeyResponse.from_orm_with_masked_key(api_key, mask_key=False)
++
++
++def list_api_keys(
++    db: Session,
++    user_id: Optional[int] = None,
++    is_active: Optional[bool] = None,
++    limit: int = 50,
++    offset: int = 0,
++) -> APIKeyListResponse:
++    """查询 API Key 列表。
++
++    Args:
++        db: 数据库会话
++        user_id: 用户ID（可选，None 表示查询所有）
++        is_active: 是否激活（可选，None 表示不过滤）
++        limit: 返回数量限制
++        offset: 偏移量
++
++    Returns:
++        API Key 列表响应
++    """
++    if user_id is not None:
++        items = api_key_repo.get_by_user_id(
++            db=db,
++            user_id=user_id,
++            is_active=is_active,
++            limit=limit,
++            offset=offset,
++        )
++        total = api_key_repo.count_by_user_id(
++            db=db,
++            user_id=user_id,
++            is_active=is_active,
++        )
++    else:
++        items = api_key_repo.list_all(
++            db=db,
++            is_active=is_active,
++            limit=limit,
++            offset=offset,
++        )
++        total = len(items)  # 简化实现，实际应该有单独的 count 方法
++
++    # 转换为响应对象（遮蔽 key）
++    response_items = [
++        APIKeyResponse.from_orm_with_masked_key(item, mask_key=True)
++        for item in items
++    ]
++
++    return APIKeyListResponse(items=response_items, total=total)
++
++
++def get_api_key_by_id(
++    db: Session,
++    api_key_id: int,
++) -> Optional[APIKeyResponse]:
++    """根据 ID 查询 API Key。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++
++    Returns:
++        API Key 响应（遮蔽 key），如果不存在则返回 None
++    """
++    api_key = api_key_repo.get_by_id(db=db, api_key_id=api_key_id)
++    if not api_key:
++        return None
++
++    return APIKeyResponse.from_orm_with_masked_key(api_key, mask_key=True)
++
++
++def revoke_api_key(
++    db: Session,
++    api_key_id: int,
++    revoked_by: int,
++) -> Optional[APIKeyResponse]:
++    """撤销 API Key。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        revoked_by: 撤销者ID
++
++    Returns:
++        撤销后的 API Key 响应，如果不存在则返回 None
++    """
++    api_key = api_key_repo.revoke_api_key(
++        db=db,
++        api_key_id=api_key_id,
++        revoked_by=revoked_by,
++    )
++    if not api_key:
++        return None
++
++    return APIKeyResponse.from_orm_with_masked_key(api_key, mask_key=True)
++
++
++def verify_api_key(
++    db: Session,
++    key: str,
++) -> tuple[bool, Optional[APIKey], Optional[str]]:
++    """验证 API Key 是否有效。
++
++    Args:
++        db: 数据库会话
++        key: API Key
++
++    Returns:
++        (是否有效, API Key 对象, 失败原因)
++    """
++    # 查询 API Key
++    api_key = api_key_repo.get_by_key(db=db, key=key)
++    if not api_key:
++        return False, None, "API Key 不存在"
++
++    # 检查是否激活
++    if not api_key.is_active:
++        return False, api_key, "API Key 已被撤销"
++
++    # 检查是否过期
++    if api_key.expires_at and api_key.expires_at < datetime.now():
++        return False, api_key, "API Key 已过期"
++
++    # 检查速率限制
++    if not check_rate_limit(api_key.id, api_key.rate_limit_per_minute):
++        return False, api_key, "超过速率限制"
++
++    # 更新最后使用时间
++    api_key_repo.update_last_used(db=db, api_key_id=api_key.id)
++
++    return True, api_key, None
++
++
++def get_usage_stats(
++    db: Session,
++    api_key_id: int,
++    start_date: Optional[datetime] = None,
++    end_date: Optional[datetime] = None,
++) -> APIKeyStatsResponse:
++    """查询 API Key 使用统计。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        start_date: 开始日期（可选）
++        end_date: 结束日期（可选）
++
++    Returns:
++        使用统计响应
++    """
++    stats = audit_log_service.get_usage_stats(
++        db=db,
++        api_key_id=api_key_id,
++        start_date=start_date,
++        end_date=end_date,
++    )
++
++    return APIKeyStatsResponse(**stats)
+diff --git a/app/services/audit_log_service.py b/app/services/audit_log_service.py
+new file mode 100644
+index 00000000..67641a8e
+--- /dev/null
++++ b/app/services/audit_log_service.py
+@@ -0,0 +1,140 @@
++"""审计日志服务。
++
++异步记录 API Key 使用，写入失败不阻塞主请求。
++"""
++from __future__ import annotations
++
++import logging
++from datetime import datetime, timedelta
++from typing import Optional
++
++from sqlalchemy import and_, func
++from sqlalchemy.orm import Session
++
++from app.models.api_key import APIKeyAuditLog
++
++logger = logging.getLogger(__name__)
++
++
++def record_api_key_usage(
++    db: Session,
++    api_key_id: int,
++    user_id: int,
++    request_url: str,
++    request_method: str,
++    response_status: int,
++) -> None:
++    """记录 API Key 使用（异步写入）。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        user_id: 用户ID
++        request_url: 请求URL
++        request_method: 请求方法
++        response_status: 响应状态码
++    """
++    try:
++        audit_log = APIKeyAuditLog(
++            api_key_id=api_key_id,
++            user_id=user_id,
++            request_url=request_url,
++            request_method=request_method,
++            response_status=response_status,
++            created_at=datetime.now(),
++        )
++        db.add(audit_log)
++        db.commit()
++    except Exception as e:
++        logger.error(f"审计日志写入失败: {e}")
++        db.rollback()
++        # 写入失败不抛出异常，不阻塞主请求
++
++
++def get_usage_stats(
++    db: Session,
++    api_key_id: int,
++    start_date: Optional[datetime] = None,
++    end_date: Optional[datetime] = None,
++) -> dict:
++    """查询 API Key 使用统计。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        start_date: 开始日期（可选）
++        end_date: 结束日期（可选）
++
++    Returns:
++        使用统计字典
++    """
++    # 默认查询最近 30 天
++    if not start_date:
++        start_date = datetime.now() - timedelta(days=30)
++    if not end_date:
++        end_date = datetime.now()
++
++    # 查询总请求数
++    query = db.query(APIKeyAuditLog).filter(
++        and_(
++            APIKeyAuditLog.api_key_id == api_key_id,
++            APIKeyAuditLog.created_at >= start_date,
++            APIKeyAuditLog.created_at <= end_date,
++        )
++    )
++
++    total_requests = query.count()
++
++    # 查询成功数（2xx 状态码）
++    success_count = query.filter(
++        and_(
++            APIKeyAuditLog.response_status >= 200,
++            APIKeyAuditLog.response_status < 300,
++        )
++    ).count()
++
++    # 查询失败数（4xx, 5xx 状态码）
++    error_count = query.filter(APIKeyAuditLog.response_status >= 400).count()
++
++    # 查询最后使用时间
++    last_log = (
++        query.order_by(APIKeyAuditLog.created_at.desc()).first()
++    )
++    last_used_at = last_log.created_at if last_log else None
++
++    # 计算平均每天请求数
++    days = (end_date - start_date).days or 1
++    avg_requests_per_day = total_requests / days
++
++    return {
++        "api_key_id": api_key_id,
++        "total_requests": total_requests,
++        "success_count": success_count,
++        "error_count": error_count,
++        "avg_requests_per_day": round(avg_requests_per_day, 2),
++        "last_used_at": last_used_at,
++    }
++
++
++def get_recent_logs(
++    db: Session,
++    api_key_id: int,
++    limit: int = 100,
++) -> list[APIKeyAuditLog]:
++    """查询最近的审计日志。
++
++    Args:
++        db: 数据库会话
++        api_key_id: API Key ID
++        limit: 返回数量限制
++
++    Returns:
++        审计日志列表
++    """
++    return (
++        db.query(APIKeyAuditLog)
++        .filter(APIKeyAuditLog.api_key_id == api_key_id)
++        .order_by(APIKeyAuditLog.created_at.desc())
++        .limit(limit)
++        .all()
++    )
+diff --git a/app/services/rate_limiter.py b/app/services/rate_limiter.py
+new file mode 100644
+index 00000000..9ec8603e
+--- /dev/null
++++ b/app/services/rate_limiter.py
+@@ -0,0 +1,148 @@
++"""速率限制服务。
++
++基于 Redis 实现滑动窗口限流，降级到内存计数器（单机模式）。
++"""
++from __future__ import annotations
++
++import time
++from collections import defaultdict
++from typing import Optional
++
++from app.core.config import REDIS_URL
++
++
++class RateLimiter:
++    """速率限制器。
++
++    优先使用 Redis，如果不可用则降级到内存计数器。
++    """
++
++    def __init__(self):
++        """初始化速率限制器。"""
++        self.redis_client: Optional[any] = None
++        self.memory_store: dict[str, list[float]] = defaultdict(list)
++
++        # 尝试连接 Redis
++        if REDIS_URL:
++            try:
++                import redis
++
++                self.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
++                # 测试连接
++                self.redis_client.ping()
++                print("✅ 速率限制器使用 Redis")
++            except Exception as e:
++                print(f"⚠️ Redis 连接失败，降级到内存计数器: {e}")
++                self.redis_client = None
++        else:
++            print("⚠️ 未配置 REDIS_URL，使用内存计数器")
++
++    def check_rate_limit(self, api_key_id: int, limit_per_minute: int) -> bool:
++        """检查是否超过速率限制。
++
++        Args:
++            api_key_id: API Key ID
++            limit_per_minute: 每分钟最大请求数
++
++        Returns:
++            True 表示未超限，False 表示超限
++        """
++        if self.redis_client:
++            return self._check_rate_limit_redis(api_key_id, limit_per_minute)
++        else:
++            return self._check_rate_limit_memory(api_key_id, limit_per_minute)
++
++    def _check_rate_limit_redis(self, api_key_id: int, limit_per_minute: int) -> bool:
++        """基于 Redis 的速率限制检查（滑动窗口）。
++
++        Args:
++            api_key_id: API Key ID
++            limit_per_minute: 每分钟最大请求数
++
++        Returns:
++            True 表示未超限，False 表示超限
++        """
++        key = f"rate_limit:api_key:{api_key_id}"
++        now = time.time()
++        window_start = now - 60  # 60 秒窗口
++
++        try:
++            # 使用 Redis Sorted Set 实现滑动窗口
++            pipe = self.redis_client.pipeline()
++
++            # 删除窗口外的记录
++            pipe.zremrangebyscore(key, 0, window_start)
++
++            # 获取当前窗口内的请求数
++            pipe.zcard(key)
++
++            # 添加当前请求
++            pipe.zadd(key, {str(now): now})
++
++            # 设置过期时间（61 秒，略大于窗口）
++            pipe.expire(key, 61)
++
++            results = pipe.execute()
++            current_count = results[1]
++
++            # 判断是否超限
++            return current_count < limit_per_minute
++
++        except Exception as e:
++            print(f"⚠️ Redis 速率限制检查失败，降级到内存: {e}")
++            return self._check_rate_limit_memory(api_key_id, limit_per_minute)
++
++    def _check_rate_limit_memory(self, api_key_id: int, limit_per_minute: int) -> bool:
++        """基于内存的速率限制检查（滑动窗口）。
++
++        Args:
++            api_key_id: API Key ID
++            limit_per_minute: 每分钟最大请求数
++
++        Returns:
++            True 表示未超限，False 表示超限
++        """
++        key = f"api_key:{api_key_id}"
++        now = time.time()
++        window_start = now - 60  # 60 秒窗口
++
++        # 清理窗口外的记录
++        self.memory_store[key] = [ts for ts in self.memory_store[key] if ts > window_start]
++
++        # 检查是否超限
++        if len(self.memory_store[key]) >= limit_per_minute:
++            return False
++
++        # 添加当前请求
++        self.memory_store[key].append(now)
++        return True
++
++
++# 全局单例
++_rate_limiter: Optional[RateLimiter] = None
++
++
++def get_rate_limiter() -> RateLimiter:
++    """获取速率限制器单例。
++
++    Returns:
++        速率限制器实例
++    """
++    global _rate_limiter
++    if _rate_limiter is None:
++        _rate_limiter = RateLimiter()
++    return _rate_limiter
++
++
++def check_rate_limit(api_key_id: int, limit_per_minute: int) -> bool:
++    """检查是否超过速率限制（便捷函数）。
++
++    Args:
++        api_key_id: API Key ID
++        limit_per_minute: 每分钟最大请求数
++
++    Returns:
++        True 表示未超限，False 表示超限
++    """
++    limiter = get_rate_limiter()
++    return limiter.check_rate_limit(api_key_id, limit_per_minute)
+diff --git a/web/src/app/admin/api-keys/page.tsx b/web/src/app/admin/api-keys/page.tsx
+new file mode 100644
+index 00000000..6afda46b
+--- /dev/null
++++ b/web/src/app/admin/api-keys/page.tsx
+@@ -0,0 +1,8 @@
++/**
++ * API Key 管理页面
++ */
++import APIKeyPanel from '@/components/admin/APIKeyPanel'
++
++export default function APIKeysPage() {
++  return <APIKeyPanel />
++}
+diff --git a/web/src/components/admin/APIKeyPanel.tsx b/web/src/components/admin/APIKeyPanel.tsx
+new file mode 100644
+index 00000000..1ad4954d
+--- /dev/null
++++ b/web/src/components/admin/APIKeyPanel.tsx
+@@ -0,0 +1,347 @@
++/**
++ * API Key 管理面板组件
++ */
++'use client'
++
++import { useState, useEffect } from 'react'
++import {
++  createAPIKey,
++  listAPIKeys,
++  revokeAPIKey,
++  getAPIKeyStats,
++  type APIKeyResponse,
++  type APIKeyCreateRequest,
++  type APIKeyStatsResponse,
++} from '@/lib/api-key-admin-api'
++
++export default function APIKeyPanel() {
++  const [apiKeys, setApiKeys] = useState<APIKeyResponse[]>([])
++  const [loading, setLoading] = useState(true)
++  const [error, setError] = useState<string | null>(null)
++  const [showCreateForm, setShowCreateForm] = useState(false)
++  const [selectedKey, setSelectedKey] = useState<APIKeyResponse | null>(null)
++  const [stats, setStats] = useState<APIKeyStatsResponse | null>(null)
++
++  // 表单状态
++  const [formData, setFormData] = useState<APIKeyCreateRequest>({
++    name: '',
++    user_id: 21, // 默认使用 api_system 用户
++    scopes: ['exam:admin'],
++    rate_limit_per_minute: 60,
++  })
++
++  // 新创建的 API Key（完整 key，仅显示一次）
++  const [newApiKey, setNewApiKey] = useState<string | null>(null)
++
++  // 加载 API Key 列表
++  const loadAPIKeys = async () => {
++    try {
++      setLoading(true)
++      setError(null)
++      const response = await listAPIKeys()
++      setApiKeys(response.items)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : '加载失败')
++    } finally {
++      setLoading(false)
++    }
++  }
++
++  useEffect(() => {
++    loadAPIKeys()
++  }, [])
++
++  // 创建 API Key
++  const handleCreate = async (e: React.FormEvent) => {
++    e.preventDefault()
++    try {
++      setError(null)
++      const result = await createAPIKey(formData)
++      setNewApiKey(result.key) // 保存完整 key
++      setShowCreateForm(false)
++      setFormData({
++        name: '',
++        user_id: 21,
++        scopes: ['exam:admin'],
++        rate_limit_per_minute: 60,
++      })
++      await loadAPIKeys()
++    } catch (err) {
++      setError(err instanceof Error ? err.message : '创建失败')
++    }
++  }
++
++  // 撤销 API Key
++  const handleRevoke = async (keyId: number) => {
++    if (!confirm('确定要撤销此 API Key 吗？撤销后无法恢复。')) {
++      return
++    }
++
++    try {
++      setError(null)
++      await revokeAPIKey(keyId)
++      await loadAPIKeys()
++    } catch (err) {
++      setError(err instanceof Error ? err.message : '撤销失败')
++    }
++  }
++
++  // 查看统计
++  const handleViewStats = async (key: APIKeyResponse) => {
++    try {
++      setError(null)
++      const statsData = await getAPIKeyStats(key.id)
++      setStats(statsData)
++      setSelectedKey(key)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : '查询统计失败')
++    }
++  }
++
++  // 复制到剪贴板
++  const copyToClipboard = (text: string) => {
++    navigator.clipboard.writeText(text)
++    alert('已复制到剪贴板')
++  }
++
++  if (loading) {
++    return <div className="p-4">加载中...</div>
++  }
++
++  return (
++    <div className="p-6 max-w-7xl mx-auto">
++      <div className="flex justify-between items-center mb-6">
++        <h1 className="text-2xl font-bold">API Key 管理</h1>
++        <button
++          onClick={() => setShowCreateForm(true)}
++          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
++        >
++          创建 API Key
++        </button>
++      </div>
++
++      {error && (
++        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded text-red-700">
++          {error}
++        </div>
++      )}
++
++      {/* 新创建的 API Key 提示（仅显示一次） */}
++      {newApiKey && (
++        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded">
++          <p className="font-bold text-green-800 mb-2">API Key 创建成功！</p>
++          <p className="text-sm text-green-700 mb-2">
++            请立即复制并保存此 API Key，关闭后将无法再次查看完整密钥。
++          </p>
++          <div className="flex items-center gap-2">
++            <code className="flex-1 p-2 bg-white border rounded font-mono text-sm">
++              {newApiKey}
++            </code>
++            <button
++              onClick={() => copyToClipboard(newApiKey)}
++              className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700"
++            >
++              复制
++            </button>
++            <button
++              onClick={() => setNewApiKey(null)}
++              className="px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
++            >
++              关闭
++            </button>
++          </div>
++        </div>
++      )}
++
++      {/* 创建表单 */}
++      {showCreateForm && (
++        <div className="mb-6 p-4 border rounded bg-gray-50">
++          <h2 className="text-lg font-bold mb-4">创建新的 API Key</h2>
++          <form onSubmit={handleCreate} className="space-y-4">
++            <div>
++              <label className="block text-sm font-medium mb-1">名称</label>
++              <input
++                type="text"
++                value={formData.name}
++                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
++                className="w-full px-3 py-2 border rounded"
++                placeholder="例如：生产环境 API Key"
++                required
++              />
++            </div>
++
++            <div>
++              <label className="block text-sm font-medium mb-1">用户 ID</label>
++              <input
++                type="number"
++                value={formData.user_id}
++                onChange={(e) => setFormData({ ...formData, user_id: parseInt(e.target.value) })}
++                className="w-full px-3 py-2 border rounded"
++                required
++              />
++              <p className="text-xs text-gray-500 mt-1">默认 21 为 api_system 系统账号</p>
++            </div>
++
++            <div>
++              <label className="block text-sm font-medium mb-1">权限范围</label>
++              <div className="space-y-2">
++                <label className="flex items-center">
++                  <input
++                    type="checkbox"
++                    checked={formData.scopes.includes('exam:admin')}
++                    onChange={(e) => {
++                      if (e.target.checked) {
++                        setFormData({ ...formData, scopes: [...formData.scopes, 'exam:admin'] })
++                      } else {
++                        setFormData({ ...formData, scopes: formData.scopes.filter(s => s !== 'exam:admin') })
++                      }
++                    }}
++                    className="mr-2"
++                  />
++                  exam:admin（AI 出题管理）
++                </label>
++              </div>
++            </div>
++
++            <div>
++              <label className="block text-sm font-medium mb-1">速率限制（每分钟）</label>
++              <input
++                type="number"
++                value={formData.rate_limit_per_minute}
++                onChange={(e) => setFormData({ ...formData, rate_limit_per_minute: parseInt(e.target.value) })}
++                className="w-full px-3 py-2 border rounded"
++                min="1"
++                max="1000"
++                required
++              />
++            </div>
++
++            <div className="flex gap-2">
++              <button
++                type="submit"
++                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
++              >
++                创建
++              </button>
++              <button
++                type="button"
++                onClick={() => setShowCreateForm(false)}
++                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
++              >
++                取消
++              </button>
++            </div>
++          </form>
++        </div>
++      )}
++
++      {/* API Key 列表 */}
++      <div className="border rounded overflow-hidden">
++        <table className="w-full">
++          <thead className="bg-gray-100">
++            <tr>
++              <th className="px-4 py-2 text-left">名称</th>
++              <th className="px-4 py-2 text-left">Key</th>
++              <th className="px-4 py-2 text-left">权限</th>
++              <th className="px-4 py-2 text-left">速率限制</th>
++              <th className="px-4 py-2 text-left">使用次数</th>
++              <th className="px-4 py-2 text-left">状态</th>
++              <th className="px-4 py-2 text-left">操作</th>
++            </tr>
++          </thead>
++          <tbody>
++            {apiKeys.map((key) => (
++              <tr key={key.id} className="border-t hover:bg-gray-50">
++                <td className="px-4 py-2">{key.name}</td>
++                <td className="px-4 py-2">
++                  <code className="text-sm">{key.key}</code>
++                </td>
++                <td className="px-4 py-2">
++                  <div className="flex flex-wrap gap-1">
++                    {key.scopes.map((scope) => (
++                      <span key={scope} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
++                        {scope}
++                      </span>
++                    ))}
++                  </div>
++                </td>
++                <td className="px-4 py-2">{key.rate_limit_per_minute}/分钟</td>
++                <td className="px-4 py-2">{key.usage_count}</td>
++                <td className="px-4 py-2">
++                  {key.is_active ? (
++                    <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">激活</span>
++                  ) : (
++                    <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded">已撤销</span>
++                  )}
++                </td>
++                <td className="px-4 py-2">
++                  <div className="flex gap-2">
++                    <button
++                      onClick={() => handleViewStats(key)}
++                      className="text-blue-600 hover:underline text-sm"
++                    >
++                      统计
++                    </button>
++                    {key.is_active && (
++                      <button
++                        onClick={() => handleRevoke(key.id)}
++                        className="text-red-600 hover:underline text-sm"
++                      >
++                        撤销
++                      </button>
++                    )}
++                  </div>
++                </td>
++              </tr>
++            ))}
++          </tbody>
++        </table>
++
++        {apiKeys.length === 0 && (
++          <div className="p-8 text-center text-gray-500">
++            暂无 API Key，点击上方按钮创建
++          </div>
++        )}
++      </div>
++
++      {/* 统计弹窗 */}
++      {selectedKey && stats && (
++        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
++          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
++            <h2 className="text-xl font-bold mb-4">{selectedKey.name} - 使用统计</h2>
++            <div className="grid grid-cols-2 gap-4 mb-4">
++              <div className="p-4 bg-gray-50 rounded">
++                <div className="text-sm text-gray-600">总请求数</div>
++                <div className="text-2xl font-bold">{stats.total_requests}</div>
++              </div>
++              <div className="p-4 bg-gray-50 rounded">
++                <div className="text-sm text-gray-600">成功数</div>
++                <div className="text-2xl font-bold text-green-600">{stats.success_count}</div>
++              </div>
++              <div className="p-4 bg-gray-50 rounded">
++                <div className="text-sm text-gray-600">失败数</div>
++                <div className="text-2xl font-bold text-red-600">{stats.error_count}</div>
++              </div>
++              <div className="p-4 bg-gray-50 rounded">
++                <div className="text-sm text-gray-600">平均每天请求数</div>
++                <div className="text-2xl font-bold">{stats.avg_requests_per_day.toFixed(2)}</div>
++              </div>
++            </div>
++            <div className="text-sm text-gray-600 mb-4">
++              最后使用时间：{stats.last_used_at ? new Date(stats.last_used_at).toLocaleString('zh-CN') : '从未使用'}
++            </div>
++            <button
++              onClick={() => {
++                setSelectedKey(null)
++                setStats(null)
++              }}
++              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
++            >
++              关闭
++            </button>
++          </div>
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/web/src/lib/api-key-admin-api.ts b/web/src/lib/api-key-admin-api.ts
+new file mode 100644
+index 00000000..10c5ecd1
+--- /dev/null
++++ b/web/src/lib/api-key-admin-api.ts
+@@ -0,0 +1,169 @@
++/**
++ * API Key 管理 API 调用封装
++ */
++
++import { getAuthHeaders } from './auth'
++
++const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
++
++export interface APIKeyCreateRequest {
++  name: string
++  user_id: number
++  scopes: string[]
++  rate_limit_per_minute?: number
++  expires_at?: string
++}
++
++export interface APIKeyResponse {
++  id: number
++  user_id: number
++  key: string
++  name: string
++  scopes: string[]
++  rate_limit_per_minute: number
++  usage_count: number
++  last_used_at: string | null
++  is_active: boolean
++  expires_at: string | null
++  created_at: string
++  created_by: number
++  revoked_at: string | null
++  revoked_by: number | null
++}
++
++export interface APIKeyListResponse {
++  items: APIKeyResponse[]
++  total: number
++}
++
++export interface APIKeyStatsResponse {
++  api_key_id: number
++  total_requests: number
++  success_count: number
++  error_count: number
++  avg_requests_per_day: number
++  last_used_at: string | null
++}
++
++export interface APIKeyAuditLog {
++  id: number
++  api_key_id: number
++  user_id: number
++  request_url: string
++  request_method: string
++  response_status: number
++  created_at: string
++}
++
++/**
++ * 创建 API Key
++ */
++export async function createAPIKey(request: APIKeyCreateRequest): Promise<APIKeyResponse> {
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys`, {
++    method: 'POST',
++    headers: {
++      'Content-Type': 'application/json',
++      ...getAuthHeaders(),
++    },
++    body: JSON.stringify(request),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '创建 API Key 失败')
++  }
++
++  return response.json()
++}
++
++/**
++ * 查询 API Key 列表
++ */
++export async function listAPIKeys(params?: {
++  user_id?: number
++  is_active?: boolean
++  limit?: number
++  offset?: number
++}): Promise<APIKeyListResponse> {
++  const searchParams = new URLSearchParams()
++  if (params?.user_id) searchParams.append('user_id', params.user_id.toString())
++  if (params?.is_active !== undefined) searchParams.append('is_active', params.is_active.toString())
++  if (params?.limit) searchParams.append('limit', params.limit.toString())
++  if (params?.offset) searchParams.append('offset', params.offset.toString())
++
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys?${searchParams}`, {
++    headers: getAuthHeaders(),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '查询 API Key 列表失败')
++  }
++
++  return response.json()
++}
++
++/**
++ * 查询单个 API Key 详情
++ */
++export async function getAPIKey(keyId: number): Promise<APIKeyResponse> {
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}`, {
++    headers: getAuthHeaders(),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '查询 API Key 失败')
++  }
++
++  return response.json()
++}
++
++/**
++ * 撤销 API Key
++ */
++export async function revokeAPIKey(keyId: number): Promise<APIKeyResponse> {
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}`, {
++    method: 'DELETE',
++    headers: getAuthHeaders(),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '撤销 API Key 失败')
++  }
++
++  return response.json()
++}
++
++/**
++ * 查询 API Key 使用统计
++ */
++export async function getAPIKeyStats(keyId: number): Promise<APIKeyStatsResponse> {
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}/stats`, {
++    headers: getAuthHeaders(),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '查询使用统计失败')
++  }
++
++  return response.json()
++}
++
++/**
++ * 查询 API Key 审计日志
++ */
++export async function getAPIKeyLogs(keyId: number, limit = 100): Promise<APIKeyAuditLog[]> {
++  const response = await fetch(`${API_BASE}/api/v1/admin/api-keys/${keyId}/logs?limit=${limit}`, {
++    headers: getAuthHeaders(),
++  })
++
++  if (!response.ok) {
++    const error = await response.json()
++    throw new Error(error.detail || '查询审计日志失败')
++  }
++
++  return response.json()
++}
