@@ -8,7 +8,6 @@ from app.core.cache_registry import reset_cache_registry
 
 def setup_function() -> None:
     reset_cache_registry()
-    asset_module.reset_asset_service()
 
 
 def test_get_asset_service_reuses_registry_instance(monkeypatch) -> None:
@@ -29,8 +28,8 @@ def test_get_asset_service_reuses_registry_instance(monkeypatch) -> None:
     assert created == ["created"]
 
 
-def test_reset_asset_service_drops_shared_instance(monkeypatch) -> None:
-    """reset_asset_service 后下次获取应重新创建实例。"""
+def test_reset_cache_registry_drops_shared_asset_instance(monkeypatch) -> None:
+    """清空公共 cache registry 后，下次获取应重新创建 AssetService。"""
 
     created: list[object] = []
 
@@ -41,7 +40,7 @@ def test_reset_asset_service_drops_shared_instance(monkeypatch) -> None:
     monkeypatch.setattr(asset_module, "AssetService", _FakeAssetService)
 
     first = asset_module.get_asset_service()
-    asset_module.reset_asset_service()
+    reset_cache_registry()
     second = asset_module.get_asset_service()
 
     assert first is not second

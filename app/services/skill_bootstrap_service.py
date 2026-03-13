@@ -25,8 +25,11 @@ DEFAULT_USER_SKILL_BOOTSTRAP_TEMPLATE = {
 def _is_bootstrap_enabled() -> bool:
     """判断是否启用用户 Skill 初始化链路。"""
 
-    versioning_enabled = ConfigResolver.get_bool("feature.enable_skill_versioning", False)
-    binding_enabled = ConfigResolver.get_bool("feature.enable_user_skill_binding", False)
+    try:
+        versioning_enabled = ConfigResolver.get_bool("feature.enable_skill_versioning", False)
+        binding_enabled = ConfigResolver.get_bool("feature.enable_user_skill_binding", False)
+    except Exception:
+        return False
     return bool(versioning_enabled and binding_enabled)
 
 

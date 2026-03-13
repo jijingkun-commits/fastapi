@@ -54,7 +54,7 @@ def test_main_should_process_and_output_summary(monkeypatch, capsys) -> None:  #
 
     monkeypatch.setattr(rebuild_script, "get_db_context", lambda: _DummyDbContext())
 
-    def _fake_process_pending_chunks(db, **kwargs):  # noqa: ANN001
+    def _fake_compensate_pending_embeddings(db, **kwargs):  # noqa: ANN001
         captured["db"] = db
         captured.update(kwargs)
         return {
@@ -67,8 +67,8 @@ def test_main_should_process_and_output_summary(monkeypatch, capsys) -> None:  #
 
     monkeypatch.setattr(
         rebuild_script.document_memory_embedding_service,
-        "process_pending_chunks",
-        _fake_process_pending_chunks,
+        "compensate_pending_embeddings",
+        _fake_compensate_pending_embeddings,
     )
     monkeypatch.setattr(
         sys,
@@ -108,7 +108,7 @@ def test_main_should_return_two_when_failed(monkeypatch, capsys) -> None:  # noq
 
     monkeypatch.setattr(rebuild_script, "get_db_context", lambda: _DummyDbContext())
 
-    def _fake_process_pending_chunks(db, **kwargs):  # noqa: ANN001
+    def _fake_compensate_pending_embeddings(db, **kwargs):  # noqa: ANN001
         captured["db"] = db
         captured.update(kwargs)
         return {
@@ -121,8 +121,8 @@ def test_main_should_return_two_when_failed(monkeypatch, capsys) -> None:  # noq
 
     monkeypatch.setattr(
         rebuild_script.document_memory_embedding_service,
-        "process_pending_chunks",
-        _fake_process_pending_chunks,
+        "compensate_pending_embeddings",
+        _fake_compensate_pending_embeddings,
     )
     monkeypatch.setattr(
         sys,

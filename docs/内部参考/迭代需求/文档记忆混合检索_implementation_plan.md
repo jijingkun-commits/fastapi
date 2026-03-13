@@ -132,7 +132,7 @@ M["后台管理重建"] --> Q
 |---|---|---|---|---|---|
 | P1-01 | C01 | 混合检索 SQL 与评分融合 | `app/repositories/document_memory_repo.py` `search_chunks_hybrid` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_repo_hybrid_search.py` | OpenClaw `search-manager.ts` + 本仓 `document_memory_repo.py` |
 | P1-02 | C01 | 检索降级（vector -> FTS） | `app/services/document_memory_service.py` `memory_search` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_service_hybrid.py -k downgrade` | OpenClaw 检索后端降级策略 |
-| P2-01 | C02 | embedding 异步写回与状态流转 | `app/services/document_memory_embedding_service.py` `process_pending_chunks` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_embedding_service.py` | 本仓 `embedding_util.py` |
+| P2-01 | C02 | embedding 异步写回与状态流转 | `app/services/document_memory_embedding_service.py` `compensate_pending_embeddings` | `venv/bin/python -m pytest -q tests/unit/test_document_memory_embedding_service.py` | 本仓 `embedding_util.py` |
 | P2-02 | C02 | 定时补偿与重试上限 | `scripts/memory/rebuild_document_embeddings.py` | `venv/bin/python -m pytest -q tests/integration/test_document_memory_embedding_compensation.py` | 本仓技能向量后台任务实现 |
 | P3-01 | C03 | 管理入口：重建与进度查询 | `app/api/v1/endpoints/memory_admin_api.py` | `venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py` | 本仓 `skill_admin_api.py` 任务模式 |
 | P4-01 | C04 | chat_service 混合召回接线与预算控制 | `app/services/chat_service.py` | `venv/bin/python -m pytest -q tests/unit/test_chat_service_document_memory_hybrid.py` | 现有 recall 注入链路 |
@@ -277,7 +277,7 @@ implementation_tasks:
       - app/models/document_memory.py
       - alembic/versions/20260228_0018_document_memory_hybrid_search.py
     symbols:
-      - process_pending_chunks
+      - compensate_pending_embeddings
       - mark_chunk_embedding_ready
       - mark_chunk_embedding_failed
     change_type: add

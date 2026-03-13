@@ -40,19 +40,6 @@ def _is_document_memory_enabled() -> bool:
     return env_value.strip().lower() in _TRUE_VALUES
 
 
-def _is_user_skill_bootstrap_enabled() -> bool:
-    """读取用户 Skill 初始化总开关，依赖版本治理与用户绑定开关。"""
-
-    try:
-        from app.services.config_resolver import ConfigResolver
-
-        versioning_enabled = ConfigResolver.get_bool("feature.enable_skill_versioning", False)
-        binding_enabled = ConfigResolver.get_bool("feature.enable_user_skill_binding", False)
-        return bool(versioning_enabled and binding_enabled)
-    except Exception:
-        return False
-
-
 def authenticate(
     db: Session,
     username: Optional[str],
@@ -127,16 +114,15 @@ def create_user(db: Session, data: UserCreate) -> Tuple[Optional[UserListItem], 
                 rollback()
             logger.warning("新用户文档记忆模板初始化失败，已降级: user_id=%s, error=%s", user.id, memory_error)
 
-    if _is_user_skill_bootstrap_enabled():
-        try:
-            seeded_skill_count = bootstrap_user_skills(db, user_id=user.id)
-            if seeded_skill_count:
-                logger.info("新用户 Skill 模板初始化完成: user_id=%s, count=%d", user.id, seeded_skill_count)
-        except Exception as skill_error:
-            rollback = getattr(db, "rollback", None)
-            if callable(rollback):
-                rollback()
-            logger.warning("新用户 Skill 模板初始化失败，已降级: user_id=%s, error=%s", user.id, skill_error)
+    try:
+        seeded_skill_count = bootstrap_user_skills(db, user_id=user.id)
+        if seeded_skill_count:
+            logger.info("新用户 Skill 模板初始化完成: user_id=%s, count=%d", user.id, seeded_skill_count)
+    except Exception as skill_error:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        logger.warning("新用户 Skill 模板初始化失败，已降级: user_id=%s, error=%s", user.id, skill_error)
 
     return UserListItem.model_validate(user), None
 

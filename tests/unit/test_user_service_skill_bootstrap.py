@@ -57,7 +57,6 @@ def test_create_user_bootstraps_skill_template_when_enabled(monkeypatch) -> None
     bootstrap_calls: List[int] = []
     _stub_user_repo(monkeypatch, user_id=31)
     monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
-    monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: True)
     monkeypatch.setattr(
         "app.services.user_service.bootstrap_user_skills",
         lambda db, *, user_id: bootstrap_calls.append(user_id) or 2,
@@ -78,7 +77,6 @@ def test_create_user_bootstrap_skill_failure_should_not_block_creation(monkeypat
     db = _DummySession()
     _stub_user_repo(monkeypatch, user_id=32)
     monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
-    monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: True)
 
     def _raise_bootstrap(db, *, user_id):  # noqa: ANN001
         raise RuntimeError("bootstrap failed")
@@ -93,23 +91,23 @@ def test_create_user_bootstrap_skill_failure_should_not_block_creation(monkeypat
     assert db.rollback_count == 1
 
 
-def test_create_user_skips_skill_bootstrap_when_disabled(monkeypatch) -> None:  # noqa: ANN001
-    """总开关关闭时，创建用户不应触发 Skill 模板初始化。"""
+def test_bootstrap_user_skills_should_return_zero_when_flag_resolution_fails(monkeypatch) -> None:  # noqa: ANN001
+    """开关解析失败时，应由 bootstrap service 自行降级为不执行。"""
 
-    payload = _build_create_payload()
-    _stub_user_repo(monkeypatch, user_id=33)
-    monkeypatch.setattr("app.services.user_service._is_document_memory_enabled", lambda: False)
-    monkeypatch.setattr("app.services.user_service._is_user_skill_bootstrap_enabled", lambda: False)
     monkeypatch.setattr(
-        "app.services.user_service.bootstrap_user_skills",
-        lambda db, *, user_id: (_ for _ in ()).throw(AssertionError("should not be called")),
+        skill_bootstrap_service.ConfigResolver,
+        "get_bool",
+        classmethod(lambda cls, key, default=False: (_ for _ in ()).throw(RuntimeError("config down"))),
+    )
+    monkeypatch.setattr(
+        skill_bootstrap_service.SkillService,
+        "bind_user_skill",
+        classmethod(lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not be called"))),
     )
 
-    user_item, error = user_service.create_user(db=_DummySession(), data=payload)
+    seeded = skill_bootstrap_service.bootstrap_user_skills(db=object(), user_id=33)
 
-    assert error is None
-    assert user_item is not None
-    assert user_item.id == 33
+    assert seeded == 0
 
 
 def test_bootstrap_user_skills_should_bind_template_entries(monkeypatch) -> None:  # noqa: ANN001

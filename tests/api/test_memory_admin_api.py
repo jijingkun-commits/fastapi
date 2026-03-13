@@ -281,7 +281,7 @@ def test_retry_failed_sync_should_return_completed(memory_admin_client: TestClie
     )
     monkeypatch.setattr(
         memory_admin_api.document_memory_embedding_service,
-        "process_pending_chunks",
+        "compensate_pending_embeddings",
         lambda *args, **kwargs: {
             "total": 3,
             "processed": 3,
