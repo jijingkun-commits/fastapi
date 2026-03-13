@@ -3,7 +3,7 @@
 ## Meta
 
 - topic: `chat-composite-latency-local-refactor`
-- source_requirements: `docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`
+- source_requirements: `workdocs/归档/正文/需求/chat-composite-latency-local-refactor_requirements.md`
 - requirements_approved: `true`
 - requirements_approval_evidence: `用户确认先走 B. 局部重构版`
 - change_mode: `refactor`
@@ -14,7 +14,7 @@
   - `LangGraph Graph API / Send`: <https://docs.langchain.com/oss/python/langgraph/graph-api#send>
   - `MDN Server-Sent Events`: <https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events>
 - related_internal_context:
-  - `docs/plans/2026-03-10-composite-chat-latency-design.md`
+  - `workdocs/归档/正文/设计/2026-03-10-composite-chat-latency-design.md`
   - `docs/开发文档/架构设计/AI模块设计.md`
 
 ## Context

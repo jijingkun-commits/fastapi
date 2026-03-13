@@ -1,8 +1,8 @@
 # chat-composite-latency-local-refactor UAT Cases
 
 > 日期：2026-03-12
-> 对应需求：`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`
-> 对应方案：`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
+> 对应需求：`workdocs/归档/正文/需求/chat-composite-latency-local-refactor_requirements.md`
+> 对应方案：`workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`
 
 ```yaml
 uat_cases:

@@ -21,10 +21,10 @@
 
 ### 4) 风险与遗留
 - unresolved_items:
-  - `docs/plans/2026-03-09-memory-intent-lean-cleanup-design.md` 等历史设计文档仍会提到该 helper，作为历史证据保留。
+  - `workdocs/归档/正文/设计/2026-03-09-memory-intent-lean-cleanup-design.md` 等历史设计文档仍会提到该 helper，作为历史证据保留。
 - followup_tasks:
   - `继续清理其他 test-only/helper-only 残留。`
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_response_policy_test_only_cleanup.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_response_policy_test_only_cleanup.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`

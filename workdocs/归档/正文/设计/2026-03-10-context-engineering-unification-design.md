@@ -322,7 +322,7 @@ implementation_seeds:
     blocked_by: [T-01, T-02, T-03, T-04]
     file_paths:
       - docs/开发文档/测试管理/测试报告/README.md
-      - docs/plans/2026-03-10-context-engineering-unification-design.md
+      - workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md
       - app/ai/context_engineering.py
       - tests/unit/test_multi_agent_context_budget.py
     symbols:
@@ -408,7 +408,7 @@ design_freeze_summary:
 clarify_handoff_contract:
   version: v2
   topic: "context-engineering-unification"
-  design_source: "docs/plans/2026-03-10-context-engineering-unification-design.md"
+  design_source: "workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md"
   handoff_ready: true
   required:
     product_contract_summary:
@@ -549,7 +549,7 @@ clarify_handoff_contract:
         blocked_by: [T-01, T-02, T-03, T-04]
         file_paths:
           - docs/开发文档/测试管理/测试报告/README.md
-          - docs/plans/2026-03-10-context-engineering-unification-design.md
+          - workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md
           - app/ai/context_engineering.py
           - tests/unit/test_multi_agent_context_budget.py
         symbols:

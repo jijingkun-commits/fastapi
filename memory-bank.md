@@ -8,7 +8,7 @@
 - 2026-03-13｜Codex Agent 写法治理阶段一采用“仓库级路由 + app/ai 局部覆盖 + Layer2 专项规则 + review/verify smell 清单 + drift gate”（ACTIVE）→ `AGENTS.md`、`app/ai/AGENTS.md`、`.cursor/rules/agent_authoring.mdc`、`.github/workflows/agent-governance-gate.yml`
 - 2026-03-13｜`memory-bank` 收敛为仓库级活跃决策索引；完整 ADR 正文写入 `docs/内部参考/决策记录.md`（ACTIVE）→ `AGENTS.md`、`memory-bank.md`、`docs/内部参考/决策记录.md`
 - 2026-03-13｜改功能默认带一次“局部复盘 + 顺手减法”，`jjk-review/jjk-verify` 同步强化架构合理性与代码精简审查（ACTIVE）→ `AGENTS.md`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`workdocs/_templates/jjk_{review,verify}_templates.md`
-- 2026-03-12｜聊天复合提问耗时治理首轮采用局部重构版 B，先修 preview 回流、frozen todo.query、coverage 口径，不先上 `Send` 全并行（ACTIVE）→ `docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`
+- 2026-03-12｜聊天复合提问耗时治理首轮采用局部重构版 B，先修 preview 回流、frozen todo.query、coverage 口径，不先上 `Send` 全并行（ACTIVE）→ `workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`、`workdocs/归档/正文/实施计划/chat-composite-latency-local-refactor_implementation_plan.md`
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
@@ -16,7 +16,7 @@
 - 2026-03-12｜瘦身判断收敛为“职责收口优先 + whole-change-set 统计”，新增文件与 helper 同样计入增长（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
-- 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `docs/plans/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
+- 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `workdocs/归档/正文/设计/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
 - 2026-03-11｜前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`（ACTIVE）→ `web/package.json`、`web/eslint.config.js`
 - 2026-03-11｜聊天页壳层样式 single entry owner 固定为 `chat-*` 主题 class，禁止组件继续保留第二套 inline 壳层（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/app/globals.css`、`web/src/components/chat/index.tsx`、`web/src/components/chat/ChatInput.tsx`
 - 2026-03-11｜JJK 工程流重构为 `clarify(requirements) -> design -> plan(UAT) -> imp -> verify`，正式产品/设计文档改为 `--doc` 显式发布，API 文档继续自动同步（ACTIVE）→ `.cursor/commands/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}.md`、`.agents/skills/jjk-{clarify,design,plan,imp,verify,api-doc-sync,arch-gate}/SKILL.md`、`memory-bank.md`
@@ -84,7 +84,7 @@
 - 取舍理由：保留锚点语法能继续利用现有知识库链路的稳定性，但展示 owner 必须从字符串替换升级为结构化 blocks，才能真正解决图文混排和刷新回放问题。
 - 影响范围：`app/core/message_display_blocks.py`、`app/repositories/chat_repo.py`、`app/api/v1/endpoints/chat_api.py`、`tests/unit/test_message_display_blocks.py`
 - 回退/失效条件：待上游能直接输出更显式的结构化锚点后，可继续缩窄 `[IMG-N]` 语法；在此之前禁止重新把 placeholder 当最终 UI 协议。
-- 关联文档/代码：`docs/plans/2026-03-11-ordered-content-blocks-design.md`、`docs/开发文档/架构设计/防屎山记录手册.md`
+- 关联文档/代码：`workdocs/归档/正文/设计/2026-03-11-ordered-content-blocks-design.md`、`docs/开发文档/架构设计/防屎山记录手册.md`
 
 ### 2026-03-11 前端 lint 入口收敛为 `eslint .`，并直接接入 `@next/eslint-plugin-next`
 
@@ -117,7 +117,7 @@
 - 取舍理由：短生命周期状态应贴近相关内容，而不是塞进输入区；相比继续在 footer 做视觉补丁，把 owner 收回消息流更简单，也更符合内容邻近性和可访问性最佳实践
 - 影响范围：`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`、`tests/unit/test_chat_runtime_status_layout_guard.py`
 - 回退/失效条件：若未来运行态状态被彻底并入 `AssistantMessage` 内部状态卡，且消息流仍是唯一展示 owner，可由新的消息级承载方案替代；在此之前禁止恢复 footer 挂载
-- 关联文档/代码：`docs/plans/2026-03-08-chat-typography-cjk-design.md`、`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
+- 关联文档/代码：`workdocs/归档/正文/设计/2026-03-08-chat-typography-cjk-design.md`、`docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 
 ### 2026-03-12 `DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪
 
@@ -148,9 +148,9 @@
 - 背景与问题：当前慢点主要集中在图内串行链路与错误澄清，而不是 HTTP/SSE 建连；若直接上全量并行重写，会同时放大 state ownership、resume、coverage、回放风险
 - 最终决策：保留当前主图拓扑与 `final_answer` 单一收口；`multi_agent_graph.py` 继续作为本轮 composite delivery policy owner；`todo_graph` 对 frozen `todo.query` 只执行不重判；请求级与 goal 级 timing 先走运行态 meta，不引入 DB migration
 - 取舍理由：项目未上线，优先选择“低风险高收益”的结构收敛；先把 23 秒无正文和 6 秒误澄清打掉，比一开始重写成全并行图更稳、更容易验证
-- 影响范围：`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_uat_cases.md`
+- 影响范围：`workdocs/归档/正文/需求/chat-composite-latency-local-refactor_requirements.md`、`workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`、`workdocs/归档/正文/实施计划/chat-composite-latency-local-refactor_implementation_plan.md`、`workdocs/归档/正文/实施计划/chat-composite-latency-local-refactor_uat_cases.md`
 - 回退/失效条件：若局部重构版 B 完成后仍无法显著改善 `first_visible_at_ms` 或仍存在串行瓶颈，再升级到 LangGraph `Send` 并行方案；在此之前不提前进入全量并行重构
-- 关联文档/代码：`docs/plans/2026-03-10-composite-chat-latency-design.md`、`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
+- 关联文档/代码：`workdocs/归档/正文/设计/2026-03-10-composite-chat-latency-design.md`、`workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`
 
 ### 2026-03-12 瘦身判断收敛为“职责收口优先 + whole-change-set 统计”
 

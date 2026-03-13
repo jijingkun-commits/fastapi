@@ -39,14 +39,14 @@
   - `bash scripts/pytest_targeted.sh app/tests/test_skill_loader_tool.py tests/unit/test_multi_agent_streaming_helpers.py -k skill_context` -> `PASS`
   - `bash scripts/pytest_targeted.sh app/tests/test_skill_loader_tool.py -k replay` -> `PASS`
   - `bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_context_budget.py tests/unit/test_multi_agent_streaming_helpers.py` -> `PASS`
-  - `/Users/jijingkun/bojxAI/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/context-engineering-unification_requirements.md --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json` -> `PASS`
-  - `/Users/jijingkun/bojxAI/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_planning_temporal_gate.json` -> `PASS`
+  - `/Users/jijingkun/bojxAI/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/context-engineering-unification_requirements.md --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json` -> `PASS`
+  - `/Users/jijingkun/bojxAI/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_planning_temporal_gate.json` -> `PASS`
   - `/Users/jijingkun/bojxAI/fastapi/venv/bin/python scripts/docs_guard.py --strict` -> `PASS`
   - `python3 scripts/ci/check_lean_budget.py --strict` -> `PASS`
 - doc_sync_check: `PASS`
-  - 设计批准与实现对齐：`docs/plans/2026-03-10-context-engineering-unification-design.md:626`
-  - 需求/计划/traceability 对齐：`docs/内部参考/迭代需求/context-engineering-unification_requirements.md:200`、`docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md:18`
-  - workflow contract 产物重生成功：`docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json`、`docs/内部参考/迭代需求/context-engineering-unification_planning_temporal_gate.json`
+  - 设计批准与实现对齐：`workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md:626`
+  - 需求/计划/traceability 对齐：`workdocs/归档/正文/需求/context-engineering-unification_requirements.md:200`、`workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md:18`
+  - workflow contract 产物重生成功：`workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json`、`workdocs/归档/报告/机读校验/context-engineering-unification_planning_temporal_gate.json`
 - test_sync_check: `PASS`
   - builder/ledger 相关测试：`tests/unit/test_multi_agent_context_budget.py:73`、`tests/unit/test_multi_agent_context_budget.py:95`
   - streaming/tool/skill 相关测试：`tests/unit/test_multi_agent_streaming_helpers.py:350`、`tests/unit/test_multi_agent_streaming_helpers.py:1835`、`tests/unit/test_multi_agent_streaming_helpers.py:1869`
@@ -55,10 +55,10 @@
 ### 5) 测试质量评分卡
 | 维度 | 分数(0-2) | evidence | note |
 |---|---|---|---|
-| 风险覆盖 | `2` | `docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md:18`、`tests/unit/test_multi_agent_context_budget.py:95`、`tests/unit/test_multi_agent_streaming_helpers.py:1835`、`tests/unit/test_multi_agent_streaming_helpers.py:1869` | 覆盖了 builder 单入口、模型感知预算、tool schema、技能摘要 canonical、replay 载荷。 |
+| 风险覆盖 | `2` | `workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md:18`、`tests/unit/test_multi_agent_context_budget.py:95`、`tests/unit/test_multi_agent_streaming_helpers.py:1835`、`tests/unit/test_multi_agent_streaming_helpers.py:1869` | 覆盖了 builder 单入口、模型感知预算、tool schema、技能摘要 canonical、replay 载荷。 |
 | 失败模式覆盖 | `2` | `tests/unit/test_multi_agent_streaming_helpers.py:350`、`tests/unit/test_multi_agent_streaming_helpers.py:378`、`tests/unit/test_multi_agent_streaming_helpers.py:400`、`app/tests/test_skill_loader_tool.py:629` | 覆盖了工具输出噪音、长 ToolMessage 污染、checkpoint 文本污染、skill replay 退化等真实失败模式。 |
 | 断言质量 | `2` | `tests/unit/test_multi_agent_context_budget.py:131`、`tests/unit/test_multi_agent_streaming_helpers.py:1863`、`app/tests/test_skill_loader_tool.py:685` | 断言的是业务契约、账本字段、skill runtime 结构，而不是只看 mock 调用或非空。 |
-| 脆弱性 | `1` | `docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md:41`、`:93`、`:94` | 本轮刚修过 selector 漂移，说明验收命令对测试命名仍有一定耦合。 |
+| 脆弱性 | `1` | `workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md:41`、`:93`、`:94` | 本轮刚修过 selector 漂移，说明验收命令对测试命名仍有一定耦合。 |
 | 可维护性 | `1` | `app/ai/context_engineering.py:82`、`app/ai/workflow/multi_agent_graph.py:4403` | 代码侧可维护性明显提升，但交付层仍依赖多份文档/产物同步；再加上当前 branch 夹带无关 migration，交付整洁度还需再收一下。 |
 - weak_tests:
   - `none`

@@ -1,7 +1,7 @@
 # context-engineering-unification 需求文档
 
 > 更新时间：2026-03-11 18:45 +08:00  
-> 上游设计：`docs/plans/2026-03-10-context-engineering-unification-design.md`  
+> 上游设计：`workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md`
 > 文档目标：定义 WHAT（需求合同、验收门禁、追溯矩阵），供 `context-engineering-unification_implementation_plan.md` 承接
 
 ## 1. 需求范围与目标
@@ -30,8 +30,8 @@
 requirements_contract:
   topic: "context-engineering-unification"
   status: "approved"
-  design_source: docs/plans/2026-03-10-context-engineering-unification-design.md
-  clarify_handoff_source: docs/plans/2026-03-10-context-engineering-unification-design.md#clarify_handoff_contract
+  design_source: workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md
+  clarify_handoff_source: workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md#clarify_handoff_contract
   clarify_handoff_version: v2
   design_approved: true
   design_approval_evidence: "确认"
@@ -204,7 +204,7 @@ traceability_matrix:
     task_id: T-01
     tc_id: TC-CEU-01
     acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_context_budget.py
-    evidence_entry: docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md
+    evidence_entry: workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md
 
   - design_item: D-01
     fr_id: FR-01
@@ -212,7 +212,7 @@ traceability_matrix:
     task_id: T-02
     tc_id: TC-CEU-02
     acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_context_budget.py -k model_aware_budget
-    evidence_entry: docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md
+    evidence_entry: workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md
 
   - design_item: D-02
     fr_id: FR-02
@@ -220,7 +220,7 @@ traceability_matrix:
     task_id: T-03
     tc_id: TC-CEU-03
     acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_streaming_helpers.py -k tool_message
-    evidence_entry: docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md
+    evidence_entry: workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md
 
   - design_item: D-03
     fr_id: FR-03
@@ -228,13 +228,13 @@ traceability_matrix:
     task_id: T-04
     tc_id: TC-CEU-04
     acceptance_cmd_ref: bash scripts/pytest_targeted.sh app/tests/test_skill_loader_tool.py tests/unit/test_multi_agent_streaming_helpers.py -k skill_context
-    evidence_entry: docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md
+    evidence_entry: workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md
 
   - design_item: D-04
     fr_id: FR-04
     feature_id: P1-doc-and-observability
     task_id: T-05
     tc_id: TC-CEU-05
-    acceptance_cmd_ref: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/context-engineering-unification_requirements.md --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json
-    evidence_entry: docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md
+    acceptance_cmd_ref: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/context-engineering-unification_requirements.md --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json
+    evidence_entry: workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md
 ```
