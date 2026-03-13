@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260228-INTENT-DECOMPOSITION-DB
 > 主题: 意图目标分解治理
-> 输入来源: `workdocs/归档/需求/意图目标分解治理_requirements.md` / `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+> 输入来源: `workdocs/归档/正文/需求/意图目标分解治理_requirements.md` / `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -16,7 +16,7 @@
 - auto_done_policy:
   - implementation-card: `hard_gate`
   - inspection/question-card: `policy_gate`
-- 与 planning_contract 一致性: `PASS`（继承 `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.4`）
+- 与 planning_contract 一致性: `PASS`（继承 `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4`）
 
 ### -1.1 automation_contract
 
@@ -51,7 +51,7 @@ automation_contract:
 
 - `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
 - 来源: `plan`
-- `card_seed` 来源: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md::planning_contract`
+- `card_seed` 来源: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md::planning_contract`
 - 推导依据与风险: 严格继承 card_order/depends_on，不重命名 card_id/feature_id
 
 ### 1.1 功能机制包映射（必填）
@@ -113,7 +113,7 @@ automation_contract:
 |------|----------|------------------|------|
 | `app/ai/workflow/multi_agent_graph.py` | WS-C01/WS-C06/WS-C07/WS-C08 | 否 | 单卡串行独占 |
 | `app/services/chat_service.py` | WS-C01/WS-C04/WS-C08 | 否 | 单卡串行独占 |
-| `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md` | WS-G01/WS-G03 | 否 | Gate 卡独占 |
+| `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md` | WS-G01/WS-G03 | 否 | Gate 卡独占 |
 
 ## 6. 依赖图与里程碑
 

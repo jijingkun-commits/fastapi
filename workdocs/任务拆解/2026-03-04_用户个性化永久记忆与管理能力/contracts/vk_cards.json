@@ -52,8 +52,8 @@
     "source_ws_file": "workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/workstreams/WS-C01_C01P1主链路入队与任务建模.md"
   },
   "source_files": {
-    "requirements": "workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md",
-    "implementation_plan": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+    "requirements": "workdocs/归档/正文/需求/用户个性化永久记忆与管理能力_requirements.md",
+    "implementation_plan": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
     "parallel_plan": "workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/parallel_plan.md",
     "workstreams": [
       "workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/workstreams/WS-C01_C01P1主链路入队与任务建模.md",
@@ -103,7 +103,7 @@
         "app/models/user_memory_intent_job.py::UserMemoryIntentJob"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_chat_service_memory_flags.py -q"
@@ -111,7 +111,7 @@
       "rollback_anchors": [
         "memory.intent_async_enabled=false"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -161,7 +161,7 @@
         "app/repositories/user_memory_intent_job_repo.py::claim_pending"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_memory_intent_worker_service.py -q"
@@ -169,7 +169,7 @@
       "rollback_anchors": [
         "停止 worker 调度入口"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -221,7 +221,7 @@
         "app/ai/prompts/agent_prompts.py::MEMORY_INTENT_DECISION_PROMPT"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_memory_intent_llm_service.py -q"
@@ -229,7 +229,7 @@
       "rollback_anchors": [
         "判定器降级为 none-only"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -281,7 +281,7 @@
         "app/repositories/document_memory_repo.py::archive_slot"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_memory_slot_governance_service.py -q"
@@ -289,7 +289,7 @@
       "rollback_anchors": [
         "slot_governance_enabled=false"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -341,7 +341,7 @@
         "app/services/memory_intent_llm_service.py::apply_reverse_intent"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_memory_sensitive_guard_service.py -q"
@@ -349,7 +349,7 @@
       "rollback_anchors": [
         "reverse_intent_enabled=false"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -403,7 +403,7 @@
         "app/services/document_memory_embedding_service.py::compensate_pending_embeddings"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/integration/test_document_memory_embedding_compensation.py -q"
@@ -411,7 +411,7 @@
       "rollback_anchors": [
         "回退到旧 flush 路径"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -464,7 +464,7 @@
         "app/repositories/document_memory_repo.py::search_chunks"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_document_memory_service_hybrid.py -q",
@@ -473,7 +473,7 @@
       "rollback_anchors": [
         "检索权重回退 text-only"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -526,7 +526,7 @@
         "app/services/memory_admin_service.py::archive_memory"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/api/test_memory_admin_api.py -q"
@@ -534,7 +534,7 @@
       "rollback_anchors": [
         "memory.intent_admin_enabled=false"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -590,7 +590,7 @@
         "app/core/config_contract.py::MEMORY_INTENT_BACKPRESSURE_THRESHOLDS"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "venv/bin/python -m pytest tests/unit/test_memory_intent_backpressure.py -q"
@@ -598,7 +598,7 @@
       "rollback_anchors": [
         "backpressure_mode=disabled"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -652,7 +652,7 @@
         "scripts/docs_guard.py::main"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "acceptance_checks": [
         "python3 scripts/check_gate_contract_consistency.py --task-split-dir 2026-03-04_用户个性化永久记忆与管理能力",
@@ -661,7 +661,7 @@
       "rollback_anchors": [
         "停止进入 cardrun 与主干合并"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [

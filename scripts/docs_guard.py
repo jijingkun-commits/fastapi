@@ -27,10 +27,10 @@ from urllib.parse import unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 DOCS_DIR = ROOT / "docs"
 SUMMARY_FILE = DOCS_DIR / "SUMMARY.md"
-REPORT_DIR = DOCS_DIR / "开发文档" / "测试管理" / "测试报告"
-WAVE_PLAN_FILE = ROOT / "workdocs" / "归档" / "实施计划" / "迁移执行波次_implementation_plan.md"
-ITERATION_REQUIREMENTS_DIR = ROOT / "workdocs" / "归档" / "需求"
-ITERATION_IMPLEMENTATION_PLAN_DIR = ROOT / "workdocs" / "归档" / "实施计划"
+REPORT_DIR = ROOT / "workdocs" / "归档" / "报告" / "测试报告"
+WAVE_PLAN_FILE = ROOT / "workdocs" / "归档" / "正文" / "实施计划" / "迁移执行波次_implementation_plan.md"
+ITERATION_REQUIREMENTS_DIR = ROOT / "workdocs" / "归档" / "正文" / "需求"
+ITERATION_IMPLEMENTATION_PLAN_DIR = ROOT / "workdocs" / "归档" / "正文" / "实施计划"
 REQUIREMENTS_SUFFIX = "_requirements.md"
 IMPLEMENTATION_PLAN_SUFFIX = "_implementation_plan.md"
 G01_WORKSTREAM_FILE = (
@@ -99,10 +99,8 @@ CURRENT_STATE_PROCESS_DOCS = {
     DOCS_DIR / "开发文档" / "架构设计" / "防屎山记录手册.md",
 }
 PROCESS_DOC_ROOTS = (
-    DOCS_DIR / "plans",
     DOCS_DIR / "内部参考" / "迭代需求",
     DOCS_DIR / "内部参考" / "任务拆解",
-    REPORT_DIR,
 )
 TASK_SPLIT_DIR = DOCS_DIR / "内部参考" / "任务拆解"
 RUNTIME_JSON_FILENAMES = {

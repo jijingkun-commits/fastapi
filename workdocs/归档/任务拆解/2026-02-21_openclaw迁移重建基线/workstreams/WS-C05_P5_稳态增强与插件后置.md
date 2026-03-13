@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: C05
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 
 ## 1. 目标
@@ -39,7 +39,7 @@
   - app/services/chat_service.py（degrade_on_plugin_failure）
 
 - 来源证据:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10
 
 ## 2. 文件边界
 
@@ -103,7 +103,7 @@ card_export:
   rollback_anchors:
   - ENABLE_RUNTIME_RECOVERY
   - ENABLE_PLUGIN_REGISTRY
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10
   done_gate:
   - 恢复任务、观测阈值、降级策略验收通过
   - 多用户并发流式场景下恢复与降级互不干扰

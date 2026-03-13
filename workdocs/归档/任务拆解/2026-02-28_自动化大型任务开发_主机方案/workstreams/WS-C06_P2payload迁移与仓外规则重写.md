@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: C06
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -27,18 +27,18 @@
 
 ### 1.2 代码锚点
 
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4
   - ~/.openclaw/workspace-dev/WORKFLOW_AUTO.md
   - ~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md
 
 - 来源证据:
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
   - AGENTS.md
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md
   - ~/.openclaw/workspace-dev/WORKFLOW_AUTO.md
   - ~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md
 
@@ -78,7 +78,7 @@ card_export:
   depends_on: ['C05']
   file_whitelist:
   - AGENTS.md
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md
   - ~/.openclaw/workspace-dev/WORKFLOW_AUTO.md
   - ~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md
   mechanism_summary:
@@ -86,14 +86,14 @@ card_export:
   - 按 31 项 checklist 做原子级映射校验
   - cron payload 缩减为 watchdog 巡检指令
   code_anchor_refs:
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4
   - ~/.openclaw/workspace-dev/WORKFLOW_AUTO.md
   - ~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md
   acceptance_checks:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - scripts/coder4_external_restore.sh
-  evidence_entry: workdocs/归档/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist
+  evidence_entry: workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist
   done_gate:
   - 31 项迁移清单全部通过
   - docs_guard 严格校验通过

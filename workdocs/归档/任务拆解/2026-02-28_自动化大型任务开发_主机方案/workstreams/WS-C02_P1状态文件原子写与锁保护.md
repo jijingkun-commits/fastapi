@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: C02
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -32,7 +32,7 @@
   - scripts/coder4/coder4_bootstrap_kernel.py::update_local_card_status
 
 - 来源证据:
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md#46-原子写入实现
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#46-原子写入实现
 
 ## 2. 文件边界
 
@@ -91,7 +91,7 @@ card_export:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - task-runner-state.json.bak
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-01-状态文件原子写与锁保护
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-01-状态文件原子写与锁保护
   done_gate:
   - 状态文件中断写入后仍可恢复并解析
   - 并发写场景无 JSON 损坏

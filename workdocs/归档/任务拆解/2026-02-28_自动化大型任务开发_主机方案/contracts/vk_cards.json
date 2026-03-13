@@ -76,8 +76,8 @@
     "source_ws_file": "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-00_G0_协议冻结.md"
   },
   "source_files": {
-    "requirements": "workdocs/归档/需求/自动化大型任务开发_主机方案_requirements.md",
-    "implementation_plan": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md",
+    "requirements": "workdocs/归档/正文/需求/自动化大型任务开发_主机方案_requirements.md",
+    "implementation_plan": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md",
     "parallel_plan": "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md",
     "workstreams": [
       "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-00_G0_协议冻结.md",
@@ -158,7 +158,7 @@
         "scripts/coder4/coder4_bootstrap_kernel.py::should_skip_duplicate"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_bootstrap_kernel.py --help",
@@ -168,12 +168,12 @@
         "DISABLE_RUN_LOCK",
         "DISABLE_IDEMPOTENCY_WINDOW"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
         "scripts/coder4/coder4_bootstrap_kernel.py",
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md"
       ],
       "done_gate": [
         "并发触发时仅出现一个 RUN_LOCK_ACQUIRED",
@@ -224,7 +224,7 @@
         "scripts/coder4/coder4_bootstrap_kernel.py::update_local_card_status"
       ],
       "example_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md#46-原子写入实现"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#46-原子写入实现"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json",
@@ -233,7 +233,7 @@
       "rollback_anchors": [
         "task-runner-state.json.bak"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-01-状态文件原子写与锁保护",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-01-状态文件原子写与锁保护",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -287,7 +287,7 @@
         "scripts/coder4/coder4_bootstrap_kernel.py::main"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json"
@@ -295,7 +295,7 @@
       "rollback_anchors": [
         "DISABLE_AUTO_WAKE"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -347,7 +347,7 @@
         "scripts/coder4/wt-flow.sh::main"
       ],
       "example_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md#63-next-子命令"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#63-next-子命令"
       ],
       "acceptance_checks": [
         "bash scripts/coder4/wt-flow.sh status",
@@ -356,7 +356,7 @@
       "rollback_anchors": [
         "WT_FLOW_ALLOW_AUTOCOMMIT=0"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-03-wt-flow-扩展与-done-gate-白名单",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-03-wt-flow-扩展与-done-gate-白名单",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -409,7 +409,7 @@
         ".artifacts/states/task_splits/2026-02-28_自动化大型任务开发_主机方案/<task_key>/task-ledger.jsonl"
       ],
       "example_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md#72-attempt-json-schema"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#72-attempt-json-schema"
       ],
       "acceptance_checks": [
         "test -f .artifacts/states/task_splits/2026-02-28_自动化大型任务开发_主机方案/<task_key>/task-runner-state.json || true",
@@ -418,7 +418,7 @@
       "rollback_anchors": [
         "restore_attempts_archive"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-04-attemptledger-本地化",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-04-attemptledger-本地化",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -467,12 +467,12 @@
         "cron payload 缩减为 watchdog 巡检指令"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4",
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4",
         "~/.openclaw/workspace-dev/WORKFLOW_AUTO.md",
         "~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md"
       ],
       "example_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist"
       ],
       "acceptance_checks": [
         "python3 scripts/docs_guard.py --strict"
@@ -480,12 +480,12 @@
       "rollback_anchors": [
         "scripts/coder4_external_restore.sh"
       ],
-      "evidence_entry": "workdocs/归档/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist",
+      "evidence_entry": "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#b4-payload-迁移逐条对照-checklist",
       "task_mode": "implementation-card",
       "merge_required": false,
       "file_scope": [
         "AGENTS.md",
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md",
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md",
         "~/.openclaw/workspace-dev/WORKFLOW_AUTO.md",
         "~/.openclaw/workspace-dev/VK_AGENT_PROMPTS.md"
       ],
@@ -535,7 +535,7 @@
         "scripts/coder4/coder4_bootstrap_kernel.py::_try_sync_vk"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_vk_sync.py --dry-run"
@@ -543,7 +543,7 @@
       "rollback_anchors": [
         "DISABLE_VK_SYNC"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -589,11 +589,11 @@
         "任一安全项失败直接 No-Go"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md::17.2",
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md::1.4"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::17.2",
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md::1.4"
       ],
       "example_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md#17-上线门禁清单gono-go"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md#17-上线门禁清单gono-go"
       ],
       "acceptance_checks": [
         "python3 scripts/docs_guard.py --strict"
@@ -601,11 +601,11 @@
       "rollback_anchors": [
         "NO_GO_IF_SECURITY_FAIL"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md"
       ],
       "done_gate": [
         "G-01~G-03 安全门禁全部 PASS"
@@ -649,7 +649,7 @@
         "scripts/coder4/wt-flow.sh::main"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json"
@@ -657,7 +657,7 @@
       "rollback_anchors": [
         "FREEZE_ON_CHAIN_FAIL"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
@@ -702,24 +702,24 @@
         "校验 planning_contract、parallel_plan、vk_cards 三方一致"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4",
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4",
         "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿"
       ],
       "acceptance_checks": [
-        "grep -n \"待迁移\" workdocs/归档/设计/自动化大型任务开发设计方案.md || true",
+        "grep -n \"待迁移\" workdocs/归档/正文/设计/自动化大型任务开发设计方案.md || true",
         "python3 scripts/docs_guard.py --strict"
       ],
       "rollback_anchors": [
         "ROLLBACK_TO_PLAN_IF_MISMATCH"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md",
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md",
         "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json"
       ],
       "done_gate": [
@@ -729,7 +729,7 @@
         "迁移 checklist 与拆解契约双向校验 PASS"
       ],
       "check_cmd": [
-        "grep -n \"待迁移\" workdocs/归档/设计/自动化大型任务开发设计方案.md || true",
+        "grep -n \"待迁移\" workdocs/归档/正文/设计/自动化大型任务开发设计方案.md || true",
         "python3 scripts/docs_guard.py --strict"
       ],
       "source_ws_file": "workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/workstreams/WS-G03_G-3迁移一致性闭环.md"
@@ -763,10 +763,10 @@
       "code_anchor_refs": [
         "scripts/coder4_external_backup.sh",
         "scripts/coder4_external_restore.sh",
-        "workdocs/归档/设计/自动化大型任务开发设计方案.md::16.4"
+        "workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::16.4"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#43-p3-exit-gate必须全绿"
+        "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#43-p3-exit-gate必须全绿"
       ],
       "acceptance_checks": [
         "bash scripts/coder4_external_backup.sh"
@@ -774,7 +774,7 @@
       "rollback_anchors": [
         "NO_GO_IF_RESTORE_FAIL"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#43-p3-exit-gate必须全绿",
+      "evidence_entry": "workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#43-p3-exit-gate必须全绿",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [

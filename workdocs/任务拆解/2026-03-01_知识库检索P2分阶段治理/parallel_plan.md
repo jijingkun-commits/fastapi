@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260301-KB-RETRIEVAL-P2  
 > 主题: 知识库检索P2分阶段治理  
-> 输入来源: `workdocs/归档/需求/知识库检索P2分阶段治理_requirements.md` / `workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md`
+> 输入来源: `workdocs/归档/正文/需求/知识库检索P2分阶段治理_requirements.md` / `workdocs/归档/正文/实施计划/知识库检索P2分阶段治理_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -64,7 +64,7 @@ automation_contract:
 | C05 | S3 | P3-01,P3-02 | 原问主路 + 扩展路并行召回；多路候选融合排序并保留可解释分数 | app/ai/tools/ragflow_tool.py::_build_retrieval_queries; app/ai/tools/ragflow_tool.py::_merge_and_rerank_candidates | venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k "rewrite or rerank" | 关闭 query rewrite 开关，仅保留原问主路 |
 | C06 | S4 | P4-01 | 根据 query 领域判定构建 metadata_condition；路由失败可回退全库检索路径 | app/ai/tools/ragflow_tool.py::_build_metadata_condition | venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k metadata | 关闭领域路由与 metadata 过滤开关 |
 | C07 | S5 | P5-02 | 检索日志字段扩展并支持灰度指标追踪；补齐运行手册、文档与索引同步 | app/ai/tools/ragflow_tool.py::_build_retrieval_log; app/ai/workflow/multi_agent_graph.py::_prepare_messages_for_supervisor_inference | venv/bin/python -m pytest -q tests/unit/test_ragflow_tool.py -k retrieval_log; python3 scripts/docs_guard.py --strict | 回退日志扩展并关闭灰度策略开关 |
-| G01 | Gate | G-1 | 统一放行标准：相关性@5 >= 80%，错误引用率 <= 5%；未达标阻断进入下游落卡与实施 | scripts/data/kb_offline_evaluation.py::evaluate_cases; workdocs/归档/实施计划/知识库检索P2分阶段治理_implementation_plan.md::planning_contract | venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate; python3 scripts/docs_guard.py --strict | 冻结放量并回退到上一稳定阶段配置 |
+| G01 | Gate | G-1 | 统一放行标准：相关性@5 >= 80%，错误引用率 <= 5%；未达标阻断进入下游落卡与实施 | scripts/data/kb_offline_evaluation.py::evaluate_cases; workdocs/归档/正文/实施计划/知识库检索P2分阶段治理_implementation_plan.md::planning_contract | venv/bin/python scripts/data/kb_offline_evaluation.py --stage gate; python3 scripts/docs_guard.py --strict | 冻结放量并回退到上一稳定阶段配置 |
 
 ## 2. 目标与边界
 

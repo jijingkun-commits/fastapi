@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: C06
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 
 ## 1. 目标
@@ -28,18 +28,18 @@
 
 ### 1.2 代码锚点
 
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.2
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.5
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.2
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.5
   - scripts/docs_guard.py::main
 
 - 来源证据:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - docs/SUMMARY.md
   - scripts/docs_guard.py
 
@@ -78,8 +78,8 @@ card_export:
   hard_depends_on: [C01, C02, C03, C04, C05]
   depends_on: [C01, C02, C03, C04, C05]
   file_whitelist:
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - docs/SUMMARY.md
   - scripts/docs_guard.py
   mechanism_summary:
@@ -87,14 +87,14 @@ card_export:
   - docs/code/test 三线收口
   - 波次级回滚锚点组合演练
   code_anchor_refs:
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.2
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.5
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.2
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.5
   - scripts/docs_guard.py::main
   acceptance_checks:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - WAVE_ROLLBACK_DRILL_MATRIX
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
   done_gate:
   - G-1~G-4 全部通过
   - docs/code/test 三线收口完成

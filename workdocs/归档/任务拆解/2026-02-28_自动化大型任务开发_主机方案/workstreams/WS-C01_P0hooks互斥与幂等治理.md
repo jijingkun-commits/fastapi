@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: C01
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -33,13 +33,13 @@
   - scripts/coder4/coder4_bootstrap_kernel.py::should_skip_duplicate
 
 - 来源证据:
-  - workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p0-02-触发互斥锁与幂等键
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
   - scripts/coder4/coder4_bootstrap_kernel.py
-  - workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md
 
 ### 禁止修改（黑名单）
 - 其他 card_id 白名单外文件
@@ -79,7 +79,7 @@ card_export:
   depends_on: []
   file_whitelist:
   - scripts/coder4/coder4_bootstrap_kernel.py
-  - workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md
   mechanism_summary:
   - 执行级互斥锁保证同一时间窗口仅一轮推进
   - 幂等键窗口过滤重复 wake/agent/cron 触发
@@ -94,7 +94,7 @@ card_export:
   rollback_anchors:
   - DISABLE_RUN_LOCK
   - DISABLE_IDEMPOTENCY_WINDOW
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#1-p0-打钩板触发器切换--主机安全基线
   done_gate:
   - 并发触发时仅出现一个 RUN_LOCK_ACQUIRED
   - 120 秒内重复触发命中 SKIP_DUPLICATE_EVENT

@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260228-AUTO-LARGE-TASK-HOST
 > 主题: 自动化大型任务开发_主机方案
-> 输入来源: `workdocs/归档/需求/自动化大型任务开发_主机方案_requirements.md` / `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+> 输入来源: `workdocs/归档/正文/需求/自动化大型任务开发_主机方案_requirements.md` / `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -66,11 +66,11 @@ automation_contract:
 | C03 | P1 | P1-02 | load_context 在 local-mode 下只读取本地状态 | scripts/coder4/coder4_bootstrap_kernel.py::build_kernel_context | python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json | DISABLE_AUTO_WAKE |
 | C04 | P1 | P1-03 | 新增 next/verify/list 子命令支撑串行推进 | scripts/coder4/wt-flow.sh::cmd_create | bash scripts/coder4/wt-flow.sh status | WT_FLOW_ALLOW_AUTOCOMMIT=0 |
 | C05 | P1 | P1-04 | 每轮执行将 gate/merge 证据内联写入 task-runner-state | scripts/coder4/coder4_bootstrap_kernel.py::record_attempt_evidence | test -f .artifacts/states/task_splits/2026-02-28_自动化大型任务开发_主机方案/<task_key>/task-runner-state.json || true | restore_attempts_archive |
-| C06 | P2 | P2-01 | 将 3000 字符 payload 拆分迁移到 AGENTS/WORKFLOW/PROMPTS | workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4 | python3 scripts/docs_guard.py --strict | scripts/coder4_external_restore.sh |
+| C06 | P2 | P2-01 | 将 3000 字符 payload 拆分迁移到 AGENTS/WORKFLOW/PROMPTS | workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4 | python3 scripts/docs_guard.py --strict | scripts/coder4_external_restore.sh |
 | C07 | P3 | P3-01 | 状态变更后异步 fire-and-forget 推送 VK | scripts/coder4/coder4_vk_sync.py::sync_to_vk | python3 scripts/coder4/coder4_vk_sync.py --dry-run | DISABLE_VK_SYNC |
-| G01 | Gate | G-1 | 汇总 hooks token/监听地址/进程权限安全门禁 | workdocs/归档/设计/自动化大型任务开发设计方案.md::17.2 | python3 scripts/docs_guard.py --strict | NO_GO_IF_SECURITY_FAIL |
+| G01 | Gate | G-1 | 汇总 hooks token/监听地址/进程权限安全门禁 | workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::17.2 | python3 scripts/docs_guard.py --strict | NO_GO_IF_SECURITY_FAIL |
 | G02 | Gate | G-2 | 验证 seed->activate->dispatch->done 全链路闭环 | scripts/coder4/coder4_bootstrap_kernel.py::decide_action | python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json | FREEZE_ON_CHAIN_FAIL |
-| G03 | Gate | G-3 | 校验 payload 迁移 31 项映射完整性 | workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4 | grep -n "待迁移" workdocs/归档/设计/自动化大型任务开发设计方案.md || true | ROLLBACK_TO_PLAN_IF_MISMATCH |
+| G03 | Gate | G-3 | 校验 payload 迁移 31 项映射完整性 | workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4 | grep -n "待迁移" workdocs/归档/正文/设计/自动化大型任务开发设计方案.md || true | ROLLBACK_TO_PLAN_IF_MISMATCH |
 | G04 | Gate | G-4 | 执行备份->注入故障->恢复->复验闭环演练 | scripts/coder4_external_backup.sh | bash scripts/coder4_external_backup.sh | NO_GO_IF_RESTORE_FAIL |
 
 ## 2. 目标与边界

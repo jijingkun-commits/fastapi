@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: G01
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 
 ## 1. 目标
@@ -28,19 +28,19 @@
 
 ### 1.2 代码锚点
 
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
   - docs/开发文档/流程与工具/Coder4自动执行总控手册.md::7
   - scripts/docs_guard.py::check_g01_evidence_binding
 
 - 来源证据:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - docs/开发文档/流程与工具/Coder4自动执行总控手册.md
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md
@@ -95,9 +95,9 @@ card_export:
   hard_depends_on: [C06]
   depends_on: [C06]
   file_whitelist:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - docs/开发文档/流程与工具/Coder4自动执行总控手册.md
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G01_G1_实测证据闭环.md
@@ -107,13 +107,13 @@ card_export:
   - 固化并核验 evidence 四元组（task_id/turn_id/process_id/status）
   - 复核证据绑定 target_task_id == evidence_task_id
   code_anchor_refs:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
   - docs/开发文档/流程与工具/Coder4自动执行总控手册.md::7
   acceptance_checks:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - WAVE_ROLLBACK_DRILL_MATRIX
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11
   done_gate:
   - evidence 四元组 task_id/turn_id/process_id/status 回填并核验通过
   - target_task_id == evidence_task_id 复核通过

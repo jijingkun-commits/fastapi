@@ -10,7 +10,7 @@
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: G04
 - hard_depends_on: G03
-- 来源主计划: `workdocs/归档/实施计划/迁移执行波次_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md`
 - 来源卡片清单: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json`
 
 ## 1. 目标
@@ -27,18 +27,18 @@
 
 ### 1.2 代码/文档锚点
 
-- workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.6
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
+- workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.6
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
 
 - 来源证据：
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md#11.6
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md#11.6
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
 
-- workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+- workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md
 - docs/SUMMARY.md
@@ -89,8 +89,8 @@ card_export:
   hard_depends_on: [G03]
   depends_on: [G03]
   file_whitelist:
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G04_G4_回滚演练.md
   - docs/SUMMARY.md
@@ -98,13 +98,13 @@ card_export:
   - 复核 WAVE_ROLLBACK_DRILL_MATRIX 记录完整性
   - 复核 Gate 收口后的发布前回滚可执行性
   code_anchor_refs:
-  - workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.6
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
+  - workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.6
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11
   acceptance_checks:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - WAVE_ROLLBACK_DRILL_MATRIX
-  evidence_entry: workdocs/归档/实施计划/迁移执行波次_implementation_plan.md#11.6
+  evidence_entry: workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md#11.6
   done_gate:
   - G-4 回滚演练通过（WAVE_ROLLBACK_DRILL_MATRIX 有可核验记录）
   - python3 scripts/docs_guard.py --strict 通过

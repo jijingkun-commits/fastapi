@@ -38,8 +38,7 @@ docs/
 │   └── 测试管理/
 │       ├── 测试用例库.md    # 按功能模块组织的用例
 │       ├── 测试指南与环境配置.md
-│       ├── {模块}测试案例.md # 详细用例
-│       └── 测试报告/        # 报告类归档
+│       └── {模块}测试案例.md # 详细用例
 ├── 内部参考/              # 长期有效的内部知识
 │   ├── 决策记录.md
 │   ├── AI技能库.md
@@ -48,7 +47,7 @@ docs/
 ```
 
 > 过程层的 canonical 根目录为仓库根的 `workdocs/`；运行态产物的 canonical 根目录为仓库根的 `.artifacts/`。  
-> `workdocs/设计/` 是新的设计过程入口，历史方案设计已归档到 `workdocs/归档/设计/`；`docs/内部参考/迭代需求/` 当前只保留少量旧入口说明与历史材料。`task_split` 的 canonical 根目录已切到 `workdocs/任务拆解/`。
+> `workdocs/设计/` 是新的设计过程入口，历史方案设计已归档到 `workdocs/归档/正文/设计/`；`docs/内部参考/` 下只保留少量旧入口说明页与历史材料。`task_split` 的 canonical 根目录已切到 `workdocs/任务拆解/`。
 
 ### 命名规范
 
@@ -66,17 +65,17 @@ docs/
 | 角色 | 范围 | 职责 |
 |---------|---------|---------|
 | `current_state` | `docs/产品文档/*.md`、`docs/开发文档/架构设计/*.md`、`docs/API文档/*.md`（`防屎山记录手册.md` 除外） | 只表达当前有效的产品/架构/API 口径 |
-| `process` | `workdocs/**`、`docs/内部参考/迭代需求/**`、`docs/开发文档/测试管理/测试报告/**`、`docs/开发文档/架构设计/防屎山记录手册.md` | `workdocs/**` 为 canonical 过程层；其余仅承载历史问题、迁移期追溯与兼容材料 |
+| `process` | `workdocs/**`、`docs/内部参考/**` 下的旧入口说明页、`docs/开发文档/架构设计/防屎山记录手册.md` | `workdocs/**` 为 canonical 过程层；其余仅承载历史问题、迁移期追溯与兼容材料 |
 | `support` | `docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/**`（测试报告除外）、`docs/内部参考/AI技能库.md`、`docs/内部参考/决策记录.md`、`docs/内部参考/数据资料/**` 等说明类文档 | 负责索引、流程说明、长期内部知识、ADR 正文与操作手册 |
 
 ### 主文档强制规则
 
 1. 主文档禁止新增 `增量需求`、`实现进展`、`已执行`、`XX补充` 一类历史性标题；新事实必须合并进原功能位。
 2. 命中已污染的主文档时，执行 `touch-once merge`：本次触达范围内必须完成融合并删除旧增量段，禁止“再补一段”。
-3. 新的设计推导、实施拆解、测试证据与执行报告统一写入 `workdocs/**` 或 `.artifacts/**`；`docs/内部参考/迭代需求/` 只保留历史追溯，不再新增同类产物。
+3. 新的设计推导、实施拆解、测试证据与执行报告统一写入 `workdocs/**` 或 `.artifacts/**`；`docs/内部参考/` 下的旧入口页只保留历史追溯，不再新增同类产物。
 4. 主文档头部必须维护 `> 更新时间：YYYY-MM-DD`，用于标识当前真相最近一次收敛时间。
 5. 主文档中的日期只允许作为当前契约的背景注记，不得形成独立变更日志章节。
-6. 过程文档与运行态产物必须分层：`workdocs/` 是 canonical 过程层，`.artifacts/` 是 canonical 运行态根；`task_split` 的 canonical 根目录固定为 `workdocs/任务拆解/`，`docs/内部参考/任务拆解/` 不再承载机器契约或过程 JSON。
+6. 过程文档与运行态产物必须分层：`workdocs/` 是 canonical 过程层，`.artifacts/` 是 canonical 运行态根；`task_split` 的 canonical 根目录固定为 `workdocs/任务拆解/`，旧任务拆解入口页不再承载机器契约或过程 JSON。
 7. `docs/**` 禁止新增真实 `.state/` 目录、`.jsonl`、`.lock` 等运行态文件；命中存量债务时只允许通过受控 allowlist 短时放行，并保留 warning 可见性。
 8. 本规则由 `scripts/docs_guard.py` 与 `scripts/check_doc_sync.sh` 联合执行：本地 `check_doc_sync.sh` 默认告警不阻断，显式 `--strict` 与 CI 仍保持阻断语义。
 

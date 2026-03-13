@@ -52,8 +52,8 @@
     "source_ws_file": "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md"
   },
   "source_files": {
-    "requirements": "workdocs/归档/需求/openclaw迁移重建基线_requirements.md",
-    "implementation_plan": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+    "requirements": "workdocs/归档/正文/需求/openclaw迁移重建基线_requirements.md",
+    "implementation_plan": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
     "parallel_plan": "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
     "workstreams": [
       "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-00_C00_预检门禁冻结.md",
@@ -143,7 +143,7 @@
         "app/schemas/chat.py::ChatRequest"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "PYTHONPATH=. pytest tests/unit/test_run_control_service.py",
@@ -155,7 +155,7 @@
         "ENABLE_RUN_CONTROL",
         "ENABLE_SSE_STOPPED_EVENT"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.2",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.2",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -227,7 +227,7 @@
         "app/core/config_contract.py::CONFIG_SPECS"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py"
@@ -236,7 +236,7 @@
         "ENABLE_TOOL_GOVERNANCE",
         "TOOL_POLICY_FAIL_MODE"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -292,7 +292,7 @@
         "app/api/v1/endpoints/skill_admin_api.py::list_skills"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "PYTHONPATH=. pytest tests/unit/test_skill_service.py -k \"version or binding\"",
@@ -302,7 +302,7 @@
         "ENABLE_SKILL_VERSIONING",
         "ENABLE_USER_SKILL_BINDING"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.8",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.8",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -363,7 +363,7 @@
         "app/services/chat_service.py::stream"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k \"context or persist\"",
@@ -373,7 +373,7 @@
         "ENABLE_MEMORY_RECALL",
         "ENABLE_PRE_COMPACTION_FLUSH"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -437,7 +437,7 @@
         "app/services/chat_service.py::sse_stream"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback"
@@ -446,7 +446,7 @@
         "ENABLE_RUNTIME_RECOVERY",
         "ENABLE_PLUGIN_REGISTRY"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.10",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -506,12 +506,12 @@
         "波次级回滚锚点组合演练"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.2",
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.5",
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.2",
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.5",
         "scripts/docs_guard.py::main"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
@@ -519,12 +519,12 @@
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md",
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
         "docs/SUMMARY.md",
         "scripts/docs_guard.py"
       ],
@@ -570,11 +570,11 @@
         "复核证据绑定 target_task_id == evidence_task_id"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11",
         "docs/开发文档/流程与工具/Coder4自动执行总控手册.md::7"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11"
       ],
       "acceptance_checks": [
         "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
@@ -582,11 +582,11 @@
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.11",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
         "docs/开发文档/流程与工具/Coder4自动执行总控手册.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
       ],
@@ -630,11 +630,11 @@
         "复核 single_active_card 串行约束未被破坏"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::6",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::6",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#7"
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#7"
       ],
       "acceptance_checks": [
         "python3 scripts/docs_guard.py --strict"
@@ -642,11 +642,11 @@
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#7",
+      "evidence_entry": "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#7",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md",
         "docs/SUMMARY.md"
@@ -691,7 +691,7 @@
         "对齐 parallel_plan 与 vk_cards 的 Gate 卡定义"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::7",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::7",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
       ],
@@ -708,7 +708,7 @@
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
       ],
@@ -752,11 +752,11 @@
         "复核 Gate 收口后的发布前回滚可执行性"
       ],
       "code_anchor_refs": [
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.6",
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11"
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.6",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md#11.6"
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md#11.6"
       ],
       "acceptance_checks": [
         "python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict"
@@ -764,12 +764,12 @@
       "rollback_anchors": [
         "WAVE_ROLLBACK_DRILL_MATRIX"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md#11.6",
+      "evidence_entry": "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md#11.6",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
-        "workdocs/归档/实施计划/迁移执行波次_implementation_plan.md",
-        "workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md",
+        "workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md",
         "workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json"
       ],
       "done_gate": [

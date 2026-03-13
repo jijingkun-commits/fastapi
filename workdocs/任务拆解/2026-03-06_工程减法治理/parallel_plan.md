@@ -18,8 +18,8 @@
 
 ## 2. 来源文件
 
-- requirements: `workdocs/归档/需求/workflow-gate-retirement_requirements.md`
-- implementation_plan: `workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md`
+- requirements: `workdocs/归档/正文/需求/workflow-gate-retirement_requirements.md`
+- implementation_plan: `workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md`
 - parallel_plan: `workdocs/任务拆解/2026-03-06_工程减法治理/parallel_plan.md`
 - workstreams_count: `9`
 

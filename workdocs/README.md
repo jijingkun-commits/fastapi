@@ -20,7 +20,7 @@
 | `workdocs/任务拆解/` 根目录与 `workstreams/` | 过程文档 / 给人读 | `parallel_plan.md`、工作包说明 |
 | `workdocs/**/contracts/` | 过程文档 / 给机器读 | 输入合同、映射 JSON、规划契约、`implementation_plan.md`、`uat_cases.md` |
 | `workdocs/**/reports/` | 过程文档 / 给机器读或半机器读 | 校验结果、消费报告、`review/test/verify/debug` 报告 |
-| `workdocs/归档/` | 历史过程文档 | 已完成专题、旧测试报告、治理专题、历史方案 |
+| `workdocs/归档/` | 历史过程文档 | `正文/`、`报告/`、`任务拆解/`、`专题/` 四类历史材料 |
 
 ## task_split 特例
 
@@ -42,26 +42,17 @@
 
 ## 过渡说明
 
-当前仓库里仍有一批历史过程文档保留在旧路径：
-
-- `docs/内部参考/迭代需求/`
-
-它们当前只承担两件事：
+当前仓库里仍保留少量旧入口说明页，但它们只负责：
 
 1. 迁移期追溯
 2. 历史兼容入口
 
-已经迁出的历史正文，优先去这些目录找：
+已经迁出的历史材料，优先按下面的桶去找：
 
 - `workdocs/_templates/`
-- `workdocs/归档/设计/`
-- `workdocs/归档/需求/`
-- `workdocs/归档/实施计划/`
-- `workdocs/归档/任务拆解/`
-- `workdocs/归档/研究报告/`
-- `workdocs/归档/测试报告/`
-- `workdocs/归档/调试报告/`
-- `workdocs/归档/审查报告/`
-- `workdocs/归档/验收报告/`
+- `workdocs/归档/正文/`：需求、设计、实施计划
+- `workdocs/归档/报告/`：测试、验收、审查、调试、重构、修复、完成、机读校验
+- `workdocs/归档/任务拆解/`：历史 task bundle
+- `workdocs/归档/专题/`：治理专题、研究报告、工作流规划、架构历史
 
-新的过程文档，不再默认写回这些旧路径。
+新的过程文档，不再默认写回旧入口页所在目录。

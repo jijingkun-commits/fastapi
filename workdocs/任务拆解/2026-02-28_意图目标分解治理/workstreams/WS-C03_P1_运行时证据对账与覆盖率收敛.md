@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -44,7 +44,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -53,7 +53,7 @@ else:
 - `tests/unit/test_multi_intent_coverage_reconcile.py`
 
 ### 禁止修改（黑名单）
-- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -85,7 +85,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `coverage reconcile tests green; missing goals recovery path verified`
 - 本 WS 负责的门禁子项: `C03:P1-04`
-- 证据回填位置（文档节）: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11`
 
 ## 6. 风险与回滚
 
@@ -124,10 +124,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["执行证据以 handoff/tool deliverable 为主，驱动 coverage_report 收敛", "must_answer 缺失目标必须进入恢复链路，不允许静默结束", "覆盖率计算与最终答复解耦"]
   code_anchor_refs: ["app/ai/workflow/multi_agent_graph.py::_coverage_gate_node", "app/ai/workflow/multi_agent_graph.py::_ensure_intent_plan_covers_runtime"]
-  example_refs: ["workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#4.4"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#4.4"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py"]
   rollback_anchors: ["ENABLE_COVERAGE_RECONCILE=false"]
-  evidence_entry: workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_multi_intent_coverage_reconcile.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

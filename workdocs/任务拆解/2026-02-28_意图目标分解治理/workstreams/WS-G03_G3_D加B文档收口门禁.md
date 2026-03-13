@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -33,7 +33,7 @@
 - 代码锚点（函数/类级）:
 - `docs/开发文档/架构设计/AI模块设计.md`
 - `docs/开发文档/架构设计/防屎山记录手册.md`
-- `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 最小样例（可伪代码）:
 
 ```python
@@ -44,17 +44,17 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
 - `docs/开发文档/架构设计/AI模块设计.md`
 - `docs/开发文档/架构设计/防屎山记录手册.md`
-- `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ### 禁止修改（黑名单）
-- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -85,7 +85,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `docs sync and guard pass`
 - 本 WS 负责的门禁子项: `G03:P2-06`
-- 证据回填位置（文档节）: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.4`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4`
 
 ## 6. 风险与回滚
 
@@ -119,15 +119,15 @@ card_export:
   hard_depends_on: ["C08"]
   soft_depends_on: []
   depends_on: ["C08"]
-  file_whitelist: ["docs/开发文档/架构设计/AI模块设计.md", "docs/开发文档/架构设计/防屎山记录手册.md", "workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md"]
+  file_whitelist: ["docs/开发文档/架构设计/AI模块设计.md", "docs/开发文档/架构设计/防屎山记录手册.md", "workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md"]
   readonly_scope: []
   owner_fields: []
   mechanism_summary: ["确认 D+B 增补段落与主计划契约一致", "确认 docs 索引完整并通过 strict guard", "确认 implementation_readiness 可进入 /jjk-vkplan 下游"]
-  code_anchor_refs: ["docs/开发文档/架构设计/AI模块设计.md", "docs/开发文档/架构设计/防屎山记录手册.md", "workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md"]
-  example_refs: ["workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12"]
+  code_anchor_refs: ["docs/开发文档/架构设计/AI模块设计.md", "docs/开发文档/架构设计/防屎山记录手册.md", "workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"]
   rollback_anchors: ["revert D+B docs section commit"]
-  evidence_entry: workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#12.4
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#12.4
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/docs_guard.py --strict"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

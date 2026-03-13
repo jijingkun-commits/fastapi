@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: C04
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 
 ## 1. 目标
@@ -40,7 +40,7 @@
   - app/services/chat_service.py（inject_memory_context）
 
 - 来源证据:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9
 
 ## 2. 文件边界
 
@@ -113,7 +113,7 @@ card_export:
   rollback_anchors:
   - ENABLE_MEMORY_RECALL
   - ENABLE_PRE_COMPACTION_FLUSH
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.9
   done_gate:
   - C04a（recall MVP）回归通过
   - C04b（flush 增强）回归通过

@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: C07
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -32,7 +32,7 @@
   - scripts/coder4/coder4_bootstrap_kernel.py::_try_sync_vk
 
 - 来源证据:
-  - workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账
 
 ## 2. 文件边界
 
@@ -87,7 +87,7 @@ card_export:
   - python3 scripts/coder4/coder4_vk_sync.py --dry-run
   rollback_anchors:
   - DISABLE_VK_SYNC
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p3-01-vk-只读同步与全量对账
   done_gate:
   - VK 断连演练时主链路不中断
   - 全量同步任务可完成状态对账

@@ -2,7 +2,7 @@
 
 > 计划 ID: PP-20260221-OPENCLAW-REBUILD-BASELINE
 > 主题: openclaw迁移重建基线
-> 输入来源: `workdocs/归档/需求/openclaw迁移重建基线_requirements.md` / `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+> 输入来源: `workdocs/归档/正文/需求/openclaw迁移重建基线_requirements.md` / `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## -1. 执行策略
 
@@ -86,11 +86,11 @@ automation_contract:
 | C03 | P3 | P3-01 | Skill 定义、版本、用户绑定三层解耦；支持用户级绑定、生效与回滚 | app/models/agent_skill.py::AgentSkill | PYTHONPATH=. pytest tests/unit/test_skill_service.py -k binding | ENABLE_SKILL_VERSIONING,ENABLE_USER_SKILL_BINDING |
 | C04 | P4 | P4-01 | Hybrid recall + pre-compaction flush 分阶段落地（C04a recall MVP / C04b flush 增强）；用户隔离与降级路径保底 | app/services/user_preference_memory_service.py::build_user_preference_context | PYTHONPATH=. pytest tests/unit/test_user_preference_memory_service.py -k context | ENABLE_MEMORY_RECALL,ENABLE_PRE_COMPACTION_FLUSH |
 | C05 | P5 | P5-01 | 恢复/隔离/观测增强与异常降级；插件能力后置接线，不阻塞主链 | app/ai/workflow/multi_agent_graph.py::_build_supervisor_fallback_handoff | PYTHONPATH=. pytest tests/unit/test_multi_agent_streaming_helpers.py -k fallback | ENABLE_RUNTIME_RECOVERY,ENABLE_PLUGIN_REGISTRY |
-| C06 | P6 | P6-01 | G-1~G-4 门禁收口与证据链复核；docs/code/test 三线收口 | workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.2 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
-| G01 | G1 | G-1 | 实测证据闭环 Gate（evidence 四元组可核验） | workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
-| G02 | G2 | G-2 | 复合任务编排 Gate（依赖链/作用域门禁一致） | workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::7 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| C06 | P6 | P6-01 | G-1~G-4 门禁收口与证据链复核；docs/code/test 三线收口 | workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.2 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G01 | G1 | G-1 | 实测证据闭环 Gate（evidence 四元组可核验） | workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::4.11 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G02 | G2 | G-2 | 复合任务编排 Gate（依赖链/作用域门禁一致） | workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::7 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 | G03 | G3 | G-3 | 契约一致性 Gate（planning_contract/vk_cards/cron 对齐） | workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json | python3 /Users/jijingkun/.codex/worktrees/978e/fastapi/scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
-| G04 | G4 | G-4 | 回滚演练 Gate（矩阵记录闭环） | workdocs/归档/实施计划/迁移执行波次_implementation_plan.md::11.6 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
+| G04 | G4 | G-4 | 回滚演练 Gate（矩阵记录闭环） | workdocs/归档/正文/实施计划/迁移执行波次_implementation_plan.md::11.6 | python3 scripts/docs_guard.py --strict | WAVE_ROLLBACK_DRILL_MATRIX |
 
 ## 2. 目标与边界
 

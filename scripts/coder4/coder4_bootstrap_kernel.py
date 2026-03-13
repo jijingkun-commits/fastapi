@@ -76,8 +76,8 @@ DEFAULT_DISPATCH_TIMEOUT_SECONDS = 600
 DEFAULT_DIRTY_WHITELIST = (
     "workdocs/需求/",
     "workdocs/设计/",
-    "workdocs/归档/需求/",
-    "workdocs/归档/设计/",
+    "workdocs/归档/正文/需求/",
+    "workdocs/归档/正文/设计/",
 )
 
 RUN_LOCK_DISABLE_ENV = "DISABLE_RUN_LOCK"

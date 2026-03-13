@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: C03
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -32,7 +32,7 @@
   - scripts/coder4/coder4_bootstrap_kernel.py::main
 
 - 来源证据:
-  - workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口
 
 ## 2. 文件边界
 
@@ -87,7 +87,7 @@ card_export:
   - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --apply-bootstrap --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json
   rollback_anchors:
   - DISABLE_AUTO_WAKE
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md#p1-02-kernel-本地模式收口
   done_gate:
   - local-mode 路径不依赖 VK 读取
   - CARD_DONE 后可自动触发下一轮 wake

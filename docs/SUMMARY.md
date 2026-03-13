@@ -149,6 +149,9 @@
 > - `workdocs/需求/`：给人读的需求过程材料
 > - `workdocs/设计/`：给人读的设计过程材料
 > - `workdocs/任务拆解/`：task_split 过程正文 + `contracts/reports`
-> - `workdocs/归档/`：历史测试报告、治理专题、旧过程正文
+> - `workdocs/归档/正文/`：历史需求、设计、实施计划
+> - `workdocs/归档/报告/`：历史测试、验收、审查、调试、重构、机读校验
+> - `workdocs/归档/任务拆解/`：历史 task bundle
+> - `workdocs/归档/专题/`：治理专题、研究报告、工作流规划、架构历史
 >
 > 若命中过去的旧链接，`docs/内部参考/` 下只剩说明页；已完成专题的 `design / requirements / implementation_plan / report` 统一去 `workdocs/归档/` 查。

@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260228-INTENT-DECOMPOSITION-DB`
-- 来源主计划: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-02-28_意图目标分解治理/parallel_plan.md`
 
 ## 1. 目标
@@ -44,7 +44,7 @@ else:
 ```
 
 - 来源证据（output/专题文档）:
-  - `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md`
+  - `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md`
 
 ## 2. 文件边界
 
@@ -54,7 +54,7 @@ else:
 - `tests/integration/test_intent_shadow_metrics.py`
 
 ### 禁止修改（黑名单）
-- `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 
 ## 3. 状态与契约
 
@@ -86,7 +86,7 @@ else:
 
 - 对应 implementation plan `done_gate`: `shadow metrics tests green; rollback switch validated`
 - 本 WS 负责的门禁子项: `C05:P1-06`
-- 证据回填位置（文档节）: `workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11`
+- 证据回填位置（文档节）: `workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11`
 
 ## 6. 风险与回滚
 
@@ -126,10 +126,10 @@ card_export:
   owner_fields: []
   mechanism_summary: ["建立 shadow 对账指标与模式切换开关", "支持灰度放量并可快速回切 heuristic_only", "输出差异率与 fallback 命中率观测"]
   code_anchor_refs: ["app/services/config_resolver.py::ConfigResolver", "app/ai/workflow/multi_agent_graph.py::_build_planner_intent_plan"]
-  example_refs: ["workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#4.6"]
+  example_refs: ["workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#4.6"]
   acceptance_checks: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"]
   rollback_anchors: ["INTENT_MODE=heuristic_only", "ENABLE_INTENT_SHADOW_COMPARE=false"]
-  evidence_entry: workdocs/归档/实施计划/意图目标分解治理_implementation_plan.md#11
+  evidence_entry: workdocs/归档/正文/实施计划/意图目标分解治理_implementation_plan.md#11
   check_cmd: ["cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/integration/test_intent_shadow_metrics.py"]
   handoff_artifacts:
     - workdocs/任务拆解/2026-02-28_意图目标分解治理/contracts/sse_events_v1.json

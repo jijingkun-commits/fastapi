@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: G02
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -29,7 +29,7 @@
   - scripts/coder4/wt-flow.sh::main
 
 - 来源证据:
-  - workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿
 
 ## 2. 文件边界
 
@@ -84,7 +84,7 @@ card_export:
   - python3 scripts/coder4/coder4_bootstrap_kernel.py --local-mode --active-task workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/_active_task.json
   rollback_anchors:
   - FREEZE_ON_CHAIN_FAIL
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#24-p1-exit-gate必须全绿
   done_gate:
   - 链路闭环验证通过且无重复推进
 ```

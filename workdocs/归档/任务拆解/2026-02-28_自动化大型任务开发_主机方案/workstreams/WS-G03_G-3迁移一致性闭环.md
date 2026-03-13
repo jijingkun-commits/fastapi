@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260228-AUTO-LARGE-TASK-HOST
 - 对应 card_id: G03
-- 来源主计划: `workdocs/归档/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/自动化大型任务开发_主机方案_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/parallel_plan.md`
 
 ## 1. 目标
@@ -25,16 +25,16 @@
 
 ### 1.2 代码锚点
 
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4
   - workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json
 
 - 来源证据:
-  - workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿
+  - workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md
   - workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json
 
 ### 禁止修改（黑名单）
@@ -49,7 +49,7 @@
 ## 4. 测试与验收
 
 - 验收命令:
-  - grep -n "待迁移" workdocs/归档/设计/自动化大型任务开发设计方案.md || true
+  - grep -n "待迁移" workdocs/归档/正文/设计/自动化大型任务开发设计方案.md || true
   - python3 scripts/docs_guard.py --strict
 
 ## 5. 风险与回滚
@@ -73,20 +73,20 @@ card_export:
   hard_depends_on: ['G02']
   depends_on: ['G02']
   file_whitelist:
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md
   - workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json
   mechanism_summary:
   - 校验 payload 迁移 31 项映射完整性
   - 校验 planning_contract、parallel_plan、vk_cards 三方一致
   code_anchor_refs:
-  - workdocs/归档/设计/自动化大型任务开发设计方案.md::附录 B.4
+  - workdocs/归档/正文/设计/自动化大型任务开发设计方案.md::附录 B.4
   - workdocs/归档/任务拆解/2026-02-28_自动化大型任务开发_主机方案/contracts/vk_cards.json
   acceptance_checks:
-  - grep -n "待迁移" workdocs/归档/设计/自动化大型任务开发设计方案.md || true
+  - grep -n "待迁移" workdocs/归档/正文/设计/自动化大型任务开发设计方案.md || true
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - ROLLBACK_TO_PLAN_IF_MISMATCH
-  evidence_entry: workdocs/归档/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿
+  evidence_entry: workdocs/归档/正文/实施计划/自动化大型任务开发_全量打钩板清单.md#32-p2-exit-gate必须全绿
   done_gate:
   - 迁移 checklist 与拆解契约双向校验 PASS
 ```

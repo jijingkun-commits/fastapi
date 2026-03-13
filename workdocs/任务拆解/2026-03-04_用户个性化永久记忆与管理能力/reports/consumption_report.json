@@ -2,7 +2,7 @@
   "ok": false,
   "task_split_dir": "2026-03-04_用户个性化永久记忆与管理能力",
   "task_split_dir_path": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力",
-  "implementation_plan": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+  "implementation_plan": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
   "vk_cards": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/任务拆解/2026-03-04_用户个性化永久记忆与管理能力/contracts/vk_cards.json",
   "warnings": [],
   "missing_feature_ids": [],
@@ -37,7 +37,7 @@
     "ok": false,
     "error": {
       "code": "CLARIFY_PLAN_ALIGNMENT_FAILED",
-      "message": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md 未找到 ```yaml``` 代码块"
+      "message": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/正文/需求/用户个性化永久记忆与管理能力_requirements.md 未找到 ```yaml``` 代码块"
     }
   },
   "summary": {
@@ -88,7 +88,7 @@
       "message": "clarify -> plan 承接校验未通过",
       "details": {
         "code": "CLARIFY_PLAN_ALIGNMENT_FAILED",
-        "message": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md 未找到 ```yaml``` 代码块"
+        "message": "/Users/jijingkun/.codex/worktrees/978e/fastapi/workdocs/归档/正文/需求/用户个性化永久记忆与管理能力_requirements.md 未找到 ```yaml``` 代码块"
       }
     }
   ]

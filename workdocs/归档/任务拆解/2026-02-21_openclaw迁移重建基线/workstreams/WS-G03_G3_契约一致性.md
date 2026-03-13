@@ -10,7 +10,7 @@
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: G03
 - hard_depends_on: G02
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 - 来源卡片清单: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json`
 
@@ -28,7 +28,7 @@
 
 ### 1.2 代码/文档锚点
 
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::7
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::7
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
 
@@ -39,7 +39,7 @@
 
 ### 可修改（白名单）
 
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md
@@ -91,7 +91,7 @@ card_export:
   hard_depends_on: [G02]
   depends_on: [G02]
   file_whitelist:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G03_G3_契约一致性.md
@@ -100,7 +100,7 @@ card_export:
   - 对齐 planning_contract / gate_contract / card_order
   - 对齐 parallel_plan 与 vk_cards 的 Gate 卡定义
   code_anchor_refs:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::7
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::7
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   acceptance_checks:

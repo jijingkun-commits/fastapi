@@ -25,7 +25,7 @@
 ## 3. 测试与验收
 
 - 最小测试集:
-  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md --output -`
+  - `cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md --output -`
 - 验收标准:
   - `clarify_plan` 模式可跑
   - 统一入口能作为唯一推荐入口
@@ -57,12 +57,12 @@ card_export:
     - scripts/check_workflow_contract.py::MODE_REGISTRY
     - scripts/check_workflow_contract.py::run_mode
   acceptance_checks:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md --output -
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md --output -
   rollback_anchors:
     - WORKFLOW_GATE_UNIFIED_ENABLED=false
-  evidence_entry: workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md
+  evidence_entry: workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md
   check_cmd:
-    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md --output -
+    - cd /Users/jijingkun/bojxAI/fastapi && python3 scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/workflow-gate-retirement_requirements.md --implementation-path workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md --output -
   done_gate:
     - check_workflow_contract 统一入口可执行
     - clarify_plan 模式输出等价结果

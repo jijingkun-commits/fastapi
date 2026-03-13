@@ -8,7 +8,7 @@
 ## 0. 关联与来源
 
 - 对应 `task_key`: `PP-20260306-workflow-gate-retirement`
-- 来源主计划: `workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md`
 - 来源并行计划: `workdocs/任务拆解/2026-03-06_工程减法治理/parallel_plan.md`
 - card_key: `PP-20260306-workflow-gate-retirement::WS-C01`
 - PR 归属: `PR-01` / `codex/workflow-gate-retirement-pr-01`
@@ -22,14 +22,14 @@
 ## 2. 文件边界
 
 ### 可修改（白名单）
-- `workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md`
-- `workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md`
-- `workdocs/归档/治理专题/工程减法治理/工程减法治理看板模板_2026-03-06.md`
+- `workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md`
+- `workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md`
+- `workdocs/归档/专题/治理专题/工程减法治理/工程减法治理看板模板_2026-03-06.md`
 
 ## 3. 测试与验收
 
 - 最小测试集:
-  - `cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md`
+  - `cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md`
 - 验收标准:
   - `NO-GO` 文案明确
   - 团队不再执行 `rm scripts/check_*.py`
@@ -51,23 +51,23 @@ card_export:
   soft_depends_on: []
   depends_on: []
   file_whitelist:
-    - workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md
-    - workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
-    - workdocs/归档/治理专题/工程减法治理/工程减法治理看板模板_2026-03-06.md
+    - workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md
+    - workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
+    - workdocs/归档/专题/治理专题/工程减法治理/工程减法治理看板模板_2026-03-06.md
   mechanism_summary:
     - 冻结 rm 删除口径
     - 统一 NO-GO 执行清单
     - 用 v3 口径替代直接删除建议
   code_anchor_refs:
-    - workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md::3.1
-    - workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md::6
+    - workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md::3.1
+    - workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md::6
   acceptance_checks:
-    - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
+    - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
   rollback_anchors:
     - WORKFLOW_GATE_UNIFIED_ENABLED=false
-  evidence_entry: workdocs/归档/实施计划/workflow-gate-retirement_implementation_plan.md
+  evidence_entry: workdocs/归档/正文/实施计划/workflow-gate-retirement_implementation_plan.md
   check_cmd:
-    - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
+    - cd /Users/jijingkun/bojxAI/fastapi && rg -n "NO-GO|rm scripts/check_\*\.py" workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06.md workdocs/归档/专题/治理专题/工程减法治理/工程减法体检报告_2026-03-06_v3.md
   done_gate:
     - NO-GO 删除口径冻结完成
     - 团队停用 rm scripts/check_*.py

@@ -64,8 +64,8 @@
     "source_ws_file": "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-00_C00_预检门禁冻结.md"
   },
   "source_files": {
-    "requirements": "workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md",
-    "implementation_plan": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+    "requirements": "workdocs/归档/正文/需求/用户个性化永久记忆与管理能力_requirements.md",
+    "implementation_plan": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
     "parallel_plan": "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
     "workstreams": [
       "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/workstreams/WS-C01_C01P1查询能力列表_详情_chunks.md",
@@ -118,7 +118,7 @@
         "app/repositories/document_memory_repo.py::list_document_chunks"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k memories_list",
@@ -128,7 +128,7 @@
         "feature.enable_document_memory_admin_api=false",
         "移除 /memories 列表与详情路由"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -188,7 +188,7 @@
         "app/repositories/document_memory_repo.py::archive_document"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k search_debug",
@@ -199,7 +199,7 @@
         "关闭 search-debug 路由",
         "关闭 delete 路由仅保留 archive"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -259,7 +259,7 @@
         "install/sql/init_postgres.sql::t_user_memory_admin_audit"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/unit/test_memory_admin_audit_service.py",
@@ -269,7 +269,7 @@
         "feature.enable_document_memory_admin_audit=false",
         "审计降级为结构化日志"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -329,7 +329,7 @@
         "app/api/v1/endpoints/memory_admin_api.py::get_memory_overview"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py -k embedding_status",
@@ -339,7 +339,7 @@
         "回退到旧 embedding-status 响应结构",
         "删除 memory-overview 路由"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -401,7 +401,7 @@
         "web/src/lib/memory-admin-api.ts::listMemories"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/.codex/worktrees/978e/fastapi/web && npm run lint"
@@ -410,7 +410,7 @@
         "移除 AdminSidebar memory 菜单",
         "下线 /admin/memory 页面路由"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -476,7 +476,7 @@
         "tests/api/test_memory_admin_api.py"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "cd /Users/jijingkun/bojxAI/fastapi && venv/bin/python -m pytest -q tests/api/test_memory_admin_api.py tests/unit/test_memory_admin_audit_service.py",
@@ -486,7 +486,7 @@
         "新增开关全部置 false",
         "回退 memory admin 文档入口"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "implementation-card",
       "merge_required": true,
       "file_scope": [
@@ -494,8 +494,8 @@
         "app/core/config.py",
         "install/sql/init_postgres.sql",
         "install/scripts/init_postgres.sql/033_memory_admin_config_seed.sql",
-        "workdocs/归档/需求/用户个性化永久记忆与管理能力_requirements.md",
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
+        "workdocs/归档/正文/需求/用户个性化永久记忆与管理能力_requirements.md",
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md",
         "docs/SUMMARY.md",
         "tests/api/test_memory_admin_api.py",
         "tests/unit/test_memory_admin_audit_service.py"
@@ -548,10 +548,10 @@
       "code_anchor_refs": [
         "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/_active_task.json::scope",
         "scripts/docs_guard.py::strict mode",
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
       ],
       "example_refs": [
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#4"
       ],
       "acceptance_checks": [
         "python3 scripts/coder4/coder4_scope_guard.py --repo-root /Users/jijingkun/bojxAI/fastapi --task-split-dir 2026-03-01_用户个性化永久记忆与管理能力 --scope-request .artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力/coder4_scope_request.json",
@@ -561,13 +561,13 @@
         "暂停 /jjk-vktodo",
         "回退到 C06 前状态并复测"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
         "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
         "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json",
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "done_gate": [
         "前置卡 gate_result 全通过",
@@ -609,7 +609,7 @@
       "code_anchor_refs": [
         "scripts/coder4/check_integration_gate.py::run_check",
         ".artifacts/states/task_splits/2026-03-01_用户个性化永久记忆与管理能力/<task_key>/task-runner-state.json.merge_results.<card_id>",
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md::planning_contract"
       ],
       "example_refs": [
         "docs/开发文档/流程与工具/AI协作速查表.md#串行主干状态流最小路径"
@@ -621,14 +621,14 @@
         "暂停最终交付并回到缺失 merge 证据的实现卡补账",
         "恢复到 G01 通过但 IG01 待通过状态"
       ],
-      "evidence_entry": "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
+      "evidence_entry": "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md#9",
       "task_mode": "inspection-card",
       "merge_required": false,
       "file_scope": [
         "scripts/coder4/check_integration_gate.py",
         "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/parallel_plan.md",
         "workdocs/任务拆解/2026-03-01_用户个性化永久记忆与管理能力/contracts/vk_cards.json",
-        "workdocs/归档/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
+        "workdocs/归档/正文/实施计划/用户个性化永久记忆与管理能力_implementation_plan.md"
       ],
       "done_gate": [
         "实现卡 merge_result 证据齐全且 merged=true",

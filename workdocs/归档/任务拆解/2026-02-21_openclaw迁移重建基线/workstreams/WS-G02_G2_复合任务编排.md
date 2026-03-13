@@ -10,7 +10,7 @@
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: G02
 - hard_depends_on: G01
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源卡片清单: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json`
 
 ## 1. 目标
@@ -27,17 +27,17 @@
 
 ### 1.2 代码/文档锚点
 
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::6
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::6
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
 
 - 来源证据：
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#7
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#7
 
 ## 2. 文件边界
 
 ### 可修改（白名单）
 
-- workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+- workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
 - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md
 - docs/SUMMARY.md
@@ -87,7 +87,7 @@ card_export:
   hard_depends_on: [G01]
   depends_on: [G01]
   file_whitelist:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/workstreams/WS-G02_G2_复合任务编排.md
   - docs/SUMMARY.md
@@ -95,13 +95,13 @@ card_export:
   - 复核 hard_depends_on 链路在文档、卡片与看板的一致性
   - 复核 single_active_card 串行约束未被破坏
   code_anchor_refs:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md::6
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md::6
   - workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/contracts/vk_cards.json
   acceptance_checks:
   - python3 scripts/docs_guard.py --strict
   rollback_anchors:
   - WAVE_ROLLBACK_DRILL_MATRIX
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#7
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#7
   done_gate:
   - G01 完成后触发 G02 复核
   - hard_depends_on 链路在文档、卡片、看板一致

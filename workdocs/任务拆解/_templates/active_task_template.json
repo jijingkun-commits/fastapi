@@ -6,7 +6,7 @@
   "single_active_card": true,
   "auto_done_policy": "hard_gate",
   "preflight_required": "C00",
-  "status_source_of_truth": "workdocs/归档/实施计划/<topic>_implementation_plan.md",
+  "status_source_of_truth": "workdocs/归档/正文/实施计划/<topic>_implementation_plan.md",
   "updated_at": "<ISO8601>",
   "updated_by": "<operator|automation>"
 }

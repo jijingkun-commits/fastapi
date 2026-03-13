@@ -9,7 +9,7 @@
 
 - 对应 task_key: PP-20260221-OPENCLAW-REBUILD-BASELINE
 - 对应 card_id: C02
-- 来源主计划: `workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md`
+- 来源主计划: `workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md`
 - 来源并行计划: `workdocs/归档/任务拆解/2026-02-21_openclaw迁移重建基线/parallel_plan.md`
 
 ## 1. 目标
@@ -36,7 +36,7 @@
   - app/core/config_contract.py（ToolPolicyContract）
 
 - 来源证据:
-  - workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7
+  - workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7
 
 ## 2. 文件边界
 
@@ -102,7 +102,7 @@ card_export:
   rollback_anchors:
   - ENABLE_TOOL_GOVERNANCE
   - TOOL_POLICY_FAIL_MODE
-  evidence_entry: workdocs/归档/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7
+  evidence_entry: workdocs/归档/正文/实施计划/openclaw迁移重建基线_implementation_plan.md#4.7
   done_gate:
   - Tool Registry/Policy/Broker 接线通过
   - ENABLE_TOOL_GOVERNANCE 与 TOOL_POLICY_FAIL_MODE 回滚验证通过
