@@ -44,4 +44,11 @@ db_migration_result:
   alembic_revision_present: true|false
   upgrade_head_proven: true|false
   verdict: pass|warn|fail
+
+agent_governance_result:
+  smell_ids_closed: pass|warn|fail
+  real_task_eval_verified: true|false
+  complexity_upgrade_evidence_verified: true|false
+  missing_eval_evidence: present|absent
+  note: <命中 agent 相关任务时填写>
 ```

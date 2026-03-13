@@ -1,0 +1,51 @@
+name: Agent Governance Gate
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'app/ai/AGENTS.md'
+      - '.cursor/rules/agent_authoring.mdc'
+      - '.cursor/commands/jjk-review.md'
+      - '.cursor/commands/jjk-verify.md'
+      - 'workdocs/_templates/jjk_review_templates.md'
+      - 'workdocs/_templates/jjk_verify_templates.md'
+      - 'docs/README.md'
+      - 'docs/开发文档/规范/多智能体开发规范.md'
+      - 'docs/开发文档/架构设计/AI模块设计.md'
+      - 'tests/unit/test_agent_governance_contract_docs.py'
+      - '.github/workflows/agent-governance-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  agent-governance-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run agent governance contract gate
+        run: |
+          bash scripts/pytest_targeted.sh tests/unit/test_agent_governance_contract_docs.py
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Agent Governance Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Test: \`tests/unit/test_agent_governance_contract_docs.py\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Rule source: \`.cursor/rules/agent_authoring.mdc\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local route: \`app/ai/AGENTS.md\`" >> "$GITHUB_STEP_SUMMARY"

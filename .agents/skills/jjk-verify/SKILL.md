@@ -83,6 +83,25 @@ description: "Use when you need `jjk-verify` in this repository. Source intent: 
 
 如果三者对不上，不要糊弄过去，直接在报告里写清楚是哪一段断了。
 
+### 4.1 命中 agent 相关任务时怎么验
+
+如果本轮交付命中 `app/ai/**`、`app/ai/AGENTS.md`、`.cursor/rules/agent_authoring.mdc`、agent 规范文档，或主题本身就是 agent 编排/路由/状态契约治理，请在 `verify_report.md` 里追加：
+
+```yaml
+agent_governance_result:
+  smell_ids_closed: pass|warn|fail
+  real_task_eval_verified: true|false
+  complexity_upgrade_evidence_verified: true|false
+  missing_eval_evidence: present|absent
+  note: <当前 agent 写法是否还残留过度流程或伪语义理解>
+```
+
+验收口径：
+
+1. `real_task_eval_verified=false` 时，不要声称 agent 治理已经稳定。
+2. `missing_eval_evidence=present` 时，默认不能给 `PASS`。
+3. 若 `keyword_primary_routing`、`dual_truth_design` 仍未关闭，也不要给 `PASS`。
+
 ## 输出怎么写
 
 最终报告至少写：

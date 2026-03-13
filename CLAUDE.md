@@ -22,6 +22,7 @@
 8. **诊断先报结论**：调试/排障场景中，若日志、报错栈、监控或最小复现证据已足以锁定根因，必须先用“结论 + 证据位置 + 是否继续处理”的形式同步用户；未经用户明确同意，不得默认进入优化、修复、重构、补测或文档回填闭环。
 9. **语义判定边界固定**：禁止在编排层（如 `app/services/**`、`app/api/**`、router/controller）新增关键词词表、正则词表或 substring 语义判定；语义识别必须收敛到 `intent/policy/resolver` 层并输出结构化 contract。
 10. **Lean 交付要有证据**：热点目录/热点文件必须过 `lean-guard`；未给出删除清单、重复收敛、复杂度变化、验证结果，不得宣称 `lean/refactor` 完成。
+11. **Agent 写法治理走专项 rule pack**：命中 agent 编排、路由、handoff、状态契约、review/verify 模板或 `app/ai/**` 时，必须结合 `.cursor/rules/agent_authoring.mdc`；命中 `app/ai/**` 时，以 `app/ai/AGENTS.md` 的局部高信号规则为准。
 
 ## 执行流程入口（强制）
 1. 改代码、跑测试、做验收前，先读 `PLANS.md` 对应章节。
@@ -37,6 +38,7 @@
   - 命令与技能写法：`.cursor/rules/command_authoring.mdc`
   - 双数据库约束：`.cursor/rules/dual-database.mdc`
   - 文档同步与映射：`.cursor/rules/doc_sync.mdc`
+  - Agent 写法治理：`.cursor/rules/agent_authoring.mdc`（命中 `app/ai/**` 时叠加 `app/ai/AGENTS.md`）
   - LangGraph 约束：`.cursor/rules/langgraph.mdc`
   - 语言风格：`.cursor/rules/python_style.mdc`、`.cursor/rules/typescript_style.mdc`
   - 测试质量与坏测试治理：`.cursor/rules/test_quality.mdc`

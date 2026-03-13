@@ -5,19 +5,15 @@
 
 ## 生效决策索引（ACTIVE 优先，建议最多 20 条）
 
-<<<<<<< HEAD
+- 2026-03-13｜Codex Agent 写法治理阶段一采用“仓库级路由 + app/ai 局部覆盖 + Layer2 专项规则 + review/verify smell 清单 + drift gate”（ACTIVE）→ `AGENTS.md`、`app/ai/AGENTS.md`、`.cursor/rules/agent_authoring.mdc`、`.github/workflows/agent-governance-gate.yml`
+- 2026-03-13｜`memory-bank` 收敛为仓库级活跃决策索引；完整 ADR 正文写入 `docs/内部参考/决策记录.md`（ACTIVE）→ `AGENTS.md`、`memory-bank.md`、`docs/内部参考/决策记录.md`
+- 2026-03-13｜改功能默认带一次“局部复盘 + 顺手减法”，`jjk-review/jjk-verify` 同步强化架构合理性与代码精简审查（ACTIVE）→ `AGENTS.md`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`workdocs/_templates/jjk_{review,verify}_templates.md`
 - 2026-03-12｜聊天复合提问耗时治理首轮采用局部重构版 B，先修 preview 回流、frozen todo.query、coverage 口径，不先上 `Send` 全并行（ACTIVE）→ `docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`、`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md`
 - 2026-03-12｜日志已足够定责时先报告根因，禁止默认进入修复闭环（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`
 - 2026-03-12｜聊天运行态状态条固定挂在消息流尾部，禁止重新挂回 footer（ACTIVE）→ `docs/开发文档/架构设计/前端架构.md`、`web/src/components/chat/index.tsx`、`web/src/app/globals.css`
 - 2026-03-12｜`DB_ECHO` 默认改为显式开启，memory intent runtime 空闲轮询与观测采样统一降噪（ACTIVE）→ `app/core/config.py`、`app/core/memory_intent_runtime.py`、`app/services/memory_intent_worker_service.py`
 - 2026-03-12｜文档信息架构细化为“最终/过程/运行态 × 人类/机器”双维模型；功能级过程 bundle 固定为 `需求/设计/任务拆解/contracts|reports`（ACTIVE）→ `docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/工作流/文档信息架构.md`、`workdocs/README.md`
 - 2026-03-12｜瘦身判断收敛为“职责收口优先 + whole-change-set 统计”，新增文件与 helper 同样计入增长（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/工程规范/lean-guard.md`
-=======
-- 2026-03-13｜`memory-bank` 收敛为仓库级活跃决策索引；完整 ADR 正文写入 `docs/内部参考/决策记录.md`（ACTIVE）→ `AGENTS.md`、`memory-bank.md`、`docs/内部参考/决策记录.md`
-- 2026-03-13｜改功能默认带一次“局部复盘 + 顺手减法”，`jjk-review/jjk-verify` 同步强化架构合理性与代码精简审查（ACTIVE）→ `AGENTS.md`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`workdocs/_templates/jjk_{review,verify}_templates.md`
-- 2026-03-12｜文档信息架构细化为“最终/过程/运行态 × 人类/机器”双维模型；功能级过程 bundle 固定为 `需求/设计/任务拆解/contracts|reports`（ACTIVE）→ `docs/README.md`、`docs/SUMMARY.md`、`docs/开发文档/流程与工具/文档信息架构.md`、`workdocs/README.md`
-- 2026-03-12｜瘦身判断收敛为“职责收口优先 + whole-change-set 统计”，新增文件与 helper 同样计入增长（ACTIVE）→ `AGENTS.md`、`.cursor/rules/core.mdc`、`.cursor/rules/bugfix-minimal-change.mdc`、`docs/开发文档/规范/lean-guard.md`
->>>>>>> 1109628c (整合子目录层级方案评估討論？inesis)
 - 2026-03-12｜聊天图表继续固定为客户端 `react-vega + svg`，Next 构建层单点隔离 `canvas` 可选依赖（ACTIVE）→ `web/next.config.mjs`、`web/src/components/chat/messages/sql-result-chart.tsx`
 - 2026-03-12｜聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器（ACTIVE）→ `docs/开发文档/架构设计/AI模块设计.md`、`docs/API文档/接口文档.md`、`web/src/hooks/useSSEStream.ts`
 - 2026-03-11｜知识库占位符降级为中间语法，AI 回复最终展示收敛到 ordered content blocks（ACTIVE）→ `docs/plans/2026-03-11-ordered-content-blocks-design.md`、`app/core/message_display_blocks.py`
@@ -56,6 +52,17 @@
 - 影响范围：`AGENTS.md`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`.agents/skills/jjk-review/SKILL.md`、`.agents/skills/jjk-verify/SKILL.md`、`workdocs/_templates/jjk_{review,verify}_templates.md`、后续所有 feature / bugfix / refactor 的评审与验收口径
 - 失效条件：若未来存在更上层、可解释且团队接受的 review 编排协议，能稳定覆盖同样的架构与精简审查语义，可将本决策标记为 `SUPERSEDED`
 - 关联文档/代码：`AGENTS.md`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`workdocs/_templates/jjk_review_templates.md`、`workdocs/_templates/jjk_verify_templates.md`
+
+### 2026-03-13 Codex Agent 写法治理阶段一采用“仓库级路由 + app/ai 局部覆盖 + Layer2 专项规则 + review/verify smell 清单 + drift gate”
+
+- 状态：ACTIVE
+- 决策主题：把“以后 Codex 在本仓库怎么写 agent”收口为 repo-native 规则装配，而不是继续靠口头提醒、单次 review 评论或再加一个监管 agent
+- 背景与问题：用户明确指出当前 agent 写法有两个长期坏味道：一是过度流程设计，二是关键词判主语义；仓库虽然已有通用精简规则和语义边界规则，但缺少 agent 写法专项入口、专项 smell 口径和专项 drift gate，导致同类问题容易回流
+- 最终决策：根 `AGENTS.md` 只新增 agent 专项路由；`app/ai/AGENTS.md` 作为局部高信号入口；`.cursor/rules/agent_authoring.mdc` 作为技术真理源；`jjk-review/jjk-verify` 与 `workdocs/_templates/jjk_{review,verify}_templates.md` 统一消费 `multi_decider_stack / keyword_primary_routing / dual_truth_design / speculative_fallback / missing_eval_evidence` 五类 smell；新增 `tests/unit/test_agent_governance_contract_docs.py` 与 `.github/workflows/agent-governance-gate.yml` 冻结关键标记
+- 取舍理由：相比把所有 agent 细则继续塞回根 `AGENTS.md`，或引入新的 meta-agent 做监管，这套方案更短、更贴近当前仓库分层，也更符合 OpenAI 对 `AGENTS.md` 的分层建议和 Anthropic 对 simple workflow / eval-first 的公开最佳实践
+- 影响范围：`AGENTS.md`、`app/ai/AGENTS.md`、`.cursor/rules/agent_authoring.mdc`、`.cursor/commands/jjk-review.md`、`.cursor/commands/jjk-verify.md`、`workdocs/_templates/jjk_review_templates.md`、`workdocs/_templates/jjk_verify_templates.md`、`tests/unit/test_agent_governance_contract_docs.py`、`.github/workflows/agent-governance-gate.yml`、`docs/README.md`、`docs/开发文档/规范/多智能体开发规范.md`
+- 失效条件：若未来仓库引入更高优先级且更靠近执行链的统一 agent authoring 协议，能稳定覆盖同样的规则装配与门禁语义，可将本条标记为 `SUPERSEDED`；在此之前保持当前分层
+- 关联文档/代码：`workdocs/需求/2026-03-13_codex-agent-governance-and-refactor/requirements.md`、`workdocs/设计/2026-03-13_codex-agent-governance-and-refactor/design.md`、`workdocs/任务拆解/2026-03-13_codex-agent-governance-phase1/contracts/implementation_plan.md`、`docs/内部参考/决策记录.md`
 
 ### 2026-03-12 聊天 live 展示正式收口到 SSE `display_blocks`，前端退役 placeholder 编译器
 

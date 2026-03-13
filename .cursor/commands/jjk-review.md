@@ -62,6 +62,31 @@ description: 审查入口：按需求、设计、计划和证据做结构化审�
 4. 有没有把触达范围本来就很明显的旧入口、重复逻辑、孤儿分支继续留着不管
 5. 如果实现没有违背 design，但明显让 touched scope 更复杂，也要提 finding
 
+### 3.1 命中 agent 相关任务时怎么审
+
+如果 touched scope 命中 `app/ai/**`、`app/ai/AGENTS.md`、`.cursor/rules/agent_authoring.mdc`、agent 规范文档，或主题本身就是 agent 编排/路由/状态契约治理，请额外输出：
+
+```yaml
+agent_authoring_review:
+  smell_ids_checked:
+    - multi_decider_stack
+    - keyword_primary_routing
+    - dual_truth_design
+    - speculative_fallback
+    - missing_eval_evidence
+  complexity_upgrade_evidence: pass|warn|fail
+  real_task_eval_evidence: pass|warn|fail
+  note: <当前 agent 写法是否仍在过度设计>
+```
+
+判定口径：
+
+1. `multi_decider_stack`：同一主语义被 planner/router/supervisor/expert 重复判两层以上。
+2. `keyword_primary_routing`：关键词、正则、substring 承担主语义路由，而不是 guardrail。
+3. `dual_truth_design`：运行态主语义同时由两份以上状态源决定。
+4. `speculative_fallback`：为“以后可能会用到”预埋 wrapper、兼容壳或双轨 fallback。
+5. `missing_eval_evidence`：方案宣称更稳/更简单，但拿不出真实任务样本或对照证据。
+
 ### 4. Findings 优先写这些
 
 优先写：

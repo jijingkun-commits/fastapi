@@ -39,4 +39,15 @@ slimming_review:
   stale_fallbacks: pass|warn|fail
   unnecessary_wrappers: pass|warn|fail
   note: <本轮是否真正让 touched scope 更简洁>
+
+agent_authoring_review:
+  smell_ids_checked:
+    - multi_decider_stack
+    - keyword_primary_routing
+    - dual_truth_design
+    - speculative_fallback
+    - missing_eval_evidence
+  complexity_upgrade_evidence: pass|warn|fail
+  real_task_eval_evidence: pass|warn|fail
+  note: <命中 agent 相关任务时填写>
 ```

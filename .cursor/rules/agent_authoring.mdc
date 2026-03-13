@@ -1,0 +1,55 @@
+---
+description: Agent 写法治理规范：默认简单、contract-first、少启发式
+globs: ["app/ai/**/*.py", "app/ai/**/*.md", ".cursor/commands/jjk-review.md", ".cursor/commands/jjk-verify.md", "docs/开发文档/规范/多智能体开发规范.md"]
+alwaysApply: false
+---
+
+# Agent 写法治理规范
+
+## 默认立场
+
+1. **simple-first**：默认先单 agent、单 supervisor 或简单 workflow；只有简单方案被证据证明不足，才允许新增决策层或新增 agent。
+2. **contract-first**：节点之间优先传结构化 contract（如 `decision / reason_code / slots / needs_clarification / confidence`），不靠自由文本 handoff 传主语义。
+3. **single semantic decider**：一次请求默认只允许一个主语义 owner；下游 executor 消费 contract，不重复做第二次“主判定”。
+4. **guardrail 与主语义分层**：guardrail 可以阻断、拒绝、清洗、抽取格式，但不能替代主语义理解。
+5. **real-task eval first**：agent 路由、handoff、状态契约或多 agent 结构发生变化时，必须补真实任务样本；没有真实样本，不得声称“已经更稳/更简单”。
+
+## smell_ids（默认阻断口径）
+
+| smell_id | 命中信号 | 默认处理 |
+|---|---|---|
+| `multi_decider_stack` | planner/router/supervisor/expert 连续对同一主语义做两层以上主判定 | 阻断，要求删层或给复杂度升级证据 |
+| `keyword_primary_routing` | 关键词、正则、substring 承担主路由或主意图判定 | 阻断，降级为 guardrail/extraction only |
+| `dual_truth_design` | 同一运行态语义同时由多份状态源决定 | 阻断，收敛到唯一真相状态 |
+| `speculative_fallback` | 为“以后可能需要”预埋 wrapper、兼容壳、双轨 fallback | 阻断，除非有明确外部不确定性与失效条件 |
+| `missing_eval_evidence` | 方案宣称更稳/更简单，但没有真实任务样本或对照 evidence | 阻断，先补样本再下结论 |
+
+## 复杂度升级门槛
+
+只有同时满足下面条件，才允许从 simple-first 升级复杂度：
+
+1. 简单方案已经被明确评估过，而且不能满足当前目标。
+2. 升级原因是当前真实需求，不是想象中的未来扩展。
+3. 能说清新增哪一层、由谁做唯一 owner、旧路径如何退役。
+4. 有真实任务样本或回归集，能比较升级前后差异。
+
+## 明确不再怎么做
+
+1. 不再用自由文本 handoff + 下游关键词猜语义的组合替代 contract。
+2. 不再把 guardrail、policy、router、planner 都写成主语义入口。
+3. 不再保留“新状态 + 旧状态 + 临时 fallback”三轨并存的运行态设计。
+4. 不再把“看起来更安全”的 speculative fallback 当默认工程习惯。
+
+## Review / Verify 约束
+
+1. `jjk-review` 命中 agent 相关任务时，必须输出 `agent_authoring_review`，并显式检查：
+   - `multi_decider_stack`
+   - `keyword_primary_routing`
+   - `dual_truth_design`
+   - `speculative_fallback`
+   - `missing_eval_evidence`
+2. `jjk-verify` 命中 agent 相关任务时，必须输出 `agent_governance_result`，至少包含：
+   - `real_task_eval_verified`
+   - `complexity_upgrade_evidence_verified`
+   - `missing_eval_evidence`
+3. 对于明显命中 `keyword_primary_routing`、`dual_truth_design` 或 `missing_eval_evidence` 的交付，默认不能给 `PASS`。
