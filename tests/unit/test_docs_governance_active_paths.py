@@ -36,6 +36,22 @@ def test_legacy_entry_pages_only_are_treated_as_process_docs():
     assert module.resolve_doc_role(hypothetical_legacy_body) == "support"
 
 
+def test_legacy_entry_dirs_only_keep_readme():
+    legacy_iteration_files = sorted(
+        str(path)
+        for path in Path("docs/内部参考/迭代需求").glob("*")
+        if path.is_file()
+    )
+    legacy_task_split_files = sorted(
+        str(path)
+        for path in Path("docs/内部参考/任务拆解").glob("*")
+        if path.is_file()
+    )
+
+    assert legacy_iteration_files == ["docs/内部参考/迭代需求/README.md"]
+    assert legacy_task_split_files == ["docs/内部参考/任务拆解/README.md"]
+
+
 def test_contract_gate_uploads_current_machine_readable_artifacts():
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
 
@@ -77,3 +93,36 @@ def test_runtime_state_pollution_only_flags_existing_tracked_files(tmp_path):
     finally:
         module.ROOT = original_root
         module.iter_git_tracked_paths = original_iter
+
+
+def test_legacy_entry_dir_residue_flags_non_readme_files(tmp_path):
+    module = _load_docs_guard_module()
+    docs_dir = tmp_path / "docs"
+    iteration_dir = docs_dir / "内部参考" / "迭代需求"
+    task_split_dir = docs_dir / "内部参考" / "任务拆解"
+    iteration_dir.mkdir(parents=True, exist_ok=True)
+    task_split_dir.mkdir(parents=True, exist_ok=True)
+    (iteration_dir / "README.md").write_text("ok", encoding="utf-8")
+    (task_split_dir / "README.md").write_text("ok", encoding="utf-8")
+    leaked = iteration_dir / "example.md"
+    leaked.write_text("legacy body", encoding="utf-8")
+
+    original_root = module.ROOT
+    original_docs_dir = module.DOCS_DIR
+    original_dirs = module.LEGACY_ENTRY_ONLY_DIRS
+    try:
+        module.ROOT = tmp_path
+        module.DOCS_DIR = docs_dir
+        module.LEGACY_ENTRY_ONLY_DIRS = (iteration_dir, task_split_dir)
+        findings = []
+
+        count = module.check_legacy_entry_only_dirs(findings)
+
+        assert count == 1
+        assert len(findings) == 1
+        assert findings[0].category == "legacy_entry_dir_residue"
+        assert findings[0].file == str(leaked.relative_to(tmp_path))
+    finally:
+        module.ROOT = original_root
+        module.DOCS_DIR = original_docs_dir
+        module.LEGACY_ENTRY_ONLY_DIRS = original_dirs

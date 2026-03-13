@@ -192,8 +192,8 @@ implementation_tasks:
     mandatory_evidence: []
     file_paths:
       - docs/开发文档/架构设计/AI模块设计.md
-      - docs/内部参考/迭代需求/agent-intent-anti-false-trigger_requirements.md
-      - docs/内部参考/迭代需求/agent-intent-anti-false-trigger_implementation_plan.md
+      - workdocs/归档/正文/需求/agent-intent-anti-false-trigger_requirements.md
+      - workdocs/归档/正文/实施计划/agent-intent-anti-false-trigger_implementation_plan.md
     symbols:
       - router_contract_runtime_sections
       - clarify_plan_alignment_report
@@ -202,9 +202,9 @@ implementation_tasks:
     acceptance_cmds:
       - cmd: PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict
         kind: integration
-      - cmd: PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_requirements.md --implementation-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_implementation_plan.md --output docs/内部参考/迭代需求/agent-intent-anti-false-trigger_clarify_plan_alignment.json
+      - cmd: PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/agent-intent-anti-false-trigger_requirements.md --implementation-path workdocs/归档/正文/实施计划/agent-intent-anti-false-trigger_implementation_plan.md --output workdocs/归档/报告/机读校验/agent-intent-anti-false-trigger_clarify_plan_alignment.json
         kind: integration
-      - cmd: PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_implementation_plan.md --output docs/内部参考/迭代需求/agent-intent-anti-false-trigger_planning_temporal_gate.json
+      - cmd: PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/agent-intent-anti-false-trigger_implementation_plan.md --output workdocs/归档/报告/机读校验/agent-intent-anti-false-trigger_planning_temporal_gate.json
         kind: integration
 ```
 

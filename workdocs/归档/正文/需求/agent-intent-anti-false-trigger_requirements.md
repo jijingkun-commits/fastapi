@@ -13,9 +13,9 @@
 requirements_contract:
   version: v1
   status: approved
-  design_source: docs/plans/2026-03-09-agent-intent-anti-false-trigger-design.md
+  design_source: workdocs/归档/正文/设计/2026-03-09-agent-intent-anti-false-trigger-design.md
   design_approved: true
-  clarify_handoff_source: docs/plans/2026-03-09-agent-intent-anti-false-trigger-design.md
+  clarify_handoff_source: workdocs/归档/正文/设计/2026-03-09-agent-intent-anti-false-trigger-design.md
   clarify_handoff_version: v2
   design_approval_evidence: approved_design_and_hydrated_tasks
   design_freeze_summary:

@@ -27,7 +27,7 @@
 - followup_tasks:
   - `继续清理 test-only/兼容壳残留。`
   - `若后续出现新的图片补链路需求，优先挂到统一保存/渲染 owner，不再恢复独立 fixer 模块。`
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_image_fixer_retirement.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_image_fixer_retirement.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`

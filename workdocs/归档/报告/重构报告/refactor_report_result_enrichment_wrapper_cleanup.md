@@ -25,7 +25,7 @@
   - `历史设计/收口文档仍会把结果增强规则服务描述为迁移参与模块，这是历史语境，当前不做清理。`
 - followup_tasks:
   - `继续清理剩余 test-only/helper-only 残留。`
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_result_enrichment_wrapper_cleanup.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_result_enrichment_wrapper_cleanup.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`

@@ -102,6 +102,10 @@ CURRENT_STATE_PROCESS_DOCS = {
     DOCS_DIR / "内部参考" / "任务拆解" / "README.md",
 }
 PROCESS_DOC_ROOTS: tuple[Path, ...] = ()
+LEGACY_ENTRY_ONLY_DIRS = (
+    DOCS_DIR / "内部参考" / "迭代需求",
+    DOCS_DIR / "内部参考" / "任务拆解",
+)
 RUNTIME_JSON_FILENAMES = {
     "task-runner-state.json",
     "coder4-idempotency.json",
@@ -972,6 +976,29 @@ def check_runtime_artifact_pollution(findings: list[Finding]) -> int:
     return count
 
 
+def check_legacy_entry_only_dirs(findings: list[Finding]) -> int:
+    count = 0
+    for root in LEGACY_ENTRY_ONLY_DIRS:
+        if not root.exists():
+            continue
+        allowed_readme = root / "README.md"
+        for candidate in sorted(root.rglob("*")):
+            if candidate.is_dir():
+                continue
+            if candidate == allowed_readme:
+                continue
+            count += 1
+            findings.append(
+                Finding(
+                    category="legacy_entry_dir_residue",
+                    level="error",
+                    file=str(candidate.relative_to(ROOT)),
+                    detail="旧入口目录只允许保留 README，正文/报告/机读产物应迁移到 workdocs/ 或归档目录",
+                )
+            )
+    return count
+
+
 def check_current_state_docs(findings: list[Finding], selected_docs: list[Path]) -> tuple[int, int]:
     timestamp_missing = 0
     forbidden_headings = 0
@@ -1317,6 +1344,7 @@ def print_human_report(report: dict, *, non_blocking: bool = False) -> None:
     print(f"report_naming_errors: {stats['report_naming_errors']}")
     print(f"current_state_timestamp_missing: {stats['current_state_timestamp_missing']}")
     print(f"current_state_forbidden_headings: {stats['current_state_forbidden_headings']}")
+    print(f"legacy_entry_dir_residue: {stats['legacy_entry_dir_residue']}")
     print(f"runtime_artifact_pollution: {stats['runtime_artifact_pollution']}")
     print(f"blacklist_var_hits: {stats['blacklist_var_hits']}")
     print(f"openclaw_gate_status_errors: {stats['openclaw_gate_status_errors']}")
@@ -1372,6 +1400,7 @@ def main() -> int:
         "report_naming_errors": check_report_naming(findings),
         "current_state_timestamp_missing": current_state_timestamp_missing,
         "current_state_forbidden_headings": current_state_forbidden_headings,
+        "legacy_entry_dir_residue": check_legacy_entry_only_dirs(findings),
         "runtime_artifact_pollution": (
             check_runtime_artifact_pollution(findings)
             + check_tracked_runtime_state_pollution(findings)

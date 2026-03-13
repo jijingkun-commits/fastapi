@@ -27,7 +27,7 @@
 - followup_tasks:
   - `继续清理 test-only/兼容壳残留。`
   - `按需补充 AgentEvent.confirmation()，前提是出现稳定调用面。`
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_events_helper_retirement.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_events_helper_retirement.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`

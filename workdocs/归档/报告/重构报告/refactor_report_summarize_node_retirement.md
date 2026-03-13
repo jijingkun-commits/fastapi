@@ -26,7 +26,7 @@
 - followup_tasks:
   - `清理 memory_get 及其旧 seam 测试`。
   - `拆分 test_events_contract，只保留仍有效的导出契约`。
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_summarize_node_retirement.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_summarize_node_retirement.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`

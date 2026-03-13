@@ -1,8 +1,8 @@
 # context-engineering-unification 实施计划
 
 > 更新时间：2026-03-11 18:45 +08:00  
-> 上游设计：`docs/plans/2026-03-10-context-engineering-unification-design.md`  
-> 对应需求：`docs/内部参考/迭代需求/context-engineering-unification_requirements.md`
+> 上游设计：`workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md`
+> 对应需求：`workdocs/归档/正文/需求/context-engineering-unification_requirements.md`
 
 ## 1. 实施概览
 
@@ -131,7 +131,7 @@ implementation_tasks:
     rollback_point: 回退本轮新增文档与账本说明，恢复 design 基线
     file_paths:
       - docs/开发文档/测试管理/测试报告/README.md
-      - docs/plans/2026-03-10-context-engineering-unification-design.md
+      - workdocs/归档/正文/设计/2026-03-10-context-engineering-unification-design.md
       - app/ai/context_engineering.py
       - tests/unit/test_multi_agent_context_budget.py
     symbols:
@@ -141,8 +141,8 @@ implementation_tasks:
     mandatory_evidence: [clarify_plan_alignment_json, planning_temporal_gate_json, docs_guard_strict_clean]
     acceptance_cmds:
       - bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_context_budget.py tests/unit/test_multi_agent_streaming_helpers.py
-      - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/context-engineering-unification_requirements.md --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json
-      - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_planning_temporal_gate.json
+      - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/context-engineering-unification_requirements.md --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json
+      - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_planning_temporal_gate.json
       - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/docs_guard.py --strict
 ```
 
@@ -189,8 +189,8 @@ planning_contract:
       pr_depends_on: []
       pr_subject: "专项测试、文档同步与规划门禁收口"
       acceptance_cmds:
-        - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/context-engineering-unification_requirements.md --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json
-        - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_planning_temporal_gate.json
+        - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/context-engineering-unification_requirements.md --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json
+        - /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_planning_temporal_gate.json
       rollback_point: 回退本轮新增文档与账本说明，恢复 design 基线
   execution_mode: core
   strict_single_active_card: true
@@ -256,9 +256,9 @@ acceptance_cmd_contracts:
   - task_id: T-05
     acceptance_cmds:
       - kind: integration
-        cmd: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/context-engineering-unification_requirements.md --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_clarify_plan_alignment.json
+        cmd: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/context-engineering-unification_requirements.md --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_clarify_plan_alignment.json
       - kind: integration
-        cmd: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/context-engineering-unification_implementation_plan.md --output docs/内部参考/迭代需求/context-engineering-unification_planning_temporal_gate.json
+        cmd: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/context-engineering-unification_implementation_plan.md --output workdocs/归档/报告/机读校验/context-engineering-unification_planning_temporal_gate.json
       - kind: integration
         cmd: /Users/jijingkun/.codex/worktrees/4620/fastapi/venv/bin/python scripts/docs_guard.py --strict
 ```

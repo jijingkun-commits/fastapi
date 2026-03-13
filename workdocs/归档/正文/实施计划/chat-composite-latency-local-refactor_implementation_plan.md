@@ -1,16 +1,16 @@
 # chat-composite-latency-local-refactor 实施计划
 
 > 日期：2026-03-12
-> 需求基线：`docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`
-> 方案基线：`docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
+> 需求基线：`workdocs/归档/正文/需求/chat-composite-latency-local-refactor_requirements.md`
+> 方案基线：`workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`
 > execution_mode：`serial`
 > change_mode：`refactor`
 
 ## 0. 输入来源清单
 
-1. `docs/内部参考/迭代需求/chat-composite-latency-local-refactor_requirements.md`
-2. `docs/plans/2026-03-12-chat-composite-latency-local-refactor-design.md`
-3. `docs/plans/2026-03-10-composite-chat-latency-design.md`
+1. `workdocs/归档/正文/需求/chat-composite-latency-local-refactor_requirements.md`
+2. `workdocs/归档/正文/设计/2026-03-12-chat-composite-latency-local-refactor-design.md`
+3. `workdocs/归档/正文/设计/2026-03-10-composite-chat-latency-design.md`
 4. `app/ai/workflow/multi_agent_graph.py`
 5. `app/ai/workflow/todo_graph.py`
 6. `app/services/chat_service.py`
@@ -167,8 +167,8 @@ task_breakdown:
       - docs/开发文档/架构设计/AI模块设计.md
       - docs/开发文档/测试管理/聊天系统测试案例.md
       - docs/开发文档/测试管理/测试用例库.md
-      - docs/内部参考/迭代需求/chat-composite-latency-local-refactor_implementation_plan.md
-      - docs/内部参考/迭代需求/chat-composite-latency-local-refactor_uat_cases.md
+      - workdocs/归档/正文/实施计划/chat-composite-latency-local-refactor_implementation_plan.md
+      - workdocs/归档/正文/实施计划/chat-composite-latency-local-refactor_uat_cases.md
     symbols:
       - composite_fast_lane_local_refactor
       - frozen_todo_query_contract

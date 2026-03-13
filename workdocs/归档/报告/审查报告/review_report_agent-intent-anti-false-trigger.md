@@ -43,8 +43,8 @@
   - `bash scripts/pytest_targeted.sh tests/unit/test_router_result_v2_replay.py -q` -> `PASS`
   - `bash scripts/pytest_targeted.sh tests/unit/test_data_intent_clarify_contract.py -q` -> `PASS`
   - `PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/docs_guard.py --strict` -> `PASS`
-  - `PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_requirements.md --implementation-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_implementation_plan.md --output docs/内部参考/迭代需求/agent-intent-anti-false-trigger_clarify_plan_alignment.json` -> `PASS`
-  - `PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path docs/内部参考/迭代需求/agent-intent-anti-false-trigger_implementation_plan.md --output docs/内部参考/迭代需求/agent-intent-anti-false-trigger_planning_temporal_gate.json` -> `PASS`
+  - `PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode clarify_plan --requirements-path workdocs/归档/正文/需求/agent-intent-anti-false-trigger_requirements.md --implementation-path workdocs/归档/正文/实施计划/agent-intent-anti-false-trigger_implementation_plan.md --output workdocs/归档/报告/机读校验/agent-intent-anti-false-trigger_clarify_plan_alignment.json` -> `PASS`
+  - `PYTHON_BIN="$(bash scripts/repo_python.sh)" && "$PYTHON_BIN" scripts/check_workflow_contract.py --mode planning_temporal_gate --implementation-path workdocs/归档/正文/实施计划/agent-intent-anti-false-trigger_implementation_plan.md --output workdocs/归档/报告/机读校验/agent-intent-anti-false-trigger_planning_temporal_gate.json` -> `PASS`
 - doc_sync_check: `PASS`
 - test_sync_check: `PASS`
 - extra_manual_review:

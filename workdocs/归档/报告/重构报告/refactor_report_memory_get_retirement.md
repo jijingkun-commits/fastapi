@@ -27,7 +27,7 @@
 - followup_tasks:
   - `拆分 test_events_contract，仅保留仍有效导出契约。`
   - `继续清理 test-only/兼容壳残留。`
-- refactor_report_path: `docs/内部参考/迭代需求/refactor_report_memory_get_retirement.md`
+- refactor_report_path: `workdocs/归档/报告/重构报告/refactor_report_memory_get_retirement.md`
 
 ### 5) 下一步
 1. `进入 /jjk-review`
