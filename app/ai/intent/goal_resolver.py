@@ -19,6 +19,21 @@ CHART_HINTS = ("画图", "画一个", "画", "图表", "折线图", "柱状图",
 DATA_DOMAIN_HINTS = ("数据", "指标", "报表", "统计", "数据库", "sql", "分析", "贷款", "存款", "余额")
 DATA_STRONG_HINTS = ("sql", "报表", "数据库", "指标", "字段", "表", "贷款", "存款", "余额")
 EXTERNAL_ENRICHMENT_HINTS = WEATHER_HINTS + ("股价", "股票", "指数", "汇率", "黄金", "油价", "行情", "基金")
+RESEARCH_COMPARE_HINTS = ("对比", "比较", "差异", "区别", "异同")
+RESEARCH_SYNTHESIS_HINTS = ("综合", "结合", "归纳", "汇总", "研究", "调研", "总结", "整理")
+RESEARCH_EVIDENCE_HINTS = ("证据", "证据点", "出处", "来源", "依据", "引用")
+RESEARCH_WEB_HINTS = ("网页", "网页资料", "网站", "联网", "网上", "网络", "web", "搜索")
+RESEARCH_ATTACHMENT_HINTS = ("附件", "pdf", "pdfs", "制度文件", "材料")
+RESEARCH_MULTI_SOURCE_HINTS = (
+    "多来源",
+    "多个来源",
+    "知识库和网页",
+    "网页和知识库",
+    "联网和知识库",
+    "结合知识库和网页",
+    "两份",
+    "多份",
+)
 
 TODO_OBSERVATION_COMBINE_HINTS = ("结合", "参考", "根据", "同步", "汇总", "回复用户", "结果")
 
@@ -84,6 +99,8 @@ def _contains_any(text: str, hints: tuple[str, ...]) -> bool:
 
 
 def _default_goal_title(kind: str) -> str:
+    if kind.startswith("research"):
+        return "综合研究"
     if kind == "knowledge.lookup":
         return "知识库检索"
     if kind == "chart.render":
@@ -124,6 +141,17 @@ def infer_primary_goal_kind(query_text: str) -> str:
     if _contains_any(lowered, CHART_HINTS):
         candidates.append((_first_hint_position(lowered, CHART_HINTS), "chart.render"))
 
+    if _is_research_request(lowered):
+        candidates.append(
+            (
+                _first_hint_position(
+                    lowered,
+                    RESEARCH_COMPARE_HINTS + RESEARCH_SYNTHESIS_HINTS + RESEARCH_EVIDENCE_HINTS,
+                ),
+                "research.execute",
+            )
+        )
+
     if _contains_any(lowered, KNOWLEDGE_HINTS):
         candidates.append((_first_hint_position(lowered, KNOWLEDGE_HINTS), "knowledge.lookup"))
 
@@ -145,6 +173,8 @@ def infer_primary_goal_kind(query_text: str) -> str:
 
 def infer_primary_goal_bucket_from_text(query_text: str) -> str:
     kind = infer_primary_goal_kind(query_text)
+    if kind.startswith("research"):
+        return "research"
     if kind.startswith("todo"):
         return "todo"
     if kind.startswith("data"):
@@ -185,3 +215,35 @@ def is_todo_external_enrichment_request(user_text: str) -> bool:
     has_enrichment = _contains_any(normalized, TODO_ENRICHMENT_HINTS)
     has_external = _contains_any(normalized, EXTERNAL_ENRICHMENT_HINTS) or _contains_any(normalized, KNOWLEDGE_HINTS)
     return has_enrichment and has_external
+
+
+def _is_research_request(normalized_query: str) -> bool:
+    """判定是否属于 research.execute 语义出口。"""
+    if not normalized_query:
+        return False
+
+    has_compare = _contains_any(normalized_query, RESEARCH_COMPARE_HINTS)
+    has_synthesis = _contains_any(normalized_query, RESEARCH_SYNTHESIS_HINTS)
+    has_evidence = _contains_any(normalized_query, RESEARCH_EVIDENCE_HINTS)
+    has_attachment_source = _contains_any(normalized_query, RESEARCH_ATTACHMENT_HINTS)
+    has_multi_source_phrase = _contains_any(normalized_query, RESEARCH_MULTI_SOURCE_HINTS)
+    has_data_signal = _contains_any(normalized_query, DATA_STRONG_HINTS)
+
+    source_family_count = 0
+    if _contains_any(normalized_query, KNOWLEDGE_HINTS):
+        source_family_count += 1
+    if _contains_any(normalized_query, RESEARCH_WEB_HINTS):
+        source_family_count += 1
+    if has_attachment_source:
+        source_family_count += 1
+
+    if has_data_signal and not (has_multi_source_phrase or source_family_count >= 2):
+        return False
+
+    if has_compare:
+        return has_multi_source_phrase or source_family_count >= 2 or not has_data_signal
+
+    if has_synthesis or has_evidence:
+        return has_multi_source_phrase or source_family_count >= 2 or (has_attachment_source and (has_evidence or has_compare))
+
+    return False

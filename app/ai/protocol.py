@@ -141,16 +141,27 @@ class ResearchEvidencePayload(TypedDict):
     excerpt: str
 
 
+class ResearchMediaRefPayload(TypedDict):
+
+    type: str
+    url: str
+    alt: str
+    source: str
+    index: NotRequired[str]
+
+
 class ResearchResultPayload(TypedDict):
 
     contract_version: str
     research_mode: str
     research_task_id: str
     summary: str
+    summary_markdown: str
     evidence: List[ResearchEvidencePayload]
     insufficiency: str
     source_count: int
     citation_count: int
+    media_refs: List[ResearchMediaRefPayload]
 
 
 def build_conversation_state_snapshot_payload(
@@ -218,11 +229,13 @@ def build_research_result_payload(
     research_mode: Any,
     research_task_id: Any,
     summary: Any,
+    summary_markdown: Any = None,
     evidence: Any,
     insufficiency: Any,
     source_count: Any = None,
     citation_count: Any = None,
-    contract_version: Any = "v1",
+    media_refs: Any = None,
+    contract_version: Any = "v2",
 ) -> ResearchResultPayload:
 
     normalized_evidence: List[ResearchEvidencePayload] = []
@@ -245,15 +258,44 @@ def build_research_result_payload(
 
     normalized_mode = _normalize_text(research_mode, "research")
     inferred_source_count = len({item["source"] for item in normalized_evidence})
+    normalized_media_refs: List[ResearchMediaRefPayload] = []
+    seen_media_refs: Set[Tuple[str, str, str, str]] = set()
+    if isinstance(media_refs, list):
+        for item in media_refs:
+            if not isinstance(item, dict):
+                continue
+            media_type = _normalize_text(item.get("type"), "media")
+            url = _normalize_text(item.get("url"))
+            if not url:
+                continue
+            source = _normalize_text(item.get("source"), "research")
+            alt = _normalize_text(item.get("alt"), "研究媒体")
+            index = _normalize_text(item.get("index"))
+            dedupe_key = (media_type, url, source, index)
+            if dedupe_key in seen_media_refs:
+                continue
+            seen_media_refs.add(dedupe_key)
+            media_payload: ResearchMediaRefPayload = {
+                "type": media_type,
+                "url": url,
+                "alt": alt,
+                "source": source,
+            }
+            if index:
+                media_payload["index"] = index
+            normalized_media_refs.append(media_payload)
+
     return {
         "contract_version": _normalize_text(contract_version, "v1"),
         "research_mode": normalized_mode,
         "research_task_id": _normalize_text(research_task_id, f"{normalized_mode}:unknown"),
         "summary": _normalize_text(summary),
+        "summary_markdown": _normalize_text(summary_markdown, _normalize_text(summary)),
         "evidence": normalized_evidence,
         "insufficiency": _normalize_text(insufficiency),
         "source_count": _normalize_non_negative_int(source_count, inferred_source_count),
         "citation_count": _normalize_non_negative_int(citation_count, 0),
+        "media_refs": normalized_media_refs,
     }
 
 
@@ -527,6 +569,63 @@ class AgentOutputParser:
             return None
 
     @staticmethod
+    def _build_kb_images_from_research_payload(payload: Dict[str, Any]) -> Dict[str, str]:
+        media_refs = payload.get("media_refs")
+        if not isinstance(media_refs, list):
+            return {}
+
+        kb_images: Dict[str, str] = {}
+        next_index = 0
+        for item in media_refs:
+            if not isinstance(item, dict):
+                continue
+            media_type = _normalize_text(item.get("type")).lower()
+            media_source = _normalize_text(item.get("source")).lower()
+            if media_source != "knowledge" and not media_type.startswith("knowledge"):
+                continue
+            url = _normalize_text(item.get("url"))
+            if not url:
+                continue
+            raw_index = _normalize_text(item.get("index"))
+            image_index = raw_index if raw_index else str(next_index)
+            if image_index in kb_images:
+                continue
+            kb_images[image_index] = url
+            if not raw_index:
+                next_index += 1
+
+        return kb_images
+
+    @staticmethod
+    def parse_research_result(content: str) -> Optional[ResearchResultPayload]:
+        stripped = str(content or "").strip()
+        if not stripped.startswith("{") or not stripped.endswith("}"):
+            return None
+
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(data, dict):
+            return None
+        if not data.get("research_task_id") and not data.get("research_mode"):
+            return None
+
+        return build_research_result_payload(
+            research_mode=data.get("research_mode"),
+            research_task_id=data.get("research_task_id"),
+            summary=data.get("summary"),
+            summary_markdown=data.get("summary_markdown"),
+            evidence=data.get("evidence"),
+            insufficiency=data.get("insufficiency"),
+            source_count=data.get("source_count"),
+            citation_count=data.get("citation_count"),
+            media_refs=data.get("media_refs"),
+            contract_version=data.get("contract_version"),
+        )
+
+    @staticmethod
     def parse_kb_images(content: str) -> Optional[Dict[str, str]]:
         match = re.search(AgentProtocol.KB_IMAGES_PATTERN, content)
         if match:
@@ -535,6 +634,11 @@ class AgentOutputParser:
                 return data
             except json.JSONDecodeError:
                 logger.warning("KB Images JSON 解析失败")
+        research_payload = AgentOutputParser.parse_research_result(content)
+        if research_payload:
+            kb_images = AgentOutputParser._build_kb_images_from_research_payload(research_payload)
+            if kb_images:
+                return kb_images
         return None
 
     @staticmethod

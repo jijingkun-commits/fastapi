@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.chat_message import ChatMessage
 from app.models.chat_asset import ChatAsset
 from app.repositories import chat_assets_repository
+from app.ai.protocol import AgentOutputParser
 from app.core.message_content import normalize_message_content
 from app.core.message_display_blocks import compile_message_display_blocks
 from app.core.utils import content_hash as _content_hash
@@ -704,15 +705,10 @@ def save_conversation_from_messages(
         elif msg_type == "tool":
             content = str(getattr(msg, "content", ""))
             logger.info("Tool消息内容(前500字): %s", content[:500])
-            kb_images_match = re.search(r'<!--KB_IMAGES:(\{.*?\})-->', content)
-            if kb_images_match:
-                try:
-                    import json
-                    new_images = json.loads(kb_images_match.group(1))
-                    tool_kb_images.update(new_images)
-                    logger.info("提取到 kb_images 映射: %s (累计: %s)", new_images, tool_kb_images)
-                except json.JSONDecodeError:
-                    logger.warning("解析 kb_images 失败: %s", kb_images_match.group(1))
+            new_images = AgentOutputParser.parse_kb_images(content)
+            if new_images:
+                tool_kb_images.update(new_images)
+                logger.info("提取到 kb_images 映射: %s (累计: %s)", new_images, tool_kb_images)
             else:
                 logger.info("Tool消息中未找到 KB_IMAGES 标记")
 

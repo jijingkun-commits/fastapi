@@ -757,8 +757,37 @@ def test_knowledge_research_should_wrap_atomic_lookup_as_stateless_contract(monk
     payload = json.loads(result)
 
     assert payload["research_mode"] == "knowledge"
-    assert payload["contract_version"] == "v1"
+    assert payload["contract_version"] == "v2"
     assert payload["summary"]
+    assert payload["summary_markdown"]
     assert payload["source_count"] >= 1
     assert payload["insufficiency"] == ""
     assert payload["evidence"]
+    assert payload["media_refs"] == []
+
+
+def test_build_knowledge_research_source_payload_should_preserve_kb_media_refs(monkeypatch) -> None:
+    """knowledge source provider 应解析 KB_IMAGES 并转成可复用 media_refs。"""
+    monkeypatch.setattr(
+        ragflow_tool.knowledge_search,
+        "func",
+        lambda query, dataset_id=None: (
+            "制度摘要：报销需部门审批。[IMG-0]\n证据1：差旅报销需发票。"
+            "\n\n<!--KB_IMAGES:{\"0\":\"/api/v1/assets/proxy/ragflow/img-0\"}-->"
+        ),
+        raising=False,
+    )
+
+    payload = ragflow_tool.build_knowledge_research_source_payload(query="整理报销制度重点", dataset_id=None)
+
+    assert payload["summary_markdown"].startswith("制度摘要：报销需部门审批。[IMG-0]")
+    assert payload["citation_count"] == 1
+    assert payload["media_refs"] == [
+        {
+            "type": "knowledge_image",
+            "url": "/api/v1/assets/proxy/ragflow/img-0",
+            "alt": "知识库图片",
+            "source": "knowledge",
+            "index": "0",
+        }
+    ]

@@ -291,7 +291,7 @@ LangGraph 目前（2025 年）不支持将特定字段标记为"瞬态"（不持
 | `service` | `chat_service`、`skill_service` | 否 | 做 API/运行时装配与调用编排，不拥有会话语义 |
 | `supervisor` | `multi_agent_graph.supervisor` | 是 | 主会话 `conversation_state` 唯一 owner，统一规划路由与用户可见错误 |
 | `workflow` | `todo_workflow`、`data_workflow` | 仅局部 workflow state | 消费 `pending_handoff.frame + expert_input_contract` 完成闭环，不接管主会话 |
-| `research_subagent` | `knowledge_research`、`web_research` | 否 | 处理单次研究任务，隔离 scratchpad，返回 `summary + evidence + insufficiency` |
+| `research_subagent` | `app/ai/agents/research_subagent.py`（内部统一编排 knowledge/web source provider） | 否 | 处理单次研究任务，隔离 scratchpad，返回 `summary + evidence + insufficiency`，并可附带 `media_refs` |
 | `tool` | `knowledge_search`、`search_tool`、`read_uploaded_file`、`analyze_image` | 否 | 提供原子能力，由 supervisor/workflow 直接调用 |
 
 说明：

@@ -1830,6 +1830,91 @@ def test_build_attachment_planning_contract_should_not_let_todo_anchor_override_
     assert payload["requires_user_confirmation"] is False
 
 
+def test_build_attachment_planning_contract_should_route_research_bucket_to_research_subagent() -> None:
+    """research goal 命中时，单附件也应走 research_subagent，而不是退回 direct_tool。"""
+    payload = build_attachment_planning_contract(
+        user_query="根据这份 PDF 制度文件，总结差异并给出证据点",
+        goal_buckets=["research"],
+        active_goal_count=1,
+        has_explicit_multi_goal=False,
+        has_todo_context=False,
+        attachment_manifest=[
+            {
+                "attachment_id": "pdf-1",
+                "name": "policy.pdf",
+                "mime": "application/pdf",
+                "size_bytes": 12,
+                "uri": "/policy.pdf",
+                "derived_kind": "document",
+            }
+        ],
+        lightweight_probe=[
+            {
+                "attachment_id": "pdf-1",
+                "probe_status": "ready",
+                "summary": "policy.pdf（kind=document）",
+                "ocr_needed": True,
+            }
+        ],
+    )
+
+    assert payload is not None
+    assert payload["planning_route"] == "research_subagent"
+    assert payload["selected_attachment_ids"] == ["pdf-1"]
+    assert payload["attachment_roles"] == [{"attachment_id": "pdf-1", "role": "evidence_source"}]
+
+
+def test_build_attachment_planning_contract_should_not_upgrade_multi_document_without_research_goal() -> None:
+    """多附件/文档探针本身不应直接触发 research，仍应保持 goal-led route。"""
+    payload = build_attachment_planning_contract(
+        user_query="先帮我看下这两份 PDF",
+        goal_buckets=["general"],
+        active_goal_count=1,
+        has_explicit_multi_goal=False,
+        has_todo_context=False,
+        attachment_manifest=[
+            {
+                "attachment_id": "pdf-1",
+                "name": "policy-a.pdf",
+                "mime": "application/pdf",
+                "size_bytes": 12,
+                "uri": "/policy-a.pdf",
+                "derived_kind": "document",
+            },
+            {
+                "attachment_id": "pdf-2",
+                "name": "policy-b.pdf",
+                "mime": "application/pdf",
+                "size_bytes": 12,
+                "uri": "/policy-b.pdf",
+                "derived_kind": "document",
+            },
+        ],
+        lightweight_probe=[
+            {
+                "attachment_id": "pdf-1",
+                "probe_status": "ready",
+                "summary": "policy-a.pdf（kind=document）",
+                "ocr_needed": True,
+            },
+            {
+                "attachment_id": "pdf-2",
+                "probe_status": "ready",
+                "summary": "policy-b.pdf（kind=document）",
+                "ocr_needed": True,
+            },
+        ],
+    )
+
+    assert payload is not None
+    assert payload["planning_route"] == "direct_tool"
+    assert payload["selected_attachment_ids"] == ["pdf-1", "pdf-2"]
+    assert payload["attachment_roles"] == [
+        {"attachment_id": "pdf-1", "role": "file_input"},
+        {"attachment_id": "pdf-2", "role": "file_input"},
+    ]
+
+
 def test_prepare_streaming_inference_state_tracks_prompt_or_tool_schema_budget(monkeypatch) -> None:
     """Supervisor 推理态应记录 prompt/tool schema 分项预算。"""
 

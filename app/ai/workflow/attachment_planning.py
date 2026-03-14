@@ -204,6 +204,7 @@ def build_attachment_planning_contract(
 
     non_general_goal_buckets = [bucket for bucket in normalized_goal_buckets if bucket != "general"]
     has_multiple_goal_buckets = len(non_general_goal_buckets) >= 2
+    has_research_goal = "research" in non_general_goal_buckets
     has_document_probe = any(
         bool(item.get("ocr_needed"))
         or bool(item.get("section_hints"))
@@ -221,14 +222,14 @@ def build_attachment_planning_contract(
 
     if has_multiple_goal_buckets or (has_explicit_multi_goal and active_goal_count >= 2):
         planning_route = "mixed"
+    elif has_research_goal:
+        planning_route = "research_subagent"
     elif "data" in normalized_goal_buckets:
         planning_route = "data_workflow"
     elif "todo" in normalized_goal_buckets:
         planning_route = "todo_workflow"
     elif has_todo_context and not non_general_goal_buckets:
         planning_route = "todo_workflow"
-    elif len(attachment_manifest) >= 2 or has_document_probe:
-        planning_route = "research_subagent"
     elif has_tabular_probe and not has_todo_context:
         planning_route = "data_workflow"
     else:
@@ -239,7 +240,7 @@ def build_attachment_planning_contract(
         for item in attachment_manifest
         if _normalize_text(item.get("attachment_id"))
     ]
-    selected_attachment_ids = all_attachment_ids[:1] if planning_route == "direct_tool" else all_attachment_ids
+    selected_attachment_ids = all_attachment_ids[:1] if planning_route == "direct_tool" and len(all_attachment_ids) == 1 else all_attachment_ids
     attachment_roles = [
         {
             "attachment_id": _normalize_text(item.get("attachment_id")),
@@ -255,7 +256,7 @@ def build_attachment_planning_contract(
                 route = "todo_workflow"
             elif bucket == "data":
                 route = "data_workflow"
-            elif len(attachment_manifest) >= 2 or has_document_probe:
+            elif bucket == "research":
                 route = "research_subagent"
             else:
                 route = "direct_tool"
@@ -265,6 +266,7 @@ def build_attachment_planning_contract(
         f"goal_buckets={','.join(normalized_goal_buckets) or 'general'}",
         f"attachment_count={len(all_attachment_ids)}",
         f"has_todo_context={str(has_todo_context).lower()}",
+        f"has_research_goal={str(has_research_goal).lower()}",
         f"document_probe={str(has_document_probe).lower()}",
         f"tabular_probe={str(has_tabular_probe).lower()}",
     ]

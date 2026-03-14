@@ -62,6 +62,16 @@ success_definition:
   - 单次知识库直查和单次联网查询不被误升级为 subagent。
   - 研究类知识库问答中的图片仍能以文图结合方式在 live 与 history 中稳定展示。
   - 附件不会因为“带了文件”就被自动送入 `research_subagent`。
+design_source: workdocs/设计/2026-03-13_research-subagent-phase1/design.md
+design_approved: true
+design_approval_evidence: 2026-03-13 用户确认“继续”，已进入 jjk-plan 并产出 implementation_plan / uat_cases
+design_freeze_summary:
+  - 一期只引入一个统一的 research_subagent，不拆 knowledge/web/attachment 三个平级研究代理。
+  - knowledge/web 的多来源研究任务进入 research_subagent，单次直查继续保留 tool。
+  - 附件保持 route-agnostic，继续先由 supervisor planning 决定去向。
+  - 知识库图文展示能力不得因 research_subagent 引入而退化，仍复用现有 canonical display pipeline。
+clarify_handoff_source: workdocs/设计/2026-03-13_research-subagent-phase1/design.md
+clarify_handoff_version: v1
 ```
 
 ## product_contract_matrix
@@ -224,6 +234,61 @@ success_definition:
 | BG-03 | FR-05 | S-04 | AS-06 | 如何保证知识库图片在 research 场景下不退化为纯文本体验 |
 | BG-04 | FR-01 | S-01 | AS-04, AS-05 | 如何把附件存在与任务真实目标解耦 |
 
+## 7. traceability_matrix（设计 -> FR -> Feature -> Task -> TC）
+
+```yaml
+traceability_matrix:
+  - design_item: D-01-research-goal-bucket
+    fr_id: FR-01
+    feature_id: RS-01
+    task_id: T-01
+    tc_id: TC-RS-01
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_research_goal_resolver.py tests/unit/test_intent_layer_boundary.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-01-research-goal-bucket
+    fr_id: FR-02
+    feature_id: RS-01
+    task_id: T-01
+    tc_id: TC-RS-01
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_research_goal_resolver.py tests/unit/test_intent_layer_boundary.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-02-unified-research-subagent
+    fr_id: FR-03
+    feature_id: RS-02
+    task_id: T-02
+    tc_id: TC-RS-02
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_research_subagent.py tests/unit/test_ragflow_tool.py tests/unit/test_research_dispatch_contract.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-02-unified-research-subagent
+    fr_id: FR-04
+    feature_id: RS-02
+    task_id: T-02
+    tc_id: TC-RS-05
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_research_subagent.py tests/unit/test_ragflow_tool.py tests/unit/test_research_dispatch_contract.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-05-research-media-preservation
+    fr_id: FR-05
+    feature_id: RS-05
+    task_id: T-05
+    tc_id: TC-RS-04
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_message_display_blocks.py tests/unit/test_chat_service_done_payload.py tests/unit/test_chat_repo_serialization.py tests/api/test_chat_api.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-04-attachment-route-agnostic
+    fr_id: FR-06
+    feature_id: RS-04
+    task_id: T-04
+    tc_id: TC-RS-03
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_multi_agent_streaming_helpers.py tests/unit/test_chat_service_human_attachment_persistence.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+  - design_item: D-03-supervisor-surface-cleanup
+    fr_id: FR-07
+    feature_id: RS-03
+    task_id: T-03
+    tc_id: TC-RS-02
+    acceptance_cmd_ref: bash scripts/pytest_targeted.sh tests/unit/test_research_dispatch_contract.py tests/unit/test_multi_agent_tool_governance_runtime.py -q
+    evidence_entry: workdocs/任务拆解/2026-03-13_research-subagent-phase1/contracts/implementation_plan.md
+```
+
 ## out_of_scope
 
 1. 本次不把 `todo` workflow 改造成 subagent。
@@ -249,10 +314,10 @@ success_definition:
 status: draft
 owner: AI collaboration / product clarification
 approved: false
-next_step: jjk-design
+next_step: jjk-imp
 approval_notes:
   - 已冻结一期统一 research_subagent 的首批范围为 knowledge + web。
   - 已冻结附件 route-agnostic，不天然归属 research。
   - 已冻结知识库图文展示不得因为 research_subagent 引入而退化。
-  - 待进入 design 阶段，继续把 research 结果合同、路由判定标准和展示收口方式写成正式设计。
+  - 2026-03-13 已补 design 与 implementation plan，可进入 jjk-imp。
 ```

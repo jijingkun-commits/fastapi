@@ -1,6 +1,7 @@
 """chat_repo 序列化兼容性测试。"""
 
 from datetime import date
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -234,6 +235,60 @@ def test_save_conversation_from_messages_should_use_ai_kb_images_when_tool_marke
     assert kwargs["extra_data"]["kb_images"]["0"] == "/api/v1/assets/proxy/ragflow/img-turn-2"
     assert kwargs["content"][1]["type"] == "image"
     assert kwargs["content"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-turn-2"
+
+
+def test_save_conversation_from_messages_should_compile_research_media_refs_into_kb_images() -> None:
+    """research_subagent 的 media_refs 也应复用 canonical kb_images 持久化链路。"""
+
+    research_payload = {
+        "contract_version": "v2",
+        "research_mode": "multi_source",
+        "research_task_id": "research:demo",
+        "summary": "制度摘要",
+        "summary_markdown": "### 知识库\n制度摘要 [IMG-0]",
+        "evidence": [{"source": "knowledge_search", "excerpt": "制度摘要"}],
+        "insufficiency": "",
+        "source_count": 1,
+        "citation_count": 1,
+        "media_refs": [
+            {
+                "type": "knowledge_image",
+                "url": "/api/v1/assets/proxy/ragflow/img-0",
+                "alt": "制度图片",
+                "source": "knowledge",
+                "index": "0",
+            }
+        ],
+    }
+    messages = [
+        SimpleNamespace(type="human", content="综合研究", id="human-3", name=None),
+        SimpleNamespace(
+            type="tool",
+            content=json.dumps(research_payload, ensure_ascii=False),
+            id="tool-3",
+            name="research_subagent",
+        ),
+        SimpleNamespace(
+            type="ai",
+            content="### 知识库\n制度摘要 [IMG-0]",
+            additional_kwargs={},
+            name=None,
+        ),
+    ]
+
+    with patch("app.repositories.chat_repo.save_message") as mock_save:
+        chat_repo.save_conversation_from_messages(
+            db=object(),
+            user_id=1,
+            thread_id="thread-research-kb",
+            messages=messages,
+        )
+
+    kwargs = mock_save.call_args.kwargs
+    assert kwargs["content_type"] == "multimodal"
+    assert kwargs["extra_data"]["kb_images"]["0"] == "/api/v1/assets/proxy/ragflow/img-0"
+    assert kwargs["content"][1]["type"] == "image"
+    assert kwargs["content"][1]["data"]["url"] == "/api/v1/assets/proxy/ragflow/img-0"
 
 
 def test_save_conversation_from_messages_should_not_append_missing_chart_markdown() -> None:

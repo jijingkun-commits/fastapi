@@ -124,11 +124,11 @@ D -- 否 --> X[路由到 data/todo 执行]
 3. `data_expert` 的内部推理消息只投影 `pending_handoff.frame.query_text`，并附带 `expert_input_contract(contract_id=data_handoff_query_text, contract_version=v1, state_owner=supervisor)`，避免继续把整句复合问题当专家真理源。
 4. `data_graph.analyze_data_intent` 与 `todo_graph.analyze_intent` 统一消费 `turn_act/session_frame/frame_source_map/clarify_fsm_state/clarify_round`，不再各自维护补充轮主判定；workflow 只读投影，不回写主会话 owner。
 5. `data_graph` 命中 handoff contract 时，会把 `expert_input_contract` 回填到 `query_context`，`todo_intent_helpers.filter_messages_for_todo` 命中 handoff 时会生成 `__internal_todo_handoff__ + expert_input_contract` 最小输入；两条链路都固定声明 `state_owner=supervisor`。
-6. `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 仍是 atomic tool；当任务目标变成“多来源研究/对比/证据归纳”时，Supervisor 才切到 `knowledge_research` / `web_research` 这类 stateless research 入口。
+6. `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 仍是 atomic tool；当任务目标变成“多来源研究/对比/证据归纳”时，Supervisor 才切到统一 `research_subagent` 入口，由它在隔离上下文里编排 knowledge/web source provider。
 7. `mixed` 路由仍由 `supervisor` 负责汇总与最终答复；workflow 和 research_subagent 只返回局部结果，不拥有主会话最终态。
 8. `response_message` 已纳入 `TodoAgentState` 统一管理，避免 `analyze -> clarify` 链路字段丢失；`missing_info` 仅允许 `todo_target/time_range/todo_action` 三类 canonical 槽位。
 9. 创建待办确认后若用户先取消再补充细节，且历史会话帧仍表明 `todo_action=create`，系统优先恢复原创建草稿并重新进入 `need_confirm`；确认文案与展示层只消费 canonical 槽位，不再把 UI 文案耦合进状态机决策。
-10. 当前对外聊天 API 与 SSE 主协议保持不变，结构收敛集中在 AI 内部状态、handoff 协议、research contract 和确认链路。
+10. 当前对外聊天 API 与 SSE 主协议保持不变，结构收敛集中在 AI 内部状态、handoff 协议、research contract 和确认链路；research 返回合同至少包含 `summary + evidence + insufficiency`，并允许附带 `media_refs` 复用现有图文展示链路。
 
 
 ### 9. 当前架构落点（2026-02-08 起持续生效）

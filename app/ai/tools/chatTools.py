@@ -63,33 +63,42 @@ def web_research(query: str) -> str:
     用于需要跨网页检索结果做总结、对比、证据归纳时的 stateless research 入口。
     简单单点实时搜索继续使用 search_tool。
     """
+    payload = build_research_result_payload(**build_web_research_source_payload(query=query))
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def build_web_research_source_payload(query: str) -> dict[str, Any]:
+    """将 search_tool 原子结果规整为 research source provider contract。"""
     if search_tool is None:
-        payload = build_research_result_payload(
-            research_mode="web",
-            research_task_id=_build_web_research_task_id(query),
-            summary="",
-            evidence=[],
-            insufficiency="联网搜索不可用，请检查 TAVILY_API_KEY 或工具依赖。",
-            source_count=0,
-            citation_count=0,
-        )
-        return json.dumps(payload, ensure_ascii=False)
+        return {
+            "research_mode": "web",
+            "research_task_id": _build_web_research_task_id(query),
+            "summary": "",
+            "summary_markdown": "",
+            "evidence": [],
+            "insufficiency": "联网搜索不可用，请检查 TAVILY_API_KEY 或工具依赖。",
+            "source_count": 0,
+            "citation_count": 0,
+            "media_refs": [],
+        }
 
     try:
         raw_result = search_tool.invoke({"query": query})
     except Exception as exc:
-        payload = build_research_result_payload(
-            research_mode="web",
-            research_task_id=_build_web_research_task_id(query),
-            summary="",
-            evidence=[],
-            insufficiency=str(exc)[:240],
-            source_count=0,
-            citation_count=0,
-        )
-        return json.dumps(payload, ensure_ascii=False)
+        return {
+            "research_mode": "web",
+            "research_task_id": _build_web_research_task_id(query),
+            "summary": "",
+            "summary_markdown": "",
+            "evidence": [],
+            "insufficiency": str(exc)[:240],
+            "source_count": 0,
+            "citation_count": 0,
+            "media_refs": [],
+        }
 
     evidence = []
+    summary_lines: list[str] = []
     citation_count = 0
     if isinstance(raw_result, dict):
         items = raw_result.get("results") if isinstance(raw_result.get("results"), list) else [raw_result]
@@ -105,24 +114,29 @@ def web_research(query: str) -> str:
             url = str(item.get("url") or "").strip()
             excerpt = " - ".join(part for part in (title, content, url) if part).strip(" -")
             if excerpt:
-                evidence.append({"source": "search_tool", "excerpt": excerpt[:240]})
+                clipped_excerpt = excerpt[:240]
+                evidence.append({"source": "search_tool", "excerpt": clipped_excerpt})
+                summary_lines.append(f"- {clipped_excerpt}")
                 if url:
                     citation_count += 1
     if not evidence:
         raw_text = str(raw_result or "").strip()
         if raw_text:
-            evidence.append({"source": "search_tool", "excerpt": raw_text[:240]})
+            clipped_text = raw_text[:240]
+            evidence.append({"source": "search_tool", "excerpt": clipped_text})
+            summary_lines.append(f"- {clipped_text}")
 
-    payload = build_research_result_payload(
-        research_mode="web",
-        research_task_id=_build_web_research_task_id(query),
-        summary=(evidence[0]["excerpt"] if evidence else ""),
-        evidence=evidence,
-        insufficiency="" if evidence else "web search 未返回可用证据",
-        source_count=1 if evidence else 0,
-        citation_count=citation_count,
-    )
-    return json.dumps(payload, ensure_ascii=False)
+    return {
+        "research_mode": "web",
+        "research_task_id": _build_web_research_task_id(query),
+        "summary": (evidence[0]["excerpt"] if evidence else ""),
+        "summary_markdown": "\n".join(summary_lines),
+        "evidence": evidence,
+        "insufficiency": "" if evidence else "web search 未返回可用证据",
+        "source_count": 1 if evidence else 0,
+        "citation_count": citation_count,
+        "media_refs": [],
+    }
 
 
 # 封装为 LangGraph 工具

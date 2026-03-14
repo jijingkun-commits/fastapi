@@ -579,6 +579,9 @@ def _normalize_model_goal_kind(raw_kind: str) -> str:
     if compact.startswith("chart") or any(token in compact for token in ("draw", "plot", "figure", "diagram")):
         return "chart.render"
 
+    if compact.startswith("research") or any(token in compact for token in ("compare", "contrast", "synthesize")):
+        return "research.execute"
+
     if compact.startswith("knowledge") or any(token in compact for token in ("rag", "document", "manual")):
         return "knowledge.lookup"
 
@@ -603,6 +606,8 @@ def _normalize_model_goal_kind(raw_kind: str) -> str:
 def _default_goal_title(kind: str) -> str:
     """根据标准 kind 提供默认标题。"""
     normalized = str(kind or "").strip().lower()
+    if normalized.startswith("research"):
+        return "综合研究"
     if normalized.startswith("weather"):
         return "天气信息"
     if normalized.startswith("knowledge"):
@@ -1559,6 +1564,8 @@ def _goal_kind_bucket(kind: str) -> str:
         return "data"
     if normalized.startswith("chart"):
         return "chart"
+    if normalized.startswith("research"):
+        return "research"
     if normalized.startswith(("weather", "knowledge", "external")):
         return "external"
     return "general"
@@ -1714,6 +1721,81 @@ def _extract_latest_structured_result(
     return None
 
 
+def _extract_latest_research_result_payload(messages: Sequence[BaseMessage]) -> Optional[Dict[str, Any]]:
+    """提取当前轮最近的 research_subagent 结构化结果。"""
+    for message in reversed(messages or []):
+        if not isinstance(message, ToolMessage):
+            continue
+        payload = AgentOutputParser.parse_research_result(str(getattr(message, "content", "")))
+        if payload:
+            return dict(payload)
+    return None
+
+
+def _build_research_display_markdown(payload: Dict[str, Any]) -> str:
+    """将 research contract 渲染为用户可见 Markdown。"""
+    summary_markdown = str(payload.get("summary_markdown") or "").strip()
+    summary = str(payload.get("summary") or "").strip()
+    insufficiency = str(payload.get("insufficiency") or "").strip()
+
+    display_markdown = summary_markdown or summary
+    if display_markdown and insufficiency:
+        return f"{display_markdown}\n\n> 证据不足：{insufficiency}"
+    return display_markdown
+
+
+def _build_research_deliverable(
+    payload: Dict[str, Any],
+    *,
+    goal_id: str = "",
+) -> Dict[str, Any]:
+    """将 research contract 收口为统一交付物。"""
+    normalized_payload = dict(payload or {})
+    display_markdown = _build_research_display_markdown(normalized_payload)
+    insufficiency = str(normalized_payload.get("insufficiency") or "").strip()
+    evidence = [
+        item
+        for item in list(normalized_payload.get("evidence") or [])
+        if isinstance(item, dict)
+    ]
+
+    summary = _normalize_tool_summary_text(normalized_payload.get("summary"), limit=220)
+    if not summary:
+        summary = _normalize_tool_summary_text(display_markdown, limit=220)
+    if not summary and insufficiency:
+        summary = _normalize_tool_summary_text(insufficiency, limit=220)
+
+    kb_images = AgentOutputParser.parse_kb_images(json.dumps(normalized_payload, ensure_ascii=False)) or {}
+    deliverable_payload: Dict[str, Any] = {
+        "research_payload": normalized_payload,
+        "evidence": evidence,
+        "media_refs": list(normalized_payload.get("media_refs") or []),
+    }
+    if display_markdown:
+        deliverable_payload["display_markdown"] = display_markdown
+    if insufficiency:
+        deliverable_payload["insufficiency"] = insufficiency
+    if kb_images:
+        deliverable_payload["kb_images"] = kb_images
+
+    if summary or display_markdown or evidence:
+        status = "success"
+    elif insufficiency:
+        status = "failed"
+        deliverable_payload["failure_message"] = insufficiency
+    else:
+        status = "missing"
+        deliverable_payload["failure_message"] = "综合研究仍待补齐"
+
+    return {
+        "kind": "research.execute",
+        "goal_id": goal_id,
+        "status": status,
+        "summary": summary,
+        "payload": deliverable_payload,
+    }
+
+
 def _ensure_active_goals_covers_runtime(
     state: MultiAgentState,
     base_goals: Optional[Sequence[Dict[str, Any]]] = None,
@@ -1727,6 +1809,7 @@ def _ensure_active_goals_covers_runtime(
     seen_buckets = {_goal_kind_bucket(str(goal.get("kind") or "")) for goal in goals}
     turn_messages = _slice_messages_from_latest_human(state.get("messages", []))
     direct_findings = _build_direct_lookup_findings(turn_messages)
+    research_payload = _extract_latest_research_result_payload(turn_messages)
     trace = list(state.get("handoff_execution_trace") or [])
 
     def _append_goal(kind: str, title: str) -> None:
@@ -1744,6 +1827,10 @@ def _ensure_active_goals_covers_runtime(
     if direct_findings and "external" not in seen_buckets:
         _append_goal("external.lookup", "外部信息")
         seen_buckets.add("external")
+
+    if research_payload and "research" not in seen_buckets:
+        _append_goal("research.execute", "综合研究")
+        seen_buckets.add("research")
 
     for item in trace:
         target_agent = str(item.get("target_agent") or "")
@@ -1768,6 +1855,7 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
 
     active_goals = _coerce_active_goals_input(state.get("decomposed_goals") or [])
     direct_findings = _build_direct_lookup_findings(turn_messages)
+    research_payload = _extract_latest_research_result_payload(turn_messages)
     weather_findings = [dict(item) for item in direct_findings if str(item.get("kind") or "") == "external.lookup"]
     knowledge_findings = [dict(item) for item in direct_findings if str(item.get("kind") or "") == "knowledge.lookup"]
     has_atomic_direct_goals = any(
@@ -1862,6 +1950,21 @@ def _build_delivery_artifacts(state: MultiAgentState) -> list[Dict[str, Any]]:
                 "payload": payload,
             }
         )
+
+    research_goals = [
+        goal for goal in active_goals
+        if str(goal.get("kind") or "") == "research.execute"
+    ]
+    if research_payload and research_goals:
+        for goal in research_goals:
+            deliverables.append(
+                _build_research_deliverable(
+                    research_payload,
+                    goal_id=str(goal.get("goal_id") or ""),
+                )
+            )
+    elif research_payload:
+        deliverables.append(_build_research_deliverable(research_payload))
 
     todo_structured = _extract_latest_structured_result(turn_messages, data_type="todo_list")
     data_structured = _extract_latest_structured_result(turn_messages, data_type="sql_result")
@@ -5810,6 +5913,8 @@ def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
 
     entries = _get_common_tool_entries()
     progressive_mode = False
+    knowledge_available = False
+    web_available = False
 
     try:
         from app.services.skill_service import SkillService
@@ -5827,9 +5932,10 @@ def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
         logger.warning("Supervisor 绘图工具加载失败: %s", exc)
 
     try:
-        from app.ai.tools.ragflow_tool import knowledge_search, knowledge_research, is_ragflow_configured
+        from app.ai.tools.ragflow_tool import knowledge_search, is_ragflow_configured
 
         if is_ragflow_configured():
+            knowledge_available = True
             entries.append(
                 _build_tool_entry(
                     knowledge_search,
@@ -5837,31 +5943,38 @@ def _get_supervisor_tool_entries() -> list[Dict[str, Any]]:
                     runtime_visibility="catalog_after_load" if progressive_mode else "always",
                 )
             )
-            entries.append(
-                _build_tool_entry(
-                    knowledge_research,
-                    {"group:research", "research:knowledge"},
-                    runtime_visibility="catalog_after_load" if progressive_mode else "always",
-                    required_runtime_tools={"knowledge_search"},
-                )
-            )
-            logger.debug("Supervisor 工具: 已加载 knowledge_search / knowledge_research")
+            logger.debug("Supervisor 工具: 已加载 knowledge_search")
     except Exception as exc:
         logger.warning("Supervisor 知识库工具加载失败: %s", exc)
 
     try:
-        from app.ai.tools.chatTools import search_tool, web_research
+        from app.ai.tools.chatTools import search_tool
 
         if search_tool is not None:
+            web_available = True
             entries.append(_build_tool_entry(search_tool, {"group:web"}))
-            entries.append(_build_tool_entry(web_research, {"group:research", "research:web"}))
-            logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索 / web_research")
+            logger.debug("Supervisor 工具: 已加载 TavilySearch 联网搜索")
         else:
             logger.info(
                 "联网搜索未加入 Supervisor: search_tool 未加载（请检查 TAVILY_API_KEY 或安装 langchain-tavily）"
             )
     except Exception as exc:
         logger.warning("Supervisor 联网搜索工具加载失败: %s", exc)
+
+    try:
+        from app.ai.agents.research_subagent import research_subagent
+
+        if knowledge_available or web_available:
+            entries.append(
+                _build_tool_entry(
+                    research_subagent,
+                    {"group:research", "research:unified"},
+                    runtime_visibility="catalog_after_load" if progressive_mode else "always",
+                )
+            )
+            logger.debug("Supervisor 工具: 已加载统一 research_subagent")
+    except Exception as exc:
+        logger.warning("Supervisor 研究子代理加载失败: %s", exc)
 
     try:
         if progressive_mode:

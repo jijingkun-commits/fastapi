@@ -82,7 +82,7 @@ analyze → route_next → [clarify|conflict|resolve|execute]
 | `ChatService done` | `done`（仅生命周期） | 严禁携带结构化数据 |
 
 - 2026-03-10 起，知识库检索这类“独立预构建 Agent 入口”统一使用 `langchain.agents.create_agent`；Supervisor 由于仍依赖运行时工具可见性裁剪与自定义 `ToolNode`，继续保留 `create_react_agent`。
-- `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 继续保留 atomic tool；只有 `knowledge_research` / `web_research` 这类“单次研究任务入口”才视为 stateless research subagent，且结果合同固定为 `summary + evidence + insufficiency`。
+- `knowledge_search` / `search_tool` / `read_uploaded_file` / `analyze_image` 继续保留 atomic tool；只有统一 `research_subagent` 这类“单次研究任务入口”才视为 stateless research subagent，由它在内部编排 knowledge/web source provider，结果合同固定为 `summary + evidence + insufficiency`，并允许附带 `media_refs`。
 - 本轮只收口可独立迁移的预构建 Agent API，不改 `create_todo_graph` / `create_data_graph` 等 Graph factory，也不重写当前多智能体主图的 runtime gating 结构。
 - `interrupt / resume / replay` 与 `agent.astream(..., stream_mode=["messages", "values", "custom"])` 相关契约保持不变，迁移层只改安全边界内的 Agent 构建入口，不改运行时状态归属。
 

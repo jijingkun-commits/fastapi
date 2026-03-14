@@ -2,6 +2,7 @@
 
 提供与 RAGFlow 服务的集成，支持从企业知识库检索相关信息。
 """
+import re
 import requests
 import logging
 import json
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 
 from app.core import config
-from app.ai.protocol import build_research_result_payload
+from app.ai.protocol import AgentOutputParser, AgentProtocol, build_research_result_payload
 
 logger = logging.getLogger(__name__)
 
@@ -1012,9 +1013,21 @@ def knowledge_research(query: str, dataset_id: str = None) -> str:
     用于需要跨多条知识库资料做总结、对比、证据归纳时的 stateless research 入口。
     简单单点直查继续使用 knowledge_search。
     """
+    payload = build_research_result_payload(**build_knowledge_research_source_payload(query=query, dataset_id=dataset_id))
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _strip_kb_images_marker(raw_result: str) -> str:
+    return re.sub(AgentProtocol.KB_IMAGES_PATTERN, "", str(raw_result or "")).strip()
+
+
+def build_knowledge_research_source_payload(query: str, dataset_id: str = None) -> dict[str, Any]:
+    """将 knowledge_search 原子结果规整为 research source provider contract。"""
     raw_result = str(knowledge_search.func(query=query, dataset_id=dataset_id) or "").strip()
+    summary_markdown = _strip_kb_images_marker(raw_result)
+    kb_images = AgentOutputParser.parse_kb_images(raw_result) or {}
     evidence_lines = []
-    for line in raw_result.splitlines():
+    for line in summary_markdown.splitlines():
         excerpt = str(line or "").strip()
         if not excerpt or excerpt.startswith("[IMG-"):
             continue
@@ -1023,21 +1036,34 @@ def knowledge_research(query: str, dataset_id: str = None) -> str:
             break
 
     insufficiency = ""
-    if not raw_result:
+    if not summary_markdown:
         insufficiency = "knowledge_search 未返回可用证据"
-    elif "知识库检索失败" in raw_result:
-        insufficiency = raw_result[:240]
+    elif any(token in summary_markdown for token in ("知识库检索失败", "知识库服务请求失败", "知识库检索超时")):
+        insufficiency = summary_markdown[:240]
 
-    payload = build_research_result_payload(
-        research_mode="knowledge",
-        research_task_id=f"knowledge:{hashlib.sha1(str(query or '').encode('utf-8')).hexdigest()[:8]}",
-        summary=(evidence_lines[0]["excerpt"] if evidence_lines else raw_result[:240]),
-        evidence=evidence_lines,
-        insufficiency=insufficiency,
-        source_count=1 if evidence_lines else 0,
-        citation_count=raw_result.count("[IMG-"),
-    )
-    return json.dumps(payload, ensure_ascii=False)
+    media_refs = [
+        {
+            "type": "knowledge_image",
+            "url": url,
+            "alt": "知识库图片",
+            "source": "knowledge",
+            "index": str(index),
+        }
+        for index, url in sorted(kb_images.items(), key=lambda item: str(item[0]))
+        if str(url or "").strip()
+    ]
+
+    return {
+        "research_mode": "knowledge",
+        "research_task_id": f"knowledge:{hashlib.sha1(str(query or '').encode('utf-8')).hexdigest()[:8]}",
+        "summary": (evidence_lines[0]["excerpt"] if evidence_lines else summary_markdown[:240]),
+        "summary_markdown": summary_markdown,
+        "evidence": evidence_lines,
+        "insufficiency": insufficiency,
+        "source_count": 1 if evidence_lines else 0,
+        "citation_count": max(summary_markdown.count("[IMG-"), len(media_refs)),
+        "media_refs": media_refs,
+    }
 
 def is_ragflow_configured() -> bool:
     """检查 RAGFlow 是否已配置。"""

@@ -74,6 +74,20 @@ def test_infer_model_intent_plan_uses_semantic_payload_for_prompt() -> None:
     assert plan["user_query"] == "请帮我看看天气"
 
 
+def test_infer_initial_intent_plan_exposes_research_goal_from_semantic_payload() -> None:
+    """research 语义出口应在 intent 层可见，不依赖编排层二次补路由。"""
+    state = {
+        "messages": [HumanMessage(content="你好")],
+        "semantic_payload": {"user_query": "综合知识库和网页资料，帮我对比两种报销口径的差异"},
+    }
+
+    plan = _infer_initial_intent_plan(state)
+
+    assert plan["user_query"] == "综合知识库和网页资料，帮我对比两种报销口径的差异"
+    assert [goal["kind"] for goal in plan["goals"]] == ["research.execute"]
+    assert plan["goals"][0]["allowed_agents"] == []
+
+
 
 def test_resolve_active_goals_prefers_decomposed_goals_over_intent_plan() -> None:
     """运行态目标只允许来自 decomposed_goals。"""
